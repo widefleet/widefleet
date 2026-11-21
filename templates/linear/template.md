@@ -1,11 +1,12 @@
 ---
 name: Linear
-description: Use every tool of Linear's MCP server to read and change a Linear workspace.
+description: Read and change a Linear workspace through every tool of Linear's MCP server.
 ---
 
-Connect a personal Linear account and use every tool of Linear's MCP server: issues,
-projects, comments, documents, cycles and more. Each signed-in user connects their own
-account.
+Connect a personal Linear account and use every tool of Linear's MCP server as a typed
+method: issues, projects, comments, documents, cycles and more. Each signed-in user
+connects their own account. Tools that Linear marks as able to delete or overwrite data
+ask the user before they run.
 
 ## Deploy
 
@@ -61,26 +62,43 @@ Replace `linear` if you chose another name. Call the service while handling a
 signed-in user's request so Widefleet forwards the verified caller identity.
 
 ```ts
-const result = await env.LINEAR.callTool({
-  name: "list_issues",
-  arguments: { assignee: "me", state: "started" },
-});
+const result = await env.LINEAR.listIssues({ assignee: "me", state: "started" });
 if (result.status === "connected") {
-  const { issues } = JSON.parse(result.text);
+  console.log(result.result);
 }
 ```
 
-The app exposes `connectionStatus`, `listTools` and `callTool`. `listTools` returns
-Linear's current tools with their input schemas as JSON Schema text and their hints:
-`readOnlyHint` marks tools that only read, `destructiveHint` tools that can delete or
-overwrite data. `callTool` passes the arguments to Linear unchanged; `text` holds the
-tool's JSON result and `content` every part Linear returned.
+Each tool of Linear's MCP server is a method named after it: `list_issues` is
+`listIssues`, `save_issue` is `saveIssue`. See `src/tools.ts` for every method, its
+input and Linear's description; `connectionStatus` reports setup and linking. Arguments
+are checked against the tool's schema before anything reaches Linear. `result` holds
+the tool's JSON output and `content` every part Linear returned.
+
+Tools that Linear marks as able to delete or overwrite data, such as `saveIssue` and
+`deleteComment`, ask the user first: the method returns `input_required` with the tool
+and its arguments. MCP clients show the question to the user. A calling app shows it
+itself and answers with `withInput`, as described in
+[Ask the user before continuing](https://widefleet.com/docs/guides/app-services#ask-the-user-before-continuing).
+A declined call returns `declined` and does not run.
 
 A `setup_required` result lists missing secrets. `connection_required` and
 `reconnect_required` provide a `connectUrl` for the user. `authentication_required`
 means the call has no signed-in user. `linear_error` carries Linear's message, for
-example for an unknown issue or invalid arguments. Retry `refresh_failed` after a
+example for an unknown issue. Retry `refresh_failed` after a
 provider outage; respect `retryAfter` for `rate_limited`.
 
 After connecting, verify an issue read through the consuming app. Users can
 disconnect their account on the Linear app's page.
+
+## Update the tools
+
+`src/tools.ts` is generated from Linear's tool list. To pick up new or changed tools,
+run the generator with a Linear token that has the `read` and `write` scopes, such as a
+Linear API key:
+
+```sh
+LINEAR_TOKEN=... pnpm generate
+```
+
+Review the diff before deploying. It shows changed inputs and which tools ask the user
+before they run.

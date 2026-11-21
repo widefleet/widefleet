@@ -28,26 +28,22 @@ const contentPart = z.union([
   z.object({ type: z.string() }),
 ]);
 
-// Typed service bindings cannot map recursive JSON types, so schemas travel as
-// JSON text, as tool results do.
-const jsonText = json.transform((value) => JSON.stringify(value));
+export const annotations = z.object({
+  title: z.string().optional(),
+  readOnlyHint: z.boolean().optional(),
+  destructiveHint: z.boolean().optional(),
+  idempotentHint: z.boolean().optional(),
+  openWorldHint: z.boolean().optional(),
+});
 
-/** A Linear tool, with the hints that tell readers from writers. */
+/** A Linear tool as `tools/list` describes it. */
 export const tool = z.object({
   name: z.string(),
   title: z.string().optional(),
   description: z.string().optional(),
-  inputSchema: jsonText,
-  outputSchema: jsonText.optional(),
-  annotations: z
-    .object({
-      title: z.string().optional(),
-      readOnlyHint: z.boolean().optional(),
-      destructiveHint: z.boolean().optional(),
-      idempotentHint: z.boolean().optional(),
-      openWorldHint: z.boolean().optional(),
-    })
-    .optional(),
+  inputSchema: json,
+  outputSchema: json.optional(),
+  annotations: annotations.optional(),
 });
 
 export const toolList = z.object({ tools: z.array(tool), nextCursor: z.string().optional() });
@@ -153,15 +149,24 @@ export const rpcResult = async <Result extends z.ZodType>(
 };
 
 /**
- * A tool call's result. Linear's tools answer with JSON in `text`; `content`
- * keeps every part as the server sent it.
+ * A tool call's result. Linear's tools answer with JSON text, which `result`
+ * holds parsed; `content` keeps every part as the server sent it.
  */
-export const toolOutput = (result: z.infer<typeof toolCallResult>) => {
-  const text = result.content.map((part) => ("text" in part ? part.text : "")).join("");
+export const toolOutput = (output: z.infer<typeof toolCallResult>) => {
+  const text = output.content.map((part) => ("text" in part ? part.text : "")).join("");
 
-  if (result.isError) return { status: "linear_error", message: text } as const;
+  if (output.isError) return { status: "linear_error", message: text } as const;
 
-  return { status: "connected", text, content: result.content } as const;
+  let result: z.infer<typeof json> | null = null;
+
+  if (output.content.length && output.content.every((part) => "text" in part))
+    try {
+      result = json.parse(JSON.parse(text));
+    } catch {
+      result = null;
+    }
+
+  return { status: "connected", result, content: output.content } as const;
 };
 
 /** The Linear account a token belongs to, as `get_user` reports it for "me". */
@@ -174,3 +179,64 @@ export const profile = z.object({
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
+
+/**
+ * Whether a tool asks the user before running. MCP's defaults apply to missing
+ * hints: a tool may write unless it is read-only, and a writing tool may
+ * destroy data unless it says otherwise.
+ */
+export const needsApproval = (hints: z.infer<typeof annotations> | undefined) =>
+  hints?.readOnlyHint !== true && hints?.destructiveHint !== false;
+
+// Widefleet shows questions of up to 4096 characters.
+const maxMessage = 4096;
+
+const maxPreviewString = 200;
+
+const longString = z.string().min(maxPreviewString + 1);
+
+/**
+ * The question asked before a destructive tool runs, with the tool's title and
+ * arguments. When they do not fit, long strings are shortened with their
+ * length stated; the approved call still runs with the complete arguments.
+ */
+export const approvalRequest = (title: string, input: z.infer<typeof json>) => {
+  const question = `Run the Linear tool "${title}"? Linear marks it as able to delete or overwrite data.`;
+  const exact = `${question}\n\nArguments:\n${JSON.stringify(input, null, 2)}`;
+
+  const shortened = JSON.stringify(
+    input,
+    (_, value: z.infer<typeof json>) => {
+      const long = longString.safeParse(value);
+
+      return long.success
+        ? `${long.data.slice(0, maxPreviewString)}… (${long.data.length} characters)`
+        : value;
+    },
+    2,
+  );
+
+  const message =
+    exact.length <= maxMessage
+      ? exact
+      : `${question}\n\nArguments, shortened for review. Approving runs the call with the complete arguments:\n${shortened}`.slice(
+          0,
+          maxMessage,
+        );
+
+  return {
+    resultType: "input_required",
+    inputRequests: {
+      approve: { message, requestedSchema: { type: "object", properties: {} } },
+    },
+  } as const;
+};
+
+/** The answer Widefleet passes back after the user responded to `approvalRequest`. */
+export const approvalAnswer = z
+  .object({
+    inputResponses: z.object({
+      approve: z.object({ action: z.enum(["accept", "decline", "cancel"]) }).optional(),
+    }),
+  })
+  .optional();

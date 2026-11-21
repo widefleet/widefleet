@@ -116,27 +116,51 @@ export class TestUserConnection extends UserConnection {
   }
 }
 
-// Widefleet supplies these props after verifying the signed-in caller.
+// The methods these tests call, as a consuming app declares them. Cloudflare's
+// RPC types for the loopback binding fail on recursive JSON results (TS2589,
+// cloudflare/workerd#3063).
+type Binding = Pick<
+  TestApp,
+  | "connectionStatus"
+  | "listIssues"
+  | "saveIssue"
+  | "deleteComment"
+  | "extractImages"
+  | "getWorkspace"
+  | "fetch"
+>;
+
+// Widefleet supplies these props after verifying the signed-in caller, and the
+// user's answer when it calls a method again after a question.
 export default class Host extends WorkerEntrypoint<TestEnvironment> {
   override async fetch(request: Request) {
     const subject = request.headers.get("test-subject");
+    const answer = request.headers.get("test-answer");
 
-    const options = {
-      props: {
-        caller: subject
-          ? {
-              issuer: request.headers.get("test-issuer") ?? "https://identity.example.test",
-              subject,
-              name: subject,
-            }
-          : null,
-      },
-    };
+    const caller = subject
+      ? {
+          issuer: request.headers.get("test-issuer") ?? "https://identity.example.test",
+          subject,
+          name: subject,
+        }
+      : null;
 
-    const app = this.ctx.exports.TestApp(options);
-    const connection = this.ctx.exports.TestUserConnection(options);
+    const input = answer
+      ? {
+          inputResponses: { approve: { action: z.enum(["accept", "decline"]).parse(answer) } },
+        }
+      : undefined;
 
-    const path = new URL(request.url).pathname;
+    const stub: unknown = this.ctx.exports.TestApp(
+      input ? { props: { caller, input } } : { props: { caller } },
+    );
+
+    // SAFETY: TestApp implements every Binding method; the loopback stub calls
+    // them over RPC with the same arguments and results.
+    const app = stub as Binding;
+    const connection = this.ctx.exports.TestUserConnection({ props: { caller } });
+    const url = new URL(request.url);
+    const path = url.pathname;
 
     if (path === "/rpc/personal/status") return Response.json(await connection.status());
 
@@ -149,27 +173,26 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
 
     if (path === "/rpc/status") return Response.json(await app.connectionStatus());
 
-    if (path === "/rpc/list")
-      return Response.json(
-        await app.callTool({ name: "list_issues", arguments: { assignee: "me" } }),
-      );
+    if (path === "/rpc/list") return Response.json(await app.listIssues({ assignee: "me" }));
 
-    if (path === "/rpc/tools") return Response.json(await app.listTools());
+    if (path === "/rpc/workspace") return Response.json(await app.getWorkspace());
 
-    if (path === "/rpc/unknown")
-      return Response.json(await app.callTool({ name: "delete_everything" }));
+    // Linear allows at most 250 results per page.
+    if (path === "/rpc/invalid") return Response.json(await app.listIssues({ limit: 500 }));
 
     if (path === "/rpc/image")
       return Response.json(
-        await app.callTool({ name: "extract_images", arguments: { markdown: "![](x)" } }),
+        await app.extractImages({ markdown: "![](https://example.test/x.png)" }),
       );
 
     if (path === "/rpc/create")
       return Response.json(
-        await app.callTool({
-          name: "save_issue",
-          arguments: { title: "From Widefleet", team: "ENG", labels: ["bug"] },
-        }),
+        await app.saveIssue({ title: "From Widefleet", team: "ENG", labels: ["bug"] }),
+      );
+
+    if (path === "/rpc/delete")
+      return Response.json(
+        await app.deleteComment({ id: url.searchParams.get("id") ?? "comment-1" }),
       );
 
     return app.fetch(request);

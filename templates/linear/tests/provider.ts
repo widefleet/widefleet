@@ -4,42 +4,12 @@ import { z } from "zod";
 
 const kind = "linear";
 
-const rpc = z.discriminatedUnion("method", [
-  z.object({
-    jsonrpc: z.literal("2.0"),
-    id: z.literal(1),
-    method: z.literal("tools/list"),
-    params: z.object({ cursor: z.string().optional() }),
-  }),
-  z.object({
-    jsonrpc: z.literal("2.0"),
-    id: z.literal(1),
-    method: z.literal("tools/call"),
-    params: z.object({ name: z.string(), arguments: z.record(z.string(), z.json()) }),
-  }),
-]);
-
-// Linear's tools as tools/list describes them, over two pages.
-const toolPages = [
-  [
-    {
-      name: "list_issues",
-      title: "List issues",
-      description: "List issues in the user's Linear workspace.",
-      inputSchema: { type: "object", properties: { assignee: { type: "string" } } },
-      annotations: { readOnlyHint: true, destructiveHint: false },
-      icons: [{ src: "https://static.linear.app/icon.svg" }],
-    },
-  ],
-  [
-    {
-      name: "save_issue",
-      description: "Create or update an issue.",
-      inputSchema: { type: "object", properties: { title: { type: "string" } } },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-    },
-  ],
-];
+const rpc = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.literal(1),
+  method: z.literal("tools/call"),
+  params: z.object({ name: z.string(), arguments: z.record(z.string(), z.json()) }),
+});
 
 const issue = (id: string) => ({
   id,
@@ -178,17 +148,7 @@ export const provider = () => {
 
       if (!request.headers.get("accept")?.includes("text/event-stream"))
         return new Response(null, { status: 406 });
-      const body = rpc.parse(await request.json());
-
-      if (body.method === "tools/list") {
-        const [first, second] = toolPages;
-
-        return body.params.cursor === "page-2"
-          ? event({ tools: second ?? [] })
-          : event({ tools: first ?? [], nextCursor: "page-2" });
-      }
-
-      const { params } = body;
+      const { params } = rpc.parse(await request.json());
 
       if (params.name === "get_user")
         return output({
@@ -211,6 +171,10 @@ export const provider = () => {
 
       if (params.name === "save_issue")
         return output({ ...issue("ENG-2"), title: z.string().parse(params.arguments["title"]) });
+
+      if (params.name === "delete_comment") return output({ deleted: true });
+
+      if (params.name === "get_workspace") return output({ id: "workspace-1", name: "Example" });
 
       if (params.name === "extract_images")
         return event({

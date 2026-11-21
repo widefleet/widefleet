@@ -55,7 +55,7 @@ describe("Linear MCP requests", () => {
     ).toEqual(text);
   });
 
-  it("joins text parts and keeps every part as sent", () => {
+  it("parses JSON text and keeps every part as sent", () => {
     const content = [
       { type: "text", text: '{"id":' },
       { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
@@ -64,8 +64,16 @@ describe("Linear MCP requests", () => {
 
     expect(toolOutput({ content: [...content] })).toEqual({
       status: "connected",
-      text: '{"id":"ENG-1"}',
+      result: null,
       content,
+    });
+    expect(toolOutput({ content: [content[0], content[2]] })).toEqual({
+      status: "connected",
+      result: { id: "ENG-1" },
+      content: [content[0], content[2]],
+    });
+    expect(toolOutput({ content: [{ type: "text", text: "Done" }] })).toMatchObject({
+      result: null,
     });
   });
 
@@ -82,7 +90,7 @@ describe("Linear MCP requests", () => {
     ).toEqual({ content: [{ type: "video" }] });
   });
 
-  it("lists tools with their schemas as JSON text", async () => {
+  it("lists tools with their schemas and hints", async () => {
     const schema = { type: "object", properties: { id: { type: "string" } } };
 
     expect(
@@ -102,7 +110,7 @@ describe("Linear MCP requests", () => {
       tools: [
         {
           name: "get_issue",
-          inputSchema: JSON.stringify(schema),
+          inputSchema: schema,
           annotations: { readOnlyHint: true },
         },
       ],
