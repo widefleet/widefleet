@@ -132,6 +132,21 @@ it("prepublishes the next key, rotates offline, and keeps old verification keys 
   ).rejects.toThrow();
 });
 
+it("signs with the next key when another call created or rotated the ring a moment later", async () => {
+  const env = await environment();
+  const startTime = 1_800_000_000;
+  const created = await workloadKeys(env, startTime);
+
+  expect((await workloadKeys(env, startTime - 1)).current.kid).toBe(created.current.kid);
+
+  const boundary = startTime + workloadRotationInterval;
+  const rotated = await workloadKeys(env, boundary);
+
+  expect(rotated.current.kid).not.toBe(created.current.kid);
+  expect((await workloadKeys(env, boundary - 1)).current.kid).toBe(rotated.current.kid);
+  expect(created.jwks.keys.map((key) => key.kid)).toContain(rotated.current.kid);
+});
+
 it("refuses issuance with the wrong encryption key without replacing the stored authority", async () => {
   const env = await environment();
   const original = await workloadKeys(env);
