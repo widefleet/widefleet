@@ -5,28 +5,11 @@ export const linearServer = "https://mcp.linear.app/mcp";
 
 const json = z.json();
 
-// MCP content parts. Parts of a later protocol version keep their type.
-const contentPart = z.union([
-  z.object({ type: z.literal("text"), text: z.string() }),
-  z.object({ type: z.enum(["image", "audio"]), data: z.string(), mimeType: z.string() }),
-  z.object({
-    type: z.literal("resource_link"),
-    uri: z.string(),
-    name: z.string(),
-    mimeType: z.string().optional(),
-    description: z.string().optional(),
-  }),
-  z.object({
-    type: z.literal("resource"),
-    resource: z.object({
-      uri: z.string(),
-      mimeType: z.string().optional(),
-      text: z.string().optional(),
-      blob: z.string().optional(),
-    }),
-  }),
-  z.object({ type: z.string() }),
-]);
+// MCP content parts, kept with every field the server sent: text, images,
+// audio, resources and parts of later protocol versions.
+const contentPart = z.object({ type: z.string() }).catchall(json);
+
+const textPart = z.object({ type: z.literal("text"), text: z.string() });
 
 export const annotations = z.object({
   title: z.string().optional(),
@@ -153,13 +136,14 @@ export const rpcResult = async <Result extends z.ZodType>(
  * holds parsed; `content` keeps every part as the server sent it.
  */
 export const toolOutput = (output: z.infer<typeof toolCallResult>) => {
-  const text = output.content.map((part) => ("text" in part ? part.text : "")).join("");
+  const texts = output.content.map((part) => textPart.safeParse(part));
+  const text = texts.map((part) => (part.success ? part.data.text : "")).join("");
 
   if (output.isError) return { status: "linear_error", message: text } as const;
 
   let result: z.infer<typeof json> | null = null;
 
-  if (output.content.length && output.content.every((part) => "text" in part))
+  if (texts.length && texts.every((part) => part.success))
     try {
       result = json.parse(JSON.parse(text));
     } catch {

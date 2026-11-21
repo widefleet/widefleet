@@ -56,28 +56,32 @@ describe("Linear MCP requests", () => {
   });
 
   it("parses JSON text and keeps every part as sent", () => {
-    const content = [
-      { type: "text", text: '{"id":' },
-      { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
-      { type: "text", text: '"ENG-1"}' },
-    ] as const;
+    const start = { type: "text", text: '{"id":' };
+    const end = { type: "text", text: '"ENG-1"}' };
 
-    expect(toolOutput({ content: [...content] })).toEqual({
+    const image = {
+      type: "image",
+      data: "iVBORw0KGgo=",
+      mimeType: "image/png",
+      annotations: { audience: ["user"] },
+    };
+
+    expect(toolOutput({ content: [start, image, end] })).toEqual({
       status: "connected",
       result: null,
-      content,
+      content: [start, image, end],
     });
-    expect(toolOutput({ content: [content[0], content[2]] })).toEqual({
+    expect(toolOutput({ content: [start, end] })).toEqual({
       status: "connected",
       result: { id: "ENG-1" },
-      content: [content[0], content[2]],
+      content: [start, end],
     });
     expect(toolOutput({ content: [{ type: "text", text: "Done" }] })).toMatchObject({
       result: null,
     });
   });
 
-  it("keeps parts of later protocol versions by type", async () => {
+  it("keeps every field of parts, including parts of later protocol versions", async () => {
     expect(
       await rpcResult(
         call,
@@ -87,7 +91,7 @@ describe("Linear MCP requests", () => {
           result: { content: [{ type: "video", url: "x" }] },
         }),
       ),
-    ).toEqual({ content: [{ type: "video" }] });
+    ).toEqual({ content: [{ type: "video", url: "x" }] });
   });
 
   it("lists tools with their schemas and hints", async () => {
