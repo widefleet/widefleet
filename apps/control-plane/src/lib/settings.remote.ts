@@ -8,7 +8,7 @@ import {
   ssoDomainInput,
 } from "@platform/contracts";
 import { z } from "zod";
-import { remoteContext, remoteOperation } from "#server/remote-support";
+import { commandContext, remoteContext, remoteOperation } from "#server/remote-support";
 import { getRuntime } from "#server/runtime";
 import { readSettingsAccount } from "#server/settings-account";
 
@@ -23,7 +23,7 @@ export const getSettings = query(async () => {
 export const planSettings = command(
   settingsInput.extend(organizationSelection.shape),
   async ({ organizationId, ...input }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
 
     return remoteOperation(() => runtime.settings.plan(principal, input));
   },
@@ -32,7 +32,7 @@ export const planSettings = command(
 export const updateSettings = command(
   settingsUpdate.extend(organizationSelection.shape),
   async ({ organizationId, ...input }) => {
-    const { runtime, principal, request } = await remoteContext({ organizationId });
+    const { runtime, principal, request } = await commandContext({ organizationId });
     await remoteOperation(() =>
       runtime.settings.update(principal, input, true, {
         auth: runtime.auth,
@@ -51,7 +51,7 @@ export const updateSettings = command(
 export const setExternalManagement = command(
   organizationSelection.extend({ enabled: z.boolean() }),
   async ({ enabled, organizationId }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.setExternalManagement(principal, enabled));
     await getSettings().refresh();
   },
@@ -70,7 +70,7 @@ export const createOwner = command(setupOwner, async (input) => {
 export const addCompanyDomain = command(
   ssoDomainInput.extend(organizationSelection.shape),
   async ({ organizationId, domain }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.addDomain(principal, domain, true));
     await getSettings().refresh();
   },
@@ -79,7 +79,7 @@ export const addCompanyDomain = command(
 export const removeCompanyDomain = command(
   ssoDomainInput.extend(organizationSelection.shape),
   async ({ organizationId, domain }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.removeDomain(principal, domain, true));
     await getSettings().refresh();
   },
@@ -88,7 +88,7 @@ export const removeCompanyDomain = command(
 export const verifyCompanyDomain = command(
   ssoDomainInput.extend(organizationSelection.shape),
   async ({ organizationId, domain }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
 
     try {
       await remoteOperation(() => runtime.settings.verifyDomain(principal, domain));
@@ -99,6 +99,6 @@ export const verifyCompanyDomain = command(
 );
 
 export const activateCompanySso = command(organizationSelection, async (input) => {
-  const { runtime, principal } = await remoteContext(input);
+  const { runtime, principal } = await commandContext(input);
   await remoteOperation(() => runtime.settings.activateSso(principal));
 });

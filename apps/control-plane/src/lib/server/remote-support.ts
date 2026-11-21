@@ -1,14 +1,19 @@
 import { APIError } from "better-auth/api";
 import { getRequestEvent } from "$app/server";
-import { error, invalid } from "@sveltejs/kit";
+import { error, invalid, redirect } from "@sveltejs/kit";
 import type { Result } from "better-result";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { getUserSession, pageFailure } from "./page-auth.ts";
+import { pageFailure } from "./page-auth.ts";
 import { getRuntime, reportRequestException } from "./runtime.ts";
 
-export const remoteContext = async (write?: { organizationId: string }) => {
-  const { request } = getRequestEvent();
-  const { user, session } = getUserSession();
+type Denial = { location: string; status: number; message: string };
+
+const authorize = async (deny: (denial: Denial) => never, write?: { organizationId: string }) => {
+  const { request, locals } = getRequestEvent();
+  const { user, session } = locals;
+
+  if (!user || !session)
+    return deny({ location: "/sign-in", status: 401, message: "Sign in to continue" });
   const runtime = await getRuntime();
 
   const principal = await runtime.identity.principal(
@@ -21,16 +26,21 @@ export const remoteContext = async (write?: { organizationId: string }) => {
   if (principal.isErr()) {
     if (principal.error instanceof DatabaseUnavailable) return pageFailure(principal.error);
 
-    const { code, message } = principal.error;
+    const { code, message, organizationSlug } = principal.error;
 
     if (code === "CONFLICT") error(409, message);
 
-    if (code === "UNAUTHORIZED") error(401, message);
+    if (code === "UNAUTHORIZED") return deny({ location: "/sign-in", status: 401, message });
 
-    if (code === "SSO_REQUIRED") error(403, { message, code });
+    if (code === "SSO_REQUIRED")
+      return deny({
+        location: `/sign-in?${new URLSearchParams({ organization: organizationSlug ?? "" })}`,
+        status: 403,
+        message,
+      });
 
-    // A forbidden principal means the shared organization selection is no longer available.
-    error(403, { message, code: "ORGANIZATION_REQUIRED" });
+    // A stale selection can be repaired without signing out of a valid session.
+    return deny({ location: "/organizations", status: 403, message });
   }
 
   if (write && write.organizationId !== principal.value.application.organizationId)
@@ -41,6 +51,15 @@ export const remoteContext = async (write?: { organizationId: string }) => {
 
   return { runtime, principal: principal.value, request };
 };
+
+// Queries and forms send a caller without access to where the page hook would send them. A query
+// request does not name its page, so these destinations carry no return path.
+export const remoteContext = (write?: { organizationId: string }) =>
+  authorize(({ location }) => redirect(303, location), write);
+
+// Commands cannot redirect, so they report the same denial as an error.
+export const commandContext = (write?: { organizationId: string }) =>
+  authorize(({ status, message }) => error(status, message), write);
 
 export const queryValue = <T>(
   result: Result<T, InvalidOperation | DatabaseUnavailable | StorageUnavailable | APIError>,

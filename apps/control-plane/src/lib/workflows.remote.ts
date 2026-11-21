@@ -1,6 +1,6 @@
 import { command, query } from "$app/server";
 import { appPath, identifier, workflowRequest, organizationSelection } from "@platform/contracts";
-import { queryValue, remoteContext } from "#server/remote-support";
+import { commandContext, queryValue, remoteContext } from "#server/remote-support";
 
 export const getWorkflows = query(appPath, async ({ appId }) => {
   const { runtime, principal } = await remoteContext();
@@ -15,7 +15,7 @@ export const manageWorkflow = command(
     request: workflowRequest,
   }),
   async ({ appId, requestId, request, organizationId }) => {
-    const { runtime, principal } = await remoteContext(
+    const { runtime, principal } = await commandContext(
       request.action !== "list" && request.action !== "status" ? { organizationId } : undefined,
     );
 

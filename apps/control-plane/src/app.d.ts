@@ -8,12 +8,6 @@ declare global {
       analytics?: AnalyticsConfiguration | null;
     }
 
-    interface Error {
-      message: string;
-      // The request hook resolves these on a full page load: company sign-in or organization choice.
-      code?: "SSO_REQUIRED" | "ORGANIZATION_REQUIRED";
-    }
-
     interface Locals {
       user: Authentication["$Infer"]["Session"]["user"] | null;
       session: Authentication["$Infer"]["Session"]["session"] | null;
