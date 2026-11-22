@@ -287,6 +287,13 @@ describe("Gmail personal account app", () => {
     expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
       status: "permission_required",
     });
+    expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
+      status: "permission_required",
+    });
+    // A change does not ask first when the account could not run it.
+    expect(await (await alice.request("/rpc/delete")).json()).toMatchObject({
+      status: "permission_required",
+    });
   });
 
   it("rejects changed callback identities, replay, cross-origin forms and public token endpoints", async () => {

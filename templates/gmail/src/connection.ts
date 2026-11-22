@@ -14,6 +14,14 @@ const linkedAccount = z.object({
   providerEmail: z.string().nullable(),
 });
 
+// An account connected for fewer scopes than the methods need reconnects to
+// grant the others.
+const granted = (linked: z.infer<typeof linkedAccount>) => {
+  const scope = new Set(linked.scope?.split(/[,\s]+/));
+
+  return scopes.every((name) => scope.has(name));
+};
+
 const redirect = (location: string, cookies: string[] = []) => {
   const headers = new Headers({
     location,
@@ -89,10 +97,7 @@ export const accountConnection = (environment: Environment, properties: Properti
     if (!linked)
       return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
-    const granted = new Set(linked.scope?.split(/[,\s]+/));
-
-    // An account connected for fewer scopes reconnects to grant the others.
-    if (!scopes.every((scope) => granted.has(scope)))
+    if (!granted(linked))
       return { status: "permission_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
     const auth = authentication(environment, identity, id, config.credentials);
 
@@ -213,6 +218,9 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       if (!linked)
         return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
+      if (!granted(linked))
+        return { status: "permission_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
       return {
         status: "connected",
