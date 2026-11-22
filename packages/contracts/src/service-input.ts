@@ -89,11 +89,13 @@ export const sealedInputRequired = z.strictObject({
 
 const content = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
 
-// An answer to one input request, in MCP's elicitation result shape.
+// An answer to one input request, in MCP's elicitation result shape. MCP results
+// may carry `_meta`, such as a client's note on how the person approved; it is
+// not part of the answer and is dropped.
 export const inputResponse = z.discriminatedUnion("action", [
-  z.strictObject({ action: z.literal("accept"), content: content.default({}) }),
-  z.strictObject({ action: z.literal("decline") }),
-  z.strictObject({ action: z.literal("cancel") }),
+  z.object({ action: z.literal("accept"), content: content.default({}) }),
+  z.object({ action: z.literal("decline") }),
+  z.object({ action: z.literal("cancel") }),
 ]);
 
 export type InputResponse = z.infer<typeof inputResponse>;
