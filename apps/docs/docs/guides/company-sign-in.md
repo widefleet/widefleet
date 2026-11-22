@@ -1,7 +1,7 @@
 ---
 title: Set up company sign-in
 description: Connect Microsoft Entra, Google Workspace or another identity provider, then check that colleagues can sign in and open the right apps.
-lastModified: 2026-11-15
+lastModified: 2026-11-22
 ---
 
 Connect your company's login so colleagues can use their work accounts for
@@ -167,6 +167,12 @@ Members must now use the company provider for this organization. Existing
 accounts with matching verified company email addresses keep their memberships
 and roles. Colleagues who use the CLI need to run `widefleet login` again.
 
+Addresses on your verified domains now sign in with company SSO everywhere in
+Widefleet, including other organizations they belong to. Choosing an email code,
+Google or Microsoft takes them to company SSO. To allow other sign-in methods
+for these addresses, turn off **Company addresses use SSO only** on the
+**Company sign-in** page.
+
 ## Check app access
 
 1. Open a published app in Widefleet and choose **Access → App access**.
@@ -190,6 +196,7 @@ expected result. Next, [share the app with colleagues](/guides/applications).
 | What you see                                         | What to do                                                                                                                                                                                      |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Redirect URI mismatch                                | Copy both redirect URIs from Widefleet again and register them exactly, including the path, on the same provider client.                                                                        |
+| Domain is already verified by another organization   | Each domain belongs to one organization. Ask that organization's administrator to remove it, then verify it again.                                                                              |
 | Domain verification fails                            | Check the displayed DNS name and TXT value. Allow the DNS change to propagate, then choose **Verify domain** again.                                                                             |
 | Google group access is unavailable                   | Check that Cloud Identity API is enabled in the OAuth client's project, the group scope is configured, and your organization permits it.                                                        |
 | Google sign-in works, but group access is denied     | Check the group's primary email address, direct membership and **Who can view members** setting. If the user declined group permission, repeat sign-in in a fresh browser profile and allow it. |
