@@ -2438,7 +2438,17 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .update(apps)
       .set({ activeDeploymentId: next.id })
       .where(eq(apps.id, app.id));
-    expect((await json(path, "GET")).status).toBe(404);
+    const uncachedMiss = await json(path, "GET");
+    expect(uncachedMiss.status).toBe(404);
+    expect(uncachedMiss.headers.get("cache-control")).toBe("private, no-cache");
+
+    // A deployment without an icon keeps its miss as long as an icon; inaccessible apps do not.
+    const missing = await json(`${path}?deployment=${next.id}`, "GET");
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    const hidden = await json(`${path}?deployment=${next.id}`, "GET", undefined, outsiderHeaders);
+    expect(hidden.status).toBe(404);
+    expect(hidden.headers.get("cache-control") ?? "").not.toContain("immutable");
     await environment.database.db
       .update(apps)
       .set({ activeDeploymentId: deployment.id, webEnabled: false })
