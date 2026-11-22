@@ -1,7 +1,8 @@
 import { connectionLaunch } from "./connection-launch.ts";
-import { oauthCredentials, revokeManagedGrant } from "./oauth.ts";
 import { z } from "zod";
-import { authentication, gmailScope } from "./auth.ts";
+import { approvals } from "./approval.ts";
+import { authentication } from "./auth.ts";
+import { scopes } from "./schema.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
 import { authorizationPage, connectionPage } from "./page.ts";
@@ -43,40 +44,28 @@ export const accountConnection = (environment: Environment, properties: Properti
     return row ? linkedAccount.parse(row) : null;
   };
 
-  // Disconnecting revokes a managed grant at the provider when it supports
-  // revocation. The saved tokens are removed either way.
-  const revoke = async (id: string) => {
-    const binding = environment.WIDEFLEET_OAUTH;
-
-    const saved = z
-      .object({ accessToken: z.string().nullable(), refreshToken: z.string().nullable() })
-      .nullable()
-      .parse(
-        await environment.DB.prepare(
-          "SELECT accessToken, refreshToken FROM account WHERE userId = ? AND providerId = ?",
-        )
-          .bind(id, "google")
-          .first(),
-      );
-
-    const stored = saved?.refreshToken ?? saved?.accessToken;
-
-    if (!binding || !stored) return;
-
-    try {
-      const token = new TextDecoder().decode(
-        await environment.WIDEFLEET_KEYS.decrypt("tokens", stored),
-      );
-
-      await revokeManagedGrant(binding, "google", token);
-    } catch {
-      // A grant from the operator's earlier client or a provider outage must
-      // not prevent disconnecting.
-    }
-  };
-
+  // The administrator's Google OAuth client, from the app's secrets.
   const configuration = async () => {
-    const { missing, credentials } = await oauthCredentials(environment, "google", "GOOGLE");
+    const read = async (name: string) => {
+      try {
+        return await environment.WIDEFLEET_SECRETS.get(name);
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.endsWith("App secret is not configured"))
+          throw error;
+
+        return "";
+      }
+    };
+
+    const credentials = {
+      clientId: await read("GOOGLE_CLIENT_ID"),
+      clientSecret: await read("GOOGLE_CLIENT_SECRET"),
+    };
+
+    const missing = [
+      ...(credentials.clientId ? [] : ["GOOGLE_CLIENT_ID"]),
+      ...(credentials.clientSecret ? [] : ["GOOGLE_CLIENT_SECRET"]),
+    ];
 
     if (missing.length)
       return {
@@ -100,7 +89,10 @@ export const accountConnection = (environment: Environment, properties: Properti
     if (!linked)
       return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
-    if (!linked.scope?.split(/[,\s]+/).includes(gmailScope))
+    const granted = new Set(linked.scope?.split(/[,\s]+/));
+
+    // An account connected for fewer scopes reconnects to grant the others.
+    if (!scopes.every((scope) => granted.has(scope)))
       return { status: "permission_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
     const auth = authentication(environment, identity, id, config.credentials);
 
@@ -175,7 +167,6 @@ export const accountConnection = (environment: Environment, properties: Properti
 
   const disconnect = async () => {
     const { id } = await context();
-    await revoke(id);
     await environment.DB.batch([
       environment.DB.prepare("DELETE FROM account WHERE userId = ? AND providerId = ?").bind(
         id,
@@ -220,35 +211,26 @@ export const accountConnection = (environment: Environment, properties: Properti
       if (config.status !== "configured") return config;
       const linked = await account(id);
 
+      if (!linked)
+        return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
       return {
-        status: linked ? "connected" : "connection_required",
-        accountId: linked?.accountId ?? null,
+        status: "connected",
+        accountId: linked.accountId,
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
     },
-    request: async (url: string, headers = new Headers()) => {
+    /** Sends one request to the Gmail API with the user's token. */
+    send: async (url: string, init: RequestInit) => {
       const result = await token();
 
       if (result.status !== "connected") return result;
+      const headers = new Headers(init.headers);
       headers.set("authorization", `Bearer ${result.accessToken}`);
-      const response = await fetch(url, { headers, redirect: "manual" });
 
-      if (response.status === 401)
-        return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+      const response = await fetch(url, { ...init, headers, redirect: "manual" });
 
-      if (response.status === 403) return { status: "access_denied" } as const;
-
-      if (response.status === 404) return { status: "not_found" } as const;
-
-      if (response.status === 429)
-        return { status: "rate_limited", retryAfter: response.headers.get("retry-after") } as const;
-
-      if (!response.ok && response.status !== 302)
-        throw new Error(`Gmail request failed (HTTP ${response.status})`);
-
-      const connected = { status: "connected", response } as const;
-
-      return connected;
+      return { status: "connected", response } as const;
     },
     fetch: async (request: Request) => {
       if (!caller.safeParse(properties.caller).success) return new Response(null, { status: 401 });
@@ -306,6 +288,7 @@ export const accountConnection = (environment: Environment, properties: Properti
           config.status === "setup_required" ? config.missing : [],
           url.origin,
           url.searchParams.has("error"),
+          await approvals(environment.DB, id).level(),
         );
       }
 
@@ -327,13 +310,7 @@ export const accountConnection = (environment: Environment, properties: Properti
 
         if (config.status !== "configured") return redirect("/");
 
-        const auth = authentication(
-          environment,
-          identity,
-          id,
-          config.credentials,
-          url.searchParams.get("managed_state") ?? undefined,
-        );
+        const auth = authentication(environment, identity, id, config.credentials);
 
         const session = await auth.api.getSession({ headers: request.headers });
 

@@ -1,0 +1,86 @@
+import { z } from "zod";
+import { approvalAnswer, approvals, asks, changeQuestion } from "./approval.ts";
+import { accountConnection } from "./connection.ts";
+import { caller, callerId, type Environment, type Properties } from "./context.ts";
+import { googleErrorOf, googleRequest } from "./google.ts";
+import { type Arguments, definedJson, type FieldSelection } from "./input.ts";
+import type { GmailResult } from "./results.ts";
+import { base, operations } from "./schema.ts";
+
+/** Props of a call, with the user's answer when Widefleet calls again after a question. */
+export type GmailProperties = Properties & { input?: z.input<typeof approvalAnswer> };
+
+// Google reports exhausted quotas as 403 with these reasons, and sometimes as 429.
+const rateLimits = new Set(["rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"]);
+
+/**
+ * Runs one method of the Gmail API for the current user. The request is checked
+ * against the method's parameters before anything is asked or sent. A change asks
+ * the user first when their approval level says so, and runs only after approval.
+ */
+export const run = async <T>(
+  environment: Environment,
+  properties: GmailProperties,
+  method: keyof typeof operations,
+  input: Arguments,
+  select?: FieldSelection,
+): Promise<GmailResult<T>> => {
+  const operation = operations[method];
+  const request = googleRequest(base, method, operation, input, select);
+  const connection = accountConnection(environment, properties);
+
+  if (operation.change) {
+    // A question only helps a user who can run the change afterwards.
+    const status = await connection.status();
+
+    if (status.status !== "connected") return status;
+    const id = await callerId(caller.parse(properties.caller));
+
+    if (asks(await approvals(environment.DB, id).level(), operation.change)) {
+      const answer = approvalAnswer.parse(properties.input)?.inputResponses.approve;
+
+      // The question shows the input as Gmail receives it.
+      if (!answer)
+        return changeQuestion("Gmail", method, operation.change, definedJson.parse(input));
+
+      if (answer.action !== "accept") return { status: "declined" };
+    }
+  }
+
+  const sent = await connection.send(request.url, request.init);
+
+  if (sent.status !== "connected") return sent;
+  const { response } = sent;
+  const connectUrl = environment.WIDEFLEET_ORIGIN;
+
+  if (response.status === 401) return { status: "reconnect_required", connectUrl };
+
+  const body = response.headers.get("content-type")?.startsWith("application/json")
+    ? definedJson.parse(await response.json())
+    : null;
+
+  if (response.ok)
+    // SAFETY: Gmail answered the request written from this method's selection,
+    // which its generated signature types as T.
+    return { status: "connected", data: (operation.response ? body : null) as T };
+
+  const error = googleErrorOf(body);
+
+  if (response.status === 429 || error?.reasons.some((reason) => rateLimits.has(reason)))
+    return { status: "rate_limited", retryAfter: response.headers.get("retry-after") };
+
+  if (error?.reasons.includes("insufficientPermissions"))
+    return { status: "permission_required", connectUrl };
+
+  if (!error) throw new Error(`Gmail request failed (HTTP ${response.status})`);
+
+  return {
+    status: "gmail_error",
+    error: {
+      message: error.message,
+      code: response.status,
+      status: error.status,
+      reasons: error.reasons,
+    },
+  };
+};

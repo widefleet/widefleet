@@ -20,6 +20,7 @@
     ".roo/**",
     ".windsurf/**",
     "tools/oxlint/anti-slop/**",
+    "packages/template-generator/src/runtime/*.ts",
     "**/.svelte-kit/**",
     "**/.blume/**",
     "**/.blume-verify/**",

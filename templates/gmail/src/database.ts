@@ -22,6 +22,7 @@ const schema = [
     id TEXT PRIMARY KEY NOT NULL, identifier TEXT NOT NULL, value TEXT NOT NULL,
     expiresAt DATE NOT NULL, createdAt DATE NOT NULL, updatedAt DATE NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS approval_level (userId TEXT PRIMARY KEY NOT NULL, level TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS session_userId ON session (userId)`,
   `CREATE INDEX IF NOT EXISTS verification_identifier ON verification (identifier)`,
 ];

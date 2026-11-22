@@ -13,8 +13,23 @@ export type JsonValue =
 /** A JSON object. */
 export type JsonObject = { [key: string]: JsonValue };
 
-/** A value a selection returns whole. */
-export type Leaf = string | number | boolean | null | JsonValue[] | JsonObject;
+/**
+ * Whether a selection returns a value whole: a primitive, any JSON, an object
+ * with arbitrary keys such as `JsonObject`, or a list of those. Objects with
+ * named fields take a nested selection, whether declared as interfaces or as
+ * type aliases.
+ */
+export type IsLeaf<V> = [V] extends [never]
+  ? false
+  : [JsonValue] extends [V]
+    ? true
+    : [V] extends [string | number | boolean | null]
+      ? true
+      : [V] extends [readonly (infer E)[]]
+        ? IsLeaf<E>
+        : string extends keyof V
+          ? true
+          : false;
 
 /** A union or interface: `$on` selects fields of each concrete type. */
 export interface Variants<Types extends { __typename: string }> {
@@ -22,21 +37,23 @@ export interface Variants<Types extends { __typename: string }> {
 }
 
 // A field with arguments is a method of its type; a selection passes them as
-// `$args`, which it must when the field requires an argument.
-type FieldSelection<V> = V extends (args: infer A) => infer R
-  ? NonNullable<R> extends Leaf
+// `$args`, which it must when the field requires an argument. Null and undefined
+// do not change what a field's selection looks like.
+type FieldSelection<V> = [NonNullable<V>] extends [(args: infer A) => infer R]
+  ? IsLeaf<NonNullable<R>> extends true
     ? undefined extends A
       ? true | { $args: NonNullable<A> }
       : { $args: A }
-    : (undefined extends A ? { $args?: NonNullable<A> } : { $args: A }) & ValueSelection<R>
-  : ValueSelection<V>;
+    : (undefined extends A ? { $args?: NonNullable<A> } : { $args: A }) &
+        ValueSelection<NonNullable<R>>
+  : ValueSelection<NonNullable<V>>;
 
 type ValueSelection<V> =
-  NonNullable<V> extends Leaf
+  IsLeaf<V> extends true
     ? true
-    : NonNullable<V> extends (infer E)[]
-      ? ValueSelection<E>
-      : Selection<NonNullable<V>>;
+    : [V] extends [readonly (infer E)[]]
+      ? ValueSelection<NonNullable<E>>
+      : Selection<V>;
 
 type VariantSelection<U> = U extends { __typename: string }
   ? { [N in U["__typename"]]?: Selection<Extract<U, { __typename: N }>> }
@@ -69,7 +86,7 @@ export type Exact<S, Allowed> = S extends readonly unknown[]
     : S;
 
 type FieldResult<V, S> = V extends (args: never) => infer R
-  ? NonNullable<R> extends Leaf
+  ? IsLeaf<NonNullable<R>> extends true
     ? R
     : ValueResult<R, S>
   : ValueResult<V, S>;
@@ -77,11 +94,13 @@ type FieldResult<V, S> = V extends (args: never) => infer R
 /** The result of a selection on a value: each selected field with its type. */
 export type ValueResult<V, S> = S extends true
   ? V
-  : null extends V
-    ? ValueResult<NonNullable<V>, S> | null
-    : V extends (infer E)[]
-      ? ValueResult<E, S>[]
-      : Selected<V, S>;
+  : undefined extends V
+    ? ValueResult<Exclude<V, undefined>, S> | undefined
+    : null extends V
+      ? ValueResult<NonNullable<V>, S> | null
+      : V extends (infer E)[]
+        ? ValueResult<E, S>[]
+        : Selected<V, S>;
 
 /** The fields a selection returns from an object, and `__typename` for each variant. */
 export type Selected<T, S> =

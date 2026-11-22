@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  type Arguments,
+  definedJson,
+  type FieldSelection,
+  InvalidRequest,
+  type JsonInput,
+} from "./input.ts";
 import type { JsonValue } from "./selection.ts";
 import { type Graph, graph, variants } from "./schema.ts";
 
@@ -14,27 +21,6 @@ const identifier = z.string().regex(/^[_A-Za-z][_0-9A-Za-z]*$/);
 const selection = z.record(z.string(), json);
 
 type Selection = z.infer<typeof selection>;
-
-// JSON values, leaving out undefined object fields at every depth as JSON does.
-// Numbers must be finite: NaN or Infinity never turn into null.
-export const definedJson: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(definedJson),
-    z
-      .record(z.string(), definedJson.optional())
-      .transform((entries) =>
-        Object.fromEntries(
-          Object.entries(entries).flatMap(([key, value]) =>
-            value === undefined ? [] : [[key, value] as const],
-          ),
-        ),
-      ),
-  ]),
-);
 
 const argumentValues = z.record(z.string(), definedJson.optional());
 
@@ -58,26 +44,7 @@ const own = <T>(record: Record<string, T>, key: string) =>
 
 const fieldsOf = (type: string) => own<Fields>(graph, type);
 
-/** A selection or input that does not match Linear's schema. */
-export class InvalidRequest extends Error {}
-
 export type GraphQLRequest = { query: string; variables: Record<string, JsonValue> };
-
-/** JSON as typed inputs and selections hold it, where optional fields may be undefined. */
-export type JsonInput =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | readonly JsonInput[]
-  | { readonly [key: string]: JsonInput };
-
-/** A method's arguments by name, as its generated signature types them. */
-export type Arguments = Readonly<Record<string, JsonInput>>;
-
-/** The fields to return, as `Selection` types them. */
-export type FieldSelection = Readonly<Record<string, JsonInput>>;
 
 /**
  * Writes the GraphQL request for one query or mutation. Every argument travels

@@ -20,6 +20,7 @@ import {
   isUnionType,
 } from "graphql";
 import { z } from "zod";
+import { comment } from "./emit.ts";
 import { reservedMethods } from "./reserved.ts";
 import type { Change, GeneratedFiles, Hidden } from "./rules.ts";
 
@@ -61,7 +62,7 @@ export const generateGraphql = (
 
   const roots = new Set<GraphQLNamedType>([query, mutation]);
 
-  const changes = z.enum(["create", "update", "delete"]);
+  const changes = z.enum(["create", "update", "delete", "send"]);
 
   const hiddenRule = z.object({ hidden: z.string() });
 
@@ -78,15 +79,6 @@ export const generateGraphql = (
     ["JSON", "JsonValue"],
     ["JSONObject", "JsonObject"],
   ]);
-
-  const comment = (text: string | null | undefined, indent = "") =>
-    text
-      ? `${indent}/**\n${text
-          .replaceAll("*/", "*\\/")
-          .split("\n")
-          .map((line) => `${indent} *${line ? ` ${line}` : ""}`)
-          .join("\n")}\n${indent} */\n`
-      : "";
 
   const typeName = (type: GraphQLNamedType) =>
     isScalarType(type) ? (scalars.get(type.name) ?? "string") : type.name;
@@ -226,7 +218,7 @@ export const generateGraphql = (
     root: "Query" | "Mutation",
     field: GraphQLField<unknown, unknown>,
     name: string,
-    change: "create" | "update" | "delete" | null,
+    change: Change | null,
   ) => {
     if (reserved.has(name) || names.has(name))
       return problems.push(`${root}.${field.name} becomes method ${name}, which is taken`);

@@ -1,4 +1,3 @@
-import { managedOAuthPlugin, type OAuthCredentials } from "./oauth.ts";
 import { z } from "zod";
 import { betterAuth } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
@@ -6,14 +5,16 @@ import { setSessionCookie } from "better-auth/cookies";
 import type { Caller, Environment } from "./context.ts";
 import { ensureUser } from "./database.ts";
 
-export const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
+import { scopes } from "./schema.ts";
+
+/** The administrator's Google OAuth client. */
+export type OAuthCredentials = { clientId: string; clientSecret: string };
 
 export const authentication = (
   environment: Environment,
   identity: Caller,
   id: string,
   credentials: OAuthCredentials,
-  ticket?: string,
 ) =>
   betterAuth({
     database: environment.DB,
@@ -70,7 +71,8 @@ export const authentication = (
       google: {
         clientId: credentials.clientId,
         clientSecret: credentials.clientSecret,
-        scope: [gmailScope],
+        // The scopes that authorize every method of the Gmail API this template offers.
+        scope: [...scopes],
         accessType: "offline",
         prompt: "select_account consent",
         disableSignUp: true,
@@ -78,9 +80,6 @@ export const authentication = (
       },
     },
     plugins: [
-      ...(credentials.managed && environment.WIDEFLEET_OAUTH
-        ? [managedOAuthPlugin(environment.WIDEFLEET_OAUTH, "google", ticket)]
-        : []),
       {
         id: "widefleet-caller",
         endpoints: {

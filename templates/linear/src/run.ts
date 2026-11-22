@@ -2,7 +2,8 @@ import { z } from "zod";
 import { approvalAnswer, approvals, asks, type Change, changeQuestion } from "./approval.ts";
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
-import { type Arguments, definedJson, type FieldSelection, graphqlRequest } from "./graphql.ts";
+import { graphqlRequest } from "./graphql.ts";
+import { type Arguments, definedJson, type FieldSelection } from "./input.ts";
 import type { LinearResult } from "./results.ts";
 
 /** Props of a call, with the user's answer when Widefleet calls again after a question. */
