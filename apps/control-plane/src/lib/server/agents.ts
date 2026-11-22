@@ -7,7 +7,7 @@ import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { agents } from "./schema.ts";
-import { transact } from "./transactions.ts";
+import { readOnly, transact } from "./transactions.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 
 const presentAgent = (record: typeof agents.$inferSelect) =>
@@ -20,7 +20,7 @@ const presentAgent = (record: typeof agents.$inferSelect) =>
 
 export const createAgentService = (database: Database) => ({
   list: (principal: Principal) =>
-    transact(database, async (transaction) => {
+    readOnly(database, async (transaction) => {
       if (!principal.creator)
         return Result.err(
           new InvalidOperation({

@@ -12,12 +12,16 @@ import {
 } from "./capability-changes.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import { InvalidOperation } from "./errors.ts";
-import type { Database } from "./database.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
-import { transact, type Transaction } from "./transactions.ts";
+import { readOnly, transact } from "./transactions.ts";
 
-const readRequests = async (transaction: Transaction, principal: Principal, requestId?: string) => {
+const readRequests = async (
+  transaction: DatabaseExecutor,
+  principal: Principal,
+  requestId?: string,
+) => {
   const service = alias(apps, "service");
 
   const records = await transaction
@@ -82,7 +86,7 @@ export const createServiceAccess = (database: Database, execution?: HostedExecut
       return Result.ok(updated);
     }),
   requests: (principal: Principal) =>
-    transact(database, async (transaction) =>
+    readOnly(database, async (transaction) =>
       Result.ok(await readRequests(transaction, principal)),
     ),
   request: (principal: Principal, input: z.infer<typeof contract.connectionRequestInput>) =>

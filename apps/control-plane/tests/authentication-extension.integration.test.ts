@@ -103,8 +103,11 @@ it("blocks direct account access and new sessions while still allowing sign-out"
 
   allowed = false;
 
-  for (const path of ["/get-session", "/list-sessions", "/list-accounts", "/token"])
+  for (const path of ["/list-sessions", "/list-accounts", "/token"])
     expect((await request(path)).status).toBe(403);
+
+  // Session lookups are not rechecked: an extension that blocks a user ends their sessions.
+  expect((await request("/get-session")).status).toBe(200);
 
   expect((await request("/update-user", { name: "Blocked name" })).status).toBe(403);
   await expect(context.internalAdapter.createSession(environment.owner.id)).rejects.toThrow(

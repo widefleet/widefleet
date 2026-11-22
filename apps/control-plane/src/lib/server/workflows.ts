@@ -6,12 +6,12 @@ import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
 import { requireAgentExecution } from "./organization-runtime.ts";
-import { managedApp } from "./apps.ts";
+import { managedApp, readableApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { artifacts, deployments, jobs, cloudflareOperations } from "./schema.ts";
-import { transact } from "./transactions.ts";
+import { readOnly, transact } from "./transactions.ts";
 
 const present = (job: Pick<typeof jobs.$inferSelect, "id" | "state" | "result">) => {
   const result = job.result === null ? null : contract.jobResult.parse(job.result);
@@ -26,8 +26,8 @@ const present = (job: Pick<typeof jobs.$inferSelect, "id" | "state" | "result">)
 
 export const createWorkflowService = (database: Database, execution?: HostedExecution) => ({
   definitions: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
 
@@ -170,8 +170,8 @@ export const createWorkflowService = (database: Database, execution?: HostedExec
   read: (principal: Principal, appId: string, jobId: string) =>
     execution
       ? execution.operations.readWorkflow(principal, appId, jobId)
-      : transact(database, async (transaction) => {
-          const access = await managedApp(transaction, principal, appId);
+      : readOnly(database, async (transaction) => {
+          const access = await readableApp(transaction, principal, appId);
 
           if (access.isErr()) return access;
 

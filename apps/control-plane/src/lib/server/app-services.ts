@@ -1,3 +1,4 @@
+import type { DatabaseExecutor } from "./database.ts";
 import * as contract from "@platform/contracts";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
@@ -75,7 +76,10 @@ export const checkServiceConsumers = async (
       );
 };
 
-const deployedEntrypoints = async (transaction: Transaction, app: typeof apps.$inferSelect) => {
+const deployedEntrypoints = async (
+  transaction: DatabaseExecutor,
+  app: typeof apps.$inferSelect,
+) => {
   if (!app.activeDeploymentId || app.state === "deleting") return null;
 
   const [active] = await transaction
@@ -113,7 +117,7 @@ export const serviceEntrypoints = async (transaction: Transaction, app: typeof a
  * TSDoc comment that documents it as an API. Callers can still bind any entrypoint explicitly.
  */
 export const catalogEntrypoints = async (
-  transaction: Transaction,
+  transaction: DatabaseExecutor,
   app: typeof apps.$inferSelect,
 ) => {
   const deployed = await deployedEntrypoints(transaction, app);

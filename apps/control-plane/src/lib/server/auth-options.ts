@@ -47,6 +47,7 @@ export const authenticationOptions = (
     rateLimit,
     ipAddressHeaders,
     publicSignup = false,
+    validateSchema,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
@@ -59,6 +60,8 @@ export const authenticationOptions = (
     rateLimit?: BetterAuthOptions["rateLimit"];
     ipAddressHeaders?: string[];
     publicSignup?: boolean;
+    /** Better Auth checks the schema the first time each instance is used. */
+    validateSchema?: boolean;
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
@@ -122,13 +125,12 @@ export const authenticationOptions = (
         ];
 
         const current =
-          (allowUser && ["/get-session", "/token"].includes(context.path)) ||
+          // Session lookups are not checked on each request: an extension that blocks a user ends
+          // their sessions, and new sessions are checked when they are created.
+          (allowUser && context.path === "/token") ||
           ["/device/approve", "/device/deny"].includes(context.path) ||
           accountPaths.includes(context.path)
-            ? await getSessionFromCtx(context, {
-                // Leave renewal to the endpoint so its response owns the refreshed cookie.
-                disableRefresh: context.path === "/get-session",
-              })
+            ? await getSessionFromCtx(context)
             : null;
 
         if (current && allowUser && !(await allowUser(current.user.id)))
@@ -264,7 +266,12 @@ export const authenticationOptions = (
       },
     },
     advanced: {
-      database: { generateId: () => crypto.randomUUID() },
+      // Leave Better Auth's default when validation stays on: an explicit `true` turns its
+      // note about adapters it cannot validate into a warning.
+      database:
+        validateSchema === false
+          ? { generateId: () => crypto.randomUUID(), validateSchema }
+          : { generateId: () => crypto.randomUUID() },
       ipAddress: { ipAddressHeaders: ipAddressHeaders ?? ["x-forwarded-for"] },
       cookiePrefix: "platform",
       crossSubDomainCookies: { enabled: false },

@@ -1,10 +1,10 @@
 import { createServiceAccess } from "./service-access.ts";
-import { transact } from "./transactions.ts";
+import { readOnly, transact } from "./transactions.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, desc, eq, isNull, sql, ne, or } from "drizzle-orm";
 import type { z } from "zod";
-import { managedApp } from "./apps.ts";
+import { readableApp } from "./apps.ts";
 import { bindingState, applyCapabilityChange } from "./capability-changes.ts";
 import { catalogEntrypoints } from "./app-services.ts";
 import { apps, artifacts, deployments, jobs } from "./schema.ts";
@@ -16,7 +16,7 @@ import { InvalidOperation } from "./errors.ts";
 export const createConnectionService = (database: Database, execution?: HostedExecution) => ({
   ...createServiceAccess(database, execution),
   describe: (principal: Principal, service: string) =>
-    transact(database, async (transaction) => {
+    readOnly(database, async (transaction) => {
       const byId = contract.identifier.safeParse(service).success
         ? eq(apps.id, service)
         : undefined;
@@ -59,7 +59,7 @@ export const createConnectionService = (database: Database, execution?: HostedEx
       );
     }),
   services: (principal: Principal) =>
-    transact(database, async (transaction) => {
+    readOnly(database, async (transaction) => {
       const records = await transaction
         .select()
         .from(apps)
@@ -84,8 +84,8 @@ export const createConnectionService = (database: Database, execution?: HostedEx
       return Result.ok(entries.filter((entry) => entry.entrypoints.length > 0));
     }),
   connections: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
       const app = access.value;
@@ -163,8 +163,8 @@ export const createConnectionService = (database: Database, execution?: HostedEx
       );
     }),
   bindings: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
 
