@@ -1,3 +1,4 @@
+import { tracing } from "cloudflare:workers";
 import { userConnectionControlPath } from "@platform/contracts";
 import { createProductAnalytics } from "./analytics.ts";
 import { getRequestEvent } from "$app/server";
@@ -20,8 +21,18 @@ import { bindingAppBuilder } from "./app-builder.ts";
 export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   // Hyperdrive exposes its connection string only inside a request handler.
   const configuration = readCloudflareConfiguration(bindings);
+
   // A pool belongs to this request only; Hyperdrive owns pooling between requests.
-  const database = createDatabase(configuration, 5);
+  const database = createDatabase(configuration, 5, (name, attributes) => {
+    // Hyperdrive connections are TCP sockets, which automatic tracing does not show.
+    const span = tracing.startSpan(name).setAttributes(attributes);
+
+    return (error) => {
+      if (error) span.setStatus({ code: "error", message: error.message });
+      span.end();
+    };
+  });
+
   const observation = createProductAnalytics(configuration);
   database.db.$client.on("error", (error) => observation.exception(error));
   const reporting = createReporting(configuration, database.db);
