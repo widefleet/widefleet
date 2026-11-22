@@ -305,7 +305,12 @@ export const authenticationOptions = (
             organizationName: organization.name,
           }),
       }),
-      jwt({ jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` } }),
+      // The OAuth provider signs its tokens with these keys. Nothing reads the session JWT
+      // header, and signing it would read the keys on every session lookup.
+      jwt({
+        jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` },
+        disableSettingJwtHeader: true,
+      }),
       oauthProvider({
         loginPage: "/sign-in",
         consentPage: "/device",
