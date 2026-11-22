@@ -506,10 +506,11 @@ test("shows versioned service documentation through authenticated API and access
   const storage = createStorage(environment.configuration);
 
   const documentation = serviceDocumentation.parse({
-    format: 2,
+    format: 3,
     types: [
       {
         name: "InventoryItem",
+        kind: "type",
         definition: "type InventoryItem = { id: string; displayName: string };",
         summary: "An inventory item.",
         remarks: "",
@@ -643,7 +644,7 @@ test("shows versioned service documentation through authenticated API and access
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/services$/);
 
-  await activate({ format: 2, entrypoints: [], types: [] });
+  await activate({ format: 3, entrypoints: [], types: [] });
   await page.goto(`/widefleet/services/${record.id}`);
   await expect(
     page.getByText("No API documentation was generated.", { exact: false }),

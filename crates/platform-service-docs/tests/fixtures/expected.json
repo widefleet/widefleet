@@ -60,11 +60,12 @@
       "summary": ""
     }
   ],
-  "format": 2,
+  "format": 3,
   "types": [
     {
       "definition": "{\n    text: string;\n    limit?: number | undefined;\n}\n/** text: Text to search for. */\n/** limit: Maximum number of matches. */",
       "examples": [],
+      "kind": "interface",
       "name": "Query",
       "remarks": "",
       "summary": "A search request.",

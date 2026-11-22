@@ -98,6 +98,10 @@ const serviceEntrypointDocumentation = z.strictObject({
 
 const serviceTypeDocumentation = z.strictObject({
   name,
+  // How the source declares it, so generated declarations keep its meaning.
+  kind: z.enum(["interface", "type"]),
+  // A generic declaration's parameters with constraints and defaults, such as `T extends Item = Item`.
+  typeParameters: z.array(text).max(32).optional(),
   definition: text,
   ...comment,
   // Names of the documented types the definition uses directly.
@@ -106,7 +110,7 @@ const serviceTypeDocumentation = z.strictObject({
 
 export const serviceDocumentation = z
   .strictObject({
-    format: z.literal(2),
+    format: z.literal(3),
     entrypoints: z.array(serviceEntrypointDocumentation).max(32),
     types: z.array(serviceTypeDocumentation).max(4096),
   })

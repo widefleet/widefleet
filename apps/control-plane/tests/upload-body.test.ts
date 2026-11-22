@@ -53,10 +53,11 @@ describe("App multipart upload", () => {
 
   it("reads API documentation from its own part, separate from the module list", async () => {
     const documentation = {
-      format: 2,
+      format: 3,
       entrypoints: [],
       types: Array.from({ length: 2 }, (_, index) => ({
         name: `Large${index}`,
+        kind: "type",
         definition: "x".repeat(200_000),
         summary: "",
         remarks: "",
@@ -75,7 +76,7 @@ describe("App multipart upload", () => {
     expect(upload.modules.map((module) => module.name)).toEqual(["worker.js"]);
     body.append(contract.serviceDocumentationPart, part(documentation), "documentation.json");
     expect((await read(request(body))).isErr()).toBe(true);
-    body.set(contract.serviceDocumentationPart, part({ format: 2 }), "documentation.json");
+    body.set(contract.serviceDocumentationPart, part({ format: 3 }), "documentation.json");
     expect((await read(request(body))).isErr()).toBe(true);
   });
 

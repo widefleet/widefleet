@@ -493,7 +493,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
 
     expect(metadata.entrypoints ?? []).toEqual(fixture.entrypoints);
     expect(metadata.web).toBe(fixture.web);
-    expect(documentation.format).toBe(2);
+    expect(documentation.format).toBe(3);
 
     if (fixture.entrypoints.includes("Reader"))
       expect(

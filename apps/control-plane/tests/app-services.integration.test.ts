@@ -129,7 +129,7 @@ describe("App service connections", () => {
     });
 
     const documented = (...entrypoints: ReturnType<typeof entry>[]) => ({
-      format: 2 as const,
+      format: 3 as const,
       entrypoints,
       types: [],
     });
@@ -168,7 +168,7 @@ describe("App service connections", () => {
 
   it("describes deployed apps that the catalog omits by slug or ID", async () => {
     const target = await app(["default"], principal, {
-      format: 2,
+      format: 3,
       entrypoints: [
         { name: "default", summary: "", remarks: "", examples: [], http: true, methods: [] },
       ],
@@ -478,7 +478,7 @@ describe("App service connections", () => {
 
     const documentation = (summary: string) =>
       contract.serviceDocumentation.parse({
-        format: 2,
+        format: 3,
         entrypoints: [
           { name: "Reader", summary, remarks: "", examples: [], methods: [], http: false },
         ],
@@ -564,6 +564,7 @@ describe("App service connections", () => {
 
     const type = (name: string, definition: string, uses: string[] = []) => ({
       name,
+      kind: "type" as const,
       definition,
       summary: "",
       remarks: "",
@@ -572,7 +573,7 @@ describe("App service connections", () => {
     });
 
     const target = await app(["Reader"], principal, {
-      format: 2,
+      format: 3,
       entrypoints: [
         {
           name: "Reader",

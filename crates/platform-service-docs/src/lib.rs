@@ -35,7 +35,7 @@ impl From<serde_json::Error> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn empty() -> Value {
-    json!({"format": 2, "entrypoints": [], "types": []})
+    json!({"format": 3, "entrypoints": [], "types": []})
 }
 
 /// Documents the service entrypoints of a bundled Worker.
@@ -169,14 +169,16 @@ pub fn extract(
             let mut signatures = Vec::new();
             for &signature in callable.iter().take(16) {
                 types.start_signature();
+                // Object handlers document only their input; the runtime passes the rest.
+                let documented_parameters = if class { usize::MAX } else { 1 };
+                types.declaration_references(
+                    &mut checker,
+                    signature.declaration().unwrap_or(member),
+                    documented_parameters,
+                );
                 let signature_doc = documentation(signature.declaration().unwrap_or(member));
                 let mut parameters = Vec::new();
-                for &parameter in
-                    signature
-                        .parameters()
-                        .iter()
-                        .take(if class { usize::MAX } else { 1 })
-                {
+                for &parameter in signature.parameters().iter().take(documented_parameters) {
                     let param = parameter.value_declaration().unwrap_or(member);
                     let parameter_type = checker
                         .get_type_of_symbol_at_location(parameter, Some(param))
@@ -231,7 +233,7 @@ pub fn extract(
             }
         }
     }
-    let result = json!({"format": 2, "entrypoints": entries, "types": definitions});
+    let result = json!({"format": 3, "entrypoints": entries, "types": definitions});
     if !within_limits("", &result) || serde_json::to_vec(&result)?.len() > MAX_BYTES {
         eprintln!(
             "Warning: API documentation was omitted because it exceeds supported limits. Deployment continues."
