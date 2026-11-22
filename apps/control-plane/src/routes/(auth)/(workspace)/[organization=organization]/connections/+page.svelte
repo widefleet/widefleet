@@ -1,8 +1,9 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { getUserConnections } from "#lib/user-connections.remote";
+  import { getUserConnections, getUserConnectionStatus } from "#lib/user-connections.remote";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import UserConnectionRow from "#shadcn/components/UserConnectionRow.svelte";
+  import UserConnectionEntry from "#shadcn/components/UserConnectionEntry.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import { Button } from "@platform/ui/button";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -14,6 +15,18 @@
 
   const connections = $derived(result.connections);
 
+  const statuses = $derived(
+    connections.map((connection) =>
+      getUserConnectionStatus({
+        organizationId: workspace.organizationId,
+        appId: connection.appId,
+      }),
+    ),
+  );
+
+  // A connector whose status check finds no personal connection drops out of the list.
+  const visible = $derived(connections.filter((_, index) => statuses[index]?.current !== null));
+
   let refreshing = $state(false);
 
   let refreshFailed = $state(false);
@@ -24,7 +37,10 @@
     refreshFailed = false;
 
     try {
-      await getUserConnections({ organizationId: workspace.organizationId }).refresh();
+      await Promise.all([
+        getUserConnections({ organizationId: workspace.organizationId }).refresh(),
+        ...statuses.map((status) => status.refresh()),
+      ]);
     } catch {
       refreshFailed = true;
     } finally {
@@ -50,7 +66,7 @@
     <p role="alert" class="text-sm">
       Could not load your connections. Your saved accounts have not changed.
     </p>
-  {:else if connections.length === 0}
+  {:else if visible.length === 0}
     <EmptyState
       title="No personal connections available"
       description="Connectors will appear here after your administrator makes them available to you."
@@ -58,19 +74,28 @@
     >
   {:else}
     <ul class="divide-border/60 divide-y">
-      {#each connections as connection (connection.appId)}
-        <UserConnectionRow
-          {connection}
-          showHostname={connections.some(
-            (other) =>
-              other.appId !== connection.appId && other.displayName === connection.displayName,
-          )}
-          confirmDisconnect={page.url.searchParams.get("disconnect") === connection.appId}
-        />
+      {#each visible as connection (connection.appId)}
+        {@const showHostname = visible.some(
+          (other) =>
+            other.appId !== connection.appId && other.displayName === connection.displayName,
+        )}
+        {@const confirmDisconnect = page.url.searchParams.get("disconnect") === connection.appId}
+        <!-- Each status runs the connector's code, so rows show while their status loads. -->
+        <svelte:boundary>
+          <UserConnectionEntry record={connection} {showHostname} {confirmDisconnect} />
+          {#snippet pending()}
+            <UserConnectionRow
+              connection={{ ...connection, status: null, unavailable: false }}
+              {showHostname}
+              {confirmDisconnect}
+              checking
+            />
+          {/snippet}
+        </svelte:boundary>
       {/each}
     </ul>
   {/if}
-  {#if refreshFailed || result.error?.kind === "unavailable" || connections.some((connection) => connection.unavailable)}
+  {#if refreshFailed || result.error?.kind === "unavailable" || statuses.some((status) => status.current?.unavailable)}
     <Button
       href={workspace.path("/connections")}
       onclick={refresh}

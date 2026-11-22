@@ -3,7 +3,7 @@
   import { getWorkspaceContext } from "#lib/workspace-context";
   import { onMount } from "svelte";
   import { settingsInput } from "@platform/contracts";
-  import { getSettings } from "#lib/settings.remote";
+  import { getSettings, getSettingsActivation } from "#lib/settings.remote";
   import { SettingsWriter } from "#lib/sso-setup.svelte";
   import { Button } from "@platform/ui/button";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
@@ -27,6 +27,13 @@
 
   const view = $derived(data.view);
 
+  // The sign-in service answers separately, so the page shows before its status arrives.
+  const activationQuery = $derived(
+    getSettingsActivation({ organizationId: workspace.organizationId }),
+  );
+
+  const activation = $derived(activationQuery.current);
+
   const readonly = $derived(view.settings.externallyManaged);
 
   const writer = new SettingsWriter(
@@ -43,16 +50,12 @@
     let refreshing = false;
 
     const timer = setInterval(async () => {
-      if (
-        view.activation.state !== "applying" ||
-        refreshing ||
-        document.visibilityState !== "visible"
-      )
+      if (activation?.state !== "applying" || refreshing || document.visibilityState !== "visible")
         return;
       refreshing = true;
 
       try {
-        await settings.refresh();
+        await activationQuery.refresh();
       } catch {
         // The query exposes the failure and polling retries while activation remains pending.
       } finally {
@@ -81,6 +84,7 @@
       tested={data.tested}
       emailSignIn={data.emailSignIn}
       loginFailed={page.url.searchParams.has("error")}
+      {activation}
     />
   {:else}
     <section class="rounded-xl border" aria-label="Company SSO">
@@ -101,12 +105,12 @@
       <p class="text-muted-foreground text-sm">
         Until company SSO is active, members sign in to your apps with Widefleet.
       </p>
-      <Feedback kind={view.activation.state === "active" ? "success" : "info"}>
-        {view.activation.state === "active"
+      <Feedback kind={activation?.state === "active" ? "success" : "info"}>
+        {activation?.state === "active"
           ? "Widefleet app sign-in is active."
-          : view.activation.message}
+          : (activation?.message ?? "Checking the sign-in service…")}
       </Feedback>
-      {#if view.activation.state !== "active"}
+      {#if activation && activation.state !== "active"}
         <Button variant="outline" disabled={readonly || writer.busy} onclick={useWidefleet}
           >Activate Widefleet sign-in</Button
         >

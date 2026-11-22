@@ -3,7 +3,7 @@
   import { untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { settingsInput, type settingsView } from "@platform/contracts";
+  import { settingsInput, type activationStatus, type settingsOverview } from "@platform/contracts";
   import type { z } from "zod";
   import { warnBeforeLeaving } from "#lib/unsaved-changes";
   import {
@@ -36,14 +36,17 @@
     tested,
     emailSignIn,
     loginFailed,
+    activation,
   }: {
-    view: z.infer<typeof settingsView>;
+    view: z.infer<typeof settingsOverview>;
     organizationId: string;
     platformUrl: string;
     linked: boolean;
     tested: boolean;
     emailSignIn: boolean;
     loginFailed: boolean;
+    /** The sign-in service's status, once it has answered. */
+    activation: z.infer<typeof activationStatus> | undefined;
   } = $props();
 
   const readonly = $derived(view.settings.externallyManaged);
@@ -195,7 +198,9 @@
           </div>
         </div>
       {/if}
-      <p class="text-muted-foreground mt-6 text-xs">{view.activation.message}</p>
+      <p class="text-muted-foreground mt-6 text-xs">
+        {activation?.message ?? "Checking the sign-in service…"}
+      </p>
     </section>
 
     <CompanyDomains

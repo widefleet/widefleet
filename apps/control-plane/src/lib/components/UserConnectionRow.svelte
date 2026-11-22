@@ -17,10 +17,13 @@
     connection,
     confirmDisconnect,
     showHostname = false,
+    checking = false,
   }: {
     connection: z.infer<typeof userConnectionEntry>;
     confirmDisconnect: boolean;
     showHostname?: boolean;
+    /** The status is still loading, so the row offers no actions yet. */
+    checking?: boolean;
   } = $props();
 
   const connect = $derived(prepareUserConnection.for(connection.appId));
@@ -77,7 +80,9 @@
             </span>
           </p>
         {/if}
-        {#if connection.unavailable}
+        {#if checking}
+          <p role="status" class="text-muted-foreground mt-1 text-sm">Checking account…</p>
+        {:else if connection.unavailable}
           <p role="status" class="text-muted-foreground mt-1 text-sm">
             Could not check this account.
           </p>

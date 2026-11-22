@@ -44,7 +44,7 @@ export const readSettingsAccount = async (
   principal: Principal,
   session: Authentication["$Infer"]["Session"]["session"] | null,
 ) => ({
-  view: await runtime.settings.read(principal),
+  view: await runtime.settings.overview(principal),
   ...(await readCompanyAccount(runtime, principal, session)),
   emailSignIn: runtime.emailSignIn,
   platformUrl: runtime.configuration.PLATFORM_URL,

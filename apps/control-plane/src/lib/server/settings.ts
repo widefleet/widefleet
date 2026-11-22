@@ -1,5 +1,6 @@
 import { companySsoAvailable, operatorTrustedSso, ssoPolicy } from "./sso-policy.ts";
 import {
+  type activationStatus,
   installationSettings,
   parseCompanyDomains,
   settingsInput,
@@ -133,7 +134,7 @@ const createOrganizationSettingsService = (
       accessMode: "read only",
     });
 
-  const inspect = async (publish = false) => {
+  const prepareView = async (publish = false) => {
     const resolved = await database.transaction(
       async (transaction) => {
         // Keep publication ordered across hosted requests and self-hosted processes.
@@ -210,27 +211,6 @@ const createOrganizationSettingsService = (
       },
     );
 
-    const current =
-      appSignIn && resolved.revision
-        ? await appSignIn.status(resolved.revision)
-        : {
-            revision: "",
-            state: "waiting" as const,
-            message:
-              resolved.sso && !companySsoAvailable(configuration, resolved.sso)
-                ? "Verify the company domain before publishing its app sign-in configuration."
-                : "App sign-in has no publishable configuration.",
-          };
-
-    const activation =
-      resolved.revision && current.revision !== resolved.revision
-        ? {
-            revision: resolved.revision,
-            state: "applying" as const,
-            message: "The sign-in service is applying the configuration",
-          }
-        : current;
-
     const connection = resolved.sso;
 
     const sso = connection
@@ -264,9 +244,47 @@ const createOrganizationSettingsService = (
         ? `${configuration.PLATFORM_URL}/api/auth/sso/callback/${sso.providerId}`
         : null,
       appCallbackUrl: appSignIn?.callbackUrl ?? appCallbackUrl(configuration, organizationId),
-      activation,
       error: resolved.errors.length ? resolved.errors.join(". ") : null,
+      resolved,
     };
+  };
+
+  // The sign-in service confirms whether it applies the saved configuration. Asking it is a
+  // separate request, so pages can show the settings before the answer arrives.
+  const activationOf = async (
+    resolved: Awaited<ReturnType<typeof prepareView>>["resolved"],
+  ): Promise<z.infer<typeof activationStatus>> => {
+    const current =
+      appSignIn && resolved.revision
+        ? await appSignIn.status(resolved.revision)
+        : {
+            revision: "",
+            state: "waiting" as const,
+            message:
+              resolved.sso && !companySsoAvailable(configuration, resolved.sso)
+                ? "Verify the company domain before publishing its app sign-in configuration."
+                : "App sign-in has no publishable configuration.",
+          };
+
+    return resolved.revision && current.revision !== resolved.revision
+      ? {
+          revision: resolved.revision,
+          state: "applying" as const,
+          message: "The sign-in service is applying the configuration",
+        }
+      : current;
+  };
+
+  const overview = async (publish = false) => {
+    const { resolved, ...view } = await prepareView(publish);
+
+    return { view, resolved };
+  };
+
+  const inspect = async (publish = false) => {
+    const { view, resolved } = await overview(publish);
+
+    return { ...view, activation: await activationOf(resolved) };
   };
 
   const parseInput = (input: z.infer<typeof settingsInput>) => {
@@ -447,6 +465,17 @@ const createOrganizationSettingsService = (
       requireAdmin(principal, organizationId);
 
       return inspect();
+    },
+    // The settings without their activation status, which needs the sign-in service.
+    overview: async (principal: Principal) => {
+      requireAdmin(principal, organizationId);
+
+      return (await overview()).view;
+    },
+    activation: async (principal: Principal) => {
+      requireAdmin(principal, organizationId);
+
+      return activationOf((await overview()).resolved);
     },
     plan: async (principal: Principal, input: z.infer<typeof settingsInput>) => {
       requireAdmin(principal, organizationId);
@@ -662,6 +691,10 @@ export const createSettingsService = (
       credential?: OrganizationCredential,
     ) => scoped(organizationId).initialize(input, credential),
     read: (principal: Principal) => scoped(principal.application.organizationId).read(principal),
+    overview: (principal: Principal) =>
+      scoped(principal.application.organizationId).overview(principal),
+    activation: (principal: Principal) =>
+      scoped(principal.application.organizationId).activation(principal),
     plan: (principal: Principal, input: z.infer<typeof settingsInput>) =>
       scoped(principal.application.organizationId).plan(principal, input),
     update: (

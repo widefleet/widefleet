@@ -105,6 +105,38 @@ export const createUserConnections = (
     return { record, identity: await identify(principal) };
   };
 
+  // A failed check leaves the connector listed as unavailable. A connector that no
+  // longer offers personal connections is left out.
+  const check = async (
+    principal: Principal,
+    record: Awaited<ReturnType<typeof candidates>>[number],
+    identity: Awaited<ReturnType<typeof identify>>,
+    deadline: AbortSignal,
+  ): Promise<z.infer<typeof userConnectionEntry> | null> => {
+    try {
+      const result = await call(principal, record, identity, { action: "status" }, deadline);
+
+      return result === null
+        ? null
+        : { ...record, status: userConnectionStatus.parse(result), unavailable: false };
+    } catch (cause) {
+      // Report unexpected failures by kind only: connector responses can contain provider data.
+      if (!deadline.aborted)
+        void reportException?.(new Error("A personal connection status check failed"), undefined, {
+          appId: record.appId,
+          organizationId: principal.application.organizationId,
+          failure:
+            cause instanceof APIError
+              ? "runtime"
+              : cause instanceof z.ZodError || cause instanceof SyntaxError
+                ? "response"
+                : "request",
+        });
+
+      return { ...record, status: null, unavailable: true };
+    }
+  };
+
   return {
     list: async (principal: Principal) => {
       const records = await candidates(principal);
@@ -130,48 +162,29 @@ export const createUserConnections = (
             const record = records[index];
 
             if (!record) return;
-
-            try {
-              const result = await call(
-                principal,
-                record,
-                identity,
-                { action: "status" },
-                deadline,
-              );
-
-              results[index] =
-                result === null
-                  ? null
-                  : {
-                      ...record,
-                      status: userConnectionStatus.parse(result),
-                      unavailable: false,
-                    };
-            } catch (cause) {
-              // The row stays unavailable. Report unexpected failures by kind only:
-              // connector responses can contain provider data.
-              if (!deadline.aborted)
-                void reportException?.(
-                  new Error("A personal connection status check failed"),
-                  undefined,
-                  {
-                    appId: record.appId,
-                    organizationId: principal.application.organizationId,
-                    failure:
-                      cause instanceof APIError
-                        ? "runtime"
-                        : cause instanceof z.ZodError || cause instanceof SyntaxError
-                          ? "response"
-                          : "request",
-                  },
-                );
-            }
+            results[index] = await check(principal, record, identity, deadline);
           }
         }),
       );
 
       return results.filter((result) => result !== null);
+    },
+    // The page lists connectors right away and asks each one for its status separately,
+    // because a status runs the connector's code.
+    records: async (principal: Principal) => {
+      const records = await candidates(principal);
+
+      // A refused identity applies to every connector, so the list reports it once.
+      if (records.length) await identify(principal);
+
+      return records;
+    },
+    status: async (principal: Principal, appId: string) => {
+      const record = (await candidates(principal)).find((candidate) => candidate.appId === appId);
+
+      if (!record) return null;
+
+      return check(principal, record, await identify(principal), AbortSignal.timeout(5_000));
     },
     prepare: async (principal: Principal, appId: string) => {
       const { record, identity } = await target(principal, appId);

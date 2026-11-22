@@ -11,7 +11,7 @@ export const getUserConnections = query(organizationSelection, async (selection)
   const { runtime, principal } = await remoteContext(selection);
 
   try {
-    return { connections: await runtime.userConnections.list(principal), error: null };
+    return { connections: await runtime.userConnections.records(principal), error: null };
   } catch (cause) {
     // A refused identity, such as a recovery session without a company account,
     // explains itself; other failures are temporary.
@@ -26,6 +26,16 @@ export const getUserConnections = query(organizationSelection, async (selection)
     throw cause;
   }
 });
+
+// A status runs the connector's code, so each row loads its own without holding up the page.
+export const getUserConnectionStatus = query(
+  userConnectionInput.extend(organizationSelection.shape),
+  async ({ appId, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+
+    return runtime.userConnections.status(principal, appId);
+  },
+);
 
 const input = userConnectionInput.extend({
   ...organizationSelection.shape,

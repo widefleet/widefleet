@@ -3416,7 +3416,19 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await page.goto("/widefleet/connections");
     await expect(page.getByText("No personal connections available")).toBeVisible();
     denied = false;
+    // The list shows while each connector's status is still loading.
+    let releaseStatus = () => {};
+
+    const statusHeld = new Promise<void>((resolve) => (releaseStatus = resolve));
+
+    // Later status requests pass straight through once the first one is released.
+    await page.route("**/getUserConnectionStatus?**", async (route) => {
+      await statusHeld;
+      await route.continue();
+    });
     await page.goto("/widefleet/connections?success=true");
+    await expect(githubRow.getByText("Checking account…", { exact: true })).toBeVisible();
+    releaseStatus();
     await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
     // Duplicate names retain the hostnames needed to distinguish deployments.
     await environment.database.db
