@@ -76,8 +76,9 @@
             pending = true;
             message = "";
             try {
-              await submit();
-              // A full navigation drops cached queries and forms from the previous organization.
+              // The full navigation below drops cached queries and forms from the previous organization,
+              // so skip the default refresh. It would show the new organization on the old page first.
+              await submit().updates();
               if (selection.result?.selected) window.location.assign(selection.result.next);
             } catch {
               message = "Could not select this organization. Refresh the page and try again.";
