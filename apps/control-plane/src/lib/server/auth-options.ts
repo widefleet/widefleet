@@ -125,6 +125,8 @@ export const authenticationOptions = (
         ];
 
         const current =
+          // Session lookups are not checked on each request: an extension that blocks a user ends
+          // their sessions, and new sessions are checked when they are created.
           (allowUser && context.path === "/token") ||
           ["/device/approve", "/device/deny"].includes(context.path) ||
           accountPaths.includes(context.path)
