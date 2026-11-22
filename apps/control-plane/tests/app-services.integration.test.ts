@@ -5,6 +5,11 @@ import * as contract from "@platform/contracts";
 import type { z } from "zod";
 import { createTestEnvironment } from "./environment.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
+import {
+  encodeDocumentation,
+  storeDocumentation,
+} from "../src/lib/server/artifact-documentation.ts";
+import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { member } from "../src/lib/server/auth-schema.ts";
@@ -17,6 +22,7 @@ import {
 } from "../src/lib/server/schema.ts";
 import { decryptSecret } from "../src/lib/server/secret-encryption.ts";
 import type { Principal } from "../src/lib/server/identity.ts";
+import { memoryStorage } from "./memory-storage.fixture.ts";
 
 describe("App service connections", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -37,7 +43,21 @@ describe("App service connections", () => {
     await environment.close();
   });
 
-  const services = () => createConnectionService(environment.database.db);
+  const storage = createArtifactStorage(memoryStorage());
+
+  const services = () => createConnectionService(environment.database.db, storage);
+
+  // Publishing keeps documentation in artifact storage and a summary in the database.
+  const documented = async (
+    appId: string,
+    artifactId: string,
+    documentation: z.input<typeof contract.serviceDocumentation>,
+  ) => {
+    const encoded = encodeDocumentation(contract.serviceDocumentation.parse(documentation));
+    (await storeDocumentation(storage, appId, artifactId, encoded)).unwrap();
+
+    return encoded.summary;
+  };
 
   const applications = () => createAppService(environment.database.db, environment.configuration);
 
@@ -66,7 +86,6 @@ describe("App service connections", () => {
       web: false,
       entrypoints,
       assets: { upload_session: artifactId, binding: "ASSETS" },
-      service_documentation: documentation,
     });
 
     await environment.database.db.insert(artifacts).values({
@@ -75,6 +94,7 @@ describe("App service connections", () => {
       metadata,
       manifest: {},
       modules: [{ name: "worker.js", type: "esm", size: 1, sha256: "a".repeat(64) }],
+      documentation: documentation ? await documented(app.id, artifactId, documentation) : null,
     });
     await environment.database.db.insert(deployments).values({
       id: deploymentId,
@@ -467,16 +487,23 @@ describe("App service connections", () => {
 
     await environment.database.db
       .update(artifacts)
-      .set({ metadata: { ...first, service_documentation: documentation("First version") } })
+      .set({
+        documentation: await documented(
+          target.id,
+          target.artifactId,
+          documentation("First version"),
+        ),
+      })
       .where(eq(artifacts.id, target.artifactId));
     const nextArtifact = crypto.randomUUID();
     const nextDeployment = crypto.randomUUID();
     await environment.database.db.insert(artifacts).values({
       id: nextArtifact,
       appId: target.id,
-      metadata: { ...first, service_documentation: documentation("Next version") },
+      metadata: first,
       manifest: {},
       modules: [],
+      documentation: await documented(target.id, nextArtifact, documentation("Next version")),
     });
     await environment.database.db.insert(deployments).values({
       id: nextDeployment,

@@ -110,7 +110,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       appAccess: createAppAccessService(environment.database.db),
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
-      connections: createConnectionService(environment.database.db),
+      connections: createConnectionService(environment.database.db, storage),
       appSecrets: createAppSecrets(
         environment.database.db,
         environment.environment.PLATFORM_ENCRYPTION_KEY,
@@ -1033,9 +1033,20 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .from(artifacts)
       .where(eq(artifacts.id, first.artifactId));
 
+    // The database keeps a summary; the document itself lives in artifact storage.
+    expect(storedArtifact?.metadata).not.toHaveProperty("service_documentation");
+    expect(storedArtifact?.documentation).toMatchObject({ entrypoints: [] });
     expect(
-      contract.workerMetadata.parse(storedArtifact?.metadata).service_documentation,
-    ).toMatchObject({ format: 1 });
+      JSON.parse(
+        new TextDecoder().decode(
+          (
+            await storage.get(
+              `apps/${storedArtifact?.appId}/service-documentation/${first.artifactId}.json`,
+            )
+          ).unwrap(),
+        ),
+      ),
+    ).toEqual({ format: 1, entrypoints: [], types: [] });
     expect(
       (
         await json(

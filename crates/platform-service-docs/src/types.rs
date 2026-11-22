@@ -135,7 +135,7 @@ impl Types {
                 continue;
             }
             // Bound the amount of supplemental metadata, never the app's type system.
-            if self.seen.len() > 4096 || definitions.len() > 128 {
+            if self.seen.len() > 16 * crate::MAX_TYPES || definitions.len() > crate::MAX_TYPES {
                 return None;
             }
             if value.flags().intersects(TypeFlags::UnionOrIntersection) {
@@ -212,7 +212,7 @@ impl Types {
                 let name = self.render(checker, value, None);
                 let verbosity = P::new(VerbosityContext::default());
                 verbosity.level.set(1);
-                verbosity.max_truncation_length.set(32768);
+                verbosity.max_truncation_length.set(crate::MAX_TEXT);
                 let mut definition = self.render(checker, value, Some(verbosity));
                 if verbosity.truncated.get() {
                     return None;

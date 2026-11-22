@@ -3,9 +3,11 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { createAppService } from "../src/lib/server/apps.ts";
+import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { apps, artifacts, deployments, jobs } from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
+import { memoryStorage } from "./memory-storage.fixture.ts";
 
 describe("App connections", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -31,7 +33,10 @@ describe("App connections", () => {
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
-    service = createConnectionService(environment.database.db);
+    service = createConnectionService(
+      environment.database.db,
+      createArtifactStorage(memoryStorage()),
+    );
     appService = createAppService(environment.database.db, environment.configuration);
     creator = await person("connection-creator");
     colleague = await person("connection-reader");

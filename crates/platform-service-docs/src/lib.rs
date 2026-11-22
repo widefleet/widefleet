@@ -222,7 +222,7 @@ pub fn extract(
         return Ok(empty());
     };
     let result = json!({"format": 1, "entrypoints": entries, "types": types});
-    if !within_limits("", &result) || serde_json::to_vec(&result)?.len() > 262144 {
+    if !within_limits("", &result) || serde_json::to_vec(&result)?.len() > MAX_BYTES {
         eprintln!(
             "Warning: API documentation was omitted because it exceeds supported limits. Deployment continues."
         );
@@ -393,16 +393,22 @@ fn rpc_method(name: &str) -> bool {
         )
 }
 
+// Keep these bounds equal to the service documentation contract the control plane enforces.
+pub(crate) const MAX_TEXT: usize = 262144;
+pub(crate) const MAX_TYPES: usize = 4096;
+const MAX_BYTES: usize = 8 * 1024 * 1024;
+
 fn within_limits(key: &str, value: &Value) -> bool {
     match value {
         Value::String(text) => {
-            text.encode_utf16().count() <= if key == "name" { 128 } else { 32768 }
+            text.encode_utf16().count() <= if key == "name" { 128 } else { MAX_TEXT }
         }
         Value::Array(values) => {
             values.len()
                 <= match key {
                     "entrypoints" | "parameters" | "typeParameters" => 32,
-                    "methods" | "types" => 128,
+                    "methods" => 1024,
+                    "types" => MAX_TYPES,
                     _ => 16,
                 }
                 && values.iter().all(|value| within_limits("", value))

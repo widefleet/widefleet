@@ -15,6 +15,7 @@ import { artifacts, deployments, uploadSessions } from "./schema.ts";
 import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
+import { encodeDocumentation, storeDocumentation } from "./artifact-documentation.ts";
 import { prepareModules, storeModules, type WorkerModule } from "./worker-modules.ts";
 
 const getSession = async (
@@ -203,6 +204,9 @@ export const createUploadService = (
         }
 
         const storedModules = yield* prepareModules(metadata.main_module, modules, metadata.debug);
+        // The documentation goes to artifact storage, so metadata stays small for every reader.
+        const { service_documentation: documentation, ...storedMetadata } = metadata;
+        const encoded = documentation ? encodeDocumentation(documentation) : null;
 
         const artifactId = session.id;
 
@@ -253,7 +257,8 @@ export const createUploadService = (
 
         if (existing) {
           if (
-            !isDeepStrictEqual(existing.metadata, metadata) ||
+            !isDeepStrictEqual(existing.metadata, storedMetadata) ||
+            !isDeepStrictEqual(existing.documentation, encoded?.summary ?? null) ||
             !isDeepStrictEqual(existing.modules, storedModules)
           ) {
             return yield* new InvalidOperation({
@@ -274,12 +279,15 @@ export const createUploadService = (
 
         yield* Result.await(storeModules(storage, `apps/${appId}`, modules));
 
+        if (encoded) yield* Result.await(storeDocumentation(storage, appId, artifactId, encoded));
+
         await transaction.insert(artifacts).values({
           id: artifactId,
           appId,
-          metadata,
+          metadata: storedMetadata,
           manifest: session.manifest,
           modules: storedModules,
+          documentation: encoded?.summary ?? null,
         });
 
         return enqueueDeployment(

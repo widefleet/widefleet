@@ -299,9 +299,8 @@ native("limits documented overloads without rejecting the app", async () => {
 });
 
 native.each([
-  { summary: "x".repeat(32769), count: 1 },
-  { summary: "é".repeat(10000), count: 14 },
-  { summary: "Read a value.", count: 129 },
+  { summary: "x".repeat(262145), count: 1 },
+  { summary: "Read a value.", count: 1025 },
 ])(
   "omits oversized documentation with a warning while keeping extraction successful ($count methods)",
   async ({ summary, count }) => {
@@ -839,8 +838,21 @@ it("rejects oversized and mismatched artifact documentation and renders authored
     serviceDocumentation.safeParse({
       ...docs,
       types: [
-        { name: "Huge", definition: "x".repeat(32769), summary: "", remarks: "", examples: [] },
+        { name: "Huge", definition: "x".repeat(262145), summary: "", remarks: "", examples: [] },
       ],
+    }).success,
+  ).toBe(false);
+  // Each definition is within bounds; together they exceed 8 MiB.
+  expect(
+    serviceDocumentation.safeParse({
+      ...docs,
+      types: Array.from({ length: 33 }, (_, index) => ({
+        name: `Large${index}`,
+        definition: "x".repeat(262144),
+        summary: "",
+        remarks: "",
+        examples: [],
+      })),
     }).success,
   ).toBe(false);
   expect(

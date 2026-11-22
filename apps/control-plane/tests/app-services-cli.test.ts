@@ -501,7 +501,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     },
     {
       name: "oversized comment",
-      source: `/** ${"x".repeat(32769)} */ read() { return 1; }`,
+      source: `/** ${"x".repeat(262145)} */ read() { return 1; }`,
       warning: "API documentation was omitted",
       signatures: 0,
     },

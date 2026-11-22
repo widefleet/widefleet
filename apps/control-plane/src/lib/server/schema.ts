@@ -198,6 +198,8 @@ export const artifacts = pgTable("artifact", {
   metadata: jsonb().notNull(),
   manifest: jsonb().notNull(),
   modules: jsonb().notNull(),
+  // A summary of the API documentation kept in artifact storage, or null without any.
+  documentation: jsonb(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

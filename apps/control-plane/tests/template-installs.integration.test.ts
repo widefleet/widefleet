@@ -242,7 +242,18 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   const metadata = contract.workerMetadata.parse(artifact?.metadata);
 
-  expect(metadata.service_documentation).toEqual(documentation);
+  expect(metadata.service_documentation).toBeUndefined();
+  expect(
+    JSON.parse(
+      new TextDecoder().decode(
+        (
+          await runtime.storage.get(
+            `apps/${result.app.id}/service-documentation/${result.deployment.artifactId}.json`,
+          )
+        ).unwrap(),
+      ),
+    ),
+  ).toEqual(documentation);
   expect(metadata.assets.binding).toBe("ASSETS");
 
   // The template's static assets are part of the deployment, as with the CLI.
