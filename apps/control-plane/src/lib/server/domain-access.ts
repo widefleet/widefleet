@@ -328,8 +328,11 @@ export const createDomainAccess = (
 
   return {
     enabled,
-    joinable: async (signIn: SignIn) =>
-      enabled ? joinableOrganizations(database, access, signIn) : [],
+    joinable: async (signIn: SignIn) => {
+      requireEnabled();
+
+      return joinableOrganizations(database, access, signIn);
+    },
     join: async (signIn: SignIn, organizationId: string) => {
       requireEnabled();
 

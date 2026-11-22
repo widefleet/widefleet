@@ -24,6 +24,11 @@
 
   let error = $state("");
 
+  // One change at a time, so saves reach the server in click order.
+  const saving = $derived(
+    addJoinDomain.pending + removeJoinDomain.pending + restrictOrganizationCreation.pending > 0,
+  );
+
   const failure = (cause: unknown, fallback: string) =>
     isHttpError(cause) ? cause.body.message : cause instanceof Error ? cause.message : fallback;
 
@@ -90,6 +95,7 @@
               variant="ghost"
               size="sm"
               aria-label={`Stop letting ${domain} addresses join`}
+              disabled={saving}
               onclick={() => remove(domain)}><Trash />Remove</Button
             >
           </li>
@@ -97,7 +103,7 @@
       </ul>
     {/if}
     {#each offered as domain (domain)}
-      <Button variant="outline" size="sm" class="mt-3" onclick={() => add(domain)}
+      <Button variant="outline" size="sm" class="mt-3" disabled={saving} onclick={() => add(domain)}
         ><Plus />Let anyone with a @{domain} address join</Button
       >
     {:else}
@@ -123,6 +129,7 @@
         <Switch
           id="restrict-organization-creation"
           checked={access.restrictOrganizationCreation}
+          disabled={saving}
           onCheckedChange={restrict}
         />
       </div>

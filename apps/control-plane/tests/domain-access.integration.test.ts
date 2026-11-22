@@ -559,7 +559,9 @@ describe("Joining organizations by company email domain", () => {
     const owner = await person("owner@closed.example.test");
     await googleWorkspace(owner, "owner@closed.example.test");
 
-    expect(await environment.domainAccess.joinable(signIn(owner))).toEqual([]);
+    await expect(environment.domainAccess.joinable(signIn(owner))).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
     await expect(environment.domainAccess.join(signIn(owner), "widefleet")).rejects.toMatchObject({
       code: "FORBIDDEN",
     });

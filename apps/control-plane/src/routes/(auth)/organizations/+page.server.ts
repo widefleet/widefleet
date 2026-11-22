@@ -12,7 +12,7 @@ export const load: PageServerLoad = async ({ url }) => {
   const signIn = sessionSignIn(user, session);
 
   const [joinable, creation] = await Promise.all([
-    runtime.domainAccess.joinable(signIn),
+    runtime.domainAccess.enabled ? runtime.domainAccess.joinable(signIn) : [],
     runtime.onboarding.domains(signIn),
   ]);
 
