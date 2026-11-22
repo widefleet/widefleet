@@ -70,6 +70,32 @@ export const createAuthenticationAdmission = (
 
     return providers[0]?.providerId ?? null;
   },
+  // One organization at most verifies a domain, so this names the only provider.
+  domainSsoProvider: async (email: string) => {
+    const domain = email.trim().toLowerCase().split("@")[1];
+
+    if (!domain) return null;
+
+    const [provider] = await database
+      .select({ id: ssoProvider.organizationId, providerId: ssoProvider.providerId })
+      .from(ssoProvider)
+      .innerJoin(
+        organizationSettings,
+        eq(organizationSettings.organizationId, ssoProvider.organizationId),
+      )
+      .where(
+        and(
+          eq(ssoProvider.domainVerified, true),
+          eq(organizationSettings.ssoRequired, true),
+          eq(organizationSettings.domainSsoRequired, true),
+          sql`${domain} = any(string_to_array(${ssoProvider.domain}, ','))`,
+        ),
+      );
+
+    return provider && (await access.filterOrganizations([provider])).includes(provider.id)
+      ? { providerId: provider.providerId }
+      : null;
+  },
   allowEmail: async (email: string) => {
     if (publicSignup && (await readInstallation(database)).ownerId) return true;
 

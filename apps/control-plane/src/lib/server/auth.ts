@@ -19,6 +19,7 @@ import {
   cliClientId,
   cliResourcePolicy,
   cliScopes,
+  companySsoRequired,
 } from "./auth-options.ts";
 import * as authSchema from "./auth-schema.ts";
 import type { Configuration } from "./config.ts";
@@ -265,14 +266,27 @@ export const createAuthentication = (
               );
             }
 
+            const identityOrganizationId =
+              provider?.organizationId ??
+              (record["recovery"] === true ? installationOrganizationId : null);
+
+            if (identityOrganizationId === null) {
+              const [subject] = await database
+                .select({ email: authSchema.user.email })
+                .from(authSchema.user)
+                .where(eq(authSchema.user.id, record.userId));
+
+              // Every personal sign-in method ends here, including ones without a check
+              // of their own. Recovery and other organizations' SSO stay available.
+              const company = subject
+                ? await admission.domainSsoProvider(subject.email.toLowerCase())
+                : null;
+
+              if (company) throw companySsoRequired(company.providerId);
+            }
+
             return {
-              data: {
-                ...record,
-                identityOrganizationId:
-                  provider?.organizationId ??
-                  (record["recovery"] === true ? installationOrganizationId : null),
-                companyConfiguration: revision,
-              },
+              data: { ...record, identityOrganizationId, companyConfiguration: revision },
             };
           },
         },

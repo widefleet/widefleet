@@ -334,6 +334,8 @@ export const organizationSettings = pgTable("organization_settings", {
   ssoRequired: boolean("sso_required").notNull().default(false),
   joinDomains: jsonb("join_domains").notNull().default([]),
   restrictOrganizationCreation: boolean("restrict_organization_creation").notNull().default(false),
+  // Addresses on the verified domains sign in only through this organization's SSO.
+  domainSsoRequired: boolean("domain_sso_required").notNull().default(false),
 });
 
 // Each company email domain is proven separately. Verified domains are mirrored into

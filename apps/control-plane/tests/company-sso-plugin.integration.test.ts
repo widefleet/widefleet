@@ -130,7 +130,14 @@ describe("Better Auth SSO provider integration", () => {
     });
     await linkCompanyAccount(environment.database.db, principal.id);
     const activated = await environment.settings.activateSso(principal);
-    expect(activated.ssoRequired).toBe(true);
+    expect(activated).toMatchObject({ ssoRequired: true, domainSsoRequired: true });
+    await expect(
+      (await environment.auth.$context).internalAdapter.createSession(principal.id),
+    ).rejects.toMatchObject({ body: { code: "COMPANY_SSO_REQUIRED", providerId: "test-company" } });
+    // The other tests sign the owner in with fixture sessions on the same domain.
+    expect((await environment.settings.setDomainSso(principal, false)).domainSsoRequired).toBe(
+      false,
+    );
     expect(environment.authControl.read().configuration?.clientId).toBe("app-login");
     expect(await authenticate()).toMatchObject({ error: { code: "SSO_REQUIRED" } });
   });
@@ -337,7 +344,7 @@ describe("Better Auth SSO provider integration", () => {
     for (const domain of domains) await environment.settings.removeDomain(principal, domain, false);
   });
 
-  it("lets organizations that control the same DNS verify a shared domain", async () => {
+  it("verifies a domain for one organization only", async () => {
     const organizationId = crypto.randomUUID();
     await environment.database.db.insert(organization).values({
       id: organizationId,
@@ -372,12 +379,18 @@ describe("Better Auth SSO provider integration", () => {
       const view = await environment.settings.addDomain(principal, "claimed.example.test", false);
       const record = view.ssoDomains.find((entry) => entry.domain === "claimed.example.test");
       resolver.mockResolvedValue([[record?.record?.value ?? ""]]);
-      await environment.settings.verifyDomain(principal, "claimed.example.test");
+      // Its addresses sign in through one organization's SSO, even when both control the DNS.
+      await expect(
+        environment.settings.verifyDomain(principal, "claimed.example.test"),
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: "claimed.example.test is already verified by another organization",
+      });
       expect(
         (await environment.settings.read(principal)).ssoDomains.find(
           (entry) => entry.domain === "claimed.example.test",
         )?.verified,
-      ).toBe(true);
+      ).toBe(false);
     } finally {
       await environment.settings.removeDomain(principal, "claimed.example.test", false);
       await environment.database.db.delete(organization).where(eq(organization.id, organizationId));

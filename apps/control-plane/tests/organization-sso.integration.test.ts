@@ -557,6 +557,68 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     }
   });
 
+  it("leads every personal sign-in of a company address to that company's SSO", async () => {
+    const { internalAdapter } = await auth.$context;
+    const outsider = environment.users.createUser({ email: "user@elsewhere.test" });
+    await environment.users.saveUser(outsider);
+
+    const rule = (domainSsoRequired: boolean) =>
+      environment.database.db
+        .update(organizationSettings)
+        .set({ domainSsoRequired })
+        .where(eq(organizationSettings.organizationId, firstOrg));
+
+    const required = { body: { code: "COMPANY_SSO_REQUIRED", providerId: "company-alpha" } };
+
+    try {
+      await environment.database.db
+        .update(ssoProvider)
+        .set({ domain: "example.test" })
+        .where(eq(ssoProvider.providerId, "company-alpha"));
+      await rule(true);
+
+      // Session creation is the check every personal sign-in method passes.
+      await expect(internalAdapter.createSession(userId)).rejects.toMatchObject(required);
+      expect(await internalAdapter.createSession(outsider.id)).toMatchObject({
+        identityOrganizationId: null,
+      });
+
+      // Company SSO, another organization's SSO and recovery remain available.
+      expect((await loginCompany("company-alpha")).current?.session.identityOrganizationId).toBe(
+        firstOrg,
+      );
+      expect((await loginCompany("company-bravo")).current?.session.identityOrganizationId).toBe(
+        secondOrg,
+      );
+      // Recovery sessions are created as the recovery command creates them.
+      expect(
+        await internalAdapter.createSession(userId, true, { recovery: true }, true),
+      ).toMatchObject({ recovery: true });
+
+      // An organization the installation does not admit cannot claim the address.
+      const excluded = createAuthentication(environment.configuration, environment.database.db, {
+        organizationAccess: { filterOrganizations: async () => [] },
+      });
+
+      expect(await (await excluded.$context).internalAdapter.createSession(userId)).toBeTruthy();
+
+      await environment.database.db
+        .update(organizationSettings)
+        .set({ ssoRequired: false })
+        .where(eq(organizationSettings.organizationId, firstOrg));
+      expect(await internalAdapter.createSession(userId)).toBeTruthy();
+      await environment.database.db
+        .update(organizationSettings)
+        .set({ ssoRequired: true })
+        .where(eq(organizationSettings.organizationId, firstOrg));
+      await rule(false);
+      expect(await internalAdapter.createSession(userId)).toBeTruthy();
+    } finally {
+      await rule(false);
+      await guestDomain("company-alpha");
+    }
+  });
+
   it("preserves rejection and blocks replay of a consumed device code", async () => {
     const denied = await start();
     await confirmed(

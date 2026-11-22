@@ -7,6 +7,7 @@ import { authenticationOptions } from "../src/lib/server/auth-options.ts";
 import { runtimeConfigurationSchema } from "../src/lib/server/config.ts";
 import {
   availableSocialProviders,
+  readCompanySsoHint,
   socialSignInConfiguration,
 } from "../src/lib/server/social-sign-in.ts";
 
@@ -46,6 +47,7 @@ describe("personal social sign-in", () => {
     verified = true,
     admitted = true,
     existing = true,
+    companySso = "",
   } = {}) => {
     let otp = "";
     let active = true;
@@ -54,6 +56,8 @@ describe("personal social sign-in", () => {
     const options = authenticationOptions(configuration, {
       allowEmail: async () => admitted,
       allowUser: async () => active,
+      domainSsoProvider: async (address) =>
+        companySso && address.endsWith("@example.test") ? { providerId: companySso } : null,
       sendEmail: async (message) => {
         otp = z
           .string()
@@ -230,6 +234,56 @@ describe("personal social sign-in", () => {
       expect(f.cookies.get("platform.last_used_login_method")).toBe(provider);
     },
   );
+
+  it.each([
+    { provider: "google" as const, claims: { email_verified: true, hd: "example.test" } },
+    { provider: "microsoft" as const, claims: { xms_edov: true } },
+  ])("continues a company address with company SSO instead of $provider", async (input) => {
+    for (const existing of [true, false]) {
+      const f = await fixture({ existing, companySso: "company-alpha" });
+
+      const location = new URL(
+        z.string().parse((await f.signIn(input.provider, input.claims)).headers.get("location")),
+        baseURL,
+      );
+
+      expect(location.pathname).toBe("/sign-in/connect");
+      expect(location.searchParams.get("error")).toBe("company_sso_required");
+      // The address reaches the page only encrypted, never readable in its URL.
+      expect(location.search).not.toContain("example.test");
+      expect(
+        await readCompanySsoHint(
+          (await f.auth.$context).secretConfig,
+          z.string().parse(location.searchParams.get("error_description")),
+        ),
+      ).toEqual({ providerId: "company-alpha", email });
+      expect(
+        await readCompanySsoHint("another-synthetic-secret-never-deploy", "invalid"),
+      ).toBeNull();
+      // No user, account or session is created before company SSO.
+      const created = await f.internalAdapter.findUserByEmail(email);
+
+      if (existing) expect(created).toMatchObject({ user: { email }, accounts: [] });
+      else expect(created).toBeNull();
+      expect(f.cookies.has("platform.session_token")).toBe(false);
+    }
+  });
+
+  it("sends email codes for company addresses to company SSO", async () => {
+    const f = await fixture({ companySso: "company-alpha" });
+
+    for (const [path, body] of [
+      ["/email-otp/send-verification-otp", { email, type: "sign-in" }],
+      ["/sign-in/email-otp", { email, otp: "000000" }],
+    ] as const) {
+      const response = await f.request(path, body);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        code: "COMPANY_SSO_REQUIRED",
+        providerId: "company-alpha",
+      });
+    }
+  });
 
   it("accepts Gmail without a Workspace claim", async () => {
     const f = await fixture({ localEmail: "synthetic@gmail.com" });

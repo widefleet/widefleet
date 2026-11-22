@@ -1,6 +1,6 @@
 import { error } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
-import { availableSocialProviders } from "#server/social-sign-in";
+import { availableSocialProviders, readCompanySsoHint } from "#server/social-sign-in";
 import { localDestination } from "#server/navigation";
 import type { PageServerLoad } from "./$types";
 
@@ -22,6 +22,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     !session.recovery &&
     Date.now() - session.createdAt.getTime() < 10 * 60 * 1000;
 
+  const failure = url.searchParams.get("error");
+  const hint = url.searchParams.get("error_description");
+
+  const companySso =
+    failure === "company_sso_required" && hint
+      ? await readCompanySsoHint((await runtime.auth.$context).secretConfig, hint)
+      : null;
+
   return {
     provider,
     next,
@@ -31,6 +39,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     emailSignIn: runtime.emailSignIn,
     publicSignup: runtime.publicSignup,
     codeDelivery: runtime.configuration.LOGIN_CODE_DELIVERY,
-    failure: url.searchParams.get("error"),
+    failure,
+    companySso,
   };
 };

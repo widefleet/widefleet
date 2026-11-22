@@ -1,5 +1,5 @@
 import dns from "node:dns/promises";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { maxCompanyDomains, parseCompanyDomains } from "@platform/contracts";
 import { ssoProvider } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
@@ -295,6 +295,27 @@ export const verifySsoDomains = async (
       }),
     )
   ).filter((entry) => entry !== null);
+
+  // A domain's addresses sign in through a single organization's SSO.
+  const [claimed] = found.length
+    ? await database
+        .select({ domain: ssoDomains.domain })
+        .from(ssoDomains)
+        .where(
+          and(
+            inArray(ssoDomains.domain, found),
+            ne(ssoDomains.organizationId, organizationId),
+            isNotNull(ssoDomains.verifiedAt),
+          ),
+        )
+        .limit(1)
+    : [];
+
+  if (claimed)
+    throw new InvalidOperation({
+      code: "CONFLICT",
+      message: `${claimed.domain} is already verified by another organization`,
+    });
 
   if (found.length)
     await database.transaction(async (transaction) => {
