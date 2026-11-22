@@ -130,23 +130,38 @@ export const serviceMethodSummary = z.strictObject({
 
 type Documentation = z.infer<typeof serviceDocumentation>;
 
-// A type reference is either a qualified import type or a plain identifier;
-// both spell exactly the names in `types`.
-const typeTokens = /import\("(?:[^"\\]|\\.)*"\)(?:\.[A-Za-z_$][\w$]*)+|[A-Za-z_$][\w$]*/g;
+// Generated type names are complete type expressions: `Item`, `One.Item`,
+// `Page<Item>` or `import("./model").Item`. Each is found under its first plain
+// identifier, and a text uses it when it contains the whole name.
+const qualifier = /^import\("(?:[^"\\]|\\.)*"\)\./;
+
+const identifier = /import\("(?:[^"\\]|\\.)*"\)\.[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*/g;
+
+const leadingIdentifier = (text: string) =>
+  /^[A-Za-z_$][\w$]*/.exec(text.replace(qualifier, ""))?.[0];
 
 /** The documented types the texts use, directly or through other documented types. */
 const referencedTypes = (types: Documentation["types"], texts: string[]) => {
-  const byName = new Map(types.map((type) => [type.name, type]));
+  const candidates = new Map<string, Documentation["types"]>();
+
+  for (const type of types) {
+    const key = leadingIdentifier(type.name);
+
+    if (key) candidates.set(key, [...(candidates.get(key) ?? []), type]);
+  }
+
   const used = new Set<string>();
   const pending = [...texts];
 
   for (let text = pending.pop(); text !== undefined; text = pending.pop())
-    for (const [token] of text.matchAll(typeTokens)) {
-      const type = byName.get(token);
+    for (const [token] of text.matchAll(identifier)) {
+      const key = leadingIdentifier(token);
 
-      if (!type || used.has(type.name)) continue;
-      used.add(type.name);
-      pending.push(type.definition);
+      for (const type of (key && candidates.get(key)) || []) {
+        if (used.has(type.name) || !text.includes(type.name)) continue;
+        used.add(type.name);
+        pending.push(type.definition);
+      }
     }
 
   return types.filter((type) => used.has(type.name));
