@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-15
+lastModified: 2026-11-22
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -69,9 +69,10 @@ widefleet login
 The new login replaces CLI credentials authorized through email sign-in.
 `widefleet account` shows the account's company-link status and browser URL.
 
-A company login grants access within that organization. Selecting another
-organization does not extend that login's authority; an organization with a
-different company provider requires its own company sign-in.
+A company login grants access within that organization. For addresses on the
+organization's verified domains, it also opens the person's other
+organizations. An organization with its own required company sign-in asks for
+it when opened. External guests sign in to each organization separately.
 
 ## Provider values
 
