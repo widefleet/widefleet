@@ -71,6 +71,20 @@ describe("Linear GraphQL requests", () => {
     });
   });
 
+  it("rejects numbers JSON cannot carry instead of sending null", () => {
+    for (const estimate of [Number.NaN, Number.POSITIVE_INFINITY])
+      expect(() =>
+        graphqlRequest(
+          "Mutation",
+          "issueUpdate",
+          { id: "ENG-1", input: { estimate } },
+          {
+            success: true,
+          },
+        ),
+      ).toThrow(InvalidRequest);
+  });
+
   it("rejects requests that do not match Linear's schema before sending them", () => {
     const invalid = (input: Arguments, select: FieldSelection | undefined) => () =>
       graphqlRequest("Query", "issue", input, select);

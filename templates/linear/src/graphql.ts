@@ -15,7 +15,28 @@ const selection = z.record(z.string(), json);
 
 type Selection = z.infer<typeof selection>;
 
-const argumentValues = z.record(z.string(), json.optional());
+// JSON values, leaving out undefined object fields at every depth as JSON does.
+// Numbers must be finite: NaN or Infinity never turn into null.
+export const definedJson: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(definedJson),
+    z
+      .record(z.string(), definedJson.optional())
+      .transform((entries) =>
+        Object.fromEntries(
+          Object.entries(entries).flatMap(([key, value]) =>
+            value === undefined ? [] : [[key, value] as const],
+          ),
+        ),
+      ),
+  ]),
+);
+
+const argumentValues = z.record(z.string(), definedJson.optional());
 
 // A field's value in a selection: `true`, or the nested selection.
 const nestedSelection = (owner: string, value: JsonValue | undefined) => {
@@ -72,10 +93,12 @@ export const graphqlRequest = (
   const declarations: string[] = [];
 
   const argumentsOf = (owner: string, types: Record<string, string>, values: JsonInput) => {
-    // Undefined fields are left out at every depth, as JSON leaves them out.
-    const parsed = argumentValues.safeParse(JSON.parse(JSON.stringify(values ?? {})));
+    const parsed = argumentValues.safeParse(values ?? {});
 
-    if (!parsed.success) throw new InvalidRequest(`Arguments of ${owner} must be an object`);
+    if (!parsed.success)
+      throw new InvalidRequest(
+        `Arguments of ${owner} must be JSON: ${z.prettifyError(parsed.error)}`,
+      );
 
     const written = Object.entries(parsed.data).flatMap(([name, value]) => {
       const type = own(types, name);

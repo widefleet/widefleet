@@ -2,7 +2,7 @@ import { z } from "zod";
 import { approvalAnswer, approvals, asks, type Change, changeQuestion } from "./approval.ts";
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
-import { type Arguments, type FieldSelection, graphqlRequest } from "./graphql.ts";
+import { type Arguments, definedJson, type FieldSelection, graphqlRequest } from "./graphql.ts";
 import type { LinearResult } from "./results.ts";
 
 /** Props of a call, with the user's answer when Widefleet calls again after a question. */
@@ -36,13 +36,9 @@ export const run = async <T>(
     if (asks(await approvals(environment.DB, id).level(), operation.change)) {
       const answer = approvalAnswer.parse(properties.input)?.inputResponses.approve;
 
-      // The question shows the input as Linear receives it, without undefined fields.
+      // The question shows the input as Linear receives it.
       if (!answer)
-        return changeQuestion(
-          operation.field,
-          operation.change,
-          z.json().parse(JSON.parse(JSON.stringify(input))),
-        );
+        return changeQuestion(operation.field, operation.change, definedJson.parse(input));
 
       if (answer.action !== "accept") return { status: "declined" };
     }
