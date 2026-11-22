@@ -35,7 +35,7 @@ export const binaryPaths = {
       operationId: "getAppIcon",
       summary: "Read an app's favicon from its active deployment",
       description:
-        "Returns a conventional SVG, ICO or PNG favicon from uploaded assets, up to 256 KiB. Requires app management access, or membership in the app's organization for apps in the catalog and apps with personal connections. Missing icons return 404. With the active deployment ID as `deployment`, the response may be cached until the app is deployed again.",
+        "Returns a conventional SVG, ICO or PNG favicon from uploaded assets, up to 256 KiB. Requires app management access, or membership in the app's organization for apps in the catalog and apps with personal connections. Missing icons return 404. With the active deployment ID as `deployment`, the response, including a 404 for a deployment without an icon, may be cached until the app is deployed again.",
       parameters: [
         { name: "appId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
         {

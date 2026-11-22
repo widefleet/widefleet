@@ -14,7 +14,7 @@ import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { readInstallation } from "./installation-store.ts";
 import { templateCatalog, readTemplate, readTemplateIcon } from "./app-templates.ts";
-import { iconCache, iconResponse, readAppIcon } from "./app-icons.ts";
+import { iconCache, iconResponse, missingIconResponse, readAppIcon } from "./app-icons.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
 import { readCompanyAccount } from "./settings-account.ts";
@@ -1052,10 +1052,11 @@ export const createApi = (runtime: Runtime) => {
         await readAppIcon(runtime.database.db, runtime.storage, principal, appId),
       );
 
-      return iconResponse(
-        result,
-        iconCache(url.searchParams.get("deployment"), result.deploymentId),
-      );
+      const cacheControl = iconCache(url.searchParams.get("deployment"), result.deploymentId);
+
+      return result.icon
+        ? iconResponse(result.icon, cacheControl)
+        : missingIconResponse(cacheControl);
     }
 
     const templateIcon = /^\/api\/v1\/catalog\/templates\/([^/]+)\/icon$/.exec(url.pathname);

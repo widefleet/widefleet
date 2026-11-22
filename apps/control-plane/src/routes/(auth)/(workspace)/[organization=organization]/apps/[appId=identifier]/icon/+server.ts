@@ -1,6 +1,6 @@
 import { error } from "@sveltejs/kit";
 import { identifier } from "@platform/contracts";
-import { iconCache, iconResponse, readAppIcon } from "#server/app-icons";
+import { iconCache, iconResponse, missingIconResponse, readAppIcon } from "#server/app-icons";
 import { pageFailure, pagePrincipal } from "#server/page-auth";
 import { getRuntime } from "#server/runtime";
 import type { RequestHandler } from "./$types";
@@ -16,9 +16,9 @@ export const GET: RequestHandler = async ({ params, url }) => {
   const icon = await readAppIcon(runtime.database.db, runtime.storage, principal, appId.data);
 
   if (icon.isErr()) return pageFailure(icon.error);
+  const cacheControl = iconCache(url.searchParams.get("deployment"), icon.value.deploymentId);
 
-  return iconResponse(
-    icon.value,
-    iconCache(url.searchParams.get("deployment"), icon.value.deploymentId),
-  );
+  return icon.value.icon
+    ? iconResponse(icon.value.icon, cacheControl)
+    : missingIconResponse(cacheControl);
 };
