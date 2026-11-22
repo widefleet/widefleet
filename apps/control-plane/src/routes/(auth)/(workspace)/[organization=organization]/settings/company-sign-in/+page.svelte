@@ -34,6 +34,13 @@
 
   const activation = $derived(activationQuery.current);
 
+  const activationMessage = $derived(
+    activation?.message ??
+      (activationQuery.error
+        ? "Could not reach the sign-in service. Reload the page to try again."
+        : "Checking the sign-in service…"),
+  );
+
   const readonly = $derived(view.settings.externallyManaged);
 
   const writer = new SettingsWriter(
@@ -84,7 +91,7 @@
       tested={data.tested}
       emailSignIn={data.emailSignIn}
       loginFailed={page.url.searchParams.has("error")}
-      {activation}
+      {activationMessage}
     />
   {:else}
     <section class="rounded-xl border" aria-label="Company SSO">
@@ -106,9 +113,7 @@
         Until company SSO is active, members sign in to your apps with Widefleet.
       </p>
       <Feedback kind={activation?.state === "active" ? "success" : "info"}>
-        {activation?.state === "active"
-          ? "Widefleet app sign-in is active."
-          : (activation?.message ?? "Checking the sign-in service…")}
+        {activation?.state === "active" ? "Widefleet app sign-in is active." : activationMessage}
       </Feedback>
       {#if activation && activation.state !== "active"}
         <Button variant="outline" disabled={readonly || writer.busy} onclick={useWidefleet}

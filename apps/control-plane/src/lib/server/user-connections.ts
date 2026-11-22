@@ -137,39 +137,43 @@ export const createUserConnections = (
     }
   };
 
+  // Each check runs customer code. Bound both concurrency and the total wait; records not
+  // reached before the deadline remain explicitly unavailable.
+  const checkAll = async (
+    principal: Principal,
+    records: Awaited<ReturnType<typeof candidates>>,
+  ): Promise<(z.infer<typeof userConnectionEntry> | null)[]> => {
+    if (!records.length) return [];
+    const identity = await identify(principal);
+
+    const results: (z.infer<typeof userConnectionEntry> | null)[] = records.map((record) => ({
+      ...record,
+      status: null,
+      unavailable: true,
+    }));
+
+    const deadline = AbortSignal.timeout(5_000);
+    let next = 0;
+
+    await Promise.all(
+      Array.from({ length: Math.min(4, records.length) }, async () => {
+        while (!deadline.aborted) {
+          const index = next++;
+          const record = records[index];
+
+          if (!record) return;
+          results[index] = await check(principal, record, identity, deadline);
+        }
+      }),
+    );
+
+    return results;
+  };
+
   return {
-    list: async (principal: Principal) => {
-      const records = await candidates(principal);
-
-      if (!records.length) return [];
-      const identity = await identify(principal);
-
-      const results: (z.infer<typeof userConnectionEntry> | null)[] = records.map((record) => ({
-        ...record,
-        status: null,
-        unavailable: true,
-      }));
-
-      const deadline = AbortSignal.timeout(5_000);
-      let next = 0;
-
-      // Each request executes customer code. Bound both concurrency and the total
-      // wait; records not reached before the deadline remain explicitly unavailable.
-      await Promise.all(
-        Array.from({ length: Math.min(4, records.length) }, async () => {
-          while (!deadline.aborted) {
-            const index = next++;
-            const record = records[index];
-
-            if (!record) return;
-            results[index] = await check(principal, record, identity, deadline);
-          }
-        }),
-      );
-
-      return results.filter((result) => result !== null);
-    },
-    // The page lists connectors right away and asks each one for its status separately,
+    list: async (principal: Principal) =>
+      (await checkAll(principal, await candidates(principal))).filter((result) => result !== null),
+    // The page lists connectors right away and loads their statuses together afterwards,
     // because a status runs the connector's code.
     records: async (principal: Principal) => {
       const records = await candidates(principal);
@@ -179,12 +183,15 @@ export const createUserConnections = (
 
       return records;
     },
-    status: async (principal: Principal, appId: string) => {
-      const record = (await candidates(principal)).find((candidate) => candidate.appId === appId);
+    // A connector missing from the result no longer offers personal connections.
+    statuses: async (principal: Principal, appIds: string[]) => {
+      const records = (await candidates(principal)).filter((record) =>
+        appIds.includes(record.appId),
+      );
 
-      if (!record) return null;
+      const results = await checkAll(principal, records);
 
-      return check(principal, record, await identify(principal), AbortSignal.timeout(5_000));
+      return new Map(records.map((record, index) => [record.appId, results[index] ?? null]));
     },
     prepare: async (principal: Principal, appId: string) => {
       const { record, identity } = await target(principal, appId);

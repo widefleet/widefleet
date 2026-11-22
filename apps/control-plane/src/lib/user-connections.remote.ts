@@ -27,13 +27,26 @@ export const getUserConnections = query(organizationSelection, async (selection)
   }
 });
 
-// A status runs the connector's code, so each row loads its own without holding up the page.
-export const getUserConnectionStatus = query(
+// A status runs the connector's code, so the page shows its rows first. Rows ask together, so
+// the server checks each connector once, with its usual limits on concurrency and time.
+export const getUserConnectionStatus = query.batch(
   userConnectionInput.extend(organizationSelection.shape),
-  async ({ appId, organizationId }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+  async (inputs) => {
+    const organizations = await Promise.all(
+      [...new Set(inputs.map((input) => input.organizationId))].map(async (organizationId) => {
+        const { runtime, principal } = await remoteContext({ organizationId });
 
-    return runtime.userConnections.status(principal, appId);
+        const appIds = inputs.flatMap((input) =>
+          input.organizationId === organizationId ? [input.appId] : [],
+        );
+
+        return [organizationId, await runtime.userConnections.statuses(principal, appIds)] as const;
+      }),
+    );
+
+    const statuses = new Map(organizations);
+
+    return ({ organizationId, appId }) => statuses.get(organizationId)?.get(appId) ?? null;
   },
 );
 
