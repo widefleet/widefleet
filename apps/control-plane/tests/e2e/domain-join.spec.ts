@@ -148,7 +148,7 @@ test("joins an organization by email domain and manages its join domains", async
     const newcomer = await signIn(browser, "new@team.example.test");
     await expect(newcomer.getByRole("heading", { name: "Join your team" })).toBeVisible();
     await expect(
-      newcomer.getByText("2 members, including Grace Owner and Ada Colleague", { exact: true }),
+      newcomer.getByText("Grace Owner and Ada Colleague", { exact: true }),
     ).toBeVisible();
     await newcomer.getByRole("button", { name: "Join", exact: true }).click();
     await expect(newcomer).toHaveURL(/\/example-team(\/|$)/);
@@ -191,13 +191,12 @@ test("joins an organization by email domain and manages its join domains", async
     const builder = await signIn(browser, "builder@builders.example.test");
     await expect(builder.getByRole("heading", { name: "Create your organization" })).toBeVisible();
 
-    const toggle = builder.getByRole("switch", {
-      name: "Allow anyone with a @builders.example.test address to join",
-    });
+    const toggle = builder.getByRole("switch", { name: "Enable access for builders.example.test" });
 
     await expect(toggle).toBeChecked();
-    await builder.getByLabel("Organization name", { exact: true }).fill("Builders");
-    await builder.getByLabel("Organization URL name", { exact: true }).fill("builders");
+    await builder.getByLabel("Name", { exact: true }).fill("Builders");
+    // The address follows the name.
+    await expect(builder.getByLabel("URL", { exact: true })).toHaveValue("builders");
     await builder.getByRole("button", { name: "Create organization", exact: true }).click();
     await expect(builder).toHaveURL(/\/builders\/welcome$/);
 

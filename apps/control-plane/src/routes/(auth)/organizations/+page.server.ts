@@ -25,6 +25,9 @@ export const load: PageServerLoad = async ({ url }) => {
     canCreateOrganization: await runtime.onboarding.available(signIn),
     joinDomain: creation.joinDomain,
     creationRestricted: creation.restricted,
+    email: user.email,
+    // New organizations are addressed by their slug on this host.
+    host: url.host,
     next,
     // MCP sign-in sends people here to pick the organization a client connects to.
     connecting: new URL(next, "https://navigation.invalid").pathname === "/mcp/sign-in",
