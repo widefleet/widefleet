@@ -15,6 +15,7 @@ import { artifacts, deployments, uploadSessions } from "./schema.ts";
 import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
+import { encodeDocumentation, storeDocumentation } from "./artifact-documentation.ts";
 import { prepareModules, storeModules, type WorkerModule } from "./worker-modules.ts";
 
 const getSession = async (
@@ -128,6 +129,7 @@ export const createUploadService = (
     principal: Principal,
     appId: string,
     metadata: z.infer<typeof contract.workerMetadata>,
+    documentation: z.infer<typeof contract.serviceDocumentation> | null,
     modules: WorkerModule[],
     requestId: string,
     options: { firstDeployment?: boolean } = {},
@@ -203,6 +205,17 @@ export const createUploadService = (
         }
 
         const storedModules = yield* prepareModules(metadata.main_module, modules, metadata.debug);
+        const documented = documentation?.entrypoints.map((entry) => entry.name) ?? [];
+
+        if (
+          new Set(documented).size !== documented.length ||
+          documented.some((name) => !metadata.entrypoints?.includes(name))
+        )
+          return yield* new InvalidOperation({
+            code: "BAD_REQUEST",
+            message: "Documentation must reference unique published entrypoints",
+          });
+        const encoded = documentation ? encodeDocumentation(documentation) : null;
 
         const artifactId = session.id;
 
@@ -254,6 +267,7 @@ export const createUploadService = (
         if (existing) {
           if (
             !isDeepStrictEqual(existing.metadata, metadata) ||
+            !isDeepStrictEqual(existing.documentation, encoded?.summary ?? null) ||
             !isDeepStrictEqual(existing.modules, storedModules)
           ) {
             return yield* new InvalidOperation({
@@ -274,12 +288,15 @@ export const createUploadService = (
 
         yield* Result.await(storeModules(storage, `apps/${appId}`, modules));
 
+        yield* Result.await(storeDocumentation(storage, appId, artifactId, encoded));
+
         await transaction.insert(artifacts).values({
           id: artifactId,
           appId,
           metadata,
           manifest: session.manifest,
           modules: storedModules,
+          documentation: encoded?.summary ?? null,
         });
 
         return enqueueDeployment(

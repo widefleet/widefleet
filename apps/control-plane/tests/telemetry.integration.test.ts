@@ -206,7 +206,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         appAccess: createAppAccessService(environment.database.db),
         workflows: createWorkflowService(environment.database.db),
         migrations: createMigrationService(environment.database.db, storage),
-        connections: createConnectionService(environment.database.db),
+        connections: createConnectionService(environment.database.db, storage),
         appSecrets: createAppSecrets(
           environment.database.db,
           environment.environment.PLATFORM_ENCRYPTION_KEY,

@@ -17,6 +17,13 @@ const execute = promisify(execFile);
 const describeCli = describe.runIf(process.env["RUN_CLI_TESTS"] === "1");
 
 // Allow multiple native commands, each with its own 10-second process deadline.
+
+// The CLI sends API documentation as its own upload part.
+const uploadedDocumentation = async (form: FormData) =>
+  contract.serviceDocumentation.parse(
+    JSON.parse(await z.instanceof(File).parse(form.get(contract.serviceDocumentationPart)).text()),
+  );
+
 describeCli("App services CLI", { timeout: 30_000 }, () => {
   const app = contract.app.parse({
     id: "00000000-0000-4000-8000-000000000001",
@@ -481,14 +488,15 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       JSON.parse(z.string().parse(form.get("metadata"))),
     );
 
+    const documentation = await uploadedDocumentation(form);
+
     expect(metadata.entrypoints ?? []).toEqual(fixture.entrypoints);
     expect(metadata.web).toBe(fixture.web);
-    expect(metadata.service_documentation?.format).toBe(1);
+    expect(documentation.format).toBe(1);
 
     if (fixture.entrypoints.includes("Reader"))
       expect(
-        metadata.service_documentation?.entrypoints.find((entry) => entry.name === "Reader")
-          ?.methods[0]?.name,
+        documentation.entrypoints.find((entry) => entry.name === "Reader")?.methods[0]?.name,
       ).toBe("read");
   });
 
@@ -501,7 +509,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     },
     {
       name: "oversized comment",
-      source: `/** ${"x".repeat(32769)} */ read() { return 1; }`,
+      source: `/** ${"x".repeat(262145)} */ read() { return 1; }`,
       warning: "API documentation was omitted",
       signatures: 0,
     },
@@ -528,9 +536,9 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
 
     expect(metadata.entrypoints).toEqual(["Reader"]);
     expect(result.stderr).toContain(fixture.warning);
-    expect(metadata.service_documentation?.entrypoints[0]?.methods[0]?.signatures.length ?? 0).toBe(
-      fixture.signatures,
-    );
+    expect(
+      (await uploadedDocumentation(form)).entrypoints[0]?.methods[0]?.signatures.length ?? 0,
+    ).toBe(fixture.signatures);
   });
 
   it("reads API documentation through the authenticated service endpoint", async () => {

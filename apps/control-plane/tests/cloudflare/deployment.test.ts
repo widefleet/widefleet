@@ -18,6 +18,7 @@ import { Result } from "better-result";
 import * as contract from "@platform/contracts";
 import release from "@platform/app-runtime/release" with { type: "json" };
 import { createTestEnvironment } from "../environment.ts";
+import { memoryStorage } from "../memory-storage.fixture.ts";
 import { deployHostedRuntime } from "../../tools/hosted-runtime.ts";
 import { createCloudflareProvisioner } from "../../src/lib/server/cloudflare-provisioning.ts";
 import {
@@ -31,6 +32,7 @@ import { cloudflareRemovalId } from "../../src/lib/server/cloudflare-removal-com
 import { user, member } from "../../src/lib/server/auth-schema.ts";
 import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
 import { createCloudflareAppSignIn } from "../../src/lib/server/app-sign-in-cloudflare.ts";
+import { createArtifactStorage } from "../../src/lib/server/artifact-storage.ts";
 import { createConnectionService } from "../../src/lib/server/connections.ts";
 import { createAppService } from "../../src/lib/server/apps.ts";
 import {
@@ -699,10 +701,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         })
       ).unwrap();
 
-      first = await seedDeployment(environment.database.db, {
-        appId: parentApp.id,
-        documentation: { format: 1, entrypoints: [], types: [] },
-      });
+      first = await seedDeployment(environment.database.db, { appId: parentApp.id });
       first.command.attribution = { userId: "fixture-owner", organizationId: first.organizationId };
       preview = await seedDeployment(environment.database.db, { appId: previewApp.id });
 
@@ -868,7 +867,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           };
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding, WIDEFLEET_QUEUES: url.searchParams.get('mode') === 'queues-disabled' ? 'false' : 'true' }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
-            if (command.kind === 'capabilities') return command.connectionRequestId ? createConnectionService(db, executor).approve(command.actor, command.connectionRequestId) : executor.connections.bind(command.actor, command.appId, command.name, command.grant);
+            if (command.kind === 'capabilities') return command.connectionRequestId ? createConnectionService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), executor).approve(command.actor, command.connectionRequestId) : executor.connections.bind(command.actor, command.appId, command.name, command.grant);
             if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
@@ -974,7 +973,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/connections') {
-          const result = await withCloudflareDatabase(env, async ({db}) => createConnectionService(db).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
+          const result = await withCloudflareDatabase(env, async ({db}) => createConnectionService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS))).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
@@ -1193,13 +1192,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         contract.publishedApp.parse((await host(first.hostname))?.body).metadata,
       ).not.toHaveProperty("service_documentation");
 
-      const documentation = await worker.fetch(
-        `http://fixture/storage?key=apps/${first.appId}/service-documentation/${first.artifact.id}.json`,
-      );
-
-      expect(await documentation.json()).toMatchObject({
-        body: { format: 1, entrypoints: [], types: [] },
-      });
       expect((await host(preview.hostname))?.access).toBe(
         JSON.stringify({ revision: 1, groups: largeGroups }),
       );
@@ -2594,7 +2586,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         await seed(source);
         await dispatch(source);
         await completed(source.command.id);
-        const services = createConnectionService(environment.database.db);
+
+        const services = createConnectionService(
+          environment.database.db,
+          createArtifactStorage(memoryStorage()),
+        );
 
         const request = (
           await services.request(principal, {

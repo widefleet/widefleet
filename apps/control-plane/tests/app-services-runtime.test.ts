@@ -168,7 +168,12 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     const request = (
       path: string,
       body?:
-        | { app: z.infer<typeof publishedApp>; source: string; assets: Record<string, string> }
+        | {
+            app: z.infer<typeof publishedApp>;
+            source: string;
+            assets: Record<string, string>;
+            documentation?: z.input<typeof serviceDocumentation> | undefined;
+          }
         | z.infer<typeof appSecretPreparation>
         | { key: string }
         | { identity: { appId: string; organizationId: string; hostname: string } }
@@ -199,9 +204,10 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
       version = "v1",
       changes: Partial<z.infer<typeof publishedApp>> = {},
       assets: Record<string, string> = {},
+      documentation?: z.input<typeof serviceDocumentation>,
     ) => {
       const app = { ...snapshot(appId, code, version), ...changes };
-      const response = await request("/seed", { app, source: code, assets });
+      const response = await request("/seed", { app, source: code, assets, documentation });
       expect(response.status, await response.clone().text()).toBe(200);
 
       return app;
@@ -293,11 +299,10 @@ export default { async fetch(request, env, ctx) {
     if(url.pathname.startsWith('/workload/')) return runtime.fetch(new Request((url.searchParams.get('origin') ?? 'https://auth.apps.example.test')+url.pathname),env,ctx);
     if(url.pathname === '/executions') return Response.json(executions);
     if(url.pathname === '/seed') {
-      const {app,source,assets} = await request.json();
+      const {app,source,assets,documentation} = await request.json();
       await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/modules/'+app.modules[0].sha256,source);
       for(const [path,content] of Object.entries(assets)) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/assets/'+app.manifest[path].hash,content);
-      if(app.metadata.service_documentation) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/service-documentation/'+app.id+'.json',JSON.stringify(app.metadata.service_documentation));
-      delete app.metadata.service_documentation;
+      if(documentation) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/service-documentation/'+app.id+'.json',JSON.stringify(documentation));
       await env.WIDEFLEET_PACKAGES.put('hosts/'+app.hostname+'.json',JSON.stringify(app));
       await env.AUTH_CONFIG.put('organizations/widefleet/configuration',${JSON.stringify(encrypted)});
       await env.AUTH_CONFIG.put('apps/'+app.hostname, JSON.stringify({organizationId:'widefleet',appId:app.appId,access:{revision:1,groups:[]}}));
@@ -721,12 +726,7 @@ export default { async fetch(request, env, ctx) {
 
       expect(await described()).toMatchObject({ documentation: null, types: [] });
 
-      const documented = await publish(targetId, target("v1"), "v1", {
-        metadata: {
-          ...snapshot(targetId, target("v1")).metadata,
-          service_documentation: docs,
-        },
-      });
+      const documented = await publish(targetId, target("v1"), "v1", {}, {}, docs);
 
       await setup();
       expect(await described()).toMatchObject({
@@ -769,12 +769,15 @@ export default { async fetch(request, env, ctx) {
         entrypoints: docs.entrypoints.map((entry) => ({ ...entry, summary: "New inventory API" })),
       };
 
-      await publish(targetId, target("v1"), "v1", {
-        metadata: { ...documented.metadata, service_documentation: nextDocs },
-      });
+      await publish(targetId, target("v1"), "v1", {}, {}, nextDocs);
       await setup();
       expect(await described()).toMatchObject({ documentation: { summary: "New inventory API" } });
-      await request("/seed", { app: documented, source: target("v1"), assets: {} });
+      await request("/seed", {
+        app: documented,
+        source: target("v1"),
+        assets: {},
+        documentation: docs,
+      });
       await setup();
       expect(await described()).toMatchObject({
         documentation: docs.entrypoints[0],
@@ -1021,13 +1024,14 @@ export default { async fetch(request, env, ctx) {
 
       for (let index = 0; index < 12; index++) {
         const id = crypto.randomUUID();
-        await publish(id, target("v1"), "v1", {
-          metadata: {
-            ...snapshot(id, target("v1")).metadata,
-            entrypoints,
-            service_documentation: largeDocs,
-          },
-        });
+        await publish(
+          id,
+          target("v1"),
+          "v1",
+          { metadata: { ...snapshot(id, target("v1")).metadata, entrypoints } },
+          {},
+          largeDocs,
+        );
       }
 
       const searchPage = z.object({

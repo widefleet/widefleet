@@ -1081,12 +1081,14 @@ export const createApi = (runtime: Runtime) => {
       if (upload[2] === "worker") {
         const key = idempotencyKey(request);
 
-        const { metadata, modules } = unwrap(
+        const { metadata, documentation, modules } = unwrap(
           await parseWorkerUpload(request, contract.workerMetadata),
         );
 
         return Response.json(
-          unwrap(await runtime.uploads.publish(principal, appId, metadata, modules, key)),
+          unwrap(
+            await runtime.uploads.publish(principal, appId, metadata, documentation, modules, key),
+          ),
         );
       }
 

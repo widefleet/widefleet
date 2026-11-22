@@ -51,6 +51,34 @@ describe("App multipart upload", () => {
     expect(new TextDecoder().decode(file.modules[0]?.bytes)).toBe(source);
   });
 
+  it("reads API documentation from its own part, separate from the module list", async () => {
+    const documentation = {
+      format: 1,
+      entrypoints: [],
+      types: Array.from({ length: 2 }, (_, index) => ({
+        name: `Large${index}`,
+        definition: "x".repeat(200_000),
+        summary: "",
+        remarks: "",
+        examples: [],
+      })),
+    };
+
+    const part = (value: typeof documentation | { format: number }) =>
+      new Blob([JSON.stringify(value)], { type: "application/json" });
+
+    const body = form();
+    expect((await read(request(body))).unwrap().documentation).toBeNull();
+    body.set(contract.serviceDocumentationPart, part(documentation), "documentation.json");
+    const upload = (await read(request(body))).unwrap();
+    expect(upload.documentation).toEqual(documentation);
+    expect(upload.modules.map((module) => module.name)).toEqual(["worker.js"]);
+    body.append(contract.serviceDocumentationPart, part(documentation), "documentation.json");
+    expect((await read(request(body))).isErr()).toBe(true);
+    body.set(contract.serviceDocumentationPart, part({ format: 2 }), "documentation.json");
+    expect((await read(request(body))).isErr()).toBe(true);
+  });
+
   it("rejects JSON bodies, repeated or oversized metadata and non-file modules", async () => {
     expect(
       (

@@ -11,52 +11,76 @@ import { apps, artifacts, deployments, jobs } from "./schema.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
+import { readDocumentation } from "./artifact-documentation.ts";
 import { InvalidOperation } from "./errors.ts";
+import type { ArtifactStorage } from "./storage.ts";
 
-export const createConnectionService = (database: Database, execution?: HostedExecution) => ({
+export const createConnectionService = (
+  database: Database,
+  storage: ArtifactStorage,
+  execution?: HostedExecution,
+) => ({
   ...createServiceAccess(database, execution),
   describe: (principal: Principal, service: string) =>
-    readOnly(database, async (transaction) => {
-      const byId = contract.identifier.safeParse(service).success
-        ? eq(apps.id, service)
-        : undefined;
+    Result.gen(async function* () {
+      const described = yield* Result.await(
+        readOnly(database, async (transaction) => {
+          const byId = contract.identifier.safeParse(service).success
+            ? eq(apps.id, service)
+            : undefined;
 
-      const [record] = await transaction
-        .select({ app: apps, metadata: artifacts.metadata, deploymentId: deployments.id })
-        .from(apps)
-        .innerJoin(
-          deployments,
-          and(eq(deployments.id, apps.activeDeploymentId), eq(deployments.appId, apps.id)),
-        )
-        .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
-        .where(
-          and(
-            eq(apps.organizationId, principal.application.organizationId),
-            isNull(apps.removedAt),
-            ne(apps.state, "deleting"),
-            or(byId, eq(apps.slug, service)),
-          ),
-        )
-        .orderBy(desc(byId ?? apps.slug))
-        .limit(1);
+          const [record] = await transaction
+            .select({
+              app: apps,
+              metadata: artifacts.metadata,
+              documentation: artifacts.documentation,
+              artifactId: artifacts.id,
+              deploymentId: deployments.id,
+            })
+            .from(apps)
+            .innerJoin(
+              deployments,
+              and(eq(deployments.id, apps.activeDeploymentId), eq(deployments.appId, apps.id)),
+            )
+            .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+            .where(
+              and(
+                eq(apps.organizationId, principal.application.organizationId),
+                isNull(apps.removedAt),
+                ne(apps.state, "deleting"),
+                or(byId, eq(apps.slug, service)),
+              ),
+            )
+            .orderBy(desc(byId ?? apps.slug))
+            .limit(1);
 
-      if (!record)
-        return Result.err(
-          new InvalidOperation({ code: "NOT_FOUND", message: "App service not found" }),
-        );
-      const metadata = contract.workerMetadata.parse(record.metadata);
+          if (!record)
+            return Result.err(
+              new InvalidOperation({ code: "NOT_FOUND", message: "App service not found" }),
+            );
+          const metadata = contract.workerMetadata.parse(record.metadata);
 
-      return Result.ok(
-        contract.serviceDescription.parse({
-          appId: record.app.id,
-          slug: record.app.slug,
-          displayName: record.app.displayName,
-          accessMode: record.app.serviceAccessMode,
-          deploymentId: record.deploymentId,
-          entrypoints: metadata.entrypoints ?? [],
-          documentation: metadata.service_documentation ?? null,
+          return Result.ok({
+            appId: record.app.id,
+            slug: record.app.slug,
+            displayName: record.app.displayName,
+            accessMode: record.app.serviceAccessMode,
+            deploymentId: record.deploymentId,
+            entrypoints: metadata.entrypoints ?? [],
+            artifactId: record.artifactId,
+            documented: record.documentation !== null,
+          });
         }),
       );
+
+      const { artifactId, documented, ...description } = described;
+
+      // Read outside the transaction: the artifact and its documentation never change.
+      const documentation = documented
+        ? yield* Result.await(readDocumentation(storage, description.appId, artifactId))
+        : null;
+
+      return Result.ok(contract.serviceDescription.parse({ ...description, documentation }));
     }),
   services: (principal: Principal) =>
     readOnly(database, async (transaction) => {

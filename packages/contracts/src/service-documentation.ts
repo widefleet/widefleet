@@ -37,9 +37,20 @@ export const appRpcMethod = z
     "App RPC method is reserved or invalid",
   );
 
-const text = z.string().max(32768);
+// Clients generated for large APIs, such as a GraphQL schema, document types with
+// hundreds of commented fields and hundreds of methods.
+const text = z.string().max(262144);
 
 const name = z.string().min(1).max(128);
+
+/**
+ * The worker upload part that carries API documentation. Module names cannot
+ * use the platform prefix, so it never collides with a module.
+ */
+export const serviceDocumentationPart = "__widefleet_documentation";
+
+/** Largest encoded service documentation an artifact may carry. */
+export const serviceDocumentationMaxBytes = 8 * 1024 * 1024;
 
 const comment = {
   summary: text,
@@ -87,13 +98,14 @@ export const serviceDocumentation = z
                   .max(serviceDocumentationMaxSignatures),
               }),
             )
-            .max(128),
+            .max(1024),
         }),
       )
       .max(32),
-    types: z.array(z.strictObject({ name, definition: text, ...comment })).max(128),
+    types: z.array(z.strictObject({ name, definition: text, ...comment })).max(4096),
   })
   .refine(
-    (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 262144,
-    "Service documentation exceeds 256 KiB",
+    (value) =>
+      new TextEncoder().encode(JSON.stringify(value)).byteLength <= serviceDocumentationMaxBytes,
+    "Service documentation exceeds 8 MiB",
   );

@@ -273,6 +273,8 @@ export const workerConfiguration = z.strictObject({
 export {
   appRpcMethod,
   serviceDocumentation,
+  serviceDocumentationMaxBytes,
+  serviceDocumentationPart,
   serviceDocumentationMaxSignatures,
 } from "./service-documentation.ts";
 
@@ -280,7 +282,6 @@ export const workerMetadata = workerConfiguration
   .extend({
     source: sourceRevision.optional(),
     web: z.boolean().optional(),
-    service_documentation: serviceDocumentation.optional(),
     // Origins the app declares in widefleet.jsonc; see networkDeclaration.
     network: networkDeclaration.optional(),
     entrypoints: z
@@ -301,17 +302,6 @@ export const workerMetadata = workerConfiguration
     assets: z.strictObject({ upload_session: identifier, binding: bindingName.default("ASSETS") }),
   })
   .superRefine((metadata, context) => {
-    const documented = metadata.service_documentation?.entrypoints.map((entry) => entry.name) ?? [];
-
-    if (
-      new Set(documented).size !== documented.length ||
-      documented.some((name) => !metadata.entrypoints?.includes(name))
-    )
-      context.addIssue({
-        code: "custom",
-        message: "Documentation must reference unique published entrypoints",
-      });
-
     const workflows = metadata.bindings
       .filter((binding) => binding.type === "workflow")
       .map((binding) => binding.workflow_name);
@@ -332,11 +322,10 @@ export const workerMetadata = workerConfiguration
     }
   });
 
-// Existing runtimes validate metadata strictly. Publish documentation separately
-// from execution snapshots, and retain source provenance in the control plane.
+// Existing runtimes validate metadata strictly. Retain source provenance in the
+// control plane.
 export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
   const metadata = { ...value };
-  delete metadata.service_documentation;
   delete metadata.source;
   // Declared origins are a control-plane request; runtimes enforce the granted
   // policy and reject metadata fields they do not know.

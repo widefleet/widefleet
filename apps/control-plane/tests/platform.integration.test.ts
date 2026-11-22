@@ -110,7 +110,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       appAccess: createAppAccessService(environment.database.db),
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
-      connections: createConnectionService(environment.database.db),
+      connections: createConnectionService(environment.database.db, storage),
       appSecrets: createAppSecrets(
         environment.database.db,
         environment.environment.PLATFORM_ENCRYPTION_KEY,
@@ -643,6 +643,11 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     code = "export default { fetch() { return new Response('ok'); } }",
     credentials = adminHeaders,
     bindings: z.infer<typeof contract.workerMetadata>["bindings"] = [],
+    documentation: z.input<typeof contract.serviceDocumentation> = {
+      format: 1,
+      entrypoints: [],
+      types: [],
+    },
   ) => {
     const form = new FormData();
     form.set(
@@ -652,8 +657,12 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         compatibility_date: "2026-10-01",
         assets: { upload_session: sessionId },
         bindings,
-        service_documentation: { format: 1, entrypoints: [], types: [] },
       }),
+    );
+    form.set(
+      contract.serviceDocumentationPart,
+      new Blob([JSON.stringify(documentation)], { type: "application/json" }),
+      "documentation.json",
     );
     form.set("worker.js", new Blob([code], { type: "application/javascript+module" }), "worker.js");
     const headers = new Headers(credentials);
@@ -734,6 +743,19 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await put(bytes)).status).toBe(200);
     expect((await start(app.id, manifest)).missing).toEqual([]);
     const requestId = crypto.randomUUID();
+
+    // Documentation may only describe entrypoints the worker publishes.
+    expect(
+      (
+        await publish(app.id, session.id, crypto.randomUUID(), undefined, undefined, undefined, {
+          format: 1,
+          entrypoints: [
+            { name: "Other", summary: "", remarks: "", examples: [], http: false, methods: [] },
+          ],
+          types: [],
+        })
+      ).status,
+    ).toBe(400);
     const first = await publish(app.id, session.id, requestId);
     expect(first.status).toBe(200);
     const deployment = contract.deployment.parse(await first.json());
@@ -1033,9 +1055,20 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .from(artifacts)
       .where(eq(artifacts.id, first.artifactId));
 
+    // The database keeps a summary; the document itself lives in artifact storage.
+    expect(storedArtifact?.metadata).not.toHaveProperty("service_documentation");
+    expect(storedArtifact?.documentation).toMatchObject({ entrypoints: [] });
     expect(
-      contract.workerMetadata.parse(storedArtifact?.metadata).service_documentation,
-    ).toMatchObject({ format: 1 });
+      JSON.parse(
+        new TextDecoder().decode(
+          (
+            await storage.get(
+              `apps/${storedArtifact?.appId}/service-documentation/${first.artifactId}.json`,
+            )
+          ).unwrap(),
+        ),
+      ),
+    ).toEqual({ format: 1, entrypoints: [], types: [] });
     expect(
       (
         await json(

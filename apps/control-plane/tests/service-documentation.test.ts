@@ -299,9 +299,8 @@ native("limits documented overloads without rejecting the app", async () => {
 });
 
 native.each([
-  { summary: "x".repeat(32769), count: 1 },
-  { summary: "é".repeat(10000), count: 14 },
-  { summary: "Read a value.", count: 129 },
+  { summary: "x".repeat(262145), count: 1 },
+  { summary: "Read a value.", count: 1025 },
 ])(
   "omits oversized documentation with a warning while keeping extraction successful ($count methods)",
   async ({ summary, count }) => {
@@ -810,7 +809,7 @@ it("shortens only unambiguous documented type references", () => {
   expect(reference.entrypoints[0]?.methods[0]?.throws).toHaveLength(2);
 });
 
-it("rejects oversized and mismatched artifact documentation and renders authored HTML as text", () => {
+it("rejects oversized artifact documentation and renders authored HTML as text", () => {
   const docs = {
     format: 1,
     entrypoints: [
@@ -827,20 +826,24 @@ it("rejects oversized and mismatched artifact documentation and renders authored
   };
 
   expect(
-    workerMetadata.safeParse({
-      main_module: "worker.js",
-      compatibility_date: "2026-10-01",
-      entrypoints: ["Other"],
-      service_documentation: docs,
-      assets: { upload_session: crypto.randomUUID() },
-    }).success,
-  ).toBe(false);
-  expect(
     serviceDocumentation.safeParse({
       ...docs,
       types: [
-        { name: "Huge", definition: "x".repeat(32769), summary: "", remarks: "", examples: [] },
+        { name: "Huge", definition: "x".repeat(262145), summary: "", remarks: "", examples: [] },
       ],
+    }).success,
+  ).toBe(false);
+  // Each definition is within bounds; together they exceed 8 MiB.
+  expect(
+    serviceDocumentation.safeParse({
+      ...docs,
+      types: Array.from({ length: 33 }, (_, index) => ({
+        name: `Large${index}`,
+        definition: "x".repeat(262144),
+        summary: "",
+        remarks: "",
+        examples: [],
+      })),
     }).success,
   ).toBe(false);
   expect(
@@ -851,14 +854,11 @@ it("rejects oversized and mismatched artifact documentation and renders authored
     main_module: "worker.js",
     compatibility_date: "2026-10-01",
     entrypoints: ["Reader"],
-    service_documentation: docs,
     network: { backend: ["https://api.example.test"] },
     assets: { upload_session: crypto.randomUUID() },
   });
 
-  expect(executionWorkerMetadata(metadata)).not.toHaveProperty("service_documentation");
   // Runtimes of earlier releases accept no declared origins in their snapshots.
   expect(executionWorkerMetadata(metadata)).not.toHaveProperty("network");
-  expect(metadata.service_documentation).toEqual(docs);
   expect(metadata.network).toEqual({ backend: ["https://api.example.test"], browser: [] });
 });
