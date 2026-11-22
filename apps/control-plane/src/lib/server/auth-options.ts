@@ -47,7 +47,6 @@ export const authenticationOptions = (
     rateLimit,
     ipAddressHeaders,
     publicSignup = false,
-    validateSchema,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
@@ -60,8 +59,6 @@ export const authenticationOptions = (
     rateLimit?: BetterAuthOptions["rateLimit"];
     ipAddressHeaders?: string[];
     publicSignup?: boolean;
-    /** Better Auth checks the schema the first time each instance is used. */
-    validateSchema?: boolean;
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
@@ -266,12 +263,7 @@ export const authenticationOptions = (
       },
     },
     advanced: {
-      // Leave Better Auth's default when validation stays on: an explicit `true` turns its
-      // note about adapters it cannot validate into a warning.
-      database:
-        validateSchema === false
-          ? { generateId: () => crypto.randomUUID(), validateSchema }
-          : { generateId: () => crypto.randomUUID() },
+      database: { generateId: () => crypto.randomUUID() },
       ipAddress: { ipAddressHeaders: ipAddressHeaders ?? ["x-forwarded-for"] },
       cookiePrefix: "platform",
       crossSubDomainCookies: { enabled: false },

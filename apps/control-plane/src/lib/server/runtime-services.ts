@@ -54,7 +54,6 @@ export const createRuntime = ({
   sendEmail,
   authRateLimit,
   authIpAddressHeaders,
-  authValidateSchema,
   authCookies,
   createOrganization,
   authentication,
@@ -78,7 +77,6 @@ export const createRuntime = ({
   source?: SourceBackend;
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
-  authValidateSchema?: boolean;
   authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
   userConnectionRequest?: UserConnectionRequest;
@@ -117,8 +115,6 @@ export const createRuntime = ({
   if (authRateLimit) authOptions.rateLimit = authRateLimit;
 
   if (authIpAddressHeaders) authOptions.ipAddressHeaders = authIpAddressHeaders;
-
-  if (authValidateSchema !== undefined) authOptions.validateSchema = authValidateSchema;
 
   if (authCookies) authOptions.cookies = authCookies;
 

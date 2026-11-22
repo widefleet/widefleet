@@ -30,7 +30,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   };
 
   try {
-    const response = await handleSession({ event, resolve });
+    // Deferred rendering continues from this call, so it keeps the request's services.
+    const response = await runtime.run(() => handleSession({ event, resolve }));
 
     if (!response.body) {
       close();
