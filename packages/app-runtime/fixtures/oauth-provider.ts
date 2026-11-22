@@ -29,7 +29,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
 
   const scopes = {
     google: "openid profile email https://www.googleapis.com/auth/gmail.readonly",
-    github: "repo read:user user:email",
+    github: "read:user user:email repo workflow project read:org user",
     microsoft: "openid profile email offline_access User.Read Files.Read",
     linear: "read write",
   };
@@ -208,7 +208,8 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
       if (url.href === "https://api.github.com/user/emails")
         return Response.json([{ email: `${user}@example.test`, primary: true, verified: true }]);
 
-      if (url.pathname === "/user/repos") return Response.json([]);
+      if (url.href === "https://api.github.com/graphql")
+        return Response.json({ data: { repository: { issues: { nodes: [] } } } });
 
       if (url.pathname === "/gmail/v1/users/me/messages") return Response.json({ messages: [] });
 

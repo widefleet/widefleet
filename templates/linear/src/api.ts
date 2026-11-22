@@ -3,7 +3,7 @@
 // from the Widefleet repository:
 //   pnpm --filter @platform/template-generator generate linear
 import { WorkerEntrypoint } from "cloudflare:workers";
-import type { Environment } from "./context.ts";
+import type { Environment as TemplateEnvironment } from "./context.ts";
 import type { LinearResult } from "./results.ts";
 import { type LinearProperties, run } from "./run.ts";
 import type {
@@ -37918,6 +37918,7 @@ export type ViewType =
   | "feedCreated"
   | "feedFollowing"
   | "feedPopular"
+  | "focus"
   | "inbox"
   | "inboxOther"
   | "inboxPriority"
@@ -39134,7 +39135,7 @@ export interface WorkspaceAnnouncementNotification {
  * as a method. A query reads; a mutation changes data and may ask the user first.
  * Methods returning objects take a selection of the fields to return.
  */
-export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
+export class LinearApi extends WorkerEntrypoint<TemplateEnvironment, LinearProperties> {
   /**
    * All teams whose settings the user can administer. This includes teams the user can change settings for, but whose issues they may not have direct access to. This differs from the `teams` query which returns teams based on issue access.
    *

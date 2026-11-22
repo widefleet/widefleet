@@ -46,7 +46,7 @@ describe("GraphQL template generator", () => {
 
     expect(summary).toBe("5 methods, 1 operations not offered, 1 types");
     expect(api).toContain(
-      "export class ExampleApi extends WorkerEntrypoint<Environment, ExampleProperties>",
+      "export class ExampleApi extends WorkerEntrypoint<TemplateEnvironment, ExampleProperties>",
     );
     expect(api).toContain("async item<S extends Selection<Item>>(");
     expect(api).toContain(
@@ -81,5 +81,20 @@ describe("GraphQL template generator", () => {
     expect(() =>
       generateGraphql(sdl, { ...rules, queries: { version: { name: "fetch" } } }, service, ""),
     ).toThrow("Query.version becomes method fetch, which is taken");
+  });
+
+  it("keeps API types named like the template's environment and refuses ones that shadow imports", () => {
+    const named = (name: string) =>
+      `${sdl}\ntype ${name} { id: ID! }\nextend type Query { other: ${name}! }`;
+
+    const { files } = generateGraphql(named("Environment"), rules, service, "");
+
+    expect(files["src/api.ts"]).toContain("export interface Environment {");
+    expect(files["src/api.ts"]).toContain(
+      "extends WorkerEntrypoint<TemplateEnvironment, ExampleProperties>",
+    );
+    expect(() => generateGraphql(named("Selection"), rules, service, "")).toThrow(
+      "The API's types Selection have the names of imports of the generated file",
+    );
   });
 });

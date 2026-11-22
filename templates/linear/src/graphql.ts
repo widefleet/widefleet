@@ -1,3 +1,5 @@
+// Shared by the generated GraphQL templates: the template generator copies this
+// file into each template's src. Edit it in packages/template-generator/src/runtime.
 import { z } from "zod";
 import {
   type Arguments,
@@ -8,9 +10,6 @@ import {
 } from "./input.ts";
 import type { JsonValue } from "./selection.ts";
 import { type Graph, graph, variants } from "./schema.ts";
-
-/** Linear's GraphQL API. */
-export const linearApi = "https://api.linear.app/graphql";
 
 const json = z.json();
 
@@ -48,7 +47,7 @@ export type GraphQLRequest = { query: string; variables: Record<string, JsonValu
 
 /**
  * Writes the GraphQL request for one query or mutation. Every argument travels
- * as a variable with the type Linear's schema declares for it.
+ * as a variable with the type the provider's schema declares for it.
  */
 export const graphqlRequest = (
   root: "Query" | "Mutation",
@@ -114,7 +113,7 @@ export const graphqlRequest = (
         throw new InvalidRequest(`${type} has no field ${name}`);
       const [target, types = {}] = own<Field>(known, name) ?? [];
 
-      // Fields Linear's schema does not know reach Linear, which names them in its error.
+      // Fields the schema does not know reach the provider, which names them in its error.
       if (target === undefined || !fieldsOf(target)) {
         if (nested === true) return [name];
 
@@ -155,23 +154,18 @@ export const graphqlRequest = (
   return { query: `${operation}${signature} { ${body} }`, variables };
 };
 
-const graphqlError = z.object({
+// Providers add their own details, in `extensions` or as further fields such as `type`.
+const graphqlError = z.looseObject({
   message: z.string(),
   path: z.array(z.union([z.string(), z.number()])).optional(),
-  extensions: z
-    .object({ type: z.string().optional(), userPresentableMessage: z.string().optional() })
-    .optional(),
+  type: z.string().optional(),
+  extensions: z.record(z.string(), json).optional(),
 });
+
+/** One error of a GraphQL response. */
+export type GraphQLError = z.infer<typeof graphqlError>;
 
 export const graphqlResponse = z.object({
   data: z.record(z.string(), json).nullable().optional(),
   errors: z.array(graphqlError).optional(),
 });
-
-/** Linear's errors, with the message Linear writes for people where it has one. */
-export const linearErrors = (errors: z.infer<typeof graphqlError>[]) =>
-  errors.map((error) => ({
-    message: error.extensions?.userPresentableMessage ?? error.message,
-    type: error.extensions?.type ?? null,
-    path: error.path ?? null,
-  }));

@@ -3,7 +3,7 @@
 // selection that Google's `fields` parameter returns. The template's rules
 // decide how each method is offered.
 import { z } from "zod";
-import { comment, identifier, propertyName } from "./emit.ts";
+import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
 import { reservedMethods } from "./reserved.ts";
 import type { Change, GeneratedFiles, Hidden } from "./rules.ts";
 
@@ -263,6 +263,7 @@ export const generateDiscovery = (
   }
 
   if (problems.length) throw new Error(problems.join("\n"));
+  checkTypeNames(Object.keys(api.schemas).map(identifier), service);
 
   const models = Object.entries(api.schemas)
     .toSorted(([left], [right]) => left.localeCompare(right, "en"))
@@ -360,7 +361,7 @@ export const generateDiscovery = (
   return {
     files: {
       "src/api.ts": `${header}import { WorkerEntrypoint } from "cloudflare:workers";
-import type { Environment } from "./context.ts";
+import type { Environment as TemplateEnvironment } from "./context.ts";
 import type { ${service.result} } from "./results.ts";
 import { type ${service.properties}, run } from "./run.ts";
 import type { Exact, ${["JsonObject", "JsonValue"]
@@ -373,7 +374,7 @@ ${models}
  * that change data may ask the user first. Methods returning objects take a
  * selection of the fields to return.
  */
-export class ${service.className} extends WorkerEntrypoint<Environment, ${service.properties}> {
+export class ${service.className} extends WorkerEntrypoint<TemplateEnvironment, ${service.properties}> {
 ${methods.join("\n")}}
 `,
       "src/schema.ts": `${header}

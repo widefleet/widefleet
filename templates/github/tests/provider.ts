@@ -4,38 +4,37 @@ import { z } from "zod";
 
 const kind = "github";
 
-export const provider = () => {
-  const codes = new Map<
-    string,
-    {
-      user: string;
-      challenge: string;
-      redirect: string;
-    }
-  >();
+const graphqlRequest = z.object({
+  query: z.string(),
+  variables: z.record(z.string(), z.json()).optional(),
+});
 
+type Json = z.infer<ReturnType<typeof z.json>>;
+
+// A synthetic GitHub OAuth app and GraphQL API. Answers follow the operation a
+// request names; `state.errors` replaces them with GraphQL errors.
+export const provider = () => {
+  const codes = new Map<string, { user: string; challenge: string; redirect: string }>();
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
-  const requests: Request[] = [];
+  const calls: z.infer<typeof graphqlRequest>[] = [];
+  const errors: Json[] = [];
 
   const state = {
     refreshes: 0,
     unavailable: false,
     apiStatus: 200,
     apiHeaders: new Headers(),
+    errors,
+    // GitHub lists the granted scopes separated by commas.
+    scope: "repo,workflow,project,read:org,user,read:user,user:email",
     expiringTokens: false,
-    redirects: new Map<string, { status: number; location: string }>(),
   };
 
   const tokens = (user: string) => {
     const accessToken = `synthetic-access-${crypto.randomUUID()}`;
     access.set(accessToken, user);
-
-    const result = {
-      access_token: accessToken,
-      token_type: "Bearer",
-      scope: "repo read:user user:email",
-    };
+    const result = { access_token: accessToken, token_type: "bearer", scope: state.scope };
 
     if (!state.expiringTokens) return Response.json(result);
     const refreshToken = `synthetic-refresh-${crypto.randomUUID()}`;
@@ -51,7 +50,8 @@ export const provider = () => {
 
   return {
     state,
-    requests,
+    calls,
+    revokeAccess: () => access.clear(),
     authorize: (location: string, user: string) => {
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));
@@ -68,7 +68,6 @@ export const provider = () => {
       return callback.href;
     },
     fetch: async (request: Request) => {
-      requests.push(request);
       const url = new URL(request.url);
 
       if (url.href === "https://github.com/login/oauth/access_token") {
@@ -106,9 +105,11 @@ export const provider = () => {
 
           if (state.unavailable)
             return Response.json({ error: "temporarily_unavailable" }, { status: 503 });
-          const user = refresh.get(form.get("refresh_token") ?? "");
+          const token = form.get("refresh_token") ?? "";
+          const user = refresh.get(token);
 
           if (!user) return Response.json({ error: "invalid_grant" }, { status: 400 });
+          refresh.delete(token);
 
           return tokens(user);
         }
@@ -116,12 +117,13 @@ export const provider = () => {
 
       const user = access.get((request.headers.get("authorization") ?? "").replace(/^Bearer /, ""));
 
-      if (!user) return new Response(null, { status: 401 });
+      if (!user) return Response.json({ message: "Bad credentials" }, { status: 401 });
 
+      // Better Auth reads the account that authorized the app.
       if (url.href === "https://api.github.com/user")
         return Response.json({
           id: Number(user),
-          login: user,
+          login: `user-${user}`,
           name: user,
           email: `${user}@example.test`,
         });
@@ -129,59 +131,45 @@ export const provider = () => {
       if (url.href === "https://api.github.com/user/emails")
         return Response.json([{ email: `${user}@example.test`, verified: true, primary: true }]);
 
-      const redirect = state.redirects.get(url.href);
+      if (url.href !== "https://api.github.com/graphql" || request.method !== "POST")
+        throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
 
-      if (redirect)
-        return new Response(null, {
-          status: redirect.status,
-          headers: { location: redirect.location },
-        });
+      // GitHub refuses API requests without a user agent.
+      if (!request.headers.get("user-agent")) return new Response(null, { status: 403 });
+      calls.push(graphqlRequest.parse(await request.json()));
 
       if (state.apiStatus !== 200)
-        return new Response(null, { status: state.apiStatus, headers: state.apiHeaders });
-
-      if (url.href.startsWith("https://api.github.com/user/repos?"))
-        return Response.json([
-          {
-            id: Number(user),
-            name: "project",
-            full_name: `${user}/project`,
-            private: true,
-            description: null,
-            html_url: `https://github.com/${user}/project`,
-            default_branch: "main",
-          },
-        ]);
-
-      if (
-        url.href === "https://api.github.com/repos/example/project/contents/README.md" ||
-        url.href === "https://api.github.com/repositories/42/contents/README.md"
-      )
-        return new Response("file content", { headers: { "content-type": "text/plain" } });
-
-      if (
-        url.href === "https://api.github.com/repositories/42/issues?page=1&per_page=30&state=open"
-      )
         return Response.json(
-          [
-            {
-              id: 7,
-              number: 7,
-              title: "Open issue",
-              state: "open",
-              html_url: "https://github.com/example/renamed/issues/7",
-              user: null,
-              created_at: "2026-01-01",
-              updated_at: "2026-01-01",
-            },
-          ],
-          {
-            headers: {
-              link: '<https://api.github.com/repositories/42/issues?page=2>; rel="next"',
-            },
-          },
+          { message: "API rate limit exceeded or access denied" },
+          { status: state.apiStatus, headers: state.apiHeaders },
         );
-      throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
+
+      if (state.errors.length)
+        return Response.json({ data: null, errors: state.errors }, { headers: state.apiHeaders });
+
+      const field = /\{ (\w+)/.exec(calls.at(-1)?.query ?? "")?.[1];
+
+      if (field === "repository")
+        return Response.json({
+          data: {
+            repository: { issues: { nodes: [{ number: 1, title: "Synthetic issue" }] } },
+          },
+        });
+
+      if (field === "createIssue")
+        return Response.json({ data: { createIssue: { issue: { number: 2 } } } });
+
+      if (field === "deleteIssue")
+        return Response.json({ data: { deleteIssue: { clientMutationId: null } } });
+
+      return Response.json({
+        errors: [
+          {
+            message: `Field '${field}' doesn't exist on type 'Query'`,
+            extensions: { code: "undefinedField" },
+          },
+        ],
+      });
     },
   };
 };

@@ -6,6 +6,13 @@ import { setSessionCookie } from "better-auth/cookies";
 import type { Caller, Environment } from "./context.ts";
 import { ensureUser } from "./database.ts";
 
+/**
+ * The scopes every offered method needs: repositories, issues and pull requests
+ * (`repo`), workflow files in commits (`workflow`), Projects (`project`),
+ * organizations and teams (`read:org`), and the user's status and follows (`user`).
+ */
+export const scopes = ["repo", "workflow", "project", "read:org", "user"] as const;
+
 export const authentication = (
   environment: Environment,
   identity: Caller,
@@ -68,7 +75,8 @@ export const authentication = (
       github: {
         clientId: credentials.clientId,
         clientSecret: credentials.clientSecret,
-        scope: ["repo"],
+        // Better Auth adds read:user and user:email.
+        scope: [...scopes],
         disableSignUp: true,
         mapProfileToUser: (profile) => ({ providerEmail: profile.email }),
       },
