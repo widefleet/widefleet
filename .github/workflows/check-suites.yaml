@@ -207,7 +207,7 @@ jobs:
             "DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
             "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
             PLATFORM_USAGE_REPORTING=false PLATFORM_CRASH_REPORTING=false WIDEFLEET_TELEMETRY_DISABLED=1 \
-            RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts
+            RUN_RUNTIME_TESTS=1 pnpm exec vitest run --config vitest.deployment.config.ts
       - name: Save Cargo dependencies and build outputs
         if: matrix.suite == 'rust-runtime' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
