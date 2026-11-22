@@ -20,6 +20,7 @@
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
+  import DomainAccess from "#shadcn/components/DomainAccess.svelte";
   import { page } from "$app/state";
   import { z } from "zod";
   import { getWorkspaceContext } from "#lib/workspace-context";
@@ -256,6 +257,7 @@
     </ul>
   </section>
 {/if}
+<DomainAccess organizationId={workspace.organizationId} />
 <details class="bg-muted/30 mt-10 rounded-lg border p-4">
   <summary class="text-sm font-medium">Understanding membership and roles</summary>
   <div class="text-muted-foreground mt-4 space-y-3 text-xs leading-6">

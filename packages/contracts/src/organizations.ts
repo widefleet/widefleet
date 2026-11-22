@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { companyDomain, maxCompanyDomains } from "./settings.ts";
 
 export const organizationIdentifier = z
   .string()
@@ -41,6 +42,42 @@ export const createOrganizationInput = z.strictObject({
       (slug) => !reservedOrganizationSlugs.some((reserved) => reserved === slug),
       "This name is reserved for a Widefleet page",
     ),
+});
+
+// Creation can also let everyone at the creator's proven company email domain join.
+export const organizationCreation = createOrganizationInput.extend({
+  allowDomainJoin: z.boolean().default(false),
+});
+
+// Email domains whose verified addresses can join an organization without an invitation.
+export const joinDomains = z
+  .array(companyDomain)
+  .max(maxCompanyDomains)
+  .refine((domains) => new Set(domains).size === domains.length, "Enter each domain once");
+
+export const joinDomainInput = z.strictObject({ domain: companyDomain });
+
+export const domainAccess = z.strictObject({
+  joinDomains,
+  // The domains the current administrator's own sign-in proves, which they can add.
+  provableDomains: z.array(z.string()),
+  // Domains the organization verified by DNS for company SSO.
+  verifiedDomains: z.array(z.string()),
+  restrictOrganizationCreation: z.boolean(),
+});
+
+export const organizationCreationRestriction = z.strictObject({ restricted: z.boolean() });
+
+export const joinableOrganization = z.object({
+  id: organizationIdentifier,
+  name: z.string(),
+  slug: z.string(),
+  domain: z.string(),
+  memberCount: z.number().int().nonnegative(),
+  // Up to three members with an address on the same domain.
+  colleagues: z.array(z.string()).max(3),
+  // The organization verified this domain by DNS for company SSO.
+  verified: z.boolean(),
 });
 
 export const onboardingOrganization = z.object({

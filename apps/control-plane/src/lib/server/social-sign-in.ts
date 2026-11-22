@@ -1,5 +1,6 @@
 import type { BetterAuthOptions, BetterAuthPlugin } from "better-auth";
 import { getSessionFromCtx } from "better-auth/api";
+import { decodeJwt } from "jose";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
 
@@ -203,3 +204,52 @@ export const validateSocialUser =
 
     return undefined;
   };
+
+// Microsoft also confirms the mail domains of personal accounts, which no organization owns.
+const consumerTenant = "9188040d-6c67-4c5b-b112-36a304b66dad";
+
+const googleDomainProof = z.object({
+  email: z.email(),
+  email_verified: z.literal(true),
+  hd: z.string().min(1),
+});
+
+const microsoftDomainProof = z.object({
+  email: z.email(),
+  tid: z.uuid(),
+  // Microsoft emits this proof as a boolean or as the string "1".
+  xms_edov: z.union([z.literal(true), z.literal("1")]),
+});
+
+// The company email domain that a provider account's saved ID token proves. Better Auth saves
+// the token at every sign-in. Google names the Workspace domain; Microsoft confirms that the
+// work tenant owns the address's domain.
+export const providerEmailDomain = (providerId: string, idToken: string | null) => {
+  if (!idToken) return null;
+  let claims: unknown;
+
+  try {
+    claims = decodeJwt(idToken);
+  } catch {
+    return null;
+  }
+
+  if (providerId === "widefleet-google") {
+    const proof = googleDomainProof.safeParse(claims);
+
+    if (!proof.success) return null;
+    const domain = proof.data.hd.toLowerCase();
+
+    return proof.data.email.toLowerCase().split("@")[1] === domain ? domain : null;
+  }
+
+  if (providerId === "widefleet-microsoft") {
+    const proof = microsoftDomainProof.safeParse(claims);
+
+    return proof.success && proof.data.tid !== consumerTenant
+      ? (proof.data.email.toLowerCase().split("@")[1] ?? null)
+      : null;
+  }
+
+  return null;
+};
