@@ -38,7 +38,12 @@ export const run = async <T>(
 
       // The question shows the input as Linear receives it.
       if (!answer)
-        return changeQuestion(operation.field, operation.change, definedJson.parse(input));
+        return changeQuestion(
+          "Linear",
+          operation.field,
+          operation.change,
+          definedJson.parse(input),
+        );
 
       if (answer.action !== "accept") return { status: "declined" };
     }

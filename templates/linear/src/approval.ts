@@ -1,5 +1,7 @@
+// Shared by the generated templates: the template generator copies this file into
+// each template's src. Edit it in packages/template-generator/src/runtime.
+
 import { z } from "zod";
-import type { ApprovalQuestion } from "./results.ts";
 import type { JsonValue } from "./selection.ts";
 
 /**
@@ -50,6 +52,16 @@ export const approvals = (database: D1Database, userId: string) => ({
   },
 });
 
+/** A question for the user before a change runs. Widefleet shows it and calls again with the answer. */
+export interface ApprovalQuestion {
+  resultType: "input_required";
+  /** Absent: a question has no status, so callers can check either field. */
+  status?: undefined;
+  inputRequests: {
+    approve: { message: string; requestedSchema: { type: "object"; properties: {} } };
+  };
+}
+
 // Widefleet shows questions of up to 4096 characters.
 const maxMessage = 4096;
 
@@ -71,12 +83,17 @@ const changeWords: Record<Change, string> = {
 };
 
 /**
- * The question asked before a change runs, with the mutation and its input.
+ * The question asked before a change runs, with the operation and its input.
  * When they do not fit, long strings are shortened with their length stated;
  * the approved call still runs with the complete input.
  */
-export const changeQuestion = (mutation: string, change: Change, input: JsonValue) => {
-  const ask = `Run the Linear change "${mutation}"? It ${changeWords[change]}.`;
+export const changeQuestion = (
+  service: string,
+  operation: string,
+  change: Change,
+  input: JsonValue,
+) => {
+  const ask = `Run the ${service} change "${operation}"? It ${changeWords[change]}.`;
   const exact = `${ask}\n\nInput:\n${JSON.stringify(input, null, 2)}`;
 
   if (exact.length <= maxMessage) return question(exact);

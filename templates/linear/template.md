@@ -121,13 +121,14 @@ disconnect their account on the Linear app's page.
 
 ## Update the API
 
-`src/api.ts` and `src/schema.ts` are generated from Linear's published GraphQL schema.
-To pick up Linear's changes, run:
+`src/api.ts` and `src/schema.ts` are generated from Linear's published GraphQL schema
+by the template generator in the Widefleet repository. To pick up Linear's changes,
+run from a checkout of that repository:
 
 ```sh
-pnpm generate
+pnpm --filter @platform/template-generator generate linear
 ```
 
-The script stops when Linear adds a mutation that `scripts/operations.ts` does not
+The generator stops when Linear adds a mutation that `scripts/operations.ts` does not
 list yet: add it with the kind of change it makes, or with the reason it is not
 offered. Review the diff before deploying.
