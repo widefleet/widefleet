@@ -166,20 +166,23 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     reporting: createReporting(configuration, requestDatabase.db),
   };
 
-  const runtime = (shared ??= createSharedRuntime(bindings, configuration));
-
   return {
     // Runs request handling with this request's services behind the shared runtime.
     run: <T>(handler: () => T) => requests.run(services, handler),
-    get: async () => {
-      try {
-        return await runtime();
-      } catch (error) {
-        // A failed initialization is retried by the next request instead of being kept.
-        if (shared === runtime) shared = undefined;
-        throw error;
-      }
-    },
+    // Building the runtime starts Better Auth's initialization, whose plugins can read the
+    // database. It therefore runs in this request's scope too, wherever it is first awaited.
+    get: () =>
+      requests.run(services, async () => {
+        const runtime = (shared ??= createSharedRuntime(bindings, configuration));
+
+        try {
+          return await runtime();
+        } catch (error) {
+          // A failed initialization is retried by the next request instead of being kept.
+          if (shared === runtime) shared = undefined;
+          throw error;
+        }
+      }),
     close: async () => {
       try {
         await Promise.allSettled([services.reporting.close(), services.observation.close()]);
