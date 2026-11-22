@@ -46,8 +46,10 @@ for package in "${packages[@]}"; do
         current=$(jq -er '.version' "$channel")
         [[ "$current" =~ -canary\.([1-9][0-9]*)\.g[0-9a-f]{12}$ ]]
         if (( BASH_REMATCH[1] > run_number )); then
-          echo "Refusing to move $package@canary backwards from $current to $version" >&2
-          exit 1
+          # A newer main run already published; this older build is superseded.
+          echo "Skipped $version because $package@canary is already the newer $current." \
+            | tee -a "${GITHUB_STEP_SUMMARY:?}"
+          exit 0
         fi
         ;;
       404) ;;
