@@ -4,6 +4,8 @@ import { companyLoginRevision, type Authentication } from "./auth.ts";
 import { account } from "./auth-schema.ts";
 import type { Principal } from "./identity.ts";
 import type { Runtime } from "./runtime.ts";
+import { readOrganizationSlug } from "./organization.ts";
+import { workspacePath } from "../workspace-path.ts";
 
 export const readCompanyAccount = async (
   runtime: Runtime,
@@ -13,6 +15,7 @@ export const readCompanyAccount = async (
   const organizationId = principal.application.organizationId;
   const resolved = await runtime.settings.resolve(organizationId);
   const provider = resolved.sso?.providerId ?? null;
+  const slug = await readOrganizationSlug(runtime.database.db, organizationId);
 
   const linked = provider
     ? await runtime.database.db
@@ -26,7 +29,7 @@ export const readCompanyAccount = async (
     organizationId,
     provider,
     label: resolved.identity?.provider.label ?? null,
-    accountUrl: `${runtime.configuration.PLATFORM_URL}/account`,
+    accountUrl: new URL(workspacePath(slug, "/account"), runtime.configuration.PLATFORM_URL).href,
     linked: linked.length > 0,
     tested: Boolean(
       companySsoAvailable(runtime.configuration, resolved.sso) &&

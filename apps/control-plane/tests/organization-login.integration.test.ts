@@ -815,7 +815,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
         organizationId: owner.organizationId,
         provider: null,
         linked: false,
-        accountUrl: `${origin}/account`,
+        accountUrl: `${origin}/cli-invitations/account`,
       });
 
       const listing = z
