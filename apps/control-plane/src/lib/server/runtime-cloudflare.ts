@@ -27,8 +27,8 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     // Hyperdrive connections are TCP sockets, which automatic tracing does not show.
     const span = tracing.startSpan(name).setAttributes(attributes);
 
-    return (error) => {
-      if (error) span.setStatus({ code: "error", message: error.message });
+    return (failure) => {
+      if (failure) span.setAttribute("error.type", failure.type).setStatus({ code: "error" });
       span.end();
     };
   });

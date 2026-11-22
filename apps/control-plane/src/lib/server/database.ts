@@ -10,8 +10,19 @@ type DatabaseSpanAttributes = {
   readonly "db.query.text"?: string;
 };
 
+// A PostgreSQL error message can quote a parameter value, so a span records only the
+// SQLSTATE code, or the error's name when there is none.
+type DatabaseFailure = { readonly type: string };
+
 // Starts a span for one database operation and returns the function that ends it.
-export type DatabaseSpan = (name: string, attributes: DatabaseSpanAttributes) => SpanEnd;
+export type DatabaseSpan = (
+  name: string,
+  attributes: DatabaseSpanAttributes,
+) => (failure?: DatabaseFailure) => void;
+
+const failure = (error: Error): DatabaseFailure => ({
+  type: error instanceof pg.DatabaseError && error.code ? error.code : error.name,
+});
 
 type QueryInput = string | pg.QueryConfig;
 
@@ -42,15 +53,21 @@ const system = { "db.system.name": "postgresql" } as const;
 
 // Every query runs through a pooled client, whichever library builds it, so one hook covers
 // Drizzle, Better Auth and raw SQL. Statements carry placeholders, never their values.
-const tracedClient = (span: DatabaseSpan) =>
-  class TracedClient extends pg.Client {
+const tracedClient = (span: DatabaseSpan) => {
+  const start = (name: string, attributes: DatabaseSpanAttributes): SpanEnd => {
+    const end = span(name, attributes);
+
+    return (error) => end(error && failure(error));
+  };
+
+  return class TracedClient extends pg.Client {
     constructor(config?: string | pg.ClientConfig) {
       super(config);
       const connect = this.connect.bind(this);
 
       // SAFETY: The wrapper keeps both Client.connect forms and returns what they return.
       this.connect = ((callback?: (error: Error | undefined) => void) => {
-        const end = span("postgres connect", system);
+        const end = start("postgres connect", system);
 
         if (!callback) return settle(connect(), end);
 
@@ -65,7 +82,7 @@ const tracedClient = (span: DatabaseSpan) =>
       const query = this.query.bind(this) as Query;
 
       const traced: Query = (input, values, callback) => {
-        const end = span("postgres query", {
+        const end = start("postgres query", {
           ...system,
           "db.query.text": (input instanceof Object ? input.text : input).slice(0, 500),
         });
@@ -87,6 +104,7 @@ const tracedClient = (span: DatabaseSpan) =>
       this.query = traced as typeof this.query;
     }
   };
+};
 
 export const createDatabase = (configuration: Configuration, max = 10, span?: DatabaseSpan) => {
   const pool = new pg.Pool({
