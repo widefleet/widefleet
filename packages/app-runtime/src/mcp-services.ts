@@ -53,6 +53,7 @@ export const searchMcpMethods = async (
             entrypoint: entrypoint.name,
             method: method.name,
             summary: method.summary,
+            nameTerms: method.nameTerms,
             terms: method.terms,
           })),
         )
