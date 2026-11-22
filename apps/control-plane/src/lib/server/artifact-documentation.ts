@@ -89,5 +89,10 @@ export const readDocumentation = (storage: ArtifactStorage, appId: string, artif
   Result.gen(async function* () {
     const bytes = yield* Result.await(storage.get(documentationKey(appId, artifactId)));
 
-    return Result.ok(contract.serviceDocumentation.parse(JSON.parse(decoder.decode(bytes))));
+    // Documentation of an earlier format counts as none until the app is deployed again.
+    const documentation = contract.serviceDocumentation.safeParse(
+      JSON.parse(decoder.decode(bytes)),
+    );
+
+    return Result.ok(documentation.success ? documentation.data : null);
   });

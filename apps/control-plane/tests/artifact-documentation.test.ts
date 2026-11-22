@@ -9,7 +9,7 @@ import { memoryStorage } from "./memory-storage.fixture.ts";
 
 const documentation = (summary: string) =>
   encodeDocumentation({
-    format: 1,
+    format: 2,
     entrypoints: [
       { name: "Reader", summary, remarks: "", examples: [], http: false, methods: [] },
       { name: "default", summary: "", remarks: "", examples: [], http: true, methods: [] },

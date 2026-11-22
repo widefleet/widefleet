@@ -644,7 +644,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     credentials = adminHeaders,
     bindings: z.infer<typeof contract.workerMetadata>["bindings"] = [],
     documentation: z.input<typeof contract.serviceDocumentation> = {
-      format: 1,
+      format: 2,
       entrypoints: [],
       types: [],
     },
@@ -748,7 +748,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(
       (
         await publish(app.id, session.id, crypto.randomUUID(), undefined, undefined, undefined, {
-          format: 1,
+          format: 2,
           entrypoints: [
             { name: "Other", summary: "", remarks: "", examples: [], http: false, methods: [] },
           ],
@@ -1047,7 +1047,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect(packages.serviceDocumentation).toEqual({
       artifactId: first.artifactId,
-      documentation: { format: 1, entrypoints: [], types: [] },
+      documentation: { format: 2, entrypoints: [], types: [] },
     });
 
     const [storedArtifact] = await environment.database.db
@@ -1068,7 +1068,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
           ).unwrap(),
         ),
       ),
-    ).toEqual({ format: 1, entrypoints: [], types: [] });
+    ).toEqual({ format: 2, entrypoints: [], types: [] });
     expect(
       (
         await json(
