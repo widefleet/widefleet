@@ -3,6 +3,7 @@ import { createOrganizationInput } from "@platform/contracts";
 import { invalid, redirect } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
 import { requireLogin } from "#server/page-auth";
+import { sessionSignIn } from "#server/identity";
 import { localDestination } from "#server/navigation";
 import { chosenDestination, organizationPlaceholder, workspacePath } from "#lib/workspace-path";
 import { z } from "zod";
@@ -15,13 +16,7 @@ export const createOrganization = form(
     const runtime = await getRuntime();
 
     const organization = await runtime.onboarding
-      .create(
-        {
-          userId: user.id,
-          identityOrganizationId: session.identityOrganizationId ?? null,
-        },
-        input,
-      )
+      .create(sessionSignIn(user, session), input)
       .catch((cause: unknown) => {
         if (cause instanceof InvalidOperation) invalid(cause.message);
         throw cause;

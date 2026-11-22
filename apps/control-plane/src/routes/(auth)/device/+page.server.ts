@@ -1,7 +1,9 @@
 import { eq } from "drizzle-orm";
 import { organization } from "#server/auth-schema";
+import { sessionSignIn } from "#server/identity";
 import { getUserSession } from "#server/page-auth";
 import { getRuntime } from "#server/runtime";
+import { companySignInLimit } from "#server/sso-policy";
 import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ url, setHeaders }) => {
@@ -9,7 +11,11 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
   const runtime = await getRuntime();
   const { session, user } = getUserSession();
 
-  const organizationId = session.identityOrganizationId;
+  // The approved token keeps the limit of the sign-in that approves it.
+  const organizationId = await companySignInLimit(
+    runtime.database.db,
+    sessionSignIn(user, session),
+  );
 
   const [company] = organizationId
     ? await runtime.database.db

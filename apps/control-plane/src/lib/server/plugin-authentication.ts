@@ -1,4 +1,4 @@
-import { companySsoAvailableSql, operatorTrustedSso } from "./sso-policy.ts";
+import { companySignInLimit, companySsoAvailableSql, operatorTrustedSso } from "./sso-policy.ts";
 import { createHash } from "node:crypto";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { JSONWebKeySet } from "jose";
@@ -134,7 +134,13 @@ export const pluginAuthentication = (
       .nullable()
       .parse(current.session["identityOrganizationId"] ?? null);
 
-    if (authority !== null && authority !== organizationId)
+    const limit = await companySignInLimit(database, {
+      userId: current.user.id,
+      identityOrganizationId: authority,
+      recovery: current.session["recovery"] === true,
+    });
+
+    if (limit !== null && limit !== organizationId)
       throw new APIError("FORBIDDEN", {
         message: "This company sign-in cannot access another organization",
       });

@@ -3,6 +3,7 @@ import { getRequestEvent } from "$app/server";
 import { error, invalid, redirect } from "@sveltejs/kit";
 import type { Result } from "better-result";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
+import { sessionSignIn } from "./identity.ts";
 import { pageFailure } from "./page-auth.ts";
 import { getRuntime, reportRequestException } from "./runtime.ts";
 
@@ -22,11 +23,7 @@ const authorize = async (
     return deny({ location: "/sign-in", status: 401, message: "Sign in to continue" });
   const runtime = await getRuntime();
 
-  const member = await runtime.identity.member(
-    user.id,
-    { organizationId },
-    session.identityOrganizationId ?? null,
-  );
+  const member = await runtime.identity.member(sessionSignIn(user, session), { organizationId });
 
   if (member.isErr()) {
     if (member.error instanceof DatabaseUnavailable) return pageFailure(member.error);

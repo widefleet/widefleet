@@ -218,7 +218,11 @@ describe("Organization discovery and selection", () => {
   });
 
   it("rejects a page's organization once it becomes unavailable", async () => {
-    const page = () => runtime.identity.member(userId, { organizationSlug: "alpha" }, null);
+    const page = () =>
+      runtime.identity.member(
+        { userId, identityOrganizationId: null, recovery: false },
+        { organizationSlug: "alpha" },
+      );
 
     expect((await page()).isOk()).toBe(true);
     admitted.delete(alpha);
@@ -261,15 +265,23 @@ describe("Organization discovery and selection", () => {
 
   it("resolves the organization a page names", async () => {
     const page = (organizationSlug: string) =>
-      runtime.identity.member(userId, { organizationSlug }, null);
+      runtime.identity.member(
+        { userId, identityOrganizationId: null, recovery: false },
+        { organizationSlug },
+      );
 
     expect((await page("beta")).unwrap()).toMatchObject({
       principal: { application: { organizationId: beta, admin: false } },
       organization: { id: beta, name: "Beta", slug: "beta" },
     });
-    expect((await runtime.identity.member(userId, { organizationId: beta }, null)).isOk()).toBe(
-      true,
-    );
+    expect(
+      (
+        await runtime.identity.member(
+          { userId, identityOrganizationId: null, recovery: false },
+          { organizationId: beta },
+        )
+      ).isOk(),
+    ).toBe(true);
 
     for (const slug of ["hidden", "unknown", ""])
       expect(await page(slug)).toMatchObject({ error: { code: "FORBIDDEN" } });

@@ -3,7 +3,7 @@ import { getRequestEvent } from "$app/server";
 import { error, redirect } from "@sveltejs/kit";
 import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { getRuntime, reportRequestException } from "./runtime.ts";
-import type { AuthenticationFailed } from "./identity.ts";
+import { sessionSignIn, type AuthenticationFailed } from "./identity.ts";
 import { runExtensionEffect } from "../extension-effects.ts";
 import { organizationPlaceholder, workspacePath } from "../workspace-path.ts";
 
@@ -31,10 +31,7 @@ export const pageOrganizations = async () => {
   const { user, session } = getUserSession();
   const runtime = await getRuntime();
 
-  const result = await runtime.identity.listOrganizations(
-    user.id,
-    session.identityOrganizationId ?? null,
-  );
+  const result = await runtime.identity.listOrganizations(sessionSignIn(user, session));
 
   if (result.isErr()) return pageFailure(result.error);
 
@@ -54,7 +51,7 @@ export const invitationIdentity = async (invitationId: string) => {
 
   const { user, session } = requireLogin(`/invitations/${invitationId}`);
 
-  return { userId: user.id, identityOrganizationId: session.identityOrganizationId ?? null };
+  return sessionSignIn(user, session);
 };
 
 const requestDestination = () => {
@@ -99,11 +96,9 @@ export const organizationMember = async (slug: string) => {
   const { user, session } = getUserSession();
   const runtime = await getRuntime();
 
-  const result = await runtime.identity.member(
-    user.id,
-    { organizationSlug: slug },
-    session.identityOrganizationId ?? null,
-  );
+  const result = await runtime.identity.member(sessionSignIn(user, session), {
+    organizationSlug: slug,
+  });
 
   if (result.isErr()) return memberFailure(result.error, requestDestination());
   runtime.reporting.active(result.value.principal.id);
@@ -122,11 +117,9 @@ const resolvePageMember = async () => {
 
   if (!slug) return null;
 
-  const result = await runtime.identity.member(
-    user.id,
-    { organizationSlug: slug },
-    session.identityOrganizationId ?? null,
-  );
+  const result = await runtime.identity.member(sessionSignIn(user, session), {
+    organizationSlug: slug,
+  });
 
   if (result.isErr()) {
     if (result.error._tag === "AuthenticationFailed" && result.error.code === "FORBIDDEN")

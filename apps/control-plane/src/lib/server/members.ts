@@ -1,4 +1,4 @@
-import { companySsoAvailableSql } from "./sso-policy.ts";
+import { companySignInLimit, companySsoAvailableSql, type SignIn } from "./sso-policy.ts";
 import { and, eq, gt } from "drizzle-orm";
 import { APIError } from "better-auth/api";
 import { Result } from "better-result";
@@ -11,7 +11,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { DatabaseUnavailable, InvalidOperation } from "./errors.ts";
-import type { AuthenticatedUser, Principal } from "./identity.ts";
+import type { Principal } from "./identity.ts";
 import { sendOrganizationInvitation, type SendEmail } from "./email.ts";
 import { findMembers } from "./member-directory.ts";
 import { organizationOperation, type OrganizationCredential } from "./organization-operations.ts";
@@ -250,10 +250,7 @@ export const createInvitationService = (
 
       return { canceled: true };
     },
-    read: async (
-      actor: Pick<AuthenticatedUser, "userId" | "identityOrganizationId">,
-      invitationId: string,
-    ) => {
+    read: async (actor: SignIn, invitationId: string) => {
       const { userId } = actor;
 
       const [record] = await database
@@ -274,10 +271,9 @@ export const createInvitationService = (
           message: "Sign in with the verified email address that received this invitation",
         });
 
-      if (
-        actor.identityOrganizationId !== null &&
-        actor.identityOrganizationId !== record.invitation.organizationId
-      )
+      const limit = await companySignInLimit(database, actor);
+
+      if (limit !== null && limit !== record.invitation.organizationId)
         throw new InvalidOperation({
           code: "FORBIDDEN",
           message: "This company sign-in cannot access another organization's invitation",

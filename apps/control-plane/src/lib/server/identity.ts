@@ -1,4 +1,4 @@
-import { companySsoAvailableSql } from "./sso-policy.ts";
+import { companySignInLimit, companySsoAvailableSql, type SignIn } from "./sso-policy.ts";
 import { verifyAccessToken } from "./access-token.ts";
 import { Result, TaggedError, type InferOk } from "better-result";
 import { eq, sql } from "drizzle-orm";
@@ -14,6 +14,16 @@ import type { Database } from "./database.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { organizationRuntimes, organizationSettings } from "./schema.ts";
 import { DatabaseUnavailable } from "./errors.ts";
+
+// Page requests read the sign-in from their session instead of a token.
+export const sessionSignIn = (
+  person: { id: string },
+  session: { identityOrganizationId?: string | null | undefined; recovery?: boolean | undefined },
+) => ({
+  userId: person.id,
+  identityOrganizationId: session.identityOrganizationId ?? null,
+  recovery: session.recovery === true,
+});
 
 export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
   code: "UNAUTHORIZED" | "FORBIDDEN" | "ORGANIZATION_REQUIRED" | "SSO_REQUIRED";
@@ -31,9 +41,11 @@ export const createIdentityService = (
   },
   allowUser?: (userId: string) => Promise<boolean>,
 ) => {
-  const memberships = (userId: string, identityOrganizationId: string | null) =>
+  const memberships = (signIn: SignIn) =>
     Result.tryPromise({
       try: async () => {
+        const limit = await companySignInLimit(database, signIn);
+
         const records = await database
           .select({
             id: user.id,
@@ -51,7 +63,7 @@ export const createIdentityService = (
           .innerJoin(organizationRuntimes, eq(organizationRuntimes.organizationId, organization.id))
           .leftJoin(ssoProvider, eq(ssoProvider.organizationId, organization.id))
           .leftJoin(organizationSettings, eq(organizationSettings.organizationId, organization.id))
-          .where(eq(user.id, userId))
+          .where(eq(user.id, signIn.userId))
           .orderBy(organization.name, organization.id);
 
         const admitted = new Set(
@@ -68,7 +80,7 @@ export const createIdentityService = (
 
           return admitted.has(record.organizationId) &&
             role.success &&
-            (identityOrganizationId === null || identityOrganizationId === record.organizationId)
+            (limit === null || limit === record.organizationId)
             ? [{ ...record, role: role.data }]
             : [];
         });
@@ -80,12 +92,11 @@ export const createIdentityService = (
   // A selection names an organization by ID, as API clients do, or by the slug in a page URL.
   // Without one, the extension's default or the member's only organization applies.
   const resolveMember = (
-    userId: string,
+    signIn: SignIn,
     selection: { organizationId: string | null } | { organizationSlug: string },
-    identityOrganizationId: string | null,
   ) =>
     Result.gen(async function* () {
-      const records = yield* Result.await(memberships(userId, identityOrganizationId));
+      const records = yield* Result.await(memberships(signIn));
       const requested = "organizationId" in selection ? selection.organizationId : undefined;
 
       const selected =
@@ -113,7 +124,7 @@ export const createIdentityService = (
           message: "This organization is unavailable or you are no longer a member",
         });
 
-      if (record.ssoRequired && identityOrganizationId !== record.organizationId)
+      if (record.ssoRequired && signIn.identityOrganizationId !== record.organizationId)
         return yield* new AuthenticationFailed({
           code: "SSO_REQUIRED",
           organizationSlug: record.organizationSlug,
@@ -143,12 +154,8 @@ export const createIdentityService = (
       });
     });
 
-  const resolveUser = (
-    userId: string,
-    organizationId: string | null,
-    identityOrganizationId: string | null,
-  ) =>
-    resolveMember(userId, { organizationId }, identityOrganizationId).then((result) =>
+  const resolveUser = (signIn: SignIn, organizationId: string | null) =>
+    resolveMember(signIn, { organizationId }).then((result) =>
       result.map(({ principal }) => principal),
     );
 
@@ -202,10 +209,12 @@ export const createIdentityService = (
             message: "The account is unavailable",
           });
 
+        // Recovery cannot authorize tokens, so a token's authority is always a company or none.
         return Result.ok({
           userId: current.id,
           identityOrganizationId: verified.authority.organizationId,
-        });
+          recovery: false,
+        } satisfies SignIn);
       }
 
       if (
@@ -233,10 +242,7 @@ export const createIdentityService = (
         });
       }
 
-      return Result.ok({
-        identityOrganizationId: session.session.identityOrganizationId ?? null,
-        userId: session.user.id,
-      });
+      return Result.ok(sessionSignIn(session.user, session.session));
     });
 
   // Requests name their organization with X-Widefleet-Organization. Without it, the
@@ -249,19 +255,15 @@ export const createIdentityService = (
       const verified = yield* Result.await(verify(request, scope));
 
       const principal = yield* Result.await(
-        resolveUser(
-          verified.userId,
-          request.headers.get("x-widefleet-organization"),
-          verified.identityOrganizationId,
-        ),
+        resolveUser(verified, request.headers.get("x-widefleet-organization")),
       );
 
       return Result.ok(principal);
     });
 
-  const listOrganizations = (userId: string, identityOrganizationId: string | null) =>
+  const listOrganizations = (signIn: SignIn) =>
     Result.gen(async function* () {
-      const records = yield* Result.await(memberships(userId, identityOrganizationId));
+      const records = yield* Result.await(memberships(signIn));
 
       return Result.ok(
         records.map((record) => ({
@@ -270,7 +272,7 @@ export const createIdentityService = (
           slug: record.organizationSlug,
           role: record.role,
           ssoRequired:
-            record.ssoRequired === true && identityOrganizationId !== record.organizationId,
+            record.ssoRequired === true && signIn.identityOrganizationId !== record.organizationId,
         })),
       );
     });
@@ -279,9 +281,7 @@ export const createIdentityService = (
     Result.gen(async function* () {
       const verified = yield* Result.await(verify(request, "platform:read"));
 
-      return Result.ok(
-        yield* Result.await(listOrganizations(verified.userId, verified.identityOrganizationId)),
-      );
+      return Result.ok(yield* Result.await(listOrganizations(verified)));
     });
 
   return {
