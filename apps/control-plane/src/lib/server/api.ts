@@ -389,6 +389,18 @@ export const createApi = (runtime: Runtime) => {
           }),
         ),
       ),
+    serviceBindingTypes: read
+      .route({ method: "GET", path: "/app-services/{service}/types" })
+      .input(contract.serviceBindingTypesQuery)
+      .output(contract.serviceBindingTypesResult)
+      .handler(async ({ context, input }) =>
+        unwrap(
+          await runtime.connections.types(context.principal, input.service, {
+            entrypoint: input.entrypoint,
+            binding: input.binding,
+          }),
+        ),
+      ),
     serviceAccess: write
       .route({ method: "PUT", path: "/app-services/{appId}/access" })
       .input(contract.appPath.extend(contract.serviceAccessChange.shape))

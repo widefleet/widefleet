@@ -43,6 +43,7 @@ pub enum FailureReason {
     DeploymentMissing,
     DeploymentStatusInvalid,
     AssetManifestMismatch,
+    ServiceTypesOutdated,
 }
 
 impl FailureReason {
@@ -158,6 +159,11 @@ impl FailureReason {
                 "asset_manifest_mismatch",
                 "Server requested an asset outside the manifest",
                 Technical,
+            ),
+            Self::ServiceTypesOutdated => (
+                "service_types_outdated",
+                "Binding types differ from the active deployment",
+                Usage,
             ),
         }
     }

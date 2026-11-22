@@ -31,6 +31,22 @@ enum CatalogCommand {
         #[arg(long = "type", value_name = "NAME")]
         types: Vec<String>,
     },
+    /// Generate TypeScript types for a binding to an app's API from its active deployment.
+    Types {
+        app: String,
+        /// Binding name in the caller's environment, which names the generated interface.
+        #[arg(long = "as", value_name = "BINDING")]
+        binding: String,
+        /// Entrypoint the binding connects to.
+        #[arg(long, default_value = "default")]
+        entrypoint: String,
+        /// File to write instead of standard output.
+        #[arg(long, short, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// Fail if the output file differs from the types of the active deployment.
+        #[arg(long, requires = "output")]
+        check: bool,
+    },
     /// Set who may connect to an API (organization administrators only).
     Access {
         app: String,
@@ -85,6 +101,11 @@ pub struct Disconnect {
     json: bool,
 }
 
+#[derive(Deserialize)]
+struct BindingTypes {
+    declarations: String,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Service {
@@ -108,10 +129,63 @@ async fn resolve_service(api: &Api, token: &str, target: &str) -> Result<Service
     .await
 }
 
+async fn types(
+    api: &Api,
+    token: &str,
+    app: &str,
+    binding: &str,
+    entrypoint: &str,
+    output: Option<PathBuf>,
+    check: bool,
+) -> Result<()> {
+    let service = app_bindings::segment(app)?;
+    let binding = app_bindings::segment(binding)?;
+    let generated: BindingTypes = json(
+        api.authenticated(
+            Method::GET,
+            &format!("/app-services/{service}/types"),
+            token,
+        )
+        .query(&[("binding", binding), ("entrypoint", entrypoint)])
+        .send()
+        .await?,
+    )
+    .await?;
+    let declarations = generated.declarations + "\n";
+    let Some(path) = output else {
+        print!("{declarations}");
+        return Ok(());
+    };
+    if !check {
+        return Ok(std::fs::write(path, declarations)?);
+    }
+    let current = match std::fs::read_to_string(&path) {
+        Ok(current) => Some(current),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    // Compare lines, so a checkout that converts line endings still matches.
+    if current.is_some_and(|current| current.lines().eq(declarations.lines())) {
+        return Ok(());
+    }
+    Err(Error::invalid(format!(
+        "{} does not match the API of {app}'s active deployment; run the command without --check to update it",
+        path.display()
+    ))
+    .with_reason(FailureReason::ServiceTypesOutdated))
+}
+
 pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalog) -> Result<()> {
     let token = auth::access_token(api, credentials).await?;
     if let Some(command) = options.command {
         let request = match command {
+            CatalogCommand::Types {
+                app,
+                binding,
+                entrypoint,
+                output,
+                check,
+            } => return types(api, &token, &app, &binding, &entrypoint, output, check).await,
             CatalogCommand::Describe {
                 app,
                 entrypoint,

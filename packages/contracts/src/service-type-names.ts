@@ -33,11 +33,29 @@ const displayNames = (names: readonly string[]) => {
   );
 };
 
+const identifier = /[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*/y;
+
+const identifierPart = /[\w$.]/;
+
 /**
- * Replaces documented type references in TypeScript type text. String and template literal text and
- * comments are copied unchanged because they describe values, not references.
+ * How {@link rewriteTypeReferences} treats one reference: keep it (`undefined`), replace it with
+ * other text, or drop it (`null`), together with its type arguments and a preceding `typeof`, in
+ * favor of `unknown`.
  */
-const rewriteReferences = (text: string, names: ReadonlyMap<string, string>) => {
+export type ReferenceRewrite = string | null | undefined;
+
+/**
+ * Rewrites the type references in TypeScript type text: module-qualified references such as
+ * `import("./src/api").Issue` and, when `names` is set, unqualified names such as `Issue` or
+ * `Page.Item`. String and template literal text and comments are copied unchanged because they
+ * describe values, not references. An unresolved reference becomes `unknown` followed by a comment
+ * that keeps the original text.
+ */
+export const rewriteTypeReferences = (
+  text: string,
+  replace: (reference: string) => ReferenceRewrite,
+  { names = false } = {},
+) => {
   let index = 0;
 
   const skipQuoted = () => {
@@ -57,6 +75,59 @@ const rewriteReferences = (text: string, names: ReadonlyMap<string, string>) => 
     index = end === -1 ? text.length : end + terminator.length;
 
     return text.slice(start, index);
+  };
+
+  // The type arguments that follow a reference, such as `<Item, "a" | "b">`.
+  const skipArguments = () => {
+    const start = index;
+    let depth = 0;
+
+    while (index < text.length) {
+      const char = text[index];
+
+      if (char === '"' || char === "'" || char === "`") {
+        skipQuoted();
+        continue;
+      }
+
+      if (char === "<") depth += 1;
+      // `=>` in a function type closes nothing.
+      else if (char === ">" && text[index - 1] !== "=") depth -= 1;
+      index += 1;
+
+      if (depth === 0) break;
+    }
+
+    return text.slice(start, index);
+  };
+
+  const unresolved = (output: string, reference: string) => {
+    const typeOf = /typeof\s+$/.exec(output);
+    const prefix = typeOf ? output.slice(0, typeOf.index) : output;
+    const original = `${typeOf?.[0] ?? ""}${reference}${text[index] === "<" ? skipArguments() : ""}`;
+
+    return `${prefix}unknown /* ${original.replaceAll("*/", "* /")} */`;
+  };
+
+  // The reference at the current position, if any, which the scan then continues after.
+  const referenceAt = () => {
+    typeReference.lastIndex = index;
+    const qualified = typeReference.exec(text);
+
+    if (qualified) {
+      index = typeReference.lastIndex;
+
+      return qualified[0];
+    }
+
+    if (!names || identifierPart.test(text[index - 1] ?? "")) return null;
+    identifier.lastIndex = index;
+    const name = identifier.exec(text);
+
+    if (!name) return null;
+    index = identifier.lastIndex;
+
+    return name[0];
   };
 
   const template = () => {
@@ -94,12 +165,13 @@ const rewriteReferences = (text: string, names: ReadonlyMap<string, string>) => 
       const char = text[index];
 
       if (embedded && char === "}" && depth === 0) return output;
-      typeReference.lastIndex = index;
-      const reference = typeReference.exec(text);
+      const reference = referenceAt();
 
       if (reference) {
-        output += names.get(reference[0]) ?? reference[0];
-        index = typeReference.lastIndex;
+        const rewrite = replace(reference);
+
+        if (rewrite === null) output = unresolved(output, reference);
+        else output += rewrite ?? reference;
       } else if (char === '"' || char === "'") output += skipQuoted();
       else if (char === "`") output += template();
       else if (text.startsWith("/*", index)) output += skipUntil("*/");
@@ -128,7 +200,7 @@ type Documentation = z.infer<typeof serviceDocumentation>;
  */
 export const shortenTypeNames = (documentation: Documentation): Documentation => {
   const names = displayNames(documentation.types.map((type) => type.name));
-  const text = (value: string) => rewriteReferences(value, names);
+  const text = (value: string) => rewriteTypeReferences(value, (reference) => names.get(reference));
 
   return {
     ...documentation,
