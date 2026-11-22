@@ -385,6 +385,7 @@ export const createApi = (runtime: Runtime) => {
           await runtime.connections.describe(context.principal, input.service, {
             entrypoint: input.entrypoint,
             methods: input.methods,
+            types: input.types,
           }),
         ),
       ),

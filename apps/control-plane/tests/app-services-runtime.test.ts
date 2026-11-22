@@ -739,7 +739,25 @@ export default { async fetch(request, env, ctx) {
       expect(await described()).toMatchObject({
         documentation: docs.entrypoints[0],
         types: docs.types,
+        omittedTypes: [],
       });
+
+      const named = await rpc("describe", {
+        hostname: service.hostname,
+        entrypoint: service.entrypoint,
+        types: ["InventoryRecord"],
+      });
+
+      expect(JSON.parse(named.content[0]?.text ?? "null")).toMatchObject({
+        documentation: { name: "Reader", methods: [] },
+        types: docs.types,
+      });
+      const missing = await rpc("describe", { ...selection, types: ["Missing"] });
+      expect(missing.isError).toBe(true);
+      expect(missing.content[0]?.text).toContain("no documented type Missing");
+      const empty = await rpc("describe", { ...selection, methods: [] });
+      expect(empty.isError).toBe(true);
+      expect(empty.content[0]?.text).toContain("Name at least one method or type");
       const search = await rpc("search", { query: "inventory records" });
       expect(JSON.parse(search.content[0]?.text ?? "null")).toMatchObject({
         methods: [
@@ -795,6 +813,7 @@ export default { async fetch(request, env, ctx) {
       expect(await described()).toMatchObject({
         documentation: docs.entrypoints[0],
         types: docs.types,
+        omittedTypes: [],
       });
 
       const called = await rpc("call", service);

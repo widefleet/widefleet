@@ -603,7 +603,7 @@ test("shows versioned service documentation through authenticated API and access
   });
 
   const selected = await context.request.get(
-    `/api/v1/app-services/${record.slug}?entrypoint=Reader&methods=findItems`,
+    `/api/v1/app-services/${record.slug}?entrypoint=Reader&methods[]=findItems`,
   );
 
   expect(await selected.json()).toMatchObject({

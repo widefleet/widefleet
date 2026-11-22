@@ -18,7 +18,7 @@ pub struct Catalog {
 
 #[derive(Subcommand)]
 enum CatalogCommand {
-    /// List the methods of an app's active deployment, or describe selected methods and their types.
+    /// List the methods of an app's active deployment, or describe selected methods and types.
     Describe {
         app: String,
         /// Entrypoint of the methods to describe.
@@ -27,6 +27,9 @@ enum CatalogCommand {
         /// Method to describe with its signatures and types; repeat for several methods.
         #[arg(long = "method", value_name = "NAME")]
         methods: Vec<String>,
+        /// Documented type to describe, as types, uses and omittedTypes name it; repeat for several.
+        #[arg(long = "type", value_name = "NAME")]
+        types: Vec<String>,
     },
     /// Set who may connect to an API (organization administrators only).
     Access {
@@ -113,14 +116,23 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
                 app,
                 entrypoint,
                 methods,
+                types,
             } => {
                 let service = app_bindings::segment(&app)?;
                 let request =
                     api.authenticated(Method::GET, &format!("/app-services/{service}"), &token);
-                if methods.is_empty() {
+                if methods.is_empty() && types.is_empty() {
                     request
                 } else {
-                    request.query(&[("entrypoint", entrypoint), ("methods", methods.join(","))])
+                    let selection = methods
+                        .into_iter()
+                        .map(|method| ("methods[]", method))
+                        .chain(types.into_iter().map(|name| ("types[]", name)));
+                    request.query(
+                        &std::iter::once(("entrypoint", entrypoint))
+                            .chain(selection)
+                            .collect::<Vec<_>>(),
+                    )
                 }
             }
             CatalogCommand::Access { app, mode } => {

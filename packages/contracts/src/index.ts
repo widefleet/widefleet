@@ -10,9 +10,11 @@ import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
 import {
   appRpcMethod,
   serviceDescriptionMaxMethods,
+  serviceDescriptionMaxTypes,
   serviceDocumentation,
   serviceMethodSelection,
   serviceMethodSummary,
+  serviceTypeName,
 } from "./service-documentation.ts";
 
 export * from "./mcp.ts";
@@ -280,8 +282,11 @@ export {
   appRpcMethod,
   listServiceMethods,
   selectServiceMethods,
+  serviceDescriptionBudget,
   serviceDescriptionMaxMethods,
+  serviceDescriptionMaxTypes,
   serviceMethodSelection,
+  serviceTypeName,
   serviceMethodSummary,
   summaryLine,
   serviceDocumentation,
@@ -461,13 +466,9 @@ export const servicePath = z.strictObject({ service: z.string().min(1).max(128) 
 
 export const serviceDescriptionQuery = servicePath.extend({
   entrypoint: bindingName.default("default"),
-  // Comma-separated method names; method names cannot contain commas.
-  methods: z
-    .string()
-    .max(serviceDescriptionMaxMethods * 129)
-    .transform((value) => value.split(","))
-    .pipe(z.array(appRpcMethod).min(1).max(serviceDescriptionMaxMethods))
-    .optional(),
+  // Repeated as `methods[]=` and `types[]=`; type names can contain commas.
+  methods: z.array(appRpcMethod).max(serviceDescriptionMaxMethods).default([]),
+  types: z.array(serviceTypeName).max(serviceDescriptionMaxTypes).default([]),
 });
 
 export const capabilityGrant = z.strictObject({
