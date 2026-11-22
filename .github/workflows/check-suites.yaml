@@ -74,6 +74,10 @@ jobs:
         run: pnpm --filter @platform/control-plane build
       - name: Build and bundle the Cloudflare control plane
         if: matrix.suite == 'cloudflare'
+        # Like the hosted extension, the fixture's authentication plugin reads the database
+        # while Better Auth initializes.
+        env:
+          WIDEFLEET_RUNTIME_EXTENSION: ${{ github.workspace }}/apps/control-plane/tests/cloudflare/plugin-init-extension.fixture.ts
         run: |
           pnpm --filter @platform/control-plane build:cloudflare
           pnpm --filter @platform/control-plane exec wrangler deploy --dry-run --outdir dist/cloudflare/bundle
