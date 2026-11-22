@@ -45,7 +45,7 @@ const methods = (
     entrypoint: "default",
     method: method.name,
     summary: method.summary,
-    terms: methodTerms(hostname, entrypoint, method),
+    ...methodTerms(hostname, entrypoint, method),
   }));
 };
 
@@ -94,6 +94,35 @@ describe("MCP method search", () => {
       "google-search-console.listSites",
     ]);
     expect(names(search("webmasters"))).toEqual(["bing-webmaster.queryStats"]);
+  });
+
+  it("ranks the method a query names above methods that mention its words", () => {
+    const tracker = methods("tracker-example.apps.example.test", "Read and change issues", [
+      {
+        name: "issueShare",
+        summary: "Shares an issue with a user. The issue's sub-issues are shared with the issue.",
+        parameter: "issueId",
+      },
+      { name: "issueArchive", summary: "Archives an issue and its sub-issues.", parameter: "id" },
+      {
+        name: "issues",
+        summary: "Lists issues you can access, filtered by team, assignee, status or label.",
+        parameter: "filter",
+      },
+      { name: "teamIssues", summary: "Lists the issues of a team.", parameter: "teamId" },
+    ]);
+
+    const ranked = (query: string) =>
+      rankMethods([...catalog, ...tracker], { query, limit: 10, offset: 0 }).methods.map(
+        (entry) => entry.method,
+      );
+
+    for (const query of ["issues", "list issues", "tracker issues"])
+      expect(ranked(query)[0]).toBe("issues");
+    // The singular still finds every method about issues.
+    expect(ranked("issue")).toEqual(
+      expect.arrayContaining(["issueShare", "issueArchive", "issues", "teamIssues"]),
+    );
   });
 
   it("returns nothing for unmatched words", () => {
