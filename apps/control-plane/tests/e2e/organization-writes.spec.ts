@@ -502,16 +502,23 @@ test("switches organizations from the sidebar menu", async ({ browser }) => {
     await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
     // Before hydration the trigger is a plain link to the chooser.
     await page.waitForLoadState("networkidle");
-    // Preloading another organization's data, as hovering a link does, leaves the session's
-    // organization unchanged.
-    expect((await context.request.get(`/${beta}/__data.json`)).ok()).toBe(true);
+    await page.getByRole("link", { name: "Choose organization: Alpha" }).click();
+    const betaItem = page.getByRole("menuitem", { name: /Beta/ });
+    // Hovering another organization does not preload it, which would switch the session.
+    const preloads: string[] = [];
+    page.on("request", (request) => preloads.push(request.url()));
+    await betaItem.hover();
+    await page.waitForTimeout(500);
+    expect(preloads.filter((url) => url.includes("__data.json"))).toEqual([]);
     expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
       application: { organizationId: alpha },
     });
-    await page.getByRole("link", { name: "Choose organization: Alpha" }).click();
-    await page.getByRole("menuitem", { name: /Beta/ }).click();
+    // The switch navigates within the page instead of loading a new document.
+    await page.evaluate(() => Object.assign(window, { organizationSwitchMarker: true }));
+    await betaItem.click();
     await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${beta}`);
     await expect(page.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+    expect(await page.evaluate(() => "organizationSwitchMarker" in window)).toBe(true);
     // The organization last opened is the one paths without an organization open.
     expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
       application: { organizationId: beta },

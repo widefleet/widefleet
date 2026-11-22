@@ -309,7 +309,7 @@
                 >{@render row()}</DropdownMenu.Item
               >
             {:else}
-              <!-- Opening the organization as a document makes it the session's organization. -->
+              <!-- Opening an organization makes it the session's organization, so hovering must not preload it. -->
               <DropdownMenu.Item class="gap-2 p-2">
                 {#snippet child({ props })}<a
                     {...props}
@@ -317,7 +317,7 @@
                       ? `/sign-in?${new URLSearchParams({ organization: entry.slug, next: workspacePath(entry.slug) })}`
                       : workspacePath(entry.slug)}
                     data-organization-shortcut={shortcut}
-                    data-sveltekit-reload>{@render row()}</a
+                    data-sveltekit-preload-data="off">{@render row()}</a
                   >{/snippet}
               </DropdownMenu.Item>
             {/if}

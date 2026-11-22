@@ -99,13 +99,13 @@ export const sessionMember = async () => {
   return result.value;
 };
 
-// Workspace pages name their organization in the URL. Opening one in a document request makes
-// it the session's organization, so paths without an organization return to it. Data requests
-// can be hover preloads that never open the page, so they leave the session unchanged.
+// Workspace pages name their organization in the URL. Opening one makes it the session's
+// organization, so paths without an organization return to it. Links to another organization
+// turn off data preloading, otherwise hovering them would switch it.
 // Organizations a person cannot open resolve to null and look the same as missing ones.
 const resolvePageMember = async () => {
   const { user, session } = getUserSession();
-  const { params, isDataRequest } = getRequestEvent();
+  const { params } = getRequestEvent();
   const runtime = await getRuntime();
   const slug = params["organization"];
 
@@ -126,7 +126,7 @@ const resolvePageMember = async () => {
 
   const { organization, principal } = result.value;
 
-  if (!isDataRequest && session.activeOrganizationId !== organization.id) {
+  if (session.activeOrganizationId !== organization.id) {
     const remembered = await runtime.identity.rememberOrganization(
       session.id,
       user.id,
