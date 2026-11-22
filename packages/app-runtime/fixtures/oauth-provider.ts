@@ -11,8 +11,8 @@ const base64url = (value: Uint8Array) =>
 const encode = (value: string) => base64url(new TextEncoder().encode(value));
 
 // Synthetic providers check PKCE, callback URI, credentials and one-use codes.
-export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
-  const codes = new Map<string, { user: string; challenge: string; redirect: string }>();
+export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear") => {
+  const codes = new Map<string, { user: string; challenge: string | null; redirect: string }>();
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
   const state = { refreshes: 0, exchanges: 0, revocations: 0, unavailable: false, expiring: true };
@@ -31,12 +31,20 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
     google: "openid profile email https://www.googleapis.com/auth/gmail.readonly",
     github: "repo read:user user:email",
     microsoft: "openid profile email offline_access User.Read Files.Read",
+    linear: "read write",
   };
 
   const tokenURLs = {
     google: "https://oauth2.googleapis.com/token",
     github: "https://github.com/login/oauth/access_token",
     microsoft: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    linear: "https://api.linear.app/oauth/token",
+  };
+
+  // RFC 7009 revocation, where the provider offers it.
+  const revocationURLs: Partial<Record<typeof kind, string>> = {
+    google: "https://oauth2.googleapis.com/revoke",
+    linear: "https://api.linear.app/oauth/revoke",
   };
 
   const tokens = (user: string) => {
@@ -78,14 +86,18 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
 
     const signature = base64url(sign("RSA-SHA256", unsigned, keys.privateKey));
 
-    return Response.json({
+    const result = {
       access_token: accessToken,
       refresh_token: refreshToken,
-      id_token: `${unsigned}.${signature}`,
       expires_in: 3600,
       token_type: "Bearer",
       scope: scopes[kind],
-    });
+    };
+
+    // Linear's token responses carry no ID token without the openid scope.
+    return Response.json(
+      kind === "linear" ? result : { ...result, id_token: `${unsigned}.${signature}` },
+    );
   };
 
   return {
@@ -94,10 +106,18 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
     authorize(location: string, user: string) {
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));
-      const challenge = z.string().min(1).parse(url.searchParams.get("code_challenge"));
+
+      // Linear OAuth applications make PKCE optional; Better Auth's Linear provider omits it.
+      const optional = kind === "linear" && !url.searchParams.has("code_challenge");
+
+      const challenge = optional
+        ? null
+        : z.string().min(1).parse(url.searchParams.get("code_challenge"));
+
       const oauthState = z.string().min(1).parse(url.searchParams.get("state"));
 
-      if (url.searchParams.get("code_challenge_method") !== "S256") throw new Error("Missing PKCE");
+      if (!optional && url.searchParams.get("code_challenge_method") !== "S256")
+        throw new Error("Missing PKCE");
       const code = crypto.randomUUID();
       codes.set(code, { user, challenge, redirect });
       const callback = new URL(redirect);
@@ -112,8 +132,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
       if (url.pathname.endsWith("/certs") || url.pathname.endsWith("/keys"))
         return Response.json({ keys: [jwk] });
 
-      // RFC 7009 revocation, as Google offers it.
-      if (url.href === "https://oauth2.googleapis.com/revoke") {
+      if (url.href === revocationURLs[kind]) {
         const form = new URLSearchParams(await request.text());
         const token = form.get("token") ?? "";
 
@@ -144,9 +163,10 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
           const saved = codes.get(code);
           codes.delete(code);
 
-          const challenge = createHash("sha256")
-            .update(form.get("code_verifier") ?? "")
-            .digest("base64url");
+          const verifier = form.get("code_verifier");
+
+          const challenge =
+            verifier === null ? null : createHash("sha256").update(verifier).digest("base64url");
 
           if (
             !saved ||
@@ -193,6 +213,30 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
       if (url.pathname === "/gmail/v1/users/me/messages") return Response.json({ messages: [] });
 
       if (url.pathname === "/v1.0/me/drive/root/children") return Response.json({ value: [] });
+
+      // Linear's GraphQL API: the viewer for the account profile, otherwise issues.
+      if (url.href === "https://api.linear.app/graphql") {
+        const { query } = z.object({ query: z.string() }).parse(await request.json());
+
+        return Response.json(
+          query.includes("viewer")
+            ? {
+                data: {
+                  viewer: {
+                    id: user,
+                    name: user,
+                    email: `${user}@example.test`,
+                    avatarUrl: null,
+                    active: true,
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                    updatedAt: "2026-01-01T00:00:00.000Z",
+                  },
+                },
+              }
+            : { data: { issues: { nodes: [] } } },
+        );
+      }
+
       throw new Error(`Unexpected request: ${url.origin}${url.pathname}`);
     },
   };

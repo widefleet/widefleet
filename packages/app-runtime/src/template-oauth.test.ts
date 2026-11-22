@@ -45,6 +45,12 @@ const clients = {
     hosts: ["https://graph.microsoft.com"],
     issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
   },
+  linear: {
+    provider: "linear",
+    scopes: ["read", "write"],
+    hosts: ["https://api.linear.app"],
+    revocationUrl: "https://api.linear.app/oauth/revoke",
+  },
 };
 
 // Origins the synthetic providers serve, as an app's network policy allows them.
@@ -57,15 +63,19 @@ const origins = [
   "https://api.github.com",
   "https://login.microsoftonline.com",
   "https://graph.microsoft.com",
+  "https://api.linear.app",
 ];
 
 for (const [template, kind, prefix] of [
   ["gmail", "google", "GOOGLE"],
   ["github", "github", "GITHUB"],
   ["onedrive", "microsoft", "MICROSOFT"],
+  ["linear", "linear", "LINEAR"],
 ] as const)
   describe(`${template} managed OAuth`, () => {
     const origin = `https://${template}.example.test:25453`;
+    // Managed clients with an RFC 7009 endpoint revoke grants on disconnect.
+    const revokes = "revocationUrl" in clients[kind];
     let runtime: Miniflare;
     let upstream: ReturnType<typeof oauthProvider>;
     let script: string;
@@ -324,7 +334,7 @@ for (const [template, kind, prefix] of [
           account: null,
         });
         // The entrypoint shares the page's disconnection, including revocation.
-        expect(upstream.state.revocations).toBe(kind === "google" && custom === "none" ? 1 : 0);
+        expect(upstream.state.revocations).toBe(revokes && custom === "none" ? 1 : 0);
       },
     );
 
@@ -430,7 +440,7 @@ for (const [template, kind, prefix] of [
       await alice.request("/disconnect", "POST");
       expect(await db.prepare("SELECT COUNT(*) AS count FROM account").first("count")).toBe(0);
       // Disconnecting revokes the grant where the provider supports RFC 7009.
-      expect(upstream.state.revocations).toBe(kind === "google" ? 1 : 0);
+      expect(upstream.state.revocations).toBe(revokes ? 1 : 0);
     });
     it("keeps custom credentials preferred and switches registrations after disconnecting", async () => {
       await runtime.setOptions(configuration("complete"));
