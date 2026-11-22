@@ -4,7 +4,7 @@ import { and, eq, isNull, or, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { appVisibility } from "./apps.ts";
 import type { Database } from "./database.ts";
-import { DatabaseUnavailable, InvalidOperation } from "./errors.ts";
+import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { apps, artifacts, deployments } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
@@ -29,18 +29,24 @@ export const findAppIcon = (manifest: z.infer<typeof assetManifest>) => {
   return null;
 };
 
-export const readAppOrganization = (database: Database, appId: string) =>
-  Result.tryPromise({
-    try: async () => {
-      const [record] = await database
-        .select({ organizationId: apps.organizationId })
-        .from(apps)
-        .where(eq(apps.id, appId));
-
-      return record?.organizationId ?? null;
+// Icons are SVG, ICO or PNG from apps and templates: never sniffed, scripted or embedded elsewhere.
+export const iconResponse = (
+  icon: { bytes: Uint8Array; contentType: string },
+  cacheControl: string,
+) =>
+  new Response(Buffer.from(icon.bytes), {
+    headers: {
+      "content-type": icon.contentType,
+      "cache-control": cacheControl,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "cross-origin-resource-policy": "same-origin",
     },
-    catch: (cause) => new DatabaseUnavailable({ message: "Could not read the app", cause }),
   });
+
+// An icon URL that names the active deployment never changes; others revalidate.
+export const iconCache = (requested: string | null, deploymentId: string) =>
+  requested === deploymentId ? "private, max-age=31536000, immutable" : "private, no-cache";
 
 // Read only the selected app's active artifact, never fetch an app URL or bypass its login.
 // Members also see the icons of apps the catalog and My connections list for them.

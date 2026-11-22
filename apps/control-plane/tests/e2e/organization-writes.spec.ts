@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
-import { apps, deployments, organizationRuntimes } from "../../src/lib/server/schema.ts";
+import { apps, artifacts, deployments, organizationRuntimes } from "../../src/lib/server/schema.ts";
+import { hashAsset } from "../../src/lib/server/asset-hash.ts";
+import { workerMetadata } from "@platform/contracts";
 import { seedDeployment } from "../cloudflare-deployment.fixture.ts";
 import { decryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { storedAppSecrets } from "../../src/lib/server/app-secrets.ts";
@@ -15,6 +17,7 @@ import {
   DeleteBucketCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
+  PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { createTestEnvironment } from "../environment.ts";
 
@@ -492,6 +495,91 @@ for (const javaScriptEnabled of [true, false]) {
     }
   });
 }
+
+test("serves app icons from the workspace address of the app's organization", async ({
+  browser,
+}) => {
+  const { person, alpha, beta, context } = await organizationSession(browser, false);
+  const appId = crypto.randomUUID();
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+  const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  const hash = hashAsset("/favicon.svg", bytes);
+
+  try {
+    await environment.database.db.insert(apps).values({
+      id: appId,
+      organizationId: alpha,
+      ownerId: person.id,
+      slug: "icon-app",
+      displayName: "Icon app",
+      hostname: `icon-app-${alpha}.apps.localhost`,
+    });
+    await environment.database.db.insert(artifacts).values({
+      id: artifactId,
+      appId,
+      manifest: { "/favicon.svg": { hash, size: bytes.length } },
+      modules: [],
+      metadata: workerMetadata.parse({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        assets: { upload_session: artifactId },
+      }),
+    });
+    await environment.database.db.insert(deployments).values({
+      id: deploymentId,
+      appId,
+      artifactId,
+      status: "succeeded",
+      requestId: crypto.randomUUID(),
+    });
+    await environment.database.db
+      .update(apps)
+      .set({ state: "active", webEnabled: true, activeDeploymentId: deploymentId })
+      .where(eq(apps.id, appId));
+    await storage.send(
+      new PutObjectCommand({
+        Bucket: environment.environment.S3_BUCKET,
+        Key: `apps/${appId}/assets/${hash}`,
+        Body: bytes,
+      }),
+    );
+    const icon = `/apps/${appId}/icon?deployment=${deploymentId}`;
+
+    const response = await context.request.get(`/${alpha}${icon}`);
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toBe("image/svg+xml");
+    expect(response.headers()["cache-control"]).toBe("private, max-age=31536000, immutable");
+    expect(new Uint8Array(await response.body())).toEqual(bytes);
+
+    // Another organization's address does not reveal the app, and invalid IDs are missing too.
+    for (const path of [`/${beta}${icon}`, "/unknown-organization" + icon, `/${alpha}/apps/x/icon`])
+      expect((await context.request.get(path)).status(), path).toBe(404);
+
+    // Without a session, existing and missing apps both lead to sign-in.
+    const anonymous = await browser.newContext({
+      baseURL: environment.configuration.PLATFORM_URL,
+    });
+
+    try {
+      for (const id of [appId, crypto.randomUUID()]) {
+        const signIn = await anonymous.request.get(`/${alpha}/apps/${id}/icon`, {
+          maxRedirects: 0,
+        });
+
+        expect(signIn.status()).toBe(303);
+        expect(new URL(signIn.headers()["location"] ?? "", "http://localhost").pathname).toBe(
+          "/sign-in",
+        );
+      }
+    } finally {
+      await anonymous.close();
+    }
+  } finally {
+    await environment.database.db.delete(apps).where(eq(apps.id, appId));
+    await context.close();
+  }
+});
 
 test("switches organizations from the sidebar menu", async ({ browser }) => {
   const { alpha, beta, context } = await organizationSession(browser, true);

@@ -14,7 +14,7 @@ import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { readInstallation } from "./installation-store.ts";
 import { templateCatalog, readTemplate, readTemplateIcon } from "./app-templates.ts";
-import { readAppIcon, readAppOrganization } from "./app-icons.ts";
+import { iconCache, iconResponse, readAppIcon } from "./app-icons.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
 import { readCompanyAccount } from "./settings-account.ts";
@@ -87,18 +87,6 @@ const idempotencyKey = (request: Request) => {
 
   return parsed.data;
 };
-
-// Icons are SVG, ICO or PNG from apps and templates: never sniffed, scripted or embedded elsewhere.
-const iconResponse = (icon: { bytes: Uint8Array; contentType: string }, cacheControl: string) =>
-  new Response(Buffer.from(icon.bytes), {
-    headers: {
-      "content-type": icon.contentType,
-      "cache-control": cacheControl,
-      "x-content-type-options": "nosniff",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-      "cross-origin-resource-policy": "same-origin",
-    },
-  });
 
 export const createApi = (runtime: Runtime) => {
   const principals = new WeakMap<Request, Principal>();
@@ -1056,33 +1044,17 @@ export const createApi = (runtime: Runtime) => {
     const icon = /^\/api\/v1\/apps\/([^/]+)\/icon$/.exec(url.pathname);
 
     if (icon && request.method === "GET") {
-      const appId = contract.identifier.parse(icon[1]);
-      // Browsers load icons without headers, so the app names its organization.
-      const organizationId = unwrap(await readAppOrganization(runtime.database.db, appId));
-
-      const member = organizationId
-        ? await runtime.identity.authenticateIn(request, "platform:read", organizationId)
-        : null;
-
-      // Apps of other organizations look the same as missing ones.
-      if (
-        !member ||
-        (member.isErr() && "code" in member.error && member.error.code === "FORBIDDEN")
-      )
-        throw new ORPCError("NOT_FOUND", { message: "App icon not found" });
-      const principal = unwrap(member);
+      const principal = unwrap(await runtime.identity.authenticate(request, "platform:read"));
       principals.set(request, principal);
+      const appId = contract.identifier.parse(icon[1]);
 
       const result = unwrap(
         await readAppIcon(runtime.database.db, runtime.storage, principal, appId),
       );
 
-      // An icon URL that names the active deployment never changes; others revalidate.
       return iconResponse(
         result,
-        url.searchParams.get("deployment") === result.deploymentId
-          ? "private, max-age=31536000, immutable"
-          : "private, no-cache",
+        iconCache(url.searchParams.get("deployment"), result.deploymentId),
       );
     }
 

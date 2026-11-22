@@ -360,10 +360,12 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     expect(await identity.authenticate(request, "platform:read")).toMatchObject({
       error: { code: "FORBIDDEN" },
     });
-    expect(await identity.authenticateIn(request, "platform:read", secondOrg)).toMatchObject({
-      error: { code: "FORBIDDEN" },
+
+    const own = new Request(request, {
+      headers: { ...headers, "x-widefleet-organization": firstOrg },
     });
-    expect((await identity.authenticateIn(request, "platform:read", firstOrg)).isOk()).toBe(true);
+
+    expect((await identity.authenticate(own, "platform:read")).isOk()).toBe(true);
   });
 
   it.each(["/link-social", "/unlink-account", "/get-access-token", "/refresh-token"])(

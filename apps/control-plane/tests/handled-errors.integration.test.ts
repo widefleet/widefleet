@@ -88,20 +88,6 @@ it.each(["GET", "PUT"])("reports database errors once for %s API requests", asyn
   expect(exception).not.toHaveBeenCalled();
 });
 
-it("reports a database outage while finding an app icon's organization as unavailable", async () => {
-  const original = new Error("Database disconnected");
-  vi.spyOn(runtime.database.db, "select").mockImplementation(() => {
-    throw original;
-  });
-
-  const response = await createApi(runtime)(
-    new Request(`http://localhost/api/v1/apps/${crypto.randomUUID()}/icon`),
-  );
-
-  expect(response.status).toBe(503);
-  expect(exception).toHaveBeenCalledOnce();
-});
-
 it.each([false, true])(
   "captures internal authentication failures including APIError: %s",
   async (apiError) => {

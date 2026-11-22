@@ -261,19 +261,6 @@ export const createIdentityService = (
       return Result.ok(principal);
     });
 
-  // Some resources name their organization themselves, such as an app's icon that a browser
-  // loads without headers.
-  const authenticateIn = (
-    request: Request,
-    scope: "platform:read" | "platform:write",
-    organizationId: string,
-  ) =>
-    Result.gen(async function* () {
-      const verified = yield* Result.await(verify(request, scope));
-
-      return resolveUser(verified.userId, organizationId, verified.identityOrganizationId);
-    });
-
   const listOrganizations = (userId: string, identityOrganizationId: string | null) =>
     Result.gen(async function* () {
       const records = yield* Result.await(memberships(userId, identityOrganizationId));
@@ -301,7 +288,6 @@ export const createIdentityService = (
 
   return {
     authenticate,
-    authenticateIn,
     organizations,
     authenticateUser: verify,
     principal: resolveUser,

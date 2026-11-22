@@ -2732,7 +2732,7 @@ test.describe("workspace experience", () => {
             webEnabled: kind !== "service",
           })
           .where(eq(apps.id, record.id));
-      await page.route(`**/api/v1/apps/${record.id}/icon?*`, (route) => {
+      await page.route(`**/widefleet/apps/${record.id}/icon?*`, (route) => {
         iconRequests.push(kind);
 
         return route.fulfill({
