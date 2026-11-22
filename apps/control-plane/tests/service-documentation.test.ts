@@ -304,6 +304,25 @@ native(
   },
 );
 
+native("keeps the names of aliases an alias refers to", async () => {
+  const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    type Comparator = { eq?: string; in?: string[] };
+    type Filter = { title?: Comparator | null; and?: Filter[] };
+    export class Reader extends WorkerEntrypoint {
+      find(filter: Filter) { return filter; }
+    }`);
+
+  const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+  expect(result.warnings).toEqual([]);
+  const filter = result.documentation.types.find((type) => type.name === "Filter");
+  expect(filter?.definition).toContain("title?: Comparator | null");
+  expect(filter?.definition).not.toContain("eq?: string");
+  expect(filter?.uses).toEqual(["Comparator"]);
+  expect(
+    result.documentation.types.find((type) => type.name === "Comparator")?.definition,
+  ).toContain("eq?: string");
+});
+
 native("documents generic type aliases with their own structure", async () => {
   const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
     interface Role { name: string }

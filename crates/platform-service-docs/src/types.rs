@@ -323,9 +323,10 @@ impl Types {
                 let verbosity = P::new(VerbosityContext::default());
                 verbosity.level.set(1);
                 verbosity.max_truncation_length.set(crate::MAX_TEXT);
-                let mut definition = if generic && node.kind() == ast::Kind::TypeAliasDeclaration {
-                    // A generic alias prints its own structure; references inside it, including
-                    // to itself, keep their names, as a declaration file writes them.
+                let mut definition = if node.kind() == ast::Kind::TypeAliasDeclaration {
+                    // An alias prints its own structure; references inside it, including to
+                    // itself and to other aliases, keep their names, as a declaration file
+                    // writes them.
                     self.relative_imports(checker.type_to_string_ex_exported(
                         value,
                         None,
