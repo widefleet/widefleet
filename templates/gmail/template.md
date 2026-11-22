@@ -135,12 +135,16 @@ their account on the Gmail app's page.
 
 `src/api.ts` and `src/schema.ts` are generated from Google's Discovery document for
 the Gmail API by the template generator in the Widefleet repository. To pick up
-Google's changes, run from a checkout of that repository:
+Google's changes in your app, run from a checkout of that repository with your app's
+directory:
 
 ```sh
-pnpm --filter @platform/template-generator generate gmail
+pnpm --filter @platform/template-generator generate /path/to/your/app
 ```
 
-The generator stops when Google adds a method that changes data and
-`scripts/operations.ts` does not list yet: add it with the kind of change it makes,
-or with the reason it is not offered. Review the diff before deploying.
+The generator reads your app's `scripts/operations.ts` and rewrites `src/api.ts`,
+`src/schema.ts` and the shared files it copies into `src`, such as `src/google.ts`
+and `src/approval.ts`. Keep your own changes out of these files. The generator stops
+when Google adds a method that changes data and `scripts/operations.ts` does not list
+yet: add it with the kind of change it makes, or with the reason it is not offered.
+Review the diff before deploying.
