@@ -9,6 +9,7 @@ import {
   selectServiceMethods,
   serviceDescriptionBudget,
   serviceDocumentation,
+  shortenTypeNames,
   workerMetadata,
 } from "@platform/contracts";
 import { extractServiceDocumentation } from "./service-documentation-fixture.ts";
@@ -942,7 +943,7 @@ it("includes the types a selection names and further types within the budget", (
   expect(selection(["Big", "Tiny"])?.omittedTypes).toEqual([]);
 });
 
-it("renders replacement advice, examples and short names on referenced types", () => {
+it("renders replacement advice, examples and short names of referenced types", () => {
   const docs = serviceDocumentation.parse({
     format: 3,
     entrypoints: [],
@@ -959,7 +960,7 @@ it("renders replacement advice, examples and short names on referenced types", (
     ],
   });
 
-  const [type] = presentServiceDocumentation(docs).types;
+  const [type] = presentServiceDocumentation(shortenTypeNames(docs)).types;
   expect(type?.name).toBe("Query");
   expect(type?.definition).toBe("type Query = { id: string; next?: Query };");
   expect(type?.description).toContain("Deprecated: Use ItemQuery for new integrations.");
@@ -1001,6 +1002,11 @@ it("shortens only unambiguous documented type references", () => {
                   type: 'Promise<[import("./app/model").Item, import("./shared/model").Item, import("./app/page").Page<import("./app/query").Query>]>',
                   description: "Matching items.\n\n```ts\nconst [item] = result;\n```",
                 },
+                uses: [
+                  'import("./app/query").Query',
+                  'import("./app/page").Page<import("./app/query").Query>',
+                  'import("./app/model").Item',
+                ],
               },
             ],
           },
@@ -1021,6 +1027,7 @@ it("shortens only unambiguous documented type references", () => {
         name: 'import("./app/page").Page<import("./app/query").Query>',
         kind: "type",
         definition: '{ items: import("./app/query").Query[] }',
+        uses: ['import("./app/query").Query'],
         summary: "",
         remarks: "",
         examples: [],
@@ -1036,9 +1043,18 @@ it("shortens only unambiguous documented type references", () => {
     ],
   });
 
-  const reference = presentServiceDocumentation(docs);
+  const shortened = shortenTypeNames(docs);
+  const reference = presentServiceDocumentation(shortened);
   const [signature] = reference.entrypoints[0]?.methods[0]?.signatures ?? [];
 
+  // Names, references and uses change together; a second pass changes nothing.
+  expect(shortenTypeNames(shortened)).toEqual(shortened);
+  expect(shortened.entrypoints[0]?.methods[0]?.signatures[0]?.uses).toEqual([
+    "Query",
+    "Page<Query>",
+    'import("./app/model").Item',
+  ]);
+  expect(shortened.types[1]?.uses).toEqual(["Query"]);
   expect(reference.types.map((type) => type.name)).toEqual([
     "Query",
     "Page<Query>",

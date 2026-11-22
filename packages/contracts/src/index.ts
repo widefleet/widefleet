@@ -4,6 +4,8 @@ export { workerHostname } from "./hostnames.ts";
 
 export * from "./source.ts";
 
+export { shortenTypeNames } from "./service-type-names.ts";
+
 import { z } from "zod";
 import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
 

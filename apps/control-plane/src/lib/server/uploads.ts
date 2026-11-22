@@ -215,7 +215,11 @@ export const createUploadService = (
             code: "BAD_REQUEST",
             message: "Documentation must reference unique published entrypoints",
           });
-        const encoded = documentation ? encodeDocumentation(documentation) : null;
+
+        // Stored once with the short names every reader shows and accepts.
+        const encoded = documentation
+          ? encodeDocumentation(contract.shortenTypeNames(documentation))
+          : null;
 
         const artifactId = session.id;
 
