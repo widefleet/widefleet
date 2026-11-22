@@ -1,19 +1,24 @@
-import type { serviceDocumentation } from "@platform/contracts";
+import { summaryLine, type serviceDocumentation } from "@platform/contracts";
 import type { z } from "zod";
 
 type EntrypointDocumentation = z.infer<typeof serviceDocumentation>["entrypoints"][number];
 
-export interface SearchableService {
+type MethodDocumentation = EntrypointDocumentation["methods"][number];
+
+export interface SearchableMethod {
   appId: string;
   hostname: string;
   entrypoint: string;
+  method: string;
   summary: string;
-  // Space-separated words from serviceTerms, precomputed when the index is written.
+  // Space-separated words from methodTerms, precomputed when the index is written.
   terms: string;
 }
 
 export interface SearchRequest {
   query: string;
+  hostname?: string | undefined;
+  entrypoint?: string | undefined;
   limit: number;
   offset: number;
 }
@@ -38,37 +43,33 @@ const words = (text: string) =>
 
 // Bounds an index entry independently of documentation size. Names come first,
 // so long prose cannot push method or parameter names out of the budget.
-const maximumTerms = 2048;
+const maximumTerms = 256;
 
-export const serviceTerms = (
+export const methodTerms = (
   hostname: string,
-  entrypoint: string,
-  documentation: EntrypointDocumentation | undefined,
+  entrypoint: EntrypointDocumentation,
+  method: MethodDocumentation,
 ) => {
-  const methods = documentation?.methods ?? [];
-
-  const parameters = methods.flatMap((method) =>
-    method.signatures.flatMap((signature) => signature.parameters),
-  );
+  const parameters = method.signatures.flatMap((signature) => signature.parameters);
 
   return words(
     [
-      hostname,
-      entrypoint,
-      ...methods.map((method) => method.name),
+      method.name,
       ...parameters.map((parameter) => parameter.name),
-      documentation?.summary,
-      ...methods.map((method) => method.summary),
+      hostname,
+      entrypoint.name,
+      method.summary,
       ...parameters.map((parameter) => parameter.description),
-      documentation?.remarks,
+      // Shared by every method of the entrypoint, so only its first line counts.
+      summaryLine(entrypoint.summary),
     ].join(" "),
   )
     .slice(0, maximumTerms)
     .join(" ");
 };
 
-// Okapi BM25 over the services the caller may see. Any query word qualifies a
-// service; services matching more and rarer words rank first.
+// Okapi BM25 over the methods the caller may see. Any query word qualifies a
+// method; methods matching more and rarer words rank first.
 const score = (documents: string[][], query: string[]) => {
   const k1 = 1.2;
   const b = 0.75;
@@ -106,40 +107,45 @@ const score = (documents: string[][], query: string[]) => {
   );
 };
 
-const order = (left: SearchableService, right: SearchableService) =>
+const order = (left: SearchableMethod, right: SearchableMethod) =>
   left.hostname.localeCompare(right.hostname, "en") ||
-  left.entrypoint.localeCompare(right.entrypoint, "en");
+  left.entrypoint.localeCompare(right.entrypoint, "en") ||
+  left.method.localeCompare(right.method, "en");
 
-// Ranks every permitted service before paging, so the first page holds the best matches.
-export const rankServices = (services: SearchableService[], request: SearchRequest) => {
+// Ranks every permitted method before paging, so the first page holds the best matches.
+export const rankMethods = (methods: SearchableMethod[], request: SearchRequest) => {
   const query = [...new Set(words(request.query))];
-  const hostname = request.query.trim().toLowerCase();
-  const exact = services.filter((service) => service.hostname === hostname);
-  let ranked: SearchableService[];
 
-  if (exact.length) ranked = exact.toSorted(order);
-  else if (!query.length) ranked = services.toSorted(order);
+  const candidates = methods.filter(
+    (method) =>
+      (request.hostname === undefined || method.hostname === request.hostname) &&
+      (request.entrypoint === undefined || method.entrypoint === request.entrypoint),
+  );
+
+  let ranked: SearchableMethod[];
+
+  if (!query.length) ranked = candidates.toSorted(order);
   else {
     const scores = score(
-      services.map((service) => service.terms.split(" ").filter(Boolean)),
+      candidates.map((method) => method.terms.split(" ").filter(Boolean)),
       query,
     );
 
-    ranked = services
-      .flatMap((service, index) => {
+    ranked = candidates
+      .flatMap((method, index) => {
         const value = scores[index] ?? 0;
 
-        return value > 0 ? [{ service, score: value }] : [];
+        return value > 0 ? [{ method, score: value }] : [];
       })
-      .sort((left, right) => right.score - left.score || order(left.service, right.service))
-      .map((entry) => entry.service);
+      .sort((left, right) => right.score - left.score || order(left.method, right.method))
+      .map((entry) => entry.method);
   }
 
   const page = ranked.slice(request.offset, request.offset + request.limit);
   const remaining = Math.max(0, ranked.length - request.offset - page.length);
 
   return {
-    services: page,
+    methods: page,
     remaining,
     next: remaining ? { ...request, offset: request.offset + page.length } : null,
   };

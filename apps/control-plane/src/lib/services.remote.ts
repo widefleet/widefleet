@@ -20,7 +20,7 @@ export const getServiceDescription = query(
   contract.servicePath.extend(contract.organizationSelection.shape),
   async ({ service, organizationId }) => {
     const { runtime, principal } = await remoteContext({ organizationId });
-    const description = queryValue(await runtime.connections.describe(principal, service));
+    const description = queryValue(await runtime.connections.reference(principal, service));
 
     return {
       ...description,

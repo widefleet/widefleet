@@ -7,7 +7,13 @@ export * from "./source.ts";
 import { z } from "zod";
 import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
 
-import { serviceDocumentation } from "./service-documentation.ts";
+import {
+  appRpcMethod,
+  serviceDescriptionMaxMethods,
+  serviceDocumentation,
+  serviceMethodSelection,
+  serviceMethodSummary,
+} from "./service-documentation.ts";
 
 export * from "./mcp.ts";
 
@@ -272,6 +278,12 @@ export const workerConfiguration = z.strictObject({
 
 export {
   appRpcMethod,
+  listServiceMethods,
+  selectServiceMethods,
+  serviceDescriptionMaxMethods,
+  serviceMethodSelection,
+  serviceMethodSummary,
+  summaryLine,
   serviceDocumentation,
   serviceDocumentationMaxBytes,
   serviceDocumentationPart,
@@ -428,12 +440,35 @@ export const serviceCatalogEntry = z.strictObject({
   accessMode: serviceAccessMode.default("approval_required"),
 });
 
-export const serviceDescription = serviceCatalogEntry.extend({
+/** An app API's complete documentation, as its reference page presents it. */
+export const serviceReference = serviceCatalogEntry.extend({
   deploymentId: identifier,
   documentation: serviceDocumentation.nullable(),
 });
 
+/**
+ * An app API's methods, and the documentation of the methods a caller selects
+ * with their types. Large APIs stay readable without loading the whole document.
+ */
+export const serviceDescription = serviceCatalogEntry.extend({
+  deploymentId: identifier,
+  documented: z.boolean(),
+  methods: z.array(serviceMethodSummary),
+  documentation: serviceMethodSelection.nullable(),
+});
+
 export const servicePath = z.strictObject({ service: z.string().min(1).max(128) });
+
+export const serviceDescriptionQuery = servicePath.extend({
+  entrypoint: bindingName.default("default"),
+  // Comma-separated method names; method names cannot contain commas.
+  methods: z
+    .string()
+    .max(serviceDescriptionMaxMethods * 129)
+    .transform((value) => value.split(","))
+    .pipe(z.array(appRpcMethod).min(1).max(serviceDescriptionMaxMethods))
+    .optional(),
+});
 
 export const capabilityGrant = z.strictObject({
   app: identifier,

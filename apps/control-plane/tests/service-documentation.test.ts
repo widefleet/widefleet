@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { executionWorkerMetadata, serviceDocumentation, workerMetadata } from "@platform/contracts";
+import {
+  executionWorkerMetadata,
+  selectServiceMethods,
+  serviceDocumentation,
+  workerMetadata,
+} from "@platform/contracts";
 import { extractServiceDocumentation } from "./service-documentation-fixture.ts";
 import { presentServiceDocumentation } from "../src/lib/server/service-documentation.ts";
 
@@ -276,6 +281,11 @@ native(
     expect(
       methods?.find((method) => method.name === "read")?.signatures[0]?.parameters[1]?.type,
     ).toBe("Map<string, Item>");
+    expect(
+      selectServiceMethods(result.documentation, "default", ["read"]).selection?.types.map(
+        (type) => type.name,
+      ),
+    ).toEqual(expect.arrayContaining(["Item", "Page<Item>"]));
   },
 );
 
@@ -371,11 +381,17 @@ native("qualifies conflicting names without discarding either type", async () =>
     ["first", "One.Item"],
     ["second", "Two.Item"],
     ["repeated", "One.Item"],
-  ])
+  ] as const) {
     expect(
       result.documentation.entrypoints[0]?.methods.find((item) => item.name === method)
         ?.signatures[0]?.returns.type,
     ).toBe(`Promise<${type}>`);
+    expect(
+      selectServiceMethods(result.documentation, "Reader", [method]).selection?.types.map(
+        (entry) => entry.name,
+      ),
+    ).toEqual([type]);
+  }
 });
 
 native.each([false, true])(
@@ -699,6 +715,87 @@ native(
     }
   },
 );
+
+it("selects the types a method uses under every generated name form", () => {
+  const type = (name: string, definition: string) => ({
+    name,
+    definition,
+    summary: "",
+    remarks: "",
+    examples: [],
+  });
+
+  const method = (name: string, parameter: string, returns: string) => ({
+    name,
+    summary: "",
+    remarks: "",
+    examples: [],
+    throws: [],
+    signatures: [
+      {
+        parameters: [
+          { name: "input", type: parameter, description: "", optional: false, rest: false },
+        ],
+        returns: { type: returns, description: "" },
+      },
+    ],
+  });
+
+  // Names as the extractor renders them: plain, namespaced, generic and qualified.
+  const documentation = serviceDocumentation.parse({
+    format: 1,
+    entrypoints: [
+      {
+        name: "Reader",
+        summary: "",
+        remarks: "",
+        examples: [],
+        http: false,
+        methods: [
+          method("first", "One.Item", "Promise<Page<Item>>"),
+          method("details", "One.ItemDetails", "Promise<Two.Item>"),
+          method(
+            "qualified",
+            'import("./app/query").Query',
+            'Promise<import("./app/page").Page<import("./app/query").Query>>',
+          ),
+          method("other", "string", "Promise<Unused>"),
+        ],
+      },
+    ],
+    types: [
+      type("One.Item", "interface Item { id: string }"),
+      type("Page<Item>", "interface Page { items: Item[] }"),
+      type("Item", "interface Item { owner: Owner }"),
+      type("Owner", "interface Owner { name: string }"),
+      type('import("./app/query").Query', "interface Query { text: string }"),
+      type(
+        'import("./app/page").Page<import("./app/query").Query>',
+        "interface Page { items: Query[] }",
+      ),
+      type("Unused", "interface Unused { id: string }"),
+      type("One.ItemDetails", "interface ItemDetails { notes: string }"),
+      type("Two.Item", "interface Item { count: number }"),
+    ],
+  });
+
+  const selected = (methods: string[]) =>
+    selectServiceMethods(documentation, "Reader", methods).selection?.types.map(
+      (entry) => entry.name,
+    );
+
+  expect(selected(["first"])).toEqual(["One.Item", "Page<Item>", "Item", "Owner"]);
+  // A longer name or another namespace's type does not pull in a shorter name.
+  expect(selected(["details"])).toEqual(["One.ItemDetails", "Two.Item"]);
+  expect(selected(["qualified"])).toEqual([
+    'import("./app/query").Query',
+    'import("./app/page").Page<import("./app/query").Query>',
+  ]);
+  expect(selectServiceMethods(documentation, "Reader", ["first", "missing"])).toEqual({
+    unknown: ["missing"],
+    selection: null,
+  });
+});
 
 it("renders replacement advice, examples and short names on referenced types", () => {
   const docs = serviceDocumentation.parse({

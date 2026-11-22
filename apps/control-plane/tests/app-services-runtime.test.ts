@@ -713,18 +713,23 @@ export default { async fetch(request, env, ctx) {
         ],
       });
 
+      const selection = {
+        hostname: service.hostname,
+        entrypoint: service.entrypoint,
+        methods: [service.method],
+      };
+
       const described = async () => {
-        const response = await rpc("describe", {
-          hostname: service.hostname,
-          entrypoint: service.entrypoint,
-        });
+        const response = await rpc("describe", selection);
 
         expect(response.isError, response.content[0]?.text).not.toBe(true);
 
         return z.json().parse(JSON.parse(response.content[0]?.text ?? "null"));
       };
 
-      expect(await described()).toMatchObject({ documentation: null, types: [] });
+      const undocumented = await rpc("describe", selection);
+      expect(undocumented.isError).toBe(true);
+      expect(undocumented.content[0]?.text).toContain("no API documentation");
 
       const documented = await publish(targetId, target("v1"), "v1", {}, {}, docs);
 
@@ -735,22 +740,28 @@ export default { async fetch(request, env, ctx) {
       });
       const search = await rpc("search", { query: "inventory records" });
       expect(JSON.parse(search.content[0]?.text ?? "null")).toMatchObject({
-        services: [{ hostname: service.hostname, summary: "Read inventory records" }],
+        methods: [
+          {
+            hostname: service.hostname,
+            entrypoint: "Reader",
+            method: "read",
+            summary: "Read one record",
+          },
+        ],
       });
+      const unknown = await rpc("describe", { ...selection, methods: ["write"] });
+      expect(unknown.isError).toBe(true);
+      expect(unknown.content[0]?.text).toContain("Search with this hostname and entrypoint");
 
-      const denied = await rpc(
-        "describe",
-        { hostname: service.hostname, entrypoint: service.entrypoint },
-        await issue("bob"),
-      );
+      const denied = await rpc("describe", selection, await issue("bob"));
 
       expect(denied.isError).toBe(true);
       const hidden = await rpc("search", { limit: 50 }, await issue("bob"));
       expect(
         z
-          .object({ services: z.array(z.object({ hostname: z.string() })) })
+          .object({ methods: z.array(z.object({ hostname: z.string() })) })
           .parse(JSON.parse(hidden.content[0]?.text ?? "null"))
-          .services.map((entry) => entry.hostname),
+          .methods.map((entry) => entry.hostname),
       ).not.toContain(service.hostname);
       expect(
         (
@@ -1013,11 +1024,20 @@ export default { async fetch(request, env, ctx) {
         format: 1,
         entrypoints: entrypoints.map((name) => ({
           name,
-          summary: "x".repeat(7000) + "search-pagination-marker",
+          summary: "",
           remarks: "",
           examples: [],
           http: false,
-          methods: [],
+          methods: [
+            {
+              name: "read",
+              summary: "x".repeat(7000) + "search-pagination-marker",
+              remarks: "",
+              examples: [],
+              throws: [],
+              signatures: [{ parameters: [], returns: { type: "void", description: "" } }],
+            },
+          ],
         })),
         types: [],
       });
@@ -1035,8 +1055,13 @@ export default { async fetch(request, env, ctx) {
       }
 
       const searchPage = z.object({
-        services: z.array(
-          z.object({ hostname: z.string(), entrypoint: z.string(), summary: z.string() }),
+        methods: z.array(
+          z.object({
+            hostname: z.string(),
+            entrypoint: z.string(),
+            method: z.string(),
+            summary: z.string(),
+          }),
         ),
         remaining: z.number(),
         next: z.object({ query: z.string(), limit: z.number(), offset: z.number() }).nullable(),
@@ -1058,7 +1083,7 @@ export default { async fetch(request, env, ctx) {
         expect(pageResult.isError, pageResult.content[0]?.text).not.toBe(true);
         const page = searchPage.parse(JSON.parse(pageResult.content[0]?.text ?? "null"));
 
-        for (const entry of page.services) {
+        for (const entry of page.methods) {
           expect(entry.summary).toHaveLength(256);
           found.add(`${entry.hostname}/${entry.entrypoint}`);
         }
@@ -1084,7 +1109,7 @@ export default { async fetch(request, env, ctx) {
       // A publisher that could not refresh the index must not expose a removed route.
       await request("/unpublish", { hostname: removed, refresh: false });
       const unrefreshed = await marker();
-      expect(unrefreshed.services.map((entry) => entry.hostname)).not.toContain(removed);
+      expect(unrefreshed.methods.map((entry) => entry.hostname)).not.toContain(removed);
       expect(unrefreshed.remaining).toBe(12 * 32 - 50);
 
       await request("/unpublish", { hostname: removed, refresh: true });
@@ -1093,7 +1118,7 @@ export default { async fetch(request, env, ctx) {
       // Other services must not push a distinctive match off the first page.
       const inventory = await rpc("search", { query: "inventory" });
       expect(JSON.parse(inventory.content[0]?.text ?? "null")).toMatchObject({
-        services: [{ hostname: service.hostname, entrypoint: service.entrypoint }],
+        methods: [{ hostname: service.hostname, entrypoint: service.entrypoint, method: "read" }],
         remaining: 0,
         next: null,
       });
@@ -1115,7 +1140,7 @@ export default { async fetch(request, env, ctx) {
       const inventorySearch = async () =>
         z
           .object({
-            services: z.array(z.object({ hostname: z.string() })),
+            methods: z.array(z.object({ hostname: z.string() })),
             complete: z.boolean(),
           })
           .parse(
@@ -1126,11 +1151,11 @@ export default { async fetch(request, env, ctx) {
       // organizations sort first, so the first rebuild spans several searches.
       await request("/foreign-routes", { count: 450 });
       await request("/drop-index");
-      expect(await inventorySearch()).toEqual({ services: [], complete: false });
-      expect(await inventorySearch()).toEqual({ services: [], complete: false });
+      expect(await inventorySearch()).toEqual({ methods: [], complete: false });
+      expect(await inventorySearch()).toEqual({ methods: [], complete: false });
 
       expect(await inventorySearch()).toEqual({
-        services: [{ hostname: service.hostname }],
+        methods: [{ hostname: service.hostname }],
         complete: true,
       });
 
@@ -1139,12 +1164,12 @@ export default { async fetch(request, env, ctx) {
       // A daily rebuild keeps serving the previous index but is not complete
       // until it has read every route.
       await request("/expire-index");
-      const rebuilding = { services: [{ hostname: service.hostname }], complete: false };
+      const rebuilding = { methods: [{ hostname: service.hostname }], complete: false };
       expect(await inventorySearch()).toEqual(rebuilding);
       expect(await inventorySearch()).toEqual(rebuilding);
 
       expect(await inventorySearch()).toEqual({
-        services: [{ hostname: service.hostname }],
+        methods: [{ hostname: service.hostname }],
         complete: true,
       });
 

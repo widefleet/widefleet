@@ -596,7 +596,19 @@ test("shows versioned service documentation through authenticated API and access
   expect(description.ok()).toBe(true);
   expect(await description.json()).toMatchObject({
     deploymentId,
-    documentation,
+    methods: [{ entrypoint: "Reader", name: "findItems", summary: "Find matching items." }],
+    documentation: null,
+  });
+
+  const selected = await context.request.get(
+    `/api/v1/app-services/${record.slug}?entrypoint=Reader&methods=findItems`,
+  );
+
+  expect(await selected.json()).toMatchObject({
+    documentation: {
+      entrypoint: { name: "Reader", methods: [{ name: "findItems" }] },
+      types: [{ name: "InventoryItem" }],
+    },
   });
   await page.goto("/widefleet/services");
   await page

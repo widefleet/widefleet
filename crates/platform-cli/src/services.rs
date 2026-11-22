@@ -18,8 +18,16 @@ pub struct Catalog {
 
 #[derive(Subcommand)]
 enum CatalogCommand {
-    /// Describe the methods and types in an app's active deployment.
-    Describe { app: String },
+    /// List the methods of an app's active deployment, or describe selected methods and their types.
+    Describe {
+        app: String,
+        /// Entrypoint of the methods to describe.
+        #[arg(long, default_value = "default")]
+        entrypoint: String,
+        /// Method to describe with its signatures and types; repeat for several methods.
+        #[arg(long = "method", value_name = "NAME")]
+        methods: Vec<String>,
+    },
     /// Set who may connect to an API (organization administrators only).
     Access {
         app: String,
@@ -101,9 +109,19 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
     let token = auth::access_token(api, credentials).await?;
     if let Some(command) = options.command {
         let request = match command {
-            CatalogCommand::Describe { app } => {
+            CatalogCommand::Describe {
+                app,
+                entrypoint,
+                methods,
+            } => {
                 let service = app_bindings::segment(&app)?;
-                api.authenticated(Method::GET, &format!("/app-services/{service}"), &token)
+                let request =
+                    api.authenticated(Method::GET, &format!("/app-services/{service}"), &token);
+                if methods.is_empty() {
+                    request
+                } else {
+                    request.query(&[("entrypoint", entrypoint), ("methods", methods.join(","))])
+                }
             }
             CatalogCommand::Access { app, mode } => {
                 let target = resolve_service(api, &token, &app).await?;
