@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-18
+lastModified: 2026-11-23
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -135,12 +135,20 @@ Starting from the caller app's **Connections → Browse app APIs** keeps that ap
 selected and skips the app-selection step. The UI, CLI and API show the same
 desired and active grants.
 
-Call the binding from server-side app code:
+Generate the binding's types from the provider's API documentation:
+
+```sh
+widefleet services types inventory-api --entrypoint Reader --as INVENTORY --output src/inventory.d.ts
+```
+
+The file declares an `INVENTORY` interface with the entrypoint's methods, their
+TSDoc and the types they use, including generic methods. Call the binding from
+server-side app code:
 
 ```ts
-type Environment = {
-  INVENTORY: { status(): Promise<{ configured: boolean }> };
-};
+import type { INVENTORY } from "./inventory.d.ts";
+
+type Environment = { INVENTORY: INVENTORY };
 
 export default {
   async fetch(_request: Request, env: Environment) {
@@ -151,6 +159,12 @@ export default {
 
 Deploy the caller and request its authenticated app URL. The response is
 `{"configured":true}`; the caller receives the result, not `API_TOKEN`.
+
+Add `--check` to the same command in CI. It fails when the file no longer matches
+the provider's active deployment; run the command without `--check` to update it.
+Types the documentation does not include, such as classes from packages, appear as
+`unknown` and are listed at the top of the file.
+
 Use the provider's own [network permissions](/guides/network) for outbound
 requests to an external system. Each app keeps its own D1, R2 and KV resources.
 
@@ -251,6 +265,9 @@ if (result.resultType === "input_required") {
   return env.OFFERS.withInput({ inputResponses, requestState: result.requestState }).send(offerId);
 }
 ```
+
+Generated binding types include `withInput` and type `requestState` as the string
+the caller passes back.
 
 The calling app passes `requestState` back unchanged; Widefleet keeps its contents
 private to the service. Answers reach only the same method with the same
@@ -410,6 +427,7 @@ All routes use normal OAuth authentication and the selected organization.
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Discover available apps and entrypoints          | `GET /api/v1/app-services`                                                                                                                 |
 | Read an active API description                   | `GET /api/v1/app-services/{slugOrAppId}`                                                                                                   |
+| Generate binding types                           | `GET /api/v1/app-services/{slugOrAppId}/types?binding=INVENTORY&entrypoint=Reader`                                                         |
 | Set API availability                             | `PUT /api/v1/app-services/{appId}/access` with `{ "accessMode": "organization" }` or `{ "accessMode": "approval_required" }`               |
 | Request a connection                             | `POST /api/v1/connection-requests` with `{ "appId": "CALLER_UUID", "app": "TARGET_UUID", "binding": "INVENTORY", "entrypoint": "Reader" }` |
 | List connection requests                         | `GET /api/v1/connection-requests`                                                                                                          |
