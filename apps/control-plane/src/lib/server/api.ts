@@ -1058,7 +1058,7 @@ export const createApi = (runtime: Runtime) => {
     if (icon && request.method === "GET") {
       const appId = contract.identifier.parse(icon[1]);
       // Browsers load icons without headers, so the app names its organization.
-      const organizationId = await readAppOrganization(runtime.database.db, appId);
+      const organizationId = unwrap(await readAppOrganization(runtime.database.db, appId));
 
       const member = organizationId
         ? await runtime.identity.authenticateIn(request, "platform:read", organizationId)
