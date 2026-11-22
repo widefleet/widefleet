@@ -98,11 +98,11 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     environment.authControl.available(true);
     await page.getByRole("button", { name: "Activate Widefleet sign-in" }).click();
     await expect(page.getByText("Widefleet app sign-in is active.", { exact: true })).toBeVisible();
-    await page.goto("/welcome");
+    await page.goto("/widefleet/welcome");
     await expect(page.getByRole("heading", { name: "Publish your first app" })).toBeVisible();
     await page.getByRole("link", { name: "Organization settings", exact: true }).click();
     await expect(page.getByRole("link", { name: "Privacy", exact: true })).toHaveCount(0);
-    await page.goto("/settings?section=reporting");
+    await page.goto("/widefleet/settings?section=reporting");
     await page.waitForLoadState("networkidle");
     await expect(page).toHaveURL(/\/settings\/company-sign-in\?section=reporting$/);
     await expect(page.getByRole("link", { name: "Company sign-in", exact: true })).toHaveAttribute(
@@ -169,7 +169,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(page).toHaveURL(/\/settings\/company-sign-in$/);
     await expect(page.getByText("Required for all members", { exact: false })).toBeVisible();
-    await page.goto("/settings/company-sign-in");
+    await page.goto("/widefleet/settings/company-sign-in");
     await page.waitForLoadState("networkidle");
 
     const passwordLogin = await request.post("/api/auth/sign-in/email", {
@@ -178,16 +178,16 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     });
 
     expect(passwordLogin.status()).toBe(404);
-    await page.goto("/settings/administration");
+    await page.goto("/widefleet/settings/administration");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Manage settings externally" }).click();
-    await page.goto("/settings/company-sign-in");
+    await page.goto("/widefleet/settings/company-sign-in");
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("button", { name: "Edit configuration" })).toBeDisabled();
-    await page.goto("/settings/administration");
+    await page.goto("/widefleet/settings/administration");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Enable browser editing" }).click();
-    await page.goto("/settings/company-sign-in");
+    await page.goto("/widefleet/settings/company-sign-in");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Edit configuration" }).click();
     await expect(page).toHaveURL(/\/settings\/company-sign-in\?edit$/);
@@ -280,7 +280,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await expect(page.getByRole("heading", { name: "Company sign-in", exact: true })).toBeVisible();
     // The migrated connection has no email domain yet; add it to the domain list.
     await expect(page.getByLabel("Company email domain")).toHaveCount(0);
-    await page.goto("/settings/company-sign-in");
+    await page.goto("/widefleet/settings/company-sign-in");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Add domain", exact: true }).click();
     const addition = page.getByRole("dialog");
@@ -306,7 +306,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await expect(
       page.getByRole("list", { name: "Email domains" }).getByText("Verified", { exact: true }),
     ).toBeVisible();
-    await page.goto("/settings/company-sign-in");
+    await page.goto("/widefleet/settings/company-sign-in");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Test company sign-in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
@@ -343,7 +343,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
 
     await page.goto(replacementLink);
     await expect(page).toHaveURL(/\/settings\/company-sign-in$/);
-    await page.goto("/settings/company-sign-in");
+    await page.goto("/widefleet/settings/company-sign-in");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Edit configuration" }).click();
     await page

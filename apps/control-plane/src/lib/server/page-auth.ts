@@ -56,29 +56,14 @@ export const invitationIdentity = async (invitationId: string) => {
   return { userId: user.id, identityOrganizationId: session.identityOrganizationId ?? null };
 };
 
-export const pagePrincipal = async () => {
-  const { user, session } = getUserSession();
+const requestDestination = () => {
   const { url, request } = getRequestEvent();
-  const runtime = await getRuntime();
+
   // Like the sign-in redirect, a form post returns to its page without the action parameter.
-  const next = request.method === "GET" ? url.pathname + url.search : url.pathname;
+  return request.method === "GET" ? url.pathname + url.search : url.pathname;
+};
 
-  const result = await runtime.identity.principal(
-    user.id,
-    session.activeOrganizationId ?? null,
-    session.identityOrganizationId ?? null,
-    session.id,
-  );
-
-  if (result.isOk()) {
-    session.activeOrganizationId = result.value.application.organizationId;
-    runtime.reporting.active(result.value.id);
-
-    return result.value;
-  }
-
-  const cause = result.error;
-
+const memberFailure = (cause: AuthenticationFailed | DatabaseUnavailable, next: string): never => {
   if (cause._tag === "DatabaseUnavailable") return pageFailure(cause);
 
   if (cause.code === "SSO_REQUIRED")
@@ -93,6 +78,89 @@ export const pagePrincipal = async () => {
 
   return pageFailure(cause);
 };
+
+// Paths without an organization, such as the start page, open the session's organization:
+// the last workspace page opened or, before that, the member's only organization.
+export const sessionMember = async () => {
+  const { user, session } = getUserSession();
+  const runtime = await getRuntime();
+
+  const result = await runtime.identity.member(
+    user.id,
+    { organizationId: session.activeOrganizationId ?? null },
+    session.identityOrganizationId ?? null,
+    session.id,
+  );
+
+  if (result.isErr()) return memberFailure(result.error, requestDestination());
+  session.activeOrganizationId = result.value.organization.id;
+  runtime.reporting.active(result.value.principal.id);
+
+  return result.value;
+};
+
+// Workspace pages name their organization in the URL. Opening one makes it the session's
+// organization, so paths without an organization return to it. Organizations a person cannot
+// open resolve to null and look the same as organizations that do not exist.
+const resolvePageMember = async () => {
+  const { user, session } = getUserSession();
+  const { params } = getRequestEvent();
+  const runtime = await getRuntime();
+  const slug = params["organization"];
+
+  if (!slug) return null;
+
+  const result = await runtime.identity.member(
+    user.id,
+    { organizationSlug: slug },
+    session.identityOrganizationId ?? null,
+  );
+
+  if (result.isErr()) {
+    if (result.error._tag === "AuthenticationFailed" && result.error.code === "FORBIDDEN")
+      return null;
+
+    return memberFailure(result.error, requestDestination());
+  }
+
+  const { organization, principal } = result.value;
+
+  if (session.activeOrganizationId !== organization.id) {
+    const remembered = await runtime.identity.rememberOrganization(
+      session.id,
+      user.id,
+      organization.id,
+    );
+
+    if (remembered.isErr()) return pageFailure(remembered.error);
+    session.activeOrganizationId = organization.id;
+  }
+
+  runtime.reporting.active(principal.id);
+
+  return result.value;
+};
+
+// The request hook checks workspace pages before any load runs, so sign-in keeps the page as
+// its return path. The workspace layout then shows an unavailable organization as not found.
+export const authorizeWorkspacePage = async () => {
+  const member = await resolvePageMember();
+
+  getRequestEvent().locals.workspace = member && {
+    id: member.organization.id,
+    slug: member.organization.slug,
+  };
+};
+
+export const pageMember = async () => {
+  const member = await resolvePageMember();
+
+  if (!member) error(404, "Organization not found.");
+
+  return member;
+};
+
+export const pagePrincipal = async () => (await pageMember()).principal;
 
 const operationStatus = {
   NOT_FOUND: 404,

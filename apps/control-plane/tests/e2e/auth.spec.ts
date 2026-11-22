@@ -30,8 +30,14 @@ import { createTestEnvironment } from "../environment.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
 import { prepareOrganizationInvitation } from "../../src/lib/server/members.ts";
+import { installationOrganizationId } from "../../src/lib/organization.ts";
 
 // A remote function's redirect arrives as a result whose serialized data names the location.
+// A query names its page's organization. SvelteKit sends a query argument as URL-safe Base64 of
+// its devalue encoding.
+const organizationQuery = (path: string, organizationId = installationOrganizationId) =>
+  `${path}?payload=${Buffer.from(JSON.stringify([{ organizationId: 1 }, organizationId])).toString("base64url")}`;
+
 const remoteRedirect = async (response: APIResponse) => {
   const { data } = z
     .object({ type: z.literal("result"), data: z.string() })
@@ -233,21 +239,21 @@ for (const javaScriptEnabled of [true, false]) {
       }
 
       for (const service of [target.id, target.slug]) {
-        await adminPage.goto(`/services/${service}/availability`);
+        await adminPage.goto(`/widefleet/services/${service}/availability`);
         await expect(
           adminPage.getByText(`Choose who can connect ${target.displayName} to their apps.`, {
             exact: true,
           }),
         ).toBeVisible();
-        await page.goto(`/services/${service}/connect`);
+        await page.goto(`/widefleet/services/${service}/connect`);
         await expect(
           page.getByRole("heading", { name: `Connect ${target.displayName}`, exact: true }),
         ).toBeVisible();
       }
 
-      await page.goto("/services/requests");
+      await page.goto("/widefleet/services/requests");
       await expect(page.getByText("No connection requests yet.")).toBeVisible();
-      await page.goto("/services");
+      await page.goto("/widefleet/services");
       await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
       await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
       await page.getByRole("link", { name: `Connect to ${target.displayName}` }).focus();
@@ -255,7 +261,9 @@ for (const javaScriptEnabled of [true, false]) {
       await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
       await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
       await page.getByRole("button", { name: "Continue", exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`/services/${target.id}/connect\\?app=${source.id}`));
+      await expect(page).toHaveURL(
+        new RegExp(`/widefleet/services/${target.id}/connect\\?app=${source.id}`),
+      );
       await expect(
         page.getByRole("heading", { name: "Request a connection", exact: true }),
       ).toBeVisible();
@@ -284,7 +292,7 @@ for (const javaScriptEnabled of [true, false]) {
       });
 
       expect(denied.status()).toBe(403);
-      await adminPage.goto("/services/requests");
+      await adminPage.goto("/widefleet/services/requests");
 
       const review = adminPage
         .getByRole("listitem", {
@@ -320,7 +328,7 @@ for (const javaScriptEnabled of [true, false]) {
         .update(apps)
         .set({ capabilityError: "Synthetic activation failure" })
         .where(eq(apps.id, source.id));
-      await page.goto(`/apps/${source.id}/connections`);
+      await page.goto(`/widefleet/apps/${source.id}/connections`);
       await page.locator("summary").filter({ hasText: "ERP" }).click();
 
       for (const width of [1280, 390]) {
@@ -353,10 +361,10 @@ for (const javaScriptEnabled of [true, false]) {
         .set({ activeDeploymentId: deploymentId })
         .where(eq(apps.id, target.id));
       await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
+      await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${source.id}/connections$`));
       await expect(page.getByText("ERP", { exact: true })).toBeVisible();
       await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
-      await adminPage.goto(`/services/${target.id}`);
+      await adminPage.goto(`/widefleet/services/${target.id}`);
       await adminPage.getByRole("link", { name: "Manage availability", exact: true }).click();
       await adminPage.getByLabel("Who can connect this API?").selectOption("organization");
       await adminPage.getByRole("button", { name: "Save availability" }).click();
@@ -373,7 +381,7 @@ for (const javaScriptEnabled of [true, false]) {
           { id: collision.id, accessMode: "approval_required" },
         ]),
       );
-      await page.goto(`/services?app=${source.id}`);
+      await page.goto(`/widefleet/services?app=${source.id}`);
       await page.getByRole("link", { name: `Connect to ${target.displayName}` }).click();
       await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
       await page.getByLabel("Binding name in your code").fill("FREE");
@@ -399,12 +407,12 @@ for (const javaScriptEnabled of [true, false]) {
       ).toBeVisible();
       await expect(page.getByText("env.FREE", { exact: true })).toBeVisible();
       await page.getByRole("link", { name: "View app connections" }).click();
-      await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
+      await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${source.id}/connections$`));
       await expect(page.getByText("FREE", { exact: true })).toBeVisible();
       await adminPage.getByLabel("Who can connect this API?").selectOption("approval_required");
       await adminPage.getByRole("button", { name: "Save availability" }).click();
       await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
-      await page.goto(`/services/${target.id}/connect?app=${source.id}`);
+      await page.goto(`/widefleet/services/${target.id}/connect?app=${source.id}`);
       await page.getByLabel("Binding name in your code").fill("ERP");
       await page.getByRole("button", { name: "Submit request" }).click();
       await expect(page.getByRole("alert")).toContainText("Choose an unused binding name");
@@ -412,12 +420,12 @@ for (const javaScriptEnabled of [true, false]) {
       await page.getByLabel("Binding name in your code").fill("REJECTED");
       await page.getByRole("button", { name: "Submit request" }).click();
       await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
-      await adminPage.goto("/services/requests");
+      await adminPage.goto("/widefleet/services/requests");
       await review.getByRole("button", { name: "Reject", exact: true }).click();
       await expect(review).toHaveCount(0);
       await page.reload();
       await expect(page.getByRole("heading", { name: "Request rejected" })).toBeVisible();
-      await page.goto(`/apps/${source.id}/connections`);
+      await page.goto(`/widefleet/apps/${source.id}/connections`);
 
       const freeConnection = page
         .locator("details")
@@ -427,11 +435,19 @@ for (const javaScriptEnabled of [true, false]) {
       await freeConnection.getByRole("button", { name: "Disconnect", exact: true }).click();
       await expect(page.getByText("FREE", { exact: true })).toHaveCount(0);
       await expect(page.getByText("ERP", { exact: true })).toBeVisible();
-      const forbiddenAvailability = await page.goto(`/services/${target.id}/availability`);
+
+      const forbiddenAvailability = await page.goto(
+        `/widefleet/services/${target.id}/availability`,
+      );
+
       expect(forbiddenAvailability?.status()).toBe(403);
-      const forbiddenApp = await page.goto(`/services/${target.id}/connect?app=${target.id}`);
+
+      const forbiddenApp = await page.goto(
+        `/widefleet/services/${target.id}/connect?app=${target.id}`,
+      );
+
       expect(forbiddenApp?.status()).toBe(404);
-      await page.goto("/services/requests");
+      await page.goto("/widefleet/services/requests");
       await page.screenshot({ path: testInfo.outputPath("request-statuses.png"), fullPage: true });
     } finally {
       await Promise.all(contexts.map((context) => context.close()));
@@ -546,7 +562,7 @@ test("shows versioned service documentation through authenticated API and access
     deploymentId,
     documentation: metadata.service_documentation,
   });
-  await page.goto("/services");
+  await page.goto("/widefleet/services");
   await page
     .getByRole("link", { name: "Inventory service API documentation", exact: true })
     .click();
@@ -587,7 +603,7 @@ test("shows versioned service documentation through authenticated API and access
   try {
     await noScript.addCookies(cookies);
     const staticPage = await noScript.newPage();
-    await staticPage.goto(`/services/${record.id}`);
+    await staticPage.goto(`/widefleet/services/${record.id}`);
     await expect(staticPage.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
   } finally {
     await noScript.close();
@@ -598,7 +614,7 @@ test("shows versioned service documentation through authenticated API and access
     .update(artifacts)
     .set({ metadata })
     .where(eq(artifacts.id, artifactId));
-  await page.goto(`/services/${record.id}`);
+  await page.goto(`/widefleet/services/${record.id}`);
   await expect(
     page.getByText("No API documentation was generated.", { exact: false }),
   ).toBeVisible();
@@ -615,7 +631,7 @@ test("shows versioned service documentation through authenticated API and access
     path: testInfo.outputPath("api-legacy-mobile-dark.png"),
     fullPage: true,
   });
-  const missing = await page.goto(`/services/${crypto.randomUUID()}`);
+  const missing = await page.goto(`/widefleet/services/${crypto.randomUUID()}`);
   expect(missing?.status()).toBe(404);
 });
 
@@ -854,36 +870,34 @@ test("selects an organization, repairs stale selection and explains removed acce
   await page.goto("/organizations");
   await expect(page.getByRole("heading", { name: "Choose an organization" })).toBeVisible();
   await page.getByRole("button", { name: "Widefleet Member" }).click();
-  await expect(page).toHaveURL("http://localhost:25430/");
+  await expect(page).toHaveURL("http://localhost:25430/widefleet");
   await expect(page.getByRole("link", { name: "Choose organization: Widefleet" })).toBeVisible();
-  await page.goto("/catalog/templates");
+  await page.goto("/widefleet/catalog/templates");
   await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
   await environment.database.db
     .update(authSession)
     .set({ activeOrganizationId: "unavailable" })
     .where(eq(authSession.userId, person.id));
 
-  // Client navigation to a query-only page reaches the server only through its query, which
-  // redirects to the organization choice without a return path.
+  // Workspace pages name their organization, so a stale session selection does not affect them.
   await page.getByRole("link", { name: /^Gmail/ }).click();
-  await expect(page).toHaveURL("http://localhost:25430/organizations");
+  await expect(page).toHaveURL("http://localhost:25430/widefleet/catalog/templates/gmail");
+  await expect(page.getByRole("heading", { name: "Gmail" })).toBeVisible();
 
-  // Page queries may run alongside the page loads. The request hook's organization-selection
-  // redirect must still reach the client when those queries reject access.
-  for (const path of ["/", "/catalog", "/catalog/templates", "/catalog/templates/gmail"]) {
-    const response = await context.request.get(`${path.replace(/\/$/, "")}/__data.json`);
-    expect(await response.json()).toEqual({
-      type: "redirect",
-      status: 303,
-      location: `/organizations?${new URLSearchParams({ next: path })}`,
-    });
-  }
+  // Paths without an organization open the session's organization and ask for a new choice.
+  const response = await context.request.get("/__data.json");
+  expect(await response.json()).toEqual({
+    type: "redirect",
+    status: 303,
+    location: `/organizations?${new URLSearchParams({ next: "/" })}`,
+  });
 
   await page.goto("/");
   await expect(page).toHaveURL("http://localhost:25430/organizations?next=%2F");
   await page.getByRole("button", { name: "Widefleet Member" }).click();
-  await expect(page).toHaveURL("http://localhost:25430/");
+  await expect(page).toHaveURL("http://localhost:25430/widefleet");
   await environment.database.db.delete(member).where(eq(member.userId, person.id));
+  expect((await page.goto("/widefleet"))?.status()).toBe(404);
   await page.goto("/");
   await expect(
     page.getByText("Your account has no available organizations.", { exact: false }),
@@ -954,7 +968,7 @@ test("renews the browser session cookie while rendering a protected page", async
     })
     .where(eq(authSession.id, current.session.id));
 
-  const response = await page.goto("/");
+  const response = await page.goto("/widefleet");
   expect(response?.status()).toBe(200);
   expect(await response?.headerValue("set-cookie")).toMatch(/Max-Age=604800/i);
   const cookie = (await context.cookies()).find((entry) => entry.name.endsWith("session_token"));
@@ -999,18 +1013,17 @@ test("protects auth-group documents and data requests even when every layout is 
 }) => {
   for (const path of [
     "/",
-    "/account",
-    "/settings/agents",
-    "/apps",
-    "/apps/new",
-    "/apps/fixture/connections",
-    "/catalog",
-    "/catalog/templates?q=mail",
-    "/catalog/templates/gmail",
-    "/settings/members?q=reader&page=2",
-    "/services",
-    "/settings/company-sign-in",
-    "/welcome",
+    "/widefleet/account",
+    "/widefleet/settings/agents",
+    "/widefleet/apps",
+    "/widefleet/apps/new",
+    "/widefleet/apps/fixture/connections",
+    "/widefleet/catalog/templates?q=mail",
+    "/widefleet/catalog/templates/gmail",
+    "/widefleet/settings/members?q=reader&page=2",
+    "/widefleet/services",
+    "/widefleet/settings/company-sign-in",
+    "/widefleet/welcome",
     "/organizations",
     "/device?user_code=ABCD1234",
   ]) {
@@ -1039,13 +1052,14 @@ test("keeps public pages, service health and API authentication outside page log
   const api = await request.get("/api/v1/apps", { maxRedirects: 0 });
   expect(api.status()).toBe(401);
   expect(api.headers()["location"]).toBeUndefined();
-  expect((await request.get("/nonexistent", { maxRedirects: 0 })).status()).toBe(404);
+  // A path that cannot name an organization has no page.
+  expect((await request.get("/missing.html", { maxRedirects: 0 })).status()).toBe(404);
 });
 
 test("asks search engines not to index control-plane pages and API responses", async ({
   request,
 }) => {
-  for (const path of ["/sign-in", "/recover", "/healthz", "/api/v1/apps", "/nonexistent"]) {
+  for (const path of ["/sign-in", "/recover", "/healthz", "/api/v1/apps", "/missing.html"]) {
     const response = await request.get(path, { maxRedirects: 0 });
     expect(response.headers()["x-robots-tag"], path).toBe("noindex");
   }
@@ -1135,7 +1149,7 @@ test("requires company SSO and links the matching verified company email without
       (request) => new URL(request.url()).searchParams.get("login_hint") === "sso@example.test",
     );
 
-    await page.goto("/account");
+    await page.goto("/widefleet/account");
     await authorization;
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(page.getByText("You are signed in with your company account.")).toBeVisible();
@@ -1507,12 +1521,12 @@ test("registers an agent, creates an app and an isolated preview, then requests 
     })),
   );
 
-  await page.goto("/settings/agents");
+  await page.goto("/widefleet/settings/agents");
   await page.getByText("Register deployment agent", { exact: true }).click();
   await page.getByLabel("Agent name", { exact: true }).fill("Local deployment host");
   await page.getByRole("button", { name: "Register agent" }).click();
   await expect(page.getByRole("status")).toContainText("agent_");
-  await page.goto("/settings/agents");
+  await page.goto("/widefleet/settings/agents");
   await expect(page.getByRole("status")).toHaveCount(0);
   await page.getByRole("link", { name: "My apps", exact: true }).click();
   await page.getByRole("link", { name: "Create app", exact: true }).click();
@@ -1532,7 +1546,7 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Notes Preview");
   await expect(page.getByRole("link", { name: "Back to original app" })).toHaveAttribute(
     "href",
-    `/apps/${appId}`,
+    `/widefleet/apps/${appId}`,
   );
   await expect(page.getByText("notes-preview.apps.localhost", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "App settings", exact: true }).click();
@@ -1594,9 +1608,9 @@ test("manages organization roles and app access by name while members create the
       })),
     );
     const memberPage = await memberContext.newPage();
-    await memberPage.goto("/apps");
+    await memberPage.goto("/widefleet/apps");
     await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
-    expect((await memberContext.request.get("/settings/members")).status()).toBe(403);
+    expect((await memberContext.request.get("/widefleet/settings/members")).status()).toBe(403);
     await memberPage.getByRole("link", { name: "Create app", exact: true }).click();
     await memberPage.getByLabel("App name", { exact: true }).fill("Member Workspace");
     await memberPage.getByLabel("URL slug").fill("member-workspace");
@@ -1635,7 +1649,7 @@ test("manages organization roles and app access by name while members create the
       .getByRole("button", { name: "Save role" })
       .click();
     await expect(page.getByRole("status")).toContainText("Role saved");
-    expect((await memberContext.request.get("/settings/members")).status()).toBe(403);
+    expect((await memberContext.request.get("/widefleet/settings/members")).status()).toBe(403);
 
     await memberPage.getByRole("link", { name: "Create app", exact: true }).click();
     await expect(memberPage).toHaveURL(/\/apps\/new$/);
@@ -1645,7 +1659,7 @@ test("manages organization roles and app access by name while members create the
       memberPage.getByRole("button", { name: /^Account:/ }).getByText("Member", { exact: true }),
     ).toBeVisible();
 
-    await page.goto("/apps");
+    await page.goto("/widefleet/apps");
     await page.getByRole("link", { name: "Team Notes", exact: true }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Team Notes");
     const appPath = new URL(page.url()).pathname;
@@ -1730,7 +1744,7 @@ test("submits a selective Workflow restart and waits for the agent's confirmatio
     .update(apps)
     .set({ state: "active", activeDeploymentId: deploymentId })
     .where(eq(apps.id, record.id));
-  await page.goto(`/apps/${record.id}/workflows`, { waitUntil: "networkidle" });
+  await page.goto(`/widefleet/apps/${record.id}/workflows`, { waitUntil: "networkidle" });
   await page.getByLabel("Action", { exact: true }).selectOption("restartFrom");
   await page.getByLabel("Instance ID", { exact: true }).fill("run-1");
   await page.getByLabel("Step name", { exact: true }).fill("approval");
@@ -1828,9 +1842,9 @@ test("confirms discarded workflow drafts on section, history and document naviga
 
   expect(created.ok()).toBe(true);
   const record = app.parse(await created.json());
-  await page.goto(`/apps/${record.id}`, { waitUntil: "networkidle" });
+  await page.goto(`/widefleet/apps/${record.id}`, { waitUntil: "networkidle" });
   await page.getByRole("link", { name: "Workflows", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/apps/${record.id}/workflows$`));
+  await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/workflows$`));
   await page.getByLabel("Action", { exact: true }).selectOption("create");
   await page.getByLabel("Parameters (JSON)").fill('{"draft":true}');
 
@@ -1852,7 +1866,7 @@ test("confirms discarded workflow drafts on section, history and document naviga
     expect(confirmation.message()).toContain("unsaved changes");
     await confirmation.dismiss();
     await navigation;
-    await expect(page).toHaveURL(new RegExp(`/apps/${record.id}/workflows$`));
+    await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/workflows$`));
     await expect(page.getByLabel("Parameters (JSON)")).toHaveValue('{"draft":true}');
   }
 
@@ -1875,7 +1889,7 @@ test("confirms discarded workflow drafts on section, history and document naviga
   const leave = page.goBack();
   await (await discardDialog).accept();
   await leave;
-  await expect(page).toHaveURL(new RegExp(`/apps/${record.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}$`));
   await expect(
     page.getByRole("heading", { name: "Ready for your first deployment." }),
   ).toBeVisible();
@@ -1944,7 +1958,7 @@ test("refreshes queued rollbacks and distinguishes pending requests from accepte
     });
   }
 
-  await page.goto(`/apps/${record.id}/deployments`);
+  await page.goto(`/widefleet/apps/${record.id}/deployments`);
   const rollback = page.getByRole("button", { name: "Restore version", exact: true });
   const requestId = await page.locator('input[name^="requestId/"]').first().inputValue();
   let release: (() => void) | undefined;
@@ -2016,7 +2030,7 @@ test("validates remote forms and creates apps without JavaScript", async ({ brow
       })),
     );
     const page = await context.newPage();
-    const response = await page.goto("/apps");
+    const response = await page.goto("/widefleet/apps");
     expect(response?.headers()["cache-control"]).toBe("private, no-store");
     await page.getByRole("link", { name: "Create app", exact: true }).click();
     await page.getByLabel("App name", { exact: true }).fill("Native Form App");
@@ -2034,7 +2048,7 @@ test("validates remote forms and creates apps without JavaScript", async ({ brow
     await page.getByRole("button", { name: "Create app" }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Native Form App");
     const parentId = z.uuid().parse(new URL(page.url()).pathname.split("/").at(-1));
-    await page.goto("/apps/new");
+    await page.goto("/widefleet/apps/new");
     await page.getByLabel("App name", { exact: true }).fill("Native Preview");
     await page.getByLabel("URL slug").fill("native-preview");
     await page.getByText("Create as preview", { exact: false }).click();
@@ -2106,7 +2120,7 @@ test.describe("member forms without JavaScript", () => {
 
     await environment.users.saveUser(target);
     await environment.linkMicrosoftUser(target.id);
-    await page.goto("/settings/members?q=Native+Role&page=2");
+    await page.goto("/widefleet/settings/members?q=Native+Role&page=2");
     const form = page.getByRole("form", { name: "Role for Native Role Target" });
     await form.getByLabel("Role", { exact: true }).selectOption("admin");
     await form.getByRole("button", { name: "Save role" }).click();
@@ -2157,7 +2171,7 @@ test.describe("member forms without JavaScript", () => {
 
     expect(created.ok()).toBe(true);
     const record = app.parse(await created.json());
-    const path = `/apps/${record.id}/access/management?q=native-grant`;
+    const path = `/widefleet/apps/${record.id}/access/management?q=native-grant`;
     await page.goto(path);
     await page.getByRole("button", { name: "Grant access" }).click();
     await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
@@ -2214,9 +2228,9 @@ for (const javaScriptEnabled of [true, false]) {
       browser,
       request,
     }) => {
-      await page.goto("/catalog");
+      await page.goto("/widefleet");
       await expect(page).toHaveURL(/\/sign-in\?next=/);
-      expect(new URL(page.url()).searchParams.get("next")).toBe("/catalog");
+      expect(new URL(page.url()).searchParams.get("next")).toBe("/widefleet");
 
       const creator = environment.users.createUser({
         name: "Catalog Creator",
@@ -2278,7 +2292,7 @@ for (const javaScriptEnabled of [true, false]) {
           })),
         );
         const readerPage = await readerContext.newPage();
-        await readerPage.goto("/apps");
+        await readerPage.goto("/widefleet/apps");
         await expect(
           readerPage.getByRole("link", { name: "Create app", exact: true }),
         ).toBeVisible();
@@ -2289,7 +2303,7 @@ for (const javaScriptEnabled of [true, false]) {
         await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText("Home");
         await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveCount(0);
 
-        await page.goto(`/apps/${record.id}/settings`);
+        await page.goto(`/widefleet/apps/${record.id}/settings`);
 
         const publish = page.getByRole("button", {
           name: "Publish to catalog",
@@ -2299,7 +2313,7 @@ for (const javaScriptEnabled of [true, false]) {
         const form = page.locator("form").filter({ has: publish });
         const action = z.string().parse(await form.getAttribute("action"));
         const remote = z.string().parse(new URL(action, origin).searchParams.get("/remote"));
-        const queryUrl = `/_app/remote/${remote.split("/")[0]}/getCatalog`;
+        const queryUrl = organizationQuery(`/_app/remote/${remote.split("/")[0]}/getCatalog`);
         const anonymous = await request.get(queryUrl);
         expect(await remoteRedirect(anonymous)).toBe("/sign-in");
 
@@ -2331,7 +2345,9 @@ for (const javaScriptEnabled of [true, false]) {
           "href",
           record.url,
         );
-        expect((await readerContext.request.get(`/apps/${record.id}`)).status()).toBe(404);
+        expect((await readerContext.request.get(`/widefleet/apps/${record.id}`)).status()).toBe(
+          404,
+        );
         expect((await readerContext.request.get(`/api/v1/apps/${record.id}`)).status()).toBe(404);
         const catalog = await readerContext.request.get(queryUrl);
         expect(catalog.headers()["cache-control"]).toBe("private, no-store");
@@ -2373,7 +2389,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
       secure: false,
     })),
   );
-  await page.goto("/settings/agents");
+  await page.goto("/widefleet/settings/agents");
   await page.getByText("Register deployment agent", { exact: true }).click();
   const form = page.locator("form").filter({ has: page.getByLabel("Agent name", { exact: true }) });
 
@@ -2388,7 +2404,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
     .parse(new URL(action, environment.configuration.PLATFORM_URL).searchParams.get("/remote"));
 
   const module = remote.split("/")[0];
-  const queryUrl = `/_app/remote/${module}/getApps`;
+  const queryUrl = organizationQuery(`/_app/remote/${module}/getApps`);
   const formUrl = `/_app/remote/${remote}`;
   const origin = environment.configuration.PLATFORM_URL;
   const ownerSession = await environment.users.login({ userId: environment.owner.id });
@@ -2406,7 +2422,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
 
   // Remote callers control their page-context headers. Neither an auth-group
   // page nor a public page may replace the remote function's own authorization.
-  for (const pathname of ["/settings/agents", "/sign-in"]) {
+  for (const pathname of ["/widefleet/settings/agents", "/sign-in"]) {
     const response = await request.get(queryUrl, {
       headers: { "x-sveltekit-pathname": pathname },
       maxRedirects: 0,
@@ -2519,7 +2535,7 @@ for (const javaScriptEnabled of [true, false]) {
           { times: 1 },
         );
 
-      await page.goto(`/apps/${parent.id}/access`, { waitUntil: "domcontentloaded" });
+      await page.goto(`/widefleet/apps/${parent.id}/access`, { waitUntil: "domcontentloaded" });
       await page.getByLabel("Allowed groups for this app", { exact: true }).fill("finance");
       hydration.emit("ready");
 
@@ -2580,7 +2596,7 @@ for (const javaScriptEnabled of [true, false]) {
       });
 
       const preview = app.parse(await previewResponse.json());
-      await page.goto(`/apps/${preview.id}/access`);
+      await page.goto(`/widefleet/apps/${preview.id}/access`);
       await expect(
         page.getByText(
           "This preview automatically inherits the original app's access rules. You cannot set separate rules.",
@@ -2591,7 +2607,7 @@ for (const javaScriptEnabled of [true, false]) {
         0,
       );
       // This phase edits the hydrated form; the first visit covers pre-hydration input.
-      await page.goto(`/apps/${parent.id}/access`, { waitUntil: "networkidle" });
+      await page.goto(`/widefleet/apps/${parent.id}/access`, { waitUntil: "networkidle" });
       await page.getByLabel("Allowed groups for this app", { exact: true }).fill("unsaved-group");
 
       const competing = await context.request.patch(`/api/v1/apps/${parent.id}/access`, {
@@ -2609,7 +2625,7 @@ for (const javaScriptEnabled of [true, false]) {
           expect(confirmation.type()).toBe("confirm");
           await confirmation.dismiss();
           await navigation;
-          await expect(page).toHaveURL(new RegExp(`/apps/${parent.id}/access$`));
+          await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${parent.id}/access$`));
           await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
             "unsaved-group",
           );
@@ -2673,7 +2689,7 @@ for (const javaScriptEnabled of [true, false]) {
           return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
         })
         .toEqual([]);
-      await page.goto(`/apps/${preview.id}/access`);
+      await page.goto(`/widefleet/apps/${preview.id}/access`);
       await expect(
         page.getByText("Allowed groups: All signed-in users", { exact: true }),
       ).toBeVisible();
@@ -2737,7 +2753,7 @@ test.describe("workspace experience", () => {
       });
     }
 
-    await page.goto("/apps?q=Icon");
+    await page.goto("/widefleet/apps?q=Icon");
     await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
     await expect(page.locator("header").getByText("Widefleet", { exact: true })).toHaveCount(1);
     const rows = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
@@ -2771,7 +2787,7 @@ test.describe("workspace experience", () => {
 
     expect(response.ok()).toBe(true);
     const record = app.parse(await response.json());
-    await page.goto("/apps");
+    await page.goto("/widefleet/apps");
     await expect(page.getByLabel("App name", { exact: true })).toHaveCount(0);
     await expect(page.getByLabel("Agent name", { exact: true })).toHaveCount(0);
     await page.getByRole("search").getByRole("searchbox").fill("searchable");
@@ -2790,7 +2806,7 @@ test.describe("workspace experience", () => {
     ).toBeVisible();
     await page.getByRole("link", { name: "Access", exact: true }).click();
     await page.getByRole("link", { name: "Management access", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/apps/${record.id}/access/management$`));
+    await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/access/management$`));
     await page.reload();
     await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Access", exact: true })).toHaveAttribute(
@@ -2820,7 +2836,7 @@ test.describe("workspace experience", () => {
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
-    await page.goto("/apps/new");
+    await page.goto("/widefleet/apps/new");
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
@@ -2863,7 +2879,7 @@ test.describe("workspace experience", () => {
     await expect(page.locator("html")).toHaveClass(/dark/);
     await page.emulateMedia({ colorScheme: "light" });
     await expect(page.locator("html")).not.toHaveClass(/dark/);
-    await page.goto(`/apps/${record.id}`);
+    await page.goto(`/widefleet/apps/${record.id}`);
     await page.getByRole("button", { name: "Copy deployment command", exact: true }).click();
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
@@ -2904,7 +2920,7 @@ test.describe("workspace experience", () => {
       requestId: crypto.randomUUID(),
       status: "running",
     });
-    await page.goto(`/apps/${record.id}/deployments`);
+    await page.goto(`/widefleet/apps/${record.id}/deployments`);
     await expect(page.getByText("Deploying", { exact: true })).toBeVisible();
     await environment.database.db
       .update(deployments)
@@ -2944,7 +2960,7 @@ test.describe("workspace experience", () => {
     context,
   }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.goto("/settings/agents");
+    await page.goto("/widefleet/settings/agents");
 
     const previousAgents = await page
       .getByRole("list", { name: "Deployment agents" })
@@ -3004,7 +3020,7 @@ test.describe("workspace experience", () => {
 
     expect(createdPreview.ok()).toBe(true);
     const preview = app.parse(await createdPreview.json());
-    await page.goto(`/apps/new?parent=${parent.id}`);
+    await page.goto(`/widefleet/apps/new?parent=${parent.id}`);
     await expect(page.getByLabel("Preview of an existing app")).toHaveValue(parent.id);
 
     const removed = await context.request.delete(`/api/v1/apps/${parent.id}`, {
@@ -3014,13 +3030,13 @@ test.describe("workspace experience", () => {
     expect(removed.ok()).toBe(true);
 
     for (const parentId of [parent.id, preview.id, crypto.randomUUID(), ""]) {
-      const response = await page.goto(`/apps/new?parent=${parentId}`);
+      const response = await page.goto(`/widefleet/apps/new?parent=${parentId}`);
       expect(response?.status()).toBe(404);
       await expect(page.getByLabel("App name", { exact: true })).toHaveCount(0);
       await expect(page.getByRole("link", { name: "Back to overview", exact: true })).toBeVisible();
     }
 
-    await page.goto("/apps/new");
+    await page.goto("/widefleet/apps/new");
     await expect(page.getByLabel("App name", { exact: true })).toBeVisible();
   });
 
@@ -3043,7 +3059,7 @@ test.describe("workspace experience", () => {
         })),
       );
       const page = await context.newPage();
-      await page.goto("/settings/agents");
+      await page.goto("/widefleet/settings/agents");
       await page.getByText("Register deployment agent", { exact: true }).click();
       await page.getByLabel("Agent name", { exact: true }).fill("   ");
       await page.getByRole("button", { name: "Register agent", exact: true }).click();
@@ -3203,7 +3219,7 @@ for (const javaScriptEnabled of [true, false]) {
 
       try {
         // A member without apps sees the templates on My apps.
-        const mine = await page.goto("/apps");
+        const mine = await page.goto("/widefleet/apps");
         expect(mine?.status()).toBe(200);
         await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
         await expect(page.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
@@ -3212,7 +3228,7 @@ for (const javaScriptEnabled of [true, false]) {
         ).toBeVisible();
         await expect(unavailable).toBeVisible();
 
-        const list = await page.goto("/catalog/templates");
+        const list = await page.goto("/widefleet/catalog/templates");
         expect(list?.status()).toBe(200);
         await expect(page.getByRole("heading", { name: "Templates", exact: true })).toBeVisible();
         await expect(
@@ -3233,9 +3249,11 @@ for (const javaScriptEnabled of [true, false]) {
       context,
       request,
     }, testInfo) => {
-      await page.goto("/catalog/templates/gmail");
+      await page.goto("/widefleet/catalog/templates/gmail");
       await expect(page).toHaveURL(/\/sign-in\?next=/);
-      expect(new URL(page.url()).searchParams.get("next")).toBe("/catalog/templates/gmail");
+      expect(new URL(page.url()).searchParams.get("next")).toBe(
+        "/widefleet/catalog/templates/gmail",
+      );
       expect((await request.get("/api/v1/catalog/templates")).status()).toBe(401);
 
       const person = environment.users.createUser({
@@ -3258,7 +3276,7 @@ for (const javaScriptEnabled of [true, false]) {
       const catalog = await context.request.get("/api/v1/catalog/templates");
       expect(catalog.status()).toBe(200);
 
-      await page.goto("/catalog/templates");
+      await page.goto("/widefleet/catalog/templates");
       await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
 
       if (javaScriptEnabled) {
@@ -3337,14 +3355,14 @@ for (const javaScriptEnabled of [true, false]) {
         page.getByRole("heading", { name: "Configure Google", exact: true }),
       ).toBeVisible();
       await expect(page.locator(".markdown")).toContainText("GOOGLE_CLIENT_ID");
-      const missing = await page.goto("/catalog/templates/missing");
+      const missing = await page.goto("/widefleet/catalog/templates/missing");
       expect(missing?.status()).toBe(404);
-      const unavailable = await page.goto("/catalog/templates/unavailable");
+      const unavailable = await page.goto("/widefleet/catalog/templates/unavailable");
       expect(unavailable?.status()).toBe(503);
       await expect(page.getByRole("heading", { name: "Something went wrong." })).toBeVisible();
       expect(await environment.database.db.select({ id: apps.id }).from(apps)).toEqual(before);
 
-      await page.goto("/catalog/templates");
+      await page.goto("/widefleet/catalog/templates");
       await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
       await environment.database.db
         .update(authSession)
@@ -3355,7 +3373,7 @@ for (const javaScriptEnabled of [true, false]) {
       // Client navigation reaches the server only through the template query. Its redirect
       // cannot name the page, while a full page load passes through the request hook.
       expect(new URL(page.url()).searchParams.get("next")).toBe(
-        javaScriptEnabled ? null : "/catalog/templates/gmail",
+        javaScriptEnabled ? null : "/widefleet/catalog/templates/gmail",
       );
       expect((await context.request.get("/api/v1/catalog/templates")).status()).toBe(401);
     });
@@ -3510,7 +3528,7 @@ for (const javaScriptEnabled of [true, false])
 
       await page.goto(`/invitations/${invitation.invitation.id}`);
       await page.getByRole("button", { name: "Accept invitation" }).click();
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
       expect(statusReads).toBe(0);
 
       if (javaScriptEnabled) {
@@ -3632,7 +3650,7 @@ for (const javaScriptEnabled of [true, false])
       await expect(page.getByText("Could not check this account.")).toBeHidden();
       await expect(page.getByRole("link", { name: "Try again", exact: true })).toBeHidden();
       await page.goto("/");
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
 
       const other = environment.users.createUser({
         name: "Other member",
@@ -3643,17 +3661,17 @@ for (const javaScriptEnabled of [true, false])
       await environment.linkMicrosoftUser(other.id);
       await signInAs(other.id);
       await page.goto("/");
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
 
       if (javaScriptEnabled) await page.getByText("Menu", { exact: true }).click();
       await page.getByRole("link", { name: "My connections", exact: true }).click();
       await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
       await signInAs(person.id);
       denied = true;
-      await page.goto("/connections");
+      await page.goto("/widefleet/connections");
       await expect(page.getByText("No personal connections available")).toBeVisible();
       denied = false;
-      await page.goto("/connections?success=true");
+      await page.goto("/widefleet/connections?success=true");
       await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
       // Duplicate names retain the hostnames needed to distinguish deployments.
       await environment.database.db
@@ -3670,8 +3688,8 @@ for (const javaScriptEnabled of [true, false])
         .set({ webEnabled: false })
         .where(inArray(apps.id, [github, files]));
       await page.goto("/");
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
-      await page.goto("/connections");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
+      await page.goto("/widefleet/connections");
       await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
       await environment.database.db
         .update(apps)
@@ -3764,7 +3782,7 @@ test("personal connections assert the company account as the app identity", asyn
       name: "SSO Test User",
     };
 
-    await page.goto("/connections");
+    await page.goto("/widefleet/connections");
     await expect(page.getByRole("heading", { name: "Company GitHub", exact: true })).toBeVisible();
     expect(identities.at(-1)).toEqual(expected);
   } finally {

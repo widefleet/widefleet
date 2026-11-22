@@ -57,7 +57,7 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
         { timeout: 15000 },
       )
       .toBe(true);
-    await page.goto("/sign-in?next=/settings/company-sign-in");
+    await page.goto("/sign-in?next=/widefleet/settings/company-sign-in");
     await page.getByLabel("Email", { exact: true }).fill(environment.owner.email);
     await page.getByRole("button", { name: "Continue with email", exact: true }).click();
     await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
@@ -169,7 +169,7 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
     await expect(page.getByText("No embedding hosts", { exact: true })).toBeVisible();
     // A completed company sign-in links the administrator, which activation requires.
     await linkCompanyAccount(environment.database.db, environment.owner.id);
-    await page.goto("/settings/company-sign-in/setup?step=activate");
+    await page.goto("/widefleet/settings/company-sign-in/setup?step=activate");
     await page.waitForLoadState("networkidle");
 
     for (const theme of ["light", "dark"] as const) {

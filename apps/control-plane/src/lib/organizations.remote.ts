@@ -4,6 +4,7 @@ import { error, invalid, redirect } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
 import { requireLogin, pageFailure } from "#server/page-auth";
 import { localDestination } from "#server/navigation";
+import { workspacePath } from "#lib/workspace-path";
 import { z } from "zod";
 import { InvalidOperation } from "#server/errors";
 
@@ -31,7 +32,7 @@ export const createOrganization = form(
 
     if (selection.isErr()) pageFailure(selection.error);
     const destination = localDestination(next);
-    redirect(303, destination === "/" ? "/welcome" : destination);
+    redirect(303, destination === "/" ? workspacePath(organization.slug, "/welcome") : destination);
   },
 );
 

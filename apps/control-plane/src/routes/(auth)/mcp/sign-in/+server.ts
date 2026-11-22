@@ -1,6 +1,6 @@
 import { redirect, error } from "@sveltejs/kit";
 import { z } from "zod";
-import { pageOrganizations, pagePrincipal, requireLogin } from "#server/page-auth";
+import { pageOrganizations, sessionMember, requireLogin } from "#server/page-auth";
 import { getRuntime } from "#server/runtime";
 import type { RequestHandler } from "./$types";
 
@@ -22,7 +22,7 @@ export const GET: RequestHandler = async ({ url }) => {
     redirect(303, `/organizations?${new URLSearchParams({ next })}`);
   }
 
-  const principal = await pagePrincipal();
+  const { principal } = await sessionMember();
   const { configuration } = await getRuntime();
   const port = configuration.APP_HTTPS_PORT === 443 ? "" : `:${configuration.APP_HTTPS_PORT}`;
   const target = new URL(`https://mcp.${configuration.APP_DOMAIN}${port}/oauth/organization`);

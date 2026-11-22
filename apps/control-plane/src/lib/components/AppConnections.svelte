@@ -16,10 +16,15 @@
   import AppStatus from "./AppStatus.svelte";
   import Feedback from "./Feedback.svelte";
   import AppConnectionActions from "./AppConnectionActions.svelte";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   let { app }: { app: z.infer<typeof appContract> } = $props();
 
-  const request = $derived(getAppConnections({ appId: app.id }));
+  const request = $derived(
+    getAppConnections({ organizationId: workspace.organizationId, appId: app.id }),
+  );
 
   const connections = $derived(
     await request.catch((cause: unknown) => {
@@ -88,7 +93,7 @@
         The app connections and resources used by this app.
       </p>
     </div>
-    <Button variant="outline" size="sm" href={`/services?app=${app.id}`}
+    <Button variant="outline" size="sm" href={workspace.path(`/services?app=${app.id}`)}
       ><Plug />Browse app APIs</Button
     >
   </div>

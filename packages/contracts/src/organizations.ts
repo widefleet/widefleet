@@ -8,6 +8,27 @@ export const organizationIdentifier = z
 
 export const organizationSelection = z.object({ organizationId: organizationIdentifier });
 
+// Control-plane pages start with the organization slug, so a slug cannot name a top-level page.
+export const reservedOrganizationSlugs = [
+  "api",
+  "cli-login",
+  "device",
+  "healthz",
+  "invitations",
+  "mcp",
+  "organizations",
+  "recover",
+  "setup",
+  "sign-in",
+  "sign-up",
+  "welcome",
+] as const;
+
+export const organizationSlugFormat = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+// Any slug an existing organization can have, including those an operator assigned.
+export const organizationSlug = z.string().max(63).regex(organizationSlugFormat);
+
 export const createOrganizationInput = z.strictObject({
   name: z.string().trim().min(1).max(200),
   slug: z
@@ -15,7 +36,11 @@ export const createOrganizationInput = z.strictObject({
     .trim()
     // Leave room for the guided 12-character app name and its separating hyphen.
     .max(50)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    .regex(organizationSlugFormat)
+    .refine(
+      (slug) => !reservedOrganizationSlugs.some((reserved) => reserved === slug),
+      "This name is reserved for a Widefleet page",
+    ),
 });
 
 export const onboardingOrganization = z.object({

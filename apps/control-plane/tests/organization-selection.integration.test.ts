@@ -249,23 +249,13 @@ describe("Organization discovery and selection", () => {
     });
   });
 
-  it("rejects a browser write when its automatically selected organization becomes unavailable", async () => {
-    const records = await environment.database.db.select().from(organizationRuntimes);
-    const alphaRuntime = records.find((record) => record.organizationId === alpha);
-    const betaRuntime = records.find((record) => record.organizationId === beta);
+  it("rejects a page's organization once it becomes unavailable", async () => {
+    await runtime.identity.selectOrganization(request("/organization"), alpha);
+    const page = () => runtime.identity.member(userId, { organizationSlug: "alpha" }, null);
 
-    if (!alphaRuntime || !betaRuntime)
-      throw new Error("Missing organization fixture runtime configurations");
-    admitted.clear();
-    admitted.add(alphaRuntime.organizationId);
-    expect(
-      (await runtime.identity.authenticate(request("/apps"), "platform:write", alpha)).isOk(),
-    ).toBe(true);
-    admitted.clear();
-    admitted.add(betaRuntime.organizationId);
-    expect(
-      await runtime.identity.authenticate(request("/apps"), "platform:write", alpha),
-    ).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect((await page()).isOk()).toBe(true);
+    admitted.delete(alpha);
+    expect(await page()).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect((await runtime.auth.api.getSession({ headers }))?.session.activeOrganizationId).toBe(
       alpha,
     );
@@ -312,34 +302,49 @@ describe("Organization discovery and selection", () => {
     headers.delete("x-widefleet-organization");
   });
 
-  it("rejects a stale browser organization before issuing a write principal", async () => {
+  it("resolves the organization a page names, independently of the session's organization", async () => {
     await runtime.identity.selectOrganization(request("/organization"), alpha);
-    expect(
-      (await runtime.identity.authenticate(request("/apps"), "platform:write", alpha)).isOk(),
-    ).toBe(true);
-    await runtime.identity.selectOrganization(request("/organization"), beta);
 
-    const stale = await runtime.identity.authenticate(request("/apps"), "platform:write", alpha);
-    expect(stale.isErr()).toBe(true);
+    const page = (organizationSlug: string) =>
+      runtime.identity.member(userId, { organizationSlug }, null);
 
-    if (stale.isErr()) {
-      expect(stale.error).toMatchObject({ code: "CONFLICT" });
-      expect(stale.error.message).toContain("Reload this page");
-    }
+    expect((await page("beta")).unwrap()).toMatchObject({
+      principal: { application: { organizationId: beta, admin: false } },
+      organization: { id: beta, name: "Beta", slug: "beta" },
+    });
+    expect((await runtime.identity.member(userId, { organizationId: beta }, null)).isOk()).toBe(
+      true,
+    );
+    expect((await runtime.auth.api.getSession({ headers }))?.session.activeOrganizationId).toBe(
+      alpha,
+    );
 
-    expect(
-      (await runtime.identity.authenticate(request("/apps"), "platform:write", beta)).unwrap()
-        .application.organizationId,
-    ).toBe(beta);
-    expect(
-      (await runtime.identity.authenticate(request("/apps"), "platform:write", "")).isErr(),
-    ).toBe(true);
+    for (const slug of ["hidden", "unknown", ""])
+      expect(await page(slug)).toMatchObject({ error: { code: "FORBIDDEN" } });
+
     await environment.database.db
       .delete(member)
       .where(and(eq(member.userId, userId), eq(member.organizationId, beta)));
+    expect(await page("beta")).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it("remembers the last opened organization for paths without one", async () => {
+    const current = await runtime.auth.api.getSession({ headers });
+
+    if (!current) throw new Error("Missing fixture session");
+    expect(await runtime.identity.principal(userId, null, null, current.session.id)).toMatchObject({
+      error: { code: "ORGANIZATION_REQUIRED" },
+    });
     expect(
-      (await runtime.identity.authenticate(request("/apps"), "platform:write", beta)).isErr(),
+      (await runtime.identity.rememberOrganization(current.session.id, userId, beta)).isOk(),
     ).toBe(true);
+    expect((await runtime.auth.api.getSession({ headers }))?.session.activeOrganizationId).toBe(
+      beta,
+    );
+    expect(
+      (await runtime.identity.authenticate(request("/me"), "platform:read")).unwrap().application
+        .organizationId,
+    ).toBe(beta);
   });
 
   it("rejects foreign selections and cross-origin changes without replacing the current selection", async () => {

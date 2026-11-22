@@ -2,7 +2,7 @@ import { expect, test, type Browser } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
 import { apps, deployments, organizationRuntimes } from "../../src/lib/server/schema.ts";
 import { seedDeployment } from "../cloudflare-deployment.fixture.ts";
@@ -170,7 +170,7 @@ test("opens organization settings without installation reporting privileges", as
     const page = await context.newPage();
     await page.goto("/organizations");
     await page.getByRole("button", { name: /Alpha/ }).click();
-    const response = await page.goto("/settings/company-sign-in");
+    const response = await page.goto(`/${alpha}/settings/company-sign-in`);
 
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("heading", { name: "Company sign-in", exact: true })).toBeVisible();
@@ -270,12 +270,8 @@ for (const javaScriptEnabled of [true, false]) {
         displayName: "Service consumer",
         hostname: `service-consumer-${alpha}.apps.localhost`,
       });
-      await environment.database.db
-        .update(session)
-        .set({ activeOrganizationId: alpha })
-        .where(eq(session.userId, person.id));
       const page = await context.newPage();
-      await page.goto(`/apps/${id}/secrets`);
+      await page.goto(`/${alpha}/apps/${id}/secrets`);
       const value = "-----BEGIN FIXTURE-----\nfirst line\nsecond line\n-----END FIXTURE-----";
       await page.getByLabel("Name", { exact: true }).fill("TOKEN");
       await page.getByLabel("Value", { exact: true }).fill(value);
@@ -309,13 +305,13 @@ for (const javaScriptEnabled of [true, false]) {
           capabilityError: "Synthetic disconnection failure",
         })
         .where(eq(apps.id, id));
-      await page.goto(`/apps/${id}/connections`);
+      await page.goto(`/${alpha}/apps/${id}/connections`);
 
       if (javaScriptEnabled) await page.waitForLoadState("networkidle");
       await page.locator("summary").filter({ hasText: "API" }).click();
       await page.getByRole("button", { name: "Retry disconnection", exact: true }).click();
       await expect(page).toHaveURL(
-        `${environment.configuration.PLATFORM_URL}/apps/${id}/connections`,
+        `${environment.configuration.PLATFORM_URL}/${alpha}/apps/${id}/connections`,
       );
       // The URL is unchanged by this form. Wait for the mutation's result before
       // reloading, otherwise navigation can cancel the enhanced form request.
@@ -342,7 +338,7 @@ for (const javaScriptEnabled of [true, false]) {
     }
   });
 
-  test(`creates an app in the only organization without visiting the chooser (JavaScript ${javaScriptEnabled})`, async ({
+  test(`opens the only organization without visiting the chooser (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {
     const { person, alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
@@ -352,8 +348,8 @@ for (const javaScriptEnabled of [true, false]) {
 
     try {
       const page = await context.newPage();
-      await page.goto("/apps/new");
-      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/apps/new`);
+      await page.goto("/");
+      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
       await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
       expect(
         await environment.database.db
@@ -361,106 +357,64 @@ for (const javaScriptEnabled of [true, false]) {
           .from(session)
           .where(eq(session.userId, person.id)),
       ).toEqual([{ organizationId: alpha }]);
-      // Remote forms must also repair existing sessions without a saved selection.
-      await environment.database.db
-        .update(session)
-        .set({ activeOrganizationId: null })
-        .where(eq(session.userId, person.id));
-      await page.getByLabel("App name", { exact: true }).fill("Automatic organization");
-      const slug = `automatic-${javaScriptEnabled}`;
-      await page.getByLabel("URL slug").fill(slug);
-      await page.getByRole("button", { name: "Create app", exact: true }).click();
-      await expect(page).toHaveURL(/\/apps\/[a-f0-9-]+$/);
-
-      expect(
-        await environment.database.db
-          .select({ organizationId: session.activeOrganizationId })
-          .from(session)
-          .where(eq(session.userId, person.id)),
-      ).toEqual([{ organizationId: alpha }]);
-
-      const records = await environment.database.db
-        .select({ organizationId: organizationRuntimes.organizationId })
-        .from(apps)
-        .innerJoin(
-          organizationRuntimes,
-          eq(apps.organizationId, organizationRuntimes.organizationId),
-        )
-        .where(eq(apps.slug, slug));
-
-      expect(records).toEqual([{ organizationId: alpha }]);
-      await expect(
-        page.getByText(`${slug}-${alpha}.apps.localhost`, { exact: true }),
-      ).toBeVisible();
-      await page.getByRole("link", { name: "Create preview", exact: true }).click();
-      await page.getByLabel("App name", { exact: true }).fill("Review");
-      await page.getByLabel("URL slug").fill(`${slug}-review`);
-      await page.getByRole("button", { name: "Create app", exact: true }).click();
-      await expect(page).toHaveURL(/\/apps\/[a-f0-9-]+$/);
-      await expect(
-        page.getByText(`${slug}-review-${alpha}.apps.localhost`, { exact: true }),
-      ).toBeVisible();
     } finally {
       await context.close();
     }
   });
 
-  test(`rejects an old tab's app creation after another tab switches organizations (JavaScript ${javaScriptEnabled})`, async ({
+  test(`creates apps in the organization a tab shows while another tab opens another (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {
-    const { alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
+    const { person, alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
 
     try {
       const first = await context.newPage();
       const second = await context.newPage();
-      await first.goto("/organizations");
-      await first.getByRole("button", { name: /^Alpha admin$/i }).click();
-      await expect(first).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
-      await first.goto("/apps/new");
+      await first.goto(`/${alpha}/apps/new`);
       await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
       await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(alpha);
-      const slug = `stale-${javaScriptEnabled}`;
-      await first.getByLabel("App name", { exact: true }).fill("Old tab app");
+      const slug = `parallel-${javaScriptEnabled}`;
+      await first.getByLabel("App name", { exact: true }).fill("Alpha tab app");
       await first.getByLabel("URL slug").fill(slug);
 
-      await second.goto("/organizations");
-      await second.getByRole("button", { name: /^Beta admin$/i }).click();
+      await second.goto(`/${beta}`);
       await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
-      await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
-      await first.getByRole("button", { name: "Create app", exact: true }).click();
-      await expect(
-        first.getByText(
-          "Your organization selection changed. Reload this page before making changes.",
-        ),
-      ).toBeVisible();
-      expect(await environment.database.db.select().from(apps).where(eq(apps.slug, slug))).toEqual(
-        [],
-      );
+      expect(
+        await environment.database.db
+          .select({ organizationId: session.activeOrganizationId })
+          .from(session)
+          .where(eq(session.userId, person.id)),
+      ).toEqual([{ organizationId: beta }]);
 
-      await first.getByRole("link", { name: "Reload page", exact: true }).click();
-      await expect(first.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
-      await first.getByLabel("App name", { exact: true }).fill("Reloaded tab app");
-      await first.getByLabel("URL slug").fill(slug);
       await first.getByRole("button", { name: "Create app", exact: true }).click();
-      await expect(first).toHaveURL(/\/apps\/[a-f0-9-]+$/);
+      await expect(first).toHaveURL(
+        new RegExp(`^${environment.configuration.PLATFORM_URL}/${alpha}/apps/[a-f0-9-]+$`),
+      );
+      await expect(
+        first.getByText(`${slug}-${alpha}.apps.localhost`, { exact: true }),
+      ).toBeVisible();
+      await first.getByRole("link", { name: "Create preview", exact: true }).click();
+      await first.getByLabel("App name", { exact: true }).fill("Review");
+      await first.getByLabel("URL slug").fill(`${slug}-review`);
+      await first.getByRole("button", { name: "Create app", exact: true }).click();
+      await expect(first).toHaveURL(new RegExp(`/${alpha}/apps/[a-f0-9-]+$`));
+      await expect(
+        first.getByText(`${slug}-review-${alpha}.apps.localhost`, { exact: true }),
+      ).toBeVisible();
 
       const records = await environment.database.db
-        .select({ organizationId: organizationRuntimes.organizationId })
+        .select({ organizationId: apps.organizationId })
         .from(apps)
-        .innerJoin(
-          organizationRuntimes,
-          eq(apps.organizationId, organizationRuntimes.organizationId),
-        )
-        .where(eq(apps.slug, slug));
+        .where(inArray(apps.slug, [slug, `${slug}-review`]));
 
-      expect(records).toEqual([{ organizationId: beta }]);
+      expect(records).toEqual([{ organizationId: alpha }, { organizationId: alpha }]);
     } finally {
       await context.close();
     }
   });
 
   for (const activeOrganizationId of [null, "unavailable"]) {
-    test(`returns to an app link after repairing selection ${activeOrganizationId} (JavaScript ${javaScriptEnabled})`, async ({
+    test(`opens an app link whatever the session's organization is ${activeOrganizationId} (JavaScript ${javaScriptEnabled})`, async ({
       browser,
     }) => {
       const { person, alpha, context } = await organizationSession(browser, javaScriptEnabled);
@@ -471,26 +425,18 @@ for (const javaScriptEnabled of [true, false]) {
           .set({ activeOrganizationId })
           .where(eq(session.userId, person.id));
 
-        const [execution] = await environment.database.db
-          .select()
-          .from(organizationRuntimes)
-          .where(eq(organizationRuntimes.organizationId, alpha));
-
-        if (!execution) throw new Error("Missing organization fixture execution");
         const appId = crypto.randomUUID();
         await environment.database.db.insert(apps).values({
           id: appId,
-          organizationId: execution.organizationId,
+          organizationId: alpha,
           ownerId: person.id,
           slug: "linked-app",
           displayName: "Linked app",
           hostname: `linked-app-${alpha}.apps.localhost`,
         });
-        const destination = `/apps/${appId}?q=linked%20app&view=overview`;
+        const destination = `/${alpha}/apps/${appId}?q=linked%20app&view=overview`;
         const page = await context.newPage();
         await page.goto(destination);
-        await expect(page).toHaveURL(/\/organizations(?:\?|$)/);
-        await page.getByRole("button", { name: /^Alpha admin$/i }).click();
         await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}${destination}`);
         await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
         await expect(page.getByRole("heading", { name: "Linked app", exact: true })).toBeVisible();
@@ -500,10 +446,30 @@ for (const javaScriptEnabled of [true, false]) {
     });
   }
 
+  test(`hides organizations a person cannot open (JavaScript ${javaScriptEnabled})`, async ({
+    browser,
+  }) => {
+    const { person, beta, context } = await organizationSession(browser, javaScriptEnabled);
+
+    try {
+      await environment.database.db
+        .delete(member)
+        .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
+      const page = await context.newPage();
+
+      for (const path of [`/${beta}`, `/${beta}/apps`, "/unknown-organization/apps"]) {
+        expect((await page.goto(path))?.status(), path).toBe(404);
+        await expect(page.getByRole("heading", { name: "Nothing here yet." })).toBeVisible();
+      }
+    } finally {
+      await context.close();
+    }
+  });
+
   test(`rejects external destinations in the chooser and submitted form (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {
-    const { context } = await organizationSession(browser, javaScriptEnabled);
+    const { alpha, context } = await organizationSession(browser, javaScriptEnabled);
 
     try {
       const page = await context.newPage();
@@ -517,7 +483,7 @@ for (const javaScriptEnabled of [true, false]) {
         input.value = "//external.example.test";
       });
       await button.click();
-      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
+      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
       await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
     } finally {
       await context.close();
@@ -532,12 +498,14 @@ test("switches organizations from the sidebar menu", async ({ browser }) => {
     const page = await context.newPage();
     await page.goto("/organizations");
     await page.getByRole("button", { name: /^Alpha admin$/i }).click();
-    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
+    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
     // Before hydration the trigger is a plain link to the chooser.
     await page.waitForLoadState("networkidle");
     await page.getByRole("link", { name: "Choose organization: Alpha" }).click();
     await page.getByRole("menuitem", { name: /Beta/ }).click();
+    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${beta}`);
     await expect(page.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+    // The organization last opened is the one paths without an organization open.
     expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
       application: { organizationId: beta },
     });
@@ -547,43 +515,32 @@ test("switches organizations from the sidebar menu", async ({ browser }) => {
     await page.getByRole("link", { name: "Choose organization: Beta" }).click();
     await expect(page.getByRole("menu")).toBeVisible();
     await page.keyboard.press("1");
+    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
     await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
-    expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
-      application: { organizationId: alpha },
-    });
   } finally {
     await context.close();
   }
 });
 
-test("reloads an open tab after another tab switches organizations", async ({ browser }) => {
-  const { beta, context } = await organizationSession(browser, true);
+test("keeps an open tab on its organization after another tab switches", async ({ browser }) => {
+  const { alpha, beta, context } = await organizationSession(browser, true);
 
   try {
     const first = await context.newPage();
     const second = await context.newPage();
-    await first.goto("/organizations");
-    await first.getByRole("button", { name: /^Alpha admin$/i }).click();
-    await expect(first).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
-    await first.goto("/apps/new");
+    await first.goto(`/${alpha}/apps/new`);
     await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+    await first.waitForLoadState("networkidle");
     await first.getByLabel("App name", { exact: true }).fill("Unfinished Alpha app");
 
-    await second.goto("/organizations");
-    await second.getByRole("button", { name: /^Beta admin$/i }).click();
+    await second.goto(`/${beta}`);
     await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
 
-    // Returning to a tab fires visibilitychange. Headless pages stay visible, so dispatch it, and
-    // repeat until the listener is hydrated and the tab has reloaded.
-    await expect(async () => {
-      await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-      await expect(first.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible({
-        timeout: 1_000,
-      });
-    }).toPass();
-    // The page reloads, so the unfinished form cannot submit to the new organization.
-    await expect(first.getByLabel("App name", { exact: true })).toHaveValue("");
-    await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(beta);
+    // Returning to a tab fires visibilitychange. Headless pages stay visible, so dispatch it.
+    await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+    await expect(first.getByLabel("App name", { exact: true })).toHaveValue("Unfinished Alpha app");
+    await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(alpha);
   } finally {
     await context.close();
   }

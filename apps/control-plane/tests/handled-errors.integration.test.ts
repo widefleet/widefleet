@@ -48,6 +48,7 @@ beforeAll(async () => {
     session: { ...current.session, activeOrganizationId: environment.application.organizationId },
     analytics: null,
     runtime: async () => runtime,
+    workspace: null,
   };
 });
 

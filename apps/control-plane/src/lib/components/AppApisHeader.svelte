@@ -1,6 +1,9 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import PageHeading from "./PageHeading.svelte";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   let {
     active,
@@ -19,8 +22,13 @@
   } = $props();
 
   const views = $derived([
-    { id: "catalog", label: "Catalog", href: `/services${query}`, count: apis },
-    { id: "requests", label: "Requests", href: "/services/requests", count: pending },
+    { id: "catalog", label: "Catalog", href: workspace.path(`/services${query}`), count: apis },
+    {
+      id: "requests",
+      label: "Requests",
+      href: workspace.path("/services/requests"),
+      count: pending,
+    },
   ]);
 </script>
 

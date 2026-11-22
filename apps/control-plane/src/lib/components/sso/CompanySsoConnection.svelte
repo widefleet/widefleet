@@ -24,6 +24,9 @@
   import RestartDialog from "./RestartDialog.svelte";
   import SsoConnectionFields from "./SsoConnectionFields.svelte";
   import EmbeddingOrigins from "./EmbeddingOrigins.svelte";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   let {
     view,
@@ -60,7 +63,7 @@
     () => organizationId,
     async () => {
       baseline = JSON.stringify(draft);
-      await goto("/settings/company-sign-in", { reset: false });
+      await goto(workspace.path("/settings/company-sign-in"), { reset: false });
       saved = true;
     },
   );
@@ -84,7 +87,7 @@
     draft = ssoDraft(view, organizationId);
     baseline = JSON.stringify(draft);
     saved = false;
-    void goto("/settings/company-sign-in?edit", { reset: false });
+    void goto(workspace.path("/settings/company-sign-in?edit"), { reset: false });
   };
 
   const save = (event: SubmitEvent) => {
@@ -95,7 +98,10 @@
   const test = async () => {
     if (!view.sso) return;
     testing = true;
-    testError = (await startCompanySignIn(view.sso.providerId, "/settings/company-sign-in")) ?? "";
+    testError = (await startCompanySignIn(
+      view.sso.providerId,
+      workspace.path("/settings/company-sign-in"),
+    )) ?? "";
     testing = false;
   };
 
@@ -132,7 +138,7 @@
             Members keep their current sign-in until you activate company SSO.
           </p>
         </div>
-        <Button href={`/settings/company-sign-in/setup?step=${nextSetupStep(view, linked)}`}
+        <Button href={workspace.path(`/settings/company-sign-in/setup?step=${nextSetupStep(view, linked)}`)}
           >Continue setup</Button
         >
       </section>
@@ -160,7 +166,7 @@
             <Button
               variant="outline"
               disabled={edits.busy}
-              onclick={() => goto("/settings/company-sign-in", { reset: false })}>Cancel</Button
+              onclick={() => goto(workspace.path("/settings/company-sign-in"), { reset: false })}>Cancel</Button
             >
             <Button id="identity-save" type="submit" disabled={edits.busy}
               >{edits.busy ? "Saving …" : "Save"}</Button

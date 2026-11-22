@@ -8,7 +8,13 @@ import { getRuntime, reportRequestException } from "./runtime.ts";
 
 type Denial = { location: string; status: number; message: string };
 
-const authorize = async (deny: (denial: Denial) => never, write?: { organizationId: string }) => {
+// Remote functions receive their page's organization as an argument. A query is cached by its
+// arguments, so it cannot read the organization from the page URL, and the session's
+// organization may belong to another tab.
+const authorize = async (
+  deny: (denial: Denial) => never,
+  { organizationId }: { organizationId: string },
+) => {
   const { request, locals } = getRequestEvent();
   const { user, session } = locals;
 
@@ -16,19 +22,16 @@ const authorize = async (deny: (denial: Denial) => never, write?: { organization
     return deny({ location: "/sign-in", status: 401, message: "Sign in to continue" });
   const runtime = await getRuntime();
 
-  const principal = await runtime.identity.principal(
+  const member = await runtime.identity.member(
     user.id,
-    session.activeOrganizationId ?? null,
+    { organizationId },
     session.identityOrganizationId ?? null,
-    session.id,
   );
 
-  if (principal.isErr()) {
-    if (principal.error instanceof DatabaseUnavailable) return pageFailure(principal.error);
+  if (member.isErr()) {
+    if (member.error instanceof DatabaseUnavailable) return pageFailure(member.error);
 
-    const { code, message, organizationSlug } = principal.error;
-
-    if (code === "CONFLICT") error(409, message);
+    const { code, message, organizationSlug } = member.error;
 
     if (code === "UNAUTHORIZED") return deny({ location: "/sign-in", status: 401, message });
 
@@ -39,27 +42,23 @@ const authorize = async (deny: (denial: Denial) => never, write?: { organization
         message,
       });
 
-    // A stale selection can be repaired without signing out of a valid session.
+    // Membership can end while a page is open. Choosing another organization repairs it.
     return deny({ location: "/organizations", status: 403, message });
   }
 
-  if (write && write.organizationId !== principal.value.application.organizationId)
-    error(409, "Your organization selection changed. Reload this page before making changes.");
+  runtime.reporting.active(member.value.principal.id);
 
-  runtime.reporting.active(principal.value.id);
-  session.activeOrganizationId = principal.value.application.organizationId;
-
-  return { runtime, principal: principal.value, request };
+  return { runtime, ...member.value, request };
 };
 
 // Queries and forms send a caller without access to where the page hook would send them. A query
 // request does not name its page, so these destinations carry no return path.
-export const remoteContext = (write?: { organizationId: string }) =>
-  authorize(({ location }) => redirect(303, location), write);
+export const remoteContext = (selection: { organizationId: string }) =>
+  authorize(({ location }) => redirect(303, location), selection);
 
 // Commands cannot redirect, so they report the same denial as an error.
-export const commandContext = (write?: { organizationId: string }) =>
-  authorize(({ status, message }) => error(status, message), write);
+export const commandContext = (selection: { organizationId: string }) =>
+  authorize(({ status, message }) => error(status, message), selection);
 
 export const queryValue = <T>(
   result: Result<T, InvalidOperation | DatabaseUnavailable | StorageUnavailable | APIError>,

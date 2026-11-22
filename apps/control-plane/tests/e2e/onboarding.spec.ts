@@ -85,7 +85,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       }),
     );
 
-    return { organizationId, email, invitationId: prepared.invitation.id };
+    return { organizationId, slug, email, invitationId: prepared.invitation.id };
   };
 
   const first = await createCompany("browser-alpha");
@@ -324,7 +324,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       operator.getByRole("button", { name: "Remove alias.example.test", exact: true }),
     ).toHaveCount(0);
 
-    await operator.goto("/settings/company-sign-in");
+    await operator.goto("/widefleet/settings/company-sign-in");
     await operator.waitForLoadState("networkidle");
     await operator.getByText("Remove this connection", { exact: true }).click();
     await operator.getByRole("button", { name: "Remove company SSO", exact: true }).click();
@@ -333,11 +333,11 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       operator.getByRole("link", { name: "Set up company SSO", exact: true }),
     ).toBeVisible();
     await configure();
-    await operator.goto("/settings/company-sign-in");
+    await operator.goto("/widefleet/settings/company-sign-in");
     await operator.waitForLoadState("networkidle");
     await expect(domains.getByText("example.test", { exact: true })).toBeVisible();
     await expect(domains.getByText("alias.example.test", { exact: true })).toHaveCount(0);
-    await operator.goto("/settings/company-sign-in");
+    await operator.goto("/widefleet/settings/company-sign-in");
     await operator.waitForLoadState("networkidle");
 
     // A recipient may already have an email session when their company enables SSO.
@@ -420,7 +420,9 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await expect(companyPage.getByLabel("Your name")).toHaveCount(0);
 
     await companyPage.getByRole("button", { name: "Accept invitation" }).click();
-    await expect(companyPage).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
+    await expect(companyPage).toHaveURL(
+      `${environment.configuration.PLATFORM_URL}/${company.slug}`,
+    );
     const accepted = await companyContext.request.get("/api/v1/me");
     expect(accepted.status(), await accepted.text()).toBe(200);
     expect(await accepted.json()).toMatchObject({
@@ -441,7 +443,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       ).toBeVisible();
       await expect(page.getByLabel("Your name")).toHaveCount(0);
       await page.getByRole("button", { name: "Accept invitation" }).click();
-      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
+      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${company.slug}`);
 
       const created = await context.request.post("/api/v1/apps", {
         headers: { origin: environment.configuration.PLATFORM_URL },
@@ -453,7 +455,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       expect(app.hostname).toBe(
         `notes-${company.email.split("@")[0]}.${environment.configuration.APP_DOMAIN}`,
       );
-      await page.goto("/settings/members");
+      await page.goto(`/${company.slug}/settings/members`);
       await page.getByText("Invite a member", { exact: true }).click();
       await page.getByLabel("Email", { exact: true }).fill(`member-${company.email}`);
       failedRecipients.add(`member-${company.email}`);
@@ -486,7 +488,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
             ).length,
         )
         .toBe(1);
-      await page.goto("/settings/company-sign-in");
+      await page.goto(`/${company.slug}/settings/company-sign-in`);
       await page.waitForLoadState("networkidle");
       await expect(
         page.getByText(
@@ -509,12 +511,12 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       .update(ssoProvider)
       .set({ domainVerified: true })
       .where(eq(ssoProvider.organizationId, "widefleet"));
-    await operator.goto("/settings/company-sign-in/setup?step=test");
+    await operator.goto("/widefleet/settings/company-sign-in/setup?step=test");
     await operator.waitForLoadState("networkidle");
     await expect(operator.getByRole("button", { name: "Test company sign-in" })).toBeVisible();
     // Activation needs the administrator's account linked to the provider; until then the
     // flow stays on the sign-in test.
-    await operator.goto("/settings/company-sign-in/setup?step=activate");
+    await operator.goto("/widefleet/settings/company-sign-in/setup?step=activate");
     await operator.waitForLoadState("networkidle");
     await expect(operator.getByRole("heading", { name: "Test sign-in" })).toBeVisible();
 
@@ -531,7 +533,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     ).toBeEnabled();
     expect((await operatorContext.request.get("/api/v1/me")).status()).toBe(200);
     const loginPage = await firstContext.newPage();
-    await loginPage.goto("/sign-in?organization=widefleet&next=%2Fsettings");
+    await loginPage.goto("/sign-in?organization=widefleet&next=%2Fwidefleet%2Fsettings");
     await expect(
       loginPage.getByRole("button", { name: "Continue with email", exact: true }),
     ).toBeVisible();
@@ -539,7 +541,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await expect(loginPage).toHaveURL(/\/settings\/company-sign-in$/);
     // Both operator sessions were verified by OTP. Activating SSO must deny
     // organization access to each of them without deleting the global account.
-    await loginPage.goto("/settings/company-sign-in/setup?step=activate");
+    await loginPage.goto("/widefleet/settings/company-sign-in/setup?step=activate");
     await loginPage.waitForLoadState("networkidle");
     await loginPage.getByRole("button", { name: "Activate company SSO", exact: true }).click();
     await expect(loginPage).not.toHaveURL(/\/settings\/company-sign-in\/setup/);

@@ -5,9 +5,10 @@ import { organizationSelection, userConnectionInput } from "@platform/contracts"
 import { z } from "zod";
 import { InvalidOperation } from "#server/errors";
 import { remoteContext } from "#server/remote-support";
+import { workspacePath } from "#lib/workspace-path";
 
-export const getUserConnections = query(async () => {
-  const { runtime, principal } = await remoteContext();
+export const getUserConnections = query(organizationSelection, async (selection) => {
+  const { runtime, principal } = await remoteContext(selection);
 
   try {
     return { connections: await runtime.userConnections.list(principal), error: null };
@@ -47,7 +48,7 @@ export const prepareUserConnection = form(input, async ({ appId, organizationId 
 });
 
 export const disconnectUserConnection = form(input, async ({ appId, organizationId }) => {
-  const { runtime, principal } = await remoteContext({ organizationId });
+  const { runtime, principal, organization } = await remoteContext({ organizationId });
 
   try {
     await runtime.userConnections.disconnect(principal, appId);
@@ -56,5 +57,5 @@ export const disconnectUserConnection = form(input, async ({ appId, organization
     throw cause;
   }
 
-  redirect(303, "/connections");
+  redirect(303, workspacePath(organization.slug, "/connections"));
 });

@@ -9,15 +9,20 @@
   import TemplateIcon from "./TemplateIcon.svelte";
   import Search from "@lucide/svelte/icons/search";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   const search = $derived((page.url.searchParams.get("q") ?? "").trim().slice(0, 200));
 
   // GitHub hosts the templates. The page around them stays usable when it cannot be reached.
   const catalog = $derived(
-    await getTemplates({ search }).catch((cause: unknown) => {
-      if (isHttpError(cause) && cause.status >= 500) return null;
-      throw cause;
-    }),
+    await getTemplates({ organizationId: workspace.organizationId, search }).catch(
+      (cause: unknown) => {
+        if (isHttpError(cause) && cause.status >= 500) return null;
+        throw cause;
+      },
+    ),
   );
 </script>
 
@@ -60,7 +65,7 @@
     {#each catalog.templates as template (template.id)}
       <li>
         <a
-          href={`/catalog/templates/${template.id}`}
+          href={workspace.path(`/catalog/templates/${template.id}`)}
           class="hover:bg-muted/40 group flex items-center justify-between gap-5 rounded-md px-2 py-5"
         >
           <div class="flex min-w-0 items-start gap-3">

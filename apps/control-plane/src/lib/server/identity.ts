@@ -77,22 +77,29 @@ export const createIdentityService = (
         new DatabaseUnavailable({ message: "Could not read organization access", cause }),
     });
 
-  const resolveUser = (
+  // A selection names an organization by ID, as API clients do, or by the slug in a page URL.
+  // Without one, the extension's default or the member's only organization applies.
+  const resolveMember = (
     userId: string,
-    organizationId: string | null,
+    selection: { organizationId: string | null } | { organizationSlug: string },
     identityOrganizationId: string | null,
     sessionId?: string | null,
   ) =>
     Result.gen(async function* () {
-      const selectedOrganizationId = organizationId ?? access.defaultOrganizationId ?? null;
       const records = yield* Result.await(memberships(userId, identityOrganizationId));
+      const requested = "organizationId" in selection ? selection.organizationId : undefined;
+
+      const selected =
+        requested === undefined ? undefined : (requested ?? access.defaultOrganizationId ?? null);
 
       const matching =
-        selectedOrganizationId === null
-          ? records
-          : records.filter((record) => record.organizationId === selectedOrganizationId);
+        "organizationSlug" in selection
+          ? records.filter((record) => record.organizationSlug === selection.organizationSlug)
+          : selected === null
+            ? records
+            : records.filter((record) => record.organizationId === selected);
 
-      if (selectedOrganizationId === null && matching.length !== 1)
+      if (selected === null && matching.length !== 1)
         return yield* new AuthenticationFailed({
           code: "ORGANIZATION_REQUIRED",
           message:
@@ -114,7 +121,7 @@ export const createIdentityService = (
           message: `Sign in with company SSO for ${record.organizationName}. Open /sign-in?organization=${encodeURIComponent(record.organizationSlug)} before authorizing the CLI.`,
         });
 
-      if (organizationId === null && sessionId) {
+      if (requested === null && sessionId) {
         const [current] = yield* Result.await(
           Result.tryPromise({
             try: () =>
@@ -148,17 +155,47 @@ export const createIdentityService = (
       const admin = organizationRoles[record.role].authorize({ agent: ["manage"] }).success;
 
       return Result.ok({
-        id: record.id,
-        name: record.name,
-        email: record.email,
-        role: record.role,
-        admin: record.organizationId === installationOrganizationId && admin,
-        application: {
-          organizationId: record.organizationId,
-          admin,
+        principal: {
+          id: record.id,
+          name: record.name,
+          email: record.email,
+          role: record.role,
+          admin: record.organizationId === installationOrganizationId && admin,
+          application: {
+            organizationId: record.organizationId,
+            admin,
+          },
+          creator: organizationRoles[record.role].authorize({ app: ["create"] }).success,
         },
-        creator: organizationRoles[record.role].authorize({ app: ["create"] }).success,
+        organization: {
+          id: record.organizationId,
+          name: record.organizationName,
+          slug: record.organizationSlug,
+        },
       });
+    });
+
+  const resolveUser = (
+    userId: string,
+    organizationId: string | null,
+    identityOrganizationId: string | null,
+    sessionId?: string | null,
+  ) =>
+    resolveMember(userId, { organizationId }, identityOrganizationId, sessionId).then((result) =>
+      result.map(({ principal }) => principal),
+    );
+
+  // Pages name their organization in the URL; the session keeps the last one opened as the
+  // destination for paths without an organization, such as the start page.
+  const rememberOrganization = (sessionId: string, userId: string, organizationId: string) =>
+    Result.tryPromise({
+      try: () =>
+        database
+          .update(sessions)
+          .set({ activeOrganizationId: organizationId })
+          .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId))),
+      catch: (cause) =>
+        new DatabaseUnavailable({ message: "Could not save organization selection", cause }),
     });
 
   const verify = (request: Request, scope: "platform:read" | "platform:write" | "network:manage") =>
@@ -255,7 +292,6 @@ export const createIdentityService = (
   const authenticate = (
     request: Request,
     scope: "platform:read" | "platform:write" | "network:manage",
-    expectedOrganizationId?: string,
   ) =>
     Result.gen(async function* () {
       const verified = yield* Result.await(verify(request, scope));
@@ -271,17 +307,6 @@ export const createIdentityService = (
           verified.sessionId,
         ),
       );
-
-      // A rendered browser form carries its displayed organization. Never reinterpret
-      // that form using a selection changed by another tab in the same session.
-      if (
-        expectedOrganizationId !== undefined &&
-        expectedOrganizationId !== principal.application.organizationId
-      )
-        return yield* new AuthenticationFailed({
-          code: "CONFLICT",
-          message: "Your organization selection changed. Reload this page before making changes.",
-        });
 
       return Result.ok(principal);
     });
@@ -351,6 +376,8 @@ export const createIdentityService = (
     selectOrganization,
     authenticateUser: verify,
     principal: resolveUser,
+    member: resolveMember,
+    rememberOrganization,
     listOrganizations,
   };
 };
