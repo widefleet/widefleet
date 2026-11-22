@@ -40,27 +40,19 @@ available memberships as `{ id, name, slug, role }` objects.
 
 For API requests, send `X-Widefleet-Organization: ORGANIZATION_ID` using an ID from
 that response. Selection does not grant access: the server checks current
-membership and role on each request. The header takes precedence over a browser
-session's active organization. Without either, a standard installation uses its
-own organization. Otherwise, exactly one available organization is selected
+membership and role on each request. Without the header, a standard installation
+uses its own organization. Otherwise, exactly one available organization is selected
 automatically; multiple available organizations require an explicit choice.
 With no available organization or no choice among several, requests return
-`403 ORGANIZATION_REQUIRED`. An invalid or unavailable explicit or saved selection
-fails with `403` and never falls back to another organization.
+`403 ORGANIZATION_REQUIRED`. An invalid or unavailable selection fails with `403`
+and never falls back to another organization.
 
 Workspace pages start with their organization's URL name, for example
-`/acme/apps`, so links and bookmarks always open the same organization. Choose
-another organization at `/organizations` or from the organization menu in the
-sidebar. Each tab works in the organization its address names, so you can keep
-several organizations open side by side.
-
-The session remembers the organization you opened last. Addresses without an
-organization, such as `/`, open it, and browser API requests without the header
-use it. `PUT /api/v1/organization` accepts
-`{ "organizationId": "ORGANIZATION_ID" }` and requires `platform:write` or a
-same-origin browser request. For a browser session it saves this organization;
-for a token it validates the selection for that call without saving a preference.
-Token clients must keep sending the header to retain an explicit target on later requests.
+`/acme/apps`, so links and bookmarks always open the same organization. Each tab
+works in the organization its address names, so you can keep several
+organizations open side by side. Switch from the organization menu in the
+sidebar or at `/organizations`. Addresses without an organization, such as `/`,
+open your organization directly and let you choose when you belong to several.
 
 `GET /api/v1/me` returns the selected context under `application`:
 `organizationId` and `admin`. The nested `admin` field authorizes app connection
