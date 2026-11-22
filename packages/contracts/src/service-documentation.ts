@@ -132,10 +132,27 @@ type Documentation = z.infer<typeof serviceDocumentation>;
 
 // Generated type names are complete type expressions: `Item`, `One.Item`,
 // `Page<Item>` or `import("./model").Item`. Each is found under its first plain
-// identifier, and a text uses it when it contains the whole name.
+// identifier, and a text uses it when it contains the whole name, not as part
+// of a longer name such as `One.ItemDetails` or `Two.Item`.
 const qualifier = /^import\("(?:[^"\\]|\\.)*"\)\./;
 
 const identifier = /import\("(?:[^"\\]|\\.)*"\)\.[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*/g;
+
+const namePart = /[\w$.]/;
+
+const declaration =
+  /^\s*(?:export\s+)?(?:declare\s+)?(?:interface|type|class|enum)\s+[A-Za-z_$][\w$]*/;
+
+const usesName = (text: string, name: string) => {
+  for (let index = text.indexOf(name); index >= 0; index = text.indexOf(name, index + 1)) {
+    const before = text[index - 1];
+    const after = text[index + name.length];
+
+    if (!(before && namePart.test(before)) && !(after && /[\w$]/.test(after))) return true;
+  }
+
+  return false;
+};
 
 const leadingIdentifier = (text: string) =>
   /^[A-Za-z_$][\w$]*/.exec(text.replace(qualifier, ""))?.[0];
@@ -158,9 +175,10 @@ const referencedTypes = (types: Documentation["types"], texts: string[]) => {
       const key = leadingIdentifier(token);
 
       for (const type of (key && candidates.get(key)) || []) {
-        if (used.has(type.name) || !text.includes(type.name)) continue;
+        if (used.has(type.name) || !usesName(text, type.name)) continue;
         used.add(type.name);
-        pending.push(type.definition);
+        // A definition starts by declaring its own short name, which is not a use.
+        pending.push(type.definition.replace(declaration, ""));
       }
     }
 

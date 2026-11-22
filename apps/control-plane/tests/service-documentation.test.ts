@@ -753,6 +753,7 @@ it("selects the types a method uses under every generated name form", () => {
         http: false,
         methods: [
           method("first", "One.Item", "Promise<Page<Item>>"),
+          method("details", "One.ItemDetails", "Promise<Two.Item>"),
           method(
             "qualified",
             'import("./app/query").Query',
@@ -773,6 +774,8 @@ it("selects the types a method uses under every generated name form", () => {
         "interface Page { items: Query[] }",
       ),
       type("Unused", "interface Unused { id: string }"),
+      type("One.ItemDetails", "interface ItemDetails { notes: string }"),
+      type("Two.Item", "interface Item { count: number }"),
     ],
   });
 
@@ -782,6 +785,8 @@ it("selects the types a method uses under every generated name form", () => {
     );
 
   expect(selected(["first"])).toEqual(["One.Item", "Page<Item>", "Item", "Owner"]);
+  // A longer name or another namespace's type does not pull in a shorter name.
+  expect(selected(["details"])).toEqual(["One.ItemDetails", "Two.Item"]);
   expect(selected(["qualified"])).toEqual([
     'import("./app/query").Query',
     'import("./app/page").Page<import("./app/query").Query>',
