@@ -9,16 +9,18 @@ import {
 } from "@platform/contracts";
 import { z } from "zod";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
+import { workspacePath } from "#lib/workspace-path";
 
-export const getAppAccess = query(appPath, async ({ appId }) => {
-  const { runtime, principal } = await remoteContext();
+const appTarget = appPath.extend(organizationSelection.shape);
+
+export const getAppAccess = query(appTarget, async ({ appId, organizationId }) => {
+  const { runtime, principal } = await remoteContext({ organizationId });
 
   return queryValue(await runtime.appAccess.read(principal, appId));
 });
 
 export const changeAppAccess = form(
-  appPath.extend({
-    ...organizationSelection.shape,
+  appTarget.extend({
     id: z.string().max(300).optional(),
     revision: appAccessChange.shape.revision,
     groups: z
@@ -33,21 +35,24 @@ export const changeAppAccess = form(
       .pipe(appAccessGroups),
   }),
   async ({ appId, revision, groups, organizationId }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal, organization } = await remoteContext({ organizationId });
     formValue(await runtime.appAccess.change(principal, appId, { revision, groups }));
-    await getAppAccess({ appId }).refresh();
+    await getAppAccess({ appId, organizationId }).refresh();
 
     if (!getRequestEvent().isRemoteRequest)
-      redirect(303, `/apps/${appId}/access?accessSaved=1#app-access`);
+      redirect(
+        303,
+        workspacePath(organization.slug, `/apps/${appId}/access?accessSaved=1#app-access`),
+      );
 
     return { saved: true };
   },
 );
 
 export const searchAccessGroups = form(
-  appPath.extend({ id: z.string().max(300).optional(), query: groupSearch.shape.query }),
-  async ({ appId, query }) => {
-    const { runtime, principal } = await remoteContext();
+  appTarget.extend({ id: z.string().max(300).optional(), query: groupSearch.shape.query }),
+  async ({ appId, query, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
     const access = queryValue(await runtime.appAccess.read(principal, appId));
 
     if (!access.canManage) error(403, "Only owners and admins can select access groups.");

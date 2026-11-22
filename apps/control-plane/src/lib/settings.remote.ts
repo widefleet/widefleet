@@ -12,8 +12,8 @@ import { commandContext, remoteContext, remoteOperation } from "#server/remote-s
 import { getRuntime } from "#server/runtime";
 import { readSettingsAccount } from "#server/settings-account";
 
-export const getSettings = query(async () => {
-  const { runtime, principal } = await remoteContext();
+export const getSettings = query(organizationSelection, async (selection) => {
+  const { runtime, principal } = await remoteContext(selection);
 
   return remoteOperation(() =>
     readSettingsAccount(runtime, principal, getRequestEvent().locals.session),
@@ -42,7 +42,7 @@ export const updateSettings = command(
 
     if (!(await runtime.auth.api.getSession({ headers: request.headers })))
       return { signedOut: true };
-    await getSettings().refresh();
+    await getSettings({ organizationId }).refresh();
 
     return { signedOut: false };
   },
@@ -53,7 +53,7 @@ export const setExternalManagement = command(
   async ({ enabled, organizationId }) => {
     const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.setExternalManagement(principal, enabled));
-    await getSettings().refresh();
+    await getSettings({ organizationId }).refresh();
   },
 );
 
@@ -72,7 +72,7 @@ export const addCompanyDomain = command(
   async ({ organizationId, domain }) => {
     const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.addDomain(principal, domain, true));
-    await getSettings().refresh();
+    await getSettings({ organizationId }).refresh();
   },
 );
 
@@ -81,7 +81,7 @@ export const removeCompanyDomain = command(
   async ({ organizationId, domain }) => {
     const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.removeDomain(principal, domain, true));
-    await getSettings().refresh();
+    await getSettings({ organizationId }).refresh();
   },
 );
 
@@ -93,7 +93,7 @@ export const verifyCompanyDomain = command(
     try {
       await remoteOperation(() => runtime.settings.verifyDomain(principal, domain));
     } finally {
-      await getSettings().refresh();
+      await getSettings({ organizationId }).refresh();
     }
   },
 );

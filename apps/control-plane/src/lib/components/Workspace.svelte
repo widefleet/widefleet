@@ -19,8 +19,8 @@
   import type { Principal } from "#server/identity";
   import { resetClientContext, updateClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
-  import { selectOrganization } from "#lib/organizations.remote";
   import { setWorkspaceContext } from "#lib/workspace-context";
+  import { workspacePath } from "#lib/workspace-path";
   import { Button } from "@platform/ui/button";
   import * as Collapsible from "@platform/ui/collapsible";
   import * as DropdownMenu from "@platform/ui/dropdown-menu";
@@ -30,30 +30,31 @@
 
   let {
     principal,
+    organization,
     organizations,
     children,
   }: {
     principal: Principal;
+    organization: { id: string; name: string; slug: string };
     organizations: z.infer<typeof organizationChoice>[];
     children: Snippet;
   } = $props();
 
   setWorkspaceContext({
     get organizationId() {
-      return principal.application.organizationId;
+      return organization.id;
     },
+    path: (path) => workspacePath(organization.slug, path),
   });
 
-  const organization = $derived(
-    organizations.find((entry) => entry.id === principal.application.organizationId),
-  );
+  const path = (target: string) => workspacePath(organization.slug, target);
 
-  const organizationName = $derived(organization?.name ?? "Organization");
+  const organizationName = $derived(organization.name);
 
   $effect(() => {
     updateClientContext({
       user: principal,
-      organization: organization ? { id: organization.id, name: organization.name } : null,
+      organization: { id: organization.id, name: organization.name },
       role: principal.role,
       analytics: page.data.analytics ?? null,
     });
@@ -61,8 +62,6 @@
 
   const roleLabel = (role: string) =>
     role === "owner" ? "Owner" : principal.application.admin ? "Administrator" : "Member";
-
-  let switching = $state(false);
 
   let signingOut = $state(false);
 
@@ -81,7 +80,7 @@
     label: string;
     icon: Component;
     paths: string[];
-    items?: { href: string; label: string; current: (url: typeof page.url) => boolean }[];
+    items?: { href: string; label: string; current: (path: string) => boolean }[];
   };
 
   // Each item also covers the pages reached from it, so the sidebar keeps showing where they belong.
@@ -105,13 +104,12 @@
               {
                 href: "/settings/company-sign-in",
                 label: "Company sign-in",
-                current: (url: typeof page.url) =>
-                  url.pathname.startsWith("/settings/company-sign-in"),
+                current: (current: string) => current.startsWith("/settings/company-sign-in"),
               },
               {
                 href: "/settings/members",
                 label: "Members",
-                current: (url: typeof page.url) => url.pathname.startsWith("/settings/members"),
+                current: (current: string) => current.startsWith("/settings/members"),
               },
               // Deployment agents belong to the installation, so only its administrators see them.
               ...(principal.admin
@@ -119,16 +117,14 @@
                     {
                       href: "/settings/agents",
                       label: "Deployment agents",
-                      current: (url: typeof page.url) =>
-                        url.pathname.startsWith("/settings/agents"),
+                      current: (current: string) => current.startsWith("/settings/agents"),
                     },
                   ]
                 : []),
               {
                 href: "/settings/administration",
                 label: "Administration",
-                current: (url: typeof page.url) =>
-                  url.pathname.startsWith("/settings/administration"),
+                current: (current: string) => current.startsWith("/settings/administration"),
               },
             ],
           },
@@ -136,10 +132,13 @@
       : []),
   ]);
 
+  // Navigation paths are relative to the organization, like the pages they describe.
+  const currentPath = $derived(page.url.pathname.slice(path("/").length) || "/");
+
   const active = (item: { href: string; paths: string[] }) =>
     item.href === "/"
-      ? page.url.pathname === "/"
-      : item.paths.some((path) => page.url.pathname.startsWith(path));
+      ? currentPath === "/"
+      : item.paths.some((prefix) => currentPath.startsWith(prefix));
 
   const section = $derived(navigation.find((item) => active(item))?.label ?? "Workspace");
 
@@ -171,23 +170,17 @@
     }
   };
 
-  // Tabs share one session, so another tab can switch the organization or the member's role.
-  // Recheck when this tab returns. After an organization switch, reload the page so that
-  // unfinished forms cannot submit to the newly selected organization.
+  // The member's role can change while the tab is in the background. Recheck when it returns.
+  // The member's role or the session can change while this tab is hidden, and the workspace
+  // query does not rerun on navigation. Recheck when the tab returns.
   const recheckWorkspace = async () => {
     if (document.visibilityState !== "visible") return;
-    const shown = principal.application.organizationId;
-    const workspace = getWorkspace();
 
     try {
-      await workspace.refresh();
+      await getWorkspace({ organization: organization.slug }).refresh();
     } catch {
       // The query keeps its last confirmed value and exposes the failure.
-      return;
     }
-
-    if (workspace.current && workspace.current.principal.application.organizationId !== shown)
-      window.location.reload();
   };
 </script>
 
@@ -222,10 +215,10 @@
                 <Collapsible.Content>
                   <Sidebar.MenuSub class="mt-1">
                     {#each item.items as subItem (subItem.href)}
-                      {@const current = subItem.current(page.url)}
+                      {@const current = subItem.current(currentPath)}
                       <Sidebar.MenuSubItem>
                         <Sidebar.MenuSubButton
-                          href={subItem.href}
+                          href={path(subItem.href)}
                           isActive={current}
                           aria-current={current ? "page" : undefined}
                           ><span>{subItem.label}</span></Sidebar.MenuSubButton
@@ -241,8 +234,10 @@
           <Sidebar.MenuItem>
             <Sidebar.MenuButton isActive={active(item)}>
               {#snippet child({ props })}
-                <a href={item.href} aria-current={active(item) ? "page" : undefined} {...props}
-                  ><item.icon /><span>{item.label}</span></a
+                <a
+                  href={path(item.href)}
+                  aria-current={active(item) ? "page" : undefined}
+                  {...props}><item.icon /><span>{item.label}</span></a
                 >
               {/snippet}
             </Sidebar.MenuButton>
@@ -303,56 +298,28 @@
           <DropdownMenu.Label class="text-muted-foreground text-xs"
             >Organizations</DropdownMenu.Label
           >
-          {#each organizations as organization, index (organization.id)}
+          {#each organizations as entry, index (entry.id)}
             {@const shortcut = index < 9 ? String(index + 1) : undefined}
             {#snippet row()}<span
                 class="grid size-6 shrink-0 place-items-center rounded-md border text-[11px] font-medium"
-                aria-hidden="true">{organization.name.charAt(0).toUpperCase()}</span
-              ><span class="min-w-0 flex-1 truncate">{organization.name}</span
+                aria-hidden="true">{entry.name.charAt(0).toUpperCase()}</span
+              ><span class="min-w-0 flex-1 truncate">{entry.name}</span
               >{#if shortcut}<DropdownMenu.Shortcut>{shortcut}</DropdownMenu.Shortcut
                 >{/if}{/snippet}
-            {#if organization.id === principal.application.organizationId}
+            {#if entry.id === organization.id}
               <DropdownMenu.Item class="gap-2 p-2" data-organization-shortcut={shortcut}
                 >{@render row()}</DropdownMenu.Item
               >
-            {:else if organization.ssoRequired}
+            {:else}
               <DropdownMenu.Item class="gap-2 p-2">
                 {#snippet child({ props })}<a
                     {...props}
-                    href={`/sign-in?${new URLSearchParams({ organization: organization.slug, next: "/" })}`}
+                    href={entry.ssoRequired
+                      ? `/sign-in?${new URLSearchParams({ organization: entry.slug, next: workspacePath(entry.slug) })}`
+                      : workspacePath(entry.slug)}
                     data-organization-shortcut={shortcut}>{@render row()}</a
                   >{/snippet}
               </DropdownMenu.Item>
-            {:else}
-              {@const selection = selectOrganization.for(organization.id)}
-              <!-- Switching mirrors the organization chooser; the menu stays open while it submits. -->
-              <form
-                {...selection.enhance(async ({ submit }) => {
-                  if (switching) return;
-                  switching = true;
-                  error = "";
-                  try {
-                    await submit();
-                    // A full navigation drops cached queries and forms from the previous organization.
-                    if (selection.result?.selected) window.location.assign(selection.result.next);
-                  } catch {
-                    error = "Could not switch organization. Refresh the page and try again.";
-                  } finally {
-                    switching = false;
-                  }
-                })}
-              >
-                <input {...selection.fields.organizationId.as("hidden", organization.id)} />
-                <input {...selection.fields.next.as("hidden", "/")} />
-                <DropdownMenu.Item class="gap-2 p-2" closeOnSelect={false} disabled={switching}>
-                  {#snippet child({ props })}<button
-                      {...props}
-                      type="submit"
-                      class={`${String(props["class"] ?? "")} w-full text-left`}
-                      data-organization-shortcut={shortcut}>{@render row()}</button
-                    >{/snippet}
-                </DropdownMenu.Item>
-              </form>
             {/if}
           {/each}
         </DropdownMenu.Group>
@@ -396,7 +363,8 @@
               ></DropdownMenu.Group
             >
             <DropdownMenu.Item>
-              {#snippet child({ props })}<a {...props} href="/account"><Users />Your account</a
+              {#snippet child({ props })}<a {...props} href={path("/account")}
+                  ><Users />Your account</a
                 >{/snippet}
             </DropdownMenu.Item>
             <DropdownMenu.Separator /><DropdownMenu.Item disabled={signingOut} onclick={signOut}
@@ -429,7 +397,7 @@
         <div class="bg-popover absolute top-11 right-0 z-40 w-64 rounded-xl border p-3 shadow-lg">
           {@render navigationLinks()}
           <div class="mt-3 space-y-1 border-t pt-3">
-            <Button href="/account" variant="ghost" class="w-full justify-start"
+            <Button href={path("/account")} variant="ghost" class="w-full justify-start"
               ><Users />Your account</Button
             >
             <Button href="/device" variant="ghost" class="w-full justify-start"

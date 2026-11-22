@@ -10,6 +10,9 @@
   import Search from "@lucide/svelte/icons/search";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Feedback from "./Feedback.svelte";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   let {
     data,
@@ -34,7 +37,7 @@
     <p>
       Manage <strong class="font-medium">management access</strong> here. Access to the published
       app is controlled by its
-      <a href={`/apps/${data.app.id}/access`} class="underline underline-offset-4"
+      <a href={workspace.path(`/apps/${data.app.id}/access`)} class="underline underline-offset-4"
         >app usage rules</a
       >. Workspace owners and admins have access to all apps.
     </p>

@@ -117,6 +117,9 @@ const runtimeWith = async (appBuilder?: typeof builder) => {
       application: environment.application,
     }),
   );
+  vi.spyOn(runtime.identity, "authenticateUser").mockResolvedValue(
+    Result.ok({ userId: environment.owner.id, identityOrganizationId: null }),
+  );
   runtimes.push(runtime);
 
   return runtime;

@@ -9,6 +9,8 @@ import {
   type userConnectionEntry,
 } from "@platform/contracts";
 import { apps, artifacts, deployments } from "./schema.ts";
+import { readOrganizationSlug } from "./organization.ts";
+import { workspacePath } from "../workspace-path.ts";
 import type { Database } from "./database.ts";
 import type { Configuration } from "./config.ts";
 import type { Principal } from "./identity.ts";
@@ -173,7 +175,12 @@ export const createUserConnections = (
     },
     prepare: async (principal: Principal, appId: string) => {
       const { record, identity } = await target(principal, appId);
-      const completion = new URL("/connections", configuration.PLATFORM_URL);
+
+      const slug = await readOrganizationSlug(database, principal.application.organizationId);
+
+      // The connector returns the person to the page listing their connections.
+      const completion = new URL(workspacePath(slug, "/connections"), configuration.PLATFORM_URL);
+
       completion.searchParams.set("completed", appId);
 
       const result = await call(principal, record, identity, {

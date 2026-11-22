@@ -141,7 +141,7 @@ for (const entry of ["registration", "sign-in", "plain-form"] as const)
       }
 
       expect(new URL(page.url()).searchParams.get("next")).toBe(
-        entry === "registration" ? "/welcome" : "/",
+        entry === "registration" ? "/[organization]/welcome" : "/[organization]",
       );
       await page.getByLabel("Organization name", { exact: true }).fill("Example Builders");
       await page.getByLabel("Organization URL name", { exact: true }).fill("example-builders");
@@ -194,12 +194,12 @@ for (const entry of ["registration", "sign-in", "plain-form"] as const)
         0,
       );
 
-      // A form left open while its session expires must use a normal page redirect.
+      // A choice made after the session expires signs in again and returns to that organization.
       await environment.database.db.delete(session);
-      await page.getByRole("button", { name: /Example Builders/ }).click();
+      await page.getByRole("link", { name: /Example Builders/ }).click();
       await expect(page).toHaveURL(/\/sign-in\?/);
       const destination = new URL(page.url()).searchParams.get("next");
-      expect(destination).toBe("/organizations");
+      expect(destination).toBe("/example-builders");
       expect(page.url()).not.toContain("__data.json");
     } finally {
       await test

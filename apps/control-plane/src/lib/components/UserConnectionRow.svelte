@@ -9,6 +9,9 @@
   import { Button, buttonVariants } from "@platform/ui/button";
   import Check from "@lucide/svelte/icons/check";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   let {
     connection,
@@ -127,7 +130,7 @@
           <Button
             variant="ghost"
             class="w-full justify-start"
-            href={`/connections?disconnect=${connection.appId}`}
+            href={workspace.path(`/connections?disconnect=${connection.appId}`)}
           >
             Disconnect<span class="sr-only"> {connection.displayName}</span>
           </Button>
@@ -159,7 +162,7 @@
         <Button type="submit" size="sm" variant="destructive" disabled={disconnect.pending > 0}
           >{disconnect.pending > 0 ? "Disconnecting…" : "Disconnect account"}</Button
         >
-        <Button href="/connections" size="sm" variant="ghost">Cancel</Button>
+        <Button href={workspace.path("/connections")} size="sm" variant="ghost">Cancel</Button>
       </div>
     </form>
   {/if}

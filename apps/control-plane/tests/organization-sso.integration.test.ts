@@ -347,7 +347,7 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     });
   });
 
-  it("uses the same company boundary for browser selection and organization discovery", async () => {
+  it("uses the same company boundary for organization access and discovery", async () => {
     const headers = { cookie: firstCookie, origin, "x-widefleet-organization": secondOrg };
 
     const request = new Request(`${apiResource(environment.configuration)}/organizations`, {
@@ -360,10 +360,12 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     expect(await identity.authenticate(request, "platform:read")).toMatchObject({
       error: { code: "FORBIDDEN" },
     });
-    expect(await identity.selectOrganization(request, secondOrg)).toMatchObject({
-      error: { code: "FORBIDDEN" },
+
+    const own = new Request(request, {
+      headers: { ...headers, "x-widefleet-organization": firstOrg },
     });
-    expect((await identity.selectOrganization(request, firstOrg)).isOk()).toBe(true);
+
+    expect((await identity.authenticate(own, "platform:read")).isOk()).toBe(true);
   });
 
   it.each(["/link-social", "/unlink-account", "/get-access-token", "/refresh-token"])(

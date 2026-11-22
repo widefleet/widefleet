@@ -13,6 +13,8 @@ declare global {
       session: Authentication["$Infer"]["Session"]["session"] | null;
       analytics: AnalyticsConfiguration | null;
       runtime: () => Promise<Runtime>;
+      // The organization a workspace page names, once the request hook has authorized it.
+      workspace: { id: string; slug: string } | null;
     }
   }
 }

@@ -19,7 +19,9 @@
 
   const app = getAppContext();
 
-  const definitions = $derived(await getWorkflows({ appId }));
+  const definitions = $derived(
+    await getWorkflows({ organizationId: workspace.organizationId, appId }),
+  );
 
   let workflow = $state("");
 
@@ -84,7 +86,12 @@
       refreshing = true;
 
       try {
-        const query = getWorkflowOperation({ appId: currentAppId, jobId: current.id });
+        const query = getWorkflowOperation({
+          organizationId: workspace.organizationId,
+          appId: currentAppId,
+          jobId: current.id,
+        });
+
         await query.refresh();
         const updated = await query;
 

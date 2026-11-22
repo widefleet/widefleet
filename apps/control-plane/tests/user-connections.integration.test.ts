@@ -145,7 +145,7 @@ describe("Personal connector accounts", () => {
     expect(new URL(prepared.url).hostname).toBe(visible.hostname);
     expect(calls.at(-1)?.operation).toEqual({
       action: "prepare",
-      completionUrl: `${environment.configuration.PLATFORM_URL}/connections?completed=${visible.id}`,
+      completionUrl: `${environment.configuration.PLATFORM_URL}/widefleet/connections?completed=${visible.id}`,
     });
     await expect(service().prepare(principal(), ordinary.id)).rejects.toMatchObject({
       code: "NOT_FOUND",

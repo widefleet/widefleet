@@ -29,6 +29,25 @@ export const findAppIcon = (manifest: z.infer<typeof assetManifest>) => {
   return null;
 };
 
+// Icons are SVG, ICO or PNG from apps and templates: never sniffed, scripted or embedded elsewhere.
+export const iconResponse = (
+  icon: { bytes: Uint8Array; contentType: string },
+  cacheControl: string,
+) =>
+  new Response(Buffer.from(icon.bytes), {
+    headers: {
+      "content-type": icon.contentType,
+      "cache-control": cacheControl,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "cross-origin-resource-policy": "same-origin",
+    },
+  });
+
+// An icon URL that names the active deployment never changes; others revalidate.
+export const iconCache = (requested: string | null, deploymentId: string) =>
+  requested === deploymentId ? "private, max-age=31536000, immutable" : "private, no-cache";
+
 // Read only the selected app's active artifact, never fetch an app URL or bypass its login.
 // Members also see the icons of apps the catalog and My connections list for them.
 export const readAppIcon = async (
