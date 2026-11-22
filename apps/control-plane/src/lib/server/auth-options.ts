@@ -47,7 +47,7 @@ export const authenticationOptions = (
     rateLimit,
     ipAddressHeaders,
     publicSignup = false,
-    validateSchema = true,
+    validateSchema,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
@@ -264,7 +264,12 @@ export const authenticationOptions = (
       },
     },
     advanced: {
-      database: { generateId: () => crypto.randomUUID(), validateSchema },
+      // Leave Better Auth's default when validation stays on: an explicit `true` turns its
+      // note about adapters it cannot validate into a warning.
+      database:
+        validateSchema === false
+          ? { generateId: () => crypto.randomUUID(), validateSchema }
+          : { generateId: () => crypto.randomUUID() },
       ipAddress: { ipAddressHeaders: ipAddressHeaders ?? ["x-forwarded-for"] },
       cookiePrefix: "platform",
       crossSubDomainCookies: { enabled: false },
