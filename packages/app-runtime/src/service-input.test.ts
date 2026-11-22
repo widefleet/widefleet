@@ -84,6 +84,33 @@ describe("Service input requests", () => {
     ).toEqual({ inputResponses: {}, requestState: { text: "Offer text the person saw" } });
   });
 
+  it("accepts answers that carry MCP result metadata", async () => {
+    const { requestState } = await sealed();
+
+    expect(
+      await openInput(secret, binding, call, {
+        requestState,
+        inputResponses: {
+          confirm: {
+            action: "accept",
+            content: { priority: "low" },
+            _meta: { "example.test/approval": "once" },
+          },
+        },
+      }),
+    ).toEqual({
+      inputResponses: { confirm: { action: "accept", content: { priority: "low" } } },
+      requestState: { text: "Offer text the person saw" },
+    });
+
+    expect(
+      await openInput(secret, binding, call, {
+        requestState,
+        inputResponses: { confirm: { action: "decline", _meta: {} } },
+      }),
+    ).toMatchObject({ inputResponses: { confirm: { action: "decline" } } });
+  });
+
   it("passes declines and cancellations through", async () => {
     const { requestState } = await sealed();
 
