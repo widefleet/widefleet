@@ -847,7 +847,7 @@ for (const navigation of ["document", "client"])
     );
   });
 
-test("selects an organization, repairs stale selection and explains removed access", async ({
+test("opens the only organization, ignores a stale session value and explains removed access", async ({
   page,
   context,
 }) => {
@@ -869,32 +869,25 @@ test("selects an organization, repairs stale selection and explains removed acce
   );
   await page.goto("/organizations");
   await expect(page.getByRole("heading", { name: "Choose an organization" })).toBeVisible();
-  await page.getByRole("button", { name: "Widefleet Member" }).click();
+  await page.getByRole("link", { name: "Widefleet Member" }).click();
   await expect(page).toHaveURL("http://localhost:25430/widefleet");
   await expect(page.getByRole("link", { name: "Choose organization: Widefleet" })).toBeVisible();
   await page.goto("/widefleet/catalog/templates");
   await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
+  // Better Auth's organization plugin keeps this column; Widefleet never reads it.
   await environment.database.db
     .update(authSession)
     .set({ activeOrganizationId: "unavailable" })
     .where(eq(authSession.userId, person.id));
 
-  // Workspace pages name their organization, so a stale session selection does not affect them.
   await page.getByRole("link", { name: /^Gmail/ }).click();
   await expect(page).toHaveURL("http://localhost:25430/widefleet/catalog/templates/gmail");
   await expect(page.getByRole("heading", { name: "Gmail" })).toBeVisible();
 
-  // Paths without an organization open the session's organization and ask for a new choice.
+  // Paths without an organization open the member's only organization.
   const response = await context.request.get("/__data.json");
-  expect(await response.json()).toEqual({
-    type: "redirect",
-    status: 303,
-    location: `/organizations?${new URLSearchParams({ next: "/" })}`,
-  });
-
+  expect(await response.json()).toEqual({ type: "redirect", status: 303, location: "/widefleet" });
   await page.goto("/");
-  await expect(page).toHaveURL("http://localhost:25430/organizations?next=%2F");
-  await page.getByRole("button", { name: "Widefleet Member" }).click();
   await expect(page).toHaveURL("http://localhost:25430/widefleet");
   await environment.database.db.delete(member).where(eq(member.userId, person.id));
   expect((await page.goto("/widefleet"))?.status()).toBe(404);

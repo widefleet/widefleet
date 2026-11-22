@@ -5,6 +5,7 @@ import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "
 import { getRuntime, reportRequestException } from "./runtime.ts";
 import type { AuthenticationFailed } from "./identity.ts";
 import { runExtensionEffect } from "../extension-effects.ts";
+import { organizationPlaceholder, workspacePath } from "../workspace-path.ts";
 
 // Remote functions are independently callable and do not inherit page groups.
 // Data access reads the hook's session and rejects calls without an identity.
@@ -72,37 +73,47 @@ const memberFailure = (cause: AuthenticationFailed | DatabaseUnavailable, next: 
       `/sign-in?${new URLSearchParams({ organization: cause.organizationSlug ?? "", next })}`,
     );
 
-  // A stale selection can be repaired without signing out of a valid session.
+  // Choosing another organization repairs a missing or unavailable one.
   if (cause.code === "ORGANIZATION_REQUIRED" || cause.code === "FORBIDDEN")
     redirect(303, `/organizations?${new URLSearchParams({ next })}`);
 
   return pageFailure(cause);
 };
 
-// Paths without an organization, such as the start page, open the session's organization:
-// the last workspace page opened or, before that, the member's only organization.
-export const sessionMember = async () => {
+// Paths without an organization, such as the start page, open the member's only organization.
+// With several, the chooser asks which one and fills it into the destination.
+export const openOrganization = async (path: string): Promise<never> => {
+  const organizations = await pageOrganizations();
+  const [only] = organizations;
+
+  if (organizations.length === 1 && only) redirect(303, workspacePath(only.slug, path));
+
+  redirect(
+    303,
+    `/organizations?${new URLSearchParams({ next: workspacePath(organizationPlaceholder, path) })}`,
+  );
+};
+
+// MCP sign-in names the organization it connects in its own address once one is chosen.
+export const organizationMember = async (slug: string) => {
   const { user, session } = getUserSession();
   const runtime = await getRuntime();
 
   const result = await runtime.identity.member(
     user.id,
-    { organizationId: session.activeOrganizationId ?? null },
+    { organizationSlug: slug },
     session.identityOrganizationId ?? null,
-    session.id,
   );
 
   if (result.isErr()) return memberFailure(result.error, requestDestination());
-  session.activeOrganizationId = result.value.organization.id;
   runtime.reporting.active(result.value.principal.id);
 
   return result.value;
 };
 
-// Workspace pages name their organization in the URL. Opening one makes it the session's
-// organization, so paths without an organization return to it. Links to another organization
-// turn off data preloading, otherwise hovering them would switch it.
-// Organizations a person cannot open resolve to null and look the same as missing ones.
+// Workspace pages name their organization in the URL, independent of the session, so tabs can
+// show different organizations. Organizations a person cannot open resolve to null and look
+// the same as missing ones.
 const resolvePageMember = async () => {
   const { user, session } = getUserSession();
   const { params } = getRequestEvent();
@@ -124,20 +135,7 @@ const resolvePageMember = async () => {
     return memberFailure(result.error, requestDestination());
   }
 
-  const { organization, principal } = result.value;
-
-  if (session.activeOrganizationId !== organization.id) {
-    const remembered = await runtime.identity.rememberOrganization(
-      session.id,
-      user.id,
-      organization.id,
-    );
-
-    if (remembered.isErr()) return pageFailure(remembered.error);
-    session.activeOrganizationId = organization.id;
-  }
-
-  runtime.reporting.active(principal.id);
+  runtime.reporting.active(result.value.principal.id);
 
   return result.value;
 };

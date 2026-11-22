@@ -2390,6 +2390,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(
       (await json(`${path}?deployment=${deployment.id}`, "GET")).headers.get("cache-control"),
     ).toBe("private, max-age=31536000, immutable");
+    // Browsers load icons without headers, so the app names its organization, not the request.
+    const elsewhere = new Headers(adminHeaders);
+    elsewhere.set("x-widefleet-organization", crypto.randomUUID());
+    expect((await json(path, "GET", undefined, elsewhere)).status).toBe(200);
 
     // Members see the icons of apps the catalog and My connections list for them.
     await environment.database.db

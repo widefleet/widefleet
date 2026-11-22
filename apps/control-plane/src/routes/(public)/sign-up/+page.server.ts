@@ -2,6 +2,7 @@ import { error, redirect } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
 import { readInstallation } from "#server/installation-store";
 import { localDestination } from "#server/navigation";
+import { organizationPlaceholder, workspacePath } from "#lib/workspace-path";
 import type { PageServerLoad } from "./$types";
 import { availableSocialProviders } from "#server/social-sign-in";
 
@@ -16,6 +17,6 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
 
   return {
     socialProviders: availableSocialProviders(runtime.configuration),
-    next: `/organizations?${new URLSearchParams({ next: destination === "/" ? "/welcome" : destination })}`,
+    next: `/organizations?${new URLSearchParams({ next: destination === "/" ? workspacePath(organizationPlaceholder, "/welcome") : destination })}`,
   };
 };

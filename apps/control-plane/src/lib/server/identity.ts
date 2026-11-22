@@ -1,8 +1,8 @@
 import { companySsoAvailableSql } from "./sso-policy.ts";
 import { verifyAccessToken } from "./access-token.ts";
 import { Result, TaggedError, type InferOk } from "better-result";
-import { and, eq, sql } from "drizzle-orm";
-import { member, user, organization, ssoProvider, session as sessions } from "./auth-schema.ts";
+import { eq, sql } from "drizzle-orm";
+import { member, user, organization, ssoProvider } from "./auth-schema.ts";
 import {
   installationOrganizationId,
   organizationRole,
@@ -16,7 +16,7 @@ import { organizationRuntimes, organizationSettings } from "./schema.ts";
 import { DatabaseUnavailable } from "./errors.ts";
 
 export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
-  code: "UNAUTHORIZED" | "FORBIDDEN" | "ORGANIZATION_REQUIRED" | "SSO_REQUIRED" | "CONFLICT";
+  code: "UNAUTHORIZED" | "FORBIDDEN" | "ORGANIZATION_REQUIRED" | "SSO_REQUIRED";
   message: string;
   organizationSlug?: string;
 }> {}
@@ -83,7 +83,6 @@ export const createIdentityService = (
     userId: string,
     selection: { organizationId: string | null } | { organizationSlug: string },
     identityOrganizationId: string | null,
-    sessionId?: string | null,
   ) =>
     Result.gen(async function* () {
       const records = yield* Result.await(memberships(userId, identityOrganizationId));
@@ -121,37 +120,6 @@ export const createIdentityService = (
           message: `Sign in with company SSO for ${record.organizationName}. Open /sign-in?organization=${encodeURIComponent(record.organizationSlug)} before authorizing the CLI.`,
         });
 
-      if (requested === null && sessionId) {
-        const [current] = yield* Result.await(
-          Result.tryPromise({
-            try: () =>
-              database
-                .update(sessions)
-                // Concurrent requests may choose the same default, but an explicit
-                // selection from another tab must never be overwritten.
-                .set({
-                  activeOrganizationId: sql`coalesce(${sessions.activeOrganizationId}, ${record.organizationId})`,
-                })
-                .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
-                .returning({ organizationId: sessions.activeOrganizationId }),
-            catch: (cause) =>
-              new DatabaseUnavailable({ message: "Could not save organization selection", cause }),
-          }),
-        );
-
-        if (!current)
-          return yield* new AuthenticationFailed({
-            code: "UNAUTHORIZED",
-            message: "Sign in to continue",
-          });
-
-        if (current.organizationId !== record.organizationId)
-          return yield* new AuthenticationFailed({
-            code: "CONFLICT",
-            message: "Your organization selection changed. Reload this page before making changes.",
-          });
-      }
-
       const admin = organizationRoles[record.role].authorize({ agent: ["manage"] }).success;
 
       return Result.ok({
@@ -179,24 +147,10 @@ export const createIdentityService = (
     userId: string,
     organizationId: string | null,
     identityOrganizationId: string | null,
-    sessionId?: string | null,
   ) =>
-    resolveMember(userId, { organizationId }, identityOrganizationId, sessionId).then((result) =>
+    resolveMember(userId, { organizationId }, identityOrganizationId).then((result) =>
       result.map(({ principal }) => principal),
     );
-
-  // Pages name their organization in the URL; the session keeps the last one opened as the
-  // destination for paths without an organization, such as the start page.
-  const rememberOrganization = (sessionId: string, userId: string, organizationId: string) =>
-    Result.tryPromise({
-      try: () =>
-        database
-          .update(sessions)
-          .set({ activeOrganizationId: organizationId })
-          .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId))),
-      catch: (cause) =>
-        new DatabaseUnavailable({ message: "Could not save organization selection", cause }),
-    });
 
   const verify = (request: Request, scope: "platform:read" | "platform:write" | "network:manage") =>
     Result.gen(async function* () {
@@ -251,7 +205,6 @@ export const createIdentityService = (
         return Result.ok({
           userId: current.id,
           sessionId: null,
-          activeOrganizationId: null,
           identityOrganizationId: verified.authority.organizationId,
         });
       }
@@ -285,10 +238,11 @@ export const createIdentityService = (
         identityOrganizationId: session.session.identityOrganizationId ?? null,
         userId: session.user.id,
         sessionId: session.session.id,
-        activeOrganizationId: session.session.activeOrganizationId ?? null,
       });
     });
 
+  // Requests name their organization with X-Widefleet-Organization. Without it, the
+  // extension's default or the member's only organization applies.
   const authenticate = (
     request: Request,
     scope: "platform:read" | "platform:write" | "network:manage",
@@ -296,19 +250,28 @@ export const createIdentityService = (
     Result.gen(async function* () {
       const verified = yield* Result.await(verify(request, scope));
 
-      const organizationId =
-        request.headers.get("x-widefleet-organization") ?? verified.activeOrganizationId ?? null;
-
       const principal = yield* Result.await(
         resolveUser(
           verified.userId,
-          organizationId,
+          request.headers.get("x-widefleet-organization"),
           verified.identityOrganizationId,
-          verified.sessionId,
         ),
       );
 
       return Result.ok(principal);
+    });
+
+  // Some resources name their organization themselves, such as an app's icon that a browser
+  // loads without headers.
+  const authenticateIn = (
+    request: Request,
+    scope: "platform:read" | "platform:write",
+    organizationId: string,
+  ) =>
+    Result.gen(async function* () {
+      const verified = yield* Result.await(verify(request, scope));
+
+      return resolveUser(verified.userId, organizationId, verified.identityOrganizationId);
     });
 
   const listOrganizations = (userId: string, identityOrganizationId: string | null) =>
@@ -336,48 +299,13 @@ export const createIdentityService = (
       );
     });
 
-  const selectOrganization = (request: Request, organizationId: string) =>
-    Result.gen(async function* () {
-      const verified = yield* Result.await(verify(request, "platform:write"));
-
-      const principal = yield* Result.await(
-        resolveUser(verified.userId, organizationId, verified.identityOrganizationId),
-      );
-
-      if (verified.sessionId) {
-        const sessionId = verified.sessionId;
-
-        const updated = yield* Result.await(
-          Result.tryPromise({
-            try: () =>
-              database
-                .update(sessions)
-                .set({ activeOrganizationId: organizationId })
-                .where(and(eq(sessions.id, sessionId), eq(sessions.userId, verified.userId)))
-                .returning({ id: sessions.id }),
-            catch: (cause) =>
-              new DatabaseUnavailable({ message: "Could not save organization selection", cause }),
-          }),
-        );
-
-        if (!updated.length)
-          return yield* new AuthenticationFailed({
-            code: "UNAUTHORIZED",
-            message: "Sign in to continue",
-          });
-      }
-
-      return Result.ok(principal);
-    });
-
   return {
     authenticate,
+    authenticateIn,
     organizations,
-    selectOrganization,
     authenticateUser: verify,
     principal: resolveUser,
     member: resolveMember,
-    rememberOrganization,
     listOrganizations,
   };
 };

@@ -4,7 +4,7 @@
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { Button } from "@platform/ui/button";
   import { resetClientContext } from "#lib/analytics-client";
-  import { selectOrganization, createOrganization } from "#lib/organizations.remote";
+  import { createOrganization } from "#lib/organizations.remote";
   import { Input } from "@platform/ui/input";
   import { Label } from "@platform/ui/label";
   import { authClient } from "#lib/auth-client";
@@ -58,47 +58,19 @@
   </p>
   <div class="mt-6 space-y-2">
     {#each data.organizations as organization (organization.id)}
-      {#if organization.ssoRequired}
-        <Button
-          href={`/sign-in?${new URLSearchParams({ organization: organization.slug, next: data.next })}`}
-          variant="outline"
-          class="h-auto w-full justify-between px-4 py-3"
+      <!-- Choosing only opens the organization; the destination names it in its address. -->
+      <Button
+        href={organization.ssoRequired
+          ? `/sign-in?${new URLSearchParams({ organization: organization.slug, next: organization.destination })}`
+          : organization.destination}
+        variant="outline"
+        class="h-auto w-full justify-between px-4 py-3"
+      >
+        <span class="truncate">{organization.name}</span>
+        <span class="text-muted-foreground text-xs" class:capitalize={!organization.ssoRequired}
+          >{organization.ssoRequired ? "Company SSO" : organization.role}</span
         >
-          <span class="truncate">{organization.name}</span><span
-            class="text-muted-foreground text-xs">Company SSO</span
-          >
-        </Button>
-      {:else}
-        {@const selection = selectOrganization.for(organization.id)}
-        <form
-          {...selection.enhance(async ({ submit }) => {
-            if (pending) return;
-            pending = true;
-            message = "";
-            try {
-              await submit();
-              // A full navigation drops cached queries and forms from the previous organization.
-              if (selection.result?.selected) window.location.assign(selection.result.next);
-            } catch {
-              message = "Could not select this organization. Refresh the page and try again.";
-            } finally {
-              pending = false;
-            }
-          })}
-        >
-          <input {...selection.fields.organizationId.as("hidden", organization.id)} />
-          <input {...selection.fields.next.as("hidden", data.next)} />
-          <Button
-            type="submit"
-            variant="outline"
-            class="h-auto w-full justify-between px-4 py-3"
-            disabled={pending || createOrganization.pending > 0}
-          >
-            <span class="truncate">{organization.name}</span>
-            <span class="text-muted-foreground text-xs capitalize">{organization.role}</span>
-          </Button>
-        </form>
-      {/if}
+      </Button>
     {/each}
   </div>
   {#if data.canCreateOrganization || creationIssues?.length}

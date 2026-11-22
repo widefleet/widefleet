@@ -169,14 +169,16 @@ test("opens organization settings without installation reporting privileges", as
 
   try {
     const page = await context.newPage();
-    await page.goto("/organizations");
-    await page.getByRole("button", { name: /Alpha/ }).click();
     const response = await page.goto(`/${alpha}/settings/company-sign-in`);
 
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("heading", { name: "Company sign-in", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Privacy", exact: true })).toHaveCount(0);
-    const current = await context.request.get("/api/v1/me");
+
+    const current = await context.request.get("/api/v1/me", {
+      headers: { "x-widefleet-organization": alpha },
+    });
+
     expect(await current.json()).toMatchObject({
       admin: false,
       application: { organizationId: alpha, admin: true },
@@ -188,17 +190,10 @@ test("opens organization settings without installation reporting privileges", as
 
 // The redirect is server-side; without JavaScript this test loads no client modules, which
 // would make Vite optimize dependencies while the next browser test starts.
-test("asks which organization an MCP client connects, despite an active one", async ({
-  browser,
-}) => {
-  const { person, alpha, beta, context } = await organizationSession(browser, false);
+test("asks which organization an MCP client connects and returns with it", async ({ browser }) => {
+  const { beta, context } = await organizationSession(browser, false);
 
   try {
-    // The active organization may be left over from earlier work in another tab.
-    await environment.database.db
-      .update(session)
-      .set({ activeOrganizationId: alpha })
-      .where(eq(session.userId, person.id));
     const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
     const signIn = `/mcp/sign-in?${new URLSearchParams({ state })}`;
 
@@ -206,8 +201,15 @@ test("asks which organization an MCP client connects, despite an active one", as
     expect(response.status()).toBe(303);
     const chooser = new URL(response.headers()["location"] ?? "invalid", "http://localhost");
     expect(chooser.pathname).toBe("/organizations");
-    expect(chooser.searchParams.get("next")).toBe(
-      `/mcp/sign-in?${new URLSearchParams({ state, chosen: "1" })}`,
+    expect(chooser.searchParams.get("next")).toBe(`${signIn}&organization=[organization]`);
+
+    // An organization the person cannot open asks again instead of connecting.
+    const foreign = await context.request.get(`${signIn}&organization=unknown`, {
+      maxRedirects: 0,
+    });
+
+    expect(new URL(foreign.headers()["location"] ?? "invalid", "http://localhost").pathname).toBe(
+      "/organizations",
     );
 
     const page = await context.newPage();
@@ -221,7 +223,7 @@ test("asks which organization an MCP client connects, despite an active one", as
       request.url().startsWith("https://mcp.apps.localhost/"),
     );
 
-    await page.getByRole("button", { name: /Beta/ }).click();
+    await page.getByRole("link", { name: /Beta/ }).click();
 
     const target = new URL((await reached).url());
     expect(target.pathname).toBe("/oauth/organization");
@@ -352,12 +354,6 @@ for (const javaScriptEnabled of [true, false]) {
       await page.goto("/");
       await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
       await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
-      expect(
-        await environment.database.db
-          .select({ organizationId: session.activeOrganizationId })
-          .from(session)
-          .where(eq(session.userId, person.id)),
-      ).toEqual([{ organizationId: alpha }]);
     } finally {
       await context.close();
     }
@@ -366,7 +362,7 @@ for (const javaScriptEnabled of [true, false]) {
   test(`creates apps in the organization a tab shows while another tab opens another (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {
-    const { person, alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
+    const { alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
 
     try {
       const first = await context.newPage();
@@ -380,12 +376,6 @@ for (const javaScriptEnabled of [true, false]) {
 
       await second.goto(`/${beta}`);
       await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
-      expect(
-        await environment.database.db
-          .select({ organizationId: session.activeOrganizationId })
-          .from(session)
-          .where(eq(session.userId, person.id)),
-      ).toEqual([{ organizationId: beta }]);
 
       await first.getByRole("button", { name: "Create app", exact: true }).click();
       await expect(first).toHaveURL(
@@ -467,7 +457,24 @@ for (const javaScriptEnabled of [true, false]) {
     }
   });
 
-  test(`rejects external destinations in the chooser and submitted form (JavaScript ${javaScriptEnabled})`, async ({
+  test(`asks for the organization at the start page and opens the chosen one (JavaScript ${javaScriptEnabled})`, async ({
+    browser,
+  }) => {
+    const { beta, context } = await organizationSession(browser, javaScriptEnabled);
+
+    try {
+      const page = await context.newPage();
+      await page.goto("/");
+      await expect(page).toHaveURL(/\/organizations\?next=/);
+      await page.getByRole("link", { name: /^Beta admin$/i }).click();
+      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${beta}`);
+      await expect(page.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test(`rejects external destinations in the chooser (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {
     const { alpha, context } = await organizationSession(browser, javaScriptEnabled);
@@ -475,15 +482,9 @@ for (const javaScriptEnabled of [true, false]) {
     try {
       const page = await context.newPage();
       await page.goto("/organizations?next=%2F%2Fexternal.example.test");
-      const button = page.getByRole("button", { name: /^Alpha admin$/i });
-      const form = page.locator("form").filter({ has: button });
-      const next = form.locator('input[name^="next/"]');
-      await expect(next).toHaveValue("/");
-      await next.evaluate((input) => {
-        if (!(input instanceof HTMLInputElement)) throw new Error("Missing next field");
-        input.value = "//external.example.test";
-      });
-      await button.click();
+      const link = page.getByRole("link", { name: /^Alpha admin$/i });
+      await expect(link).toHaveAttribute("href", `/${alpha}`);
+      await link.click();
       await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
       await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
     } finally {
@@ -497,32 +498,16 @@ test("switches organizations from the sidebar menu", async ({ browser }) => {
 
   try {
     const page = await context.newPage();
-    await page.goto("/organizations");
-    await page.getByRole("button", { name: /^Alpha admin$/i }).click();
-    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
+    await page.goto(`/${alpha}`);
     // Before hydration the trigger is a plain link to the chooser.
     await page.waitForLoadState("networkidle");
     await page.getByRole("link", { name: "Choose organization: Alpha" }).click();
-    const betaItem = page.getByRole("menuitem", { name: /Beta/ });
-    // Hovering another organization does not preload it, which would switch the session.
-    const preloads: string[] = [];
-    page.on("request", (request) => preloads.push(request.url()));
-    await betaItem.hover();
-    await page.waitForTimeout(500);
-    expect(preloads.filter((url) => url.includes("__data.json"))).toEqual([]);
-    expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
-      application: { organizationId: alpha },
-    });
     // The switch navigates within the page instead of loading a new document.
     await page.evaluate(() => Object.assign(window, { organizationSwitchMarker: true }));
-    await betaItem.click();
+    await page.getByRole("menuitem", { name: /Beta/ }).click();
     await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${beta}`);
     await expect(page.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
     expect(await page.evaluate(() => "organizationSwitchMarker" in window)).toBe(true);
-    // The organization last opened is the one paths without an organization open.
-    expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
-      application: { organizationId: beta },
-    });
 
     // Plain digits pick an organization while the menu is open.
     await page.waitForLoadState("networkidle");

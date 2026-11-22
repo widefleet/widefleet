@@ -29,6 +29,15 @@ export const findAppIcon = (manifest: z.infer<typeof assetManifest>) => {
   return null;
 };
 
+export const readAppOrganization = async (database: Database, appId: string) => {
+  const [record] = await database
+    .select({ organizationId: apps.organizationId })
+    .from(apps)
+    .where(eq(apps.id, appId));
+
+  return record?.organizationId ?? null;
+};
+
 // Read only the selected app's active artifact, never fetch an app URL or bypass its login.
 // Members also see the icons of apps the catalog and My connections list for them.
 export const readAppIcon = async (

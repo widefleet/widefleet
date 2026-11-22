@@ -1,5 +1,6 @@
 import { getUserSession, pageOrganizations } from "#server/page-auth";
 import { localDestination } from "#server/navigation";
+import { chosenDestination } from "#lib/workspace-path";
 import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 
@@ -10,7 +11,10 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
   const next = localDestination(url.searchParams.get("next"));
 
   return {
-    organizations: await pageOrganizations(),
+    organizations: (await pageOrganizations()).map((organization) => ({
+      ...organization,
+      destination: chosenDestination(next, organization.slug),
+    })),
     canCreateOrganization: await runtime.onboarding.available({
       userId: user.id,
       identityOrganizationId: session.identityOrganizationId ?? null,
