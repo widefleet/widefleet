@@ -309,13 +309,15 @@
                 >{@render row()}</DropdownMenu.Item
               >
             {:else}
+              <!-- Opening the organization as a document makes it the session's organization. -->
               <DropdownMenu.Item class="gap-2 p-2">
                 {#snippet child({ props })}<a
                     {...props}
                     href={entry.ssoRequired
                       ? `/sign-in?${new URLSearchParams({ organization: entry.slug, next: workspacePath(entry.slug) })}`
                       : workspacePath(entry.slug)}
-                    data-organization-shortcut={shortcut}>{@render row()}</a
+                    data-organization-shortcut={shortcut}
+                    data-sveltekit-reload>{@render row()}</a
                   >{/snippet}
               </DropdownMenu.Item>
             {/if}

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { and, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
 import { apps, deployments, organizationRuntimes } from "../../src/lib/server/schema.ts";
 import { seedDeployment } from "../cloudflare-deployment.fixture.ts";
@@ -501,6 +502,12 @@ test("switches organizations from the sidebar menu", async ({ browser }) => {
     await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
     // Before hydration the trigger is a plain link to the chooser.
     await page.waitForLoadState("networkidle");
+    // Preloading another organization's data, as hovering a link does, leaves the session's
+    // organization unchanged.
+    expect((await context.request.get(`/${beta}/__data.json`)).ok()).toBe(true);
+    expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
+      application: { organizationId: alpha },
+    });
     await page.getByRole("link", { name: "Choose organization: Alpha" }).click();
     await page.getByRole("menuitem", { name: /Beta/ }).click();
     await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${beta}`);
@@ -537,10 +544,23 @@ test("keeps an open tab on its organization after another tab switches", async (
     await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
 
     // Returning to a tab fires visibilitychange. Headless pages stay visible, so dispatch it.
+    const recheck = first.waitForRequest((request) => request.url().includes("/getWorkspace"));
     await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    const workspaceQuery = (await recheck).url();
     await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
     await expect(first.getByLabel("App name", { exact: true })).toHaveValue("Unfinished Alpha app");
     await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(alpha);
+
+    // The same recheck after the session ended sends the tab to sign-in.
+    const anonymous = await browser.newContext();
+
+    try {
+      const response = await anonymous.request.get(workspaceQuery);
+      const { data } = z.object({ data: z.string() }).parse(await response.json());
+      expect(JSON.parse(data)).toEqual([{ redirect: 1 }, "/sign-in"]);
+    } finally {
+      await anonymous.close();
+    }
   } finally {
     await context.close();
   }
