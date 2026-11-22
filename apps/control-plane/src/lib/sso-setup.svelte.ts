@@ -1,10 +1,10 @@
 import { isHttpError } from "@sveltejs/kit";
-import { oidcProviderInput, settingsInput, type settingsView } from "@platform/contracts";
+import { oidcProviderInput, settingsInput, type settingsOverview } from "@platform/contracts";
 import { z } from "zod";
 import { authClient } from "#lib/auth-client";
 import { planSettings, updateSettings } from "#lib/settings.remote";
 
-type View = z.infer<typeof settingsView>;
+type View = z.infer<typeof settingsOverview>;
 
 type Provider = z.infer<typeof oidcProviderInput>["appIdentityType"];
 

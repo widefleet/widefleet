@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { oidcProviderInput, type settingsView } from "@platform/contracts";
+  import { oidcProviderInput, type settingsOverview } from "@platform/contracts";
   import type { z } from "zod";
   import { Checkbox } from "@platform/ui/checkbox";
   import { Input } from "@platform/ui/input";
@@ -15,7 +15,7 @@
     domainOptional = false,
   }: {
     draft: SsoDraft;
-    view: z.infer<typeof settingsView>;
+    view: z.infer<typeof settingsOverview>;
     creating: boolean;
     domainOptional?: boolean;
   } = $props();

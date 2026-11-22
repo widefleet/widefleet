@@ -3,7 +3,7 @@
   import { untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { settingsInput, type settingsView } from "@platform/contracts";
+  import { settingsInput, type settingsOverview } from "@platform/contracts";
   import type { z } from "zod";
   import { warnBeforeLeaving } from "#lib/unsaved-changes";
   import {
@@ -36,14 +36,17 @@
     tested,
     emailSignIn,
     loginFailed,
+    activationMessage,
   }: {
-    view: z.infer<typeof settingsView>;
+    view: z.infer<typeof settingsOverview>;
     organizationId: string;
     platformUrl: string;
     linked: boolean;
     tested: boolean;
     emailSignIn: boolean;
     loginFailed: boolean;
+    /** What the sign-in service reports about applying the configuration. */
+    activationMessage: string;
   } = $props();
 
   const readonly = $derived(view.settings.externallyManaged);
@@ -195,7 +198,7 @@
           </div>
         </div>
       {/if}
-      <p class="text-muted-foreground mt-6 text-xs">{view.activation.message}</p>
+      <p class="text-muted-foreground mt-6 text-xs">{activationMessage}</p>
     </section>
 
     <CompanyDomains
