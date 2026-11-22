@@ -15,7 +15,10 @@ import {
   mcpServiceCall,
   mcpScopes,
   sealedInputRequired,
+  serviceDescriptionBudget,
   serviceDescriptionMaxMethods,
+  serviceDescriptionMaxTypes,
+  serviceTypeName,
 } from "@platform/contracts";
 import { inputFormHtml } from "#mcp-input-form";
 import { z } from "zod";
@@ -161,28 +164,38 @@ export const mcpRequest = async (
         "describe",
         {
           description:
-            "Read the documentation, signatures and types of methods found with search before calling them.",
+            "Read the documentation, signatures and types of methods found with search before calling them. " +
+            `Types the methods use directly are always included, further types up to about ${serviceDescriptionBudget / 1024} KB. ` +
+            "omittedTypes names the types left out; describe them with types.",
           inputSchema: {
             hostname: mcpServiceCall.shape.hostname,
             entrypoint: mcpServiceCall.shape.entrypoint,
             methods: z
               .array(mcpServiceCall.shape.method)
-              .min(1)
               .max(serviceDescriptionMaxMethods)
+              .default([])
               .describe("Names of the methods to describe."),
+            types: z
+              .array(serviceTypeName)
+              .max(serviceDescriptionMaxTypes)
+              .default([])
+              .describe(
+                "Names of documented types, as types, uses and omittedTypes list them, such as Page<T>.",
+              ),
           },
           annotations: { readOnlyHint: true },
         },
-        async (input) =>
-          result(
-            await describeMcpMethods(
-              environment,
-              principal,
-              input.hostname,
-              input.entrypoint,
-              input.methods,
-            ),
-          ),
+        async ({ hostname, entrypoint, methods, types }) => {
+          if (!methods.length && !types.length)
+            throw new Error("Name at least one method or type to describe.");
+
+          return result(
+            await describeMcpMethods(environment, principal, hostname, entrypoint, {
+              methods,
+              types,
+            }),
+          );
+        },
       );
       server.registerTool(
         "call",

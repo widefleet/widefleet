@@ -612,6 +612,7 @@ describe("App service connections", () => {
       await services().describe(principal, target.id, {
         entrypoint: "Reader",
         methods: ["findItems"],
+        types: [],
       })
     ).unwrap().documentation;
 
@@ -622,20 +623,40 @@ describe("App service connections", () => {
     });
     // Types reached through other types are included; unrelated ones are not.
     expect(selected?.types.map((entry) => entry.name)).toEqual(["Query", "Page", "Item"]);
+    expect(selected?.omittedTypes).toEqual([]);
+
+    const named = (
+      await services().describe(principal, target.id, {
+        entrypoint: "Reader",
+        methods: [],
+        types: ["Page"],
+      })
+    ).unwrap().documentation;
+
+    expect(named?.entrypoint.methods).toEqual([]);
+    expect(named?.types.map((entry) => entry.name)).toEqual(["Page", "Item"]);
 
     const unknown = await services().describe(principal, target.id, {
       entrypoint: "Reader",
       methods: ["findItems", "deleteItems"],
+      types: ["Missing"],
     });
 
     expect(unknown).toMatchObject({ error: { code: "NOT_FOUND" } });
-    expect(unknown.isErr() ? unknown.error.message : "").toContain("deleteItems");
-    expect(
-      await services().describe(principal, target.id, {
-        entrypoint: "Writer",
-        methods: ["findItems"],
-      }),
-    ).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(unknown.isErr() ? unknown.error.message : "").toBe(
+      "Reader has no documented method deleteItems, type Missing",
+    );
+
+    const entrypoint = await services().describe(principal, target.id, {
+      entrypoint: "Writer",
+      methods: [],
+      types: ["Page"],
+    });
+
+    expect(entrypoint).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(entrypoint.isErr() ? entrypoint.error.message : "").toBe(
+      "Writer is not a documented entrypoint",
+    );
   });
 
   it("resolves UUID-shaped slugs with app IDs taking precedence within the selected organization", async () => {

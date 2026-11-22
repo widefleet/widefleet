@@ -43,6 +43,9 @@ const text = z.string().max(262144);
 
 const name = z.string().min(1).max(128);
 
+/** The name of a documented type, as signatures and `uses` write it. */
+export const serviceTypeName = name;
+
 /**
  * The worker upload part that carries API documentation. Module names cannot
  * use the platform prefix, so it never collides with a module.
@@ -123,14 +126,25 @@ export const serviceDocumentation = z
 /** Most methods one request may describe. */
 export const serviceDescriptionMaxMethods = 20;
 
+/** Most types one request may describe by name. */
+export const serviceDescriptionMaxTypes = 20;
+
+/**
+ * Bytes a description fills with types its methods reach only through other
+ * types. The types a selection names directly are always included.
+ */
+export const serviceDescriptionBudget = 16384;
+
 /**
  * Selected methods of one entrypoint, the entrypoint's own documentation and
  * the types those methods use. Callers of large APIs read this instead of the
- * whole document.
+ * whole document. Types beyond the budget are named in `omittedTypes`, so a
+ * caller can describe them next.
  */
 export const serviceMethodSelection = z.strictObject({
   entrypoint: serviceEntrypointDocumentation,
   types: z.array(serviceTypeDocumentation),
+  omittedTypes: z.array(name),
 });
 
 /** One method in a list of a service's methods. */
@@ -142,21 +156,54 @@ export const serviceMethodSummary = z.strictObject({
 
 type Documentation = z.infer<typeof serviceDocumentation>;
 
-/** The documented types the given names lead to, following each type's uses. */
-const referencedTypes = (types: Documentation["types"], names: string[]) => {
-  const byName = new Map(types.map((type) => [type.name, type]));
-  const used = new Set<string>();
-  const pending = [...names];
+const encoder = new TextEncoder();
 
-  for (let name = pending.pop(); name !== undefined; name = pending.pop()) {
+// Bytes as a description serializes them.
+const size = (value: Documentation["types"][number] | Documentation["entrypoints"][number]) =>
+  encoder.encode(JSON.stringify(value)).byteLength;
+
+/**
+ * The documented types the given names lead to. The named types are always
+ * included; the types they reach follow breadth first while the selection stays
+ * within the budget. A type that does not fit is omitted with the types only it
+ * leads to.
+ */
+const referencedTypes = (types: Documentation["types"], names: string[], used: number) => {
+  const byName = new Map(types.map((type) => [type.name, type]));
+  const included = new Set<string>();
+  const omitted = new Set<string>();
+  let total = used;
+
+  const include = (type: Documentation["types"][number]) => {
+    included.add(type.name);
+    total += size(type);
+
+    return type.uses;
+  };
+
+  let level = [...new Set(names)].flatMap((name) => {
     const type = byName.get(name);
 
-    if (!type || used.has(name)) continue;
-    used.add(name);
-    pending.push(...type.uses);
-  }
+    return type ? include(type) : [];
+  });
 
-  return types.filter((type) => used.has(type.name));
+  while (level.length)
+    level = [...new Set(level)].flatMap((name) => {
+      const type = byName.get(name);
+
+      if (!type || included.has(name) || omitted.has(name)) return [];
+
+      if (total + size(type) <= serviceDescriptionBudget) return include(type);
+
+      omitted.add(name);
+
+      return [];
+    });
+
+  return {
+    types: types.filter((type) => included.has(type.name)),
+    omittedTypes: [...omitted],
+  };
 };
 
 /** The first line of a summary, as method lists show it. */
@@ -173,20 +220,28 @@ export const listServiceMethods = (documentation: Documentation) =>
   );
 
 /**
- * Selects methods of one entrypoint with the types their signatures use.
- * Returns the names it does not know, so callers can point to the method list.
+ * Selects methods of one entrypoint and named types with the types they use.
+ * Returns what it does not know, the entrypoint or names, so callers can point
+ * to the method list.
  */
 export const selectServiceMethods = (
   documentation: Documentation,
   entrypoint: string,
-  methods: string[],
+  selection: { methods: string[]; types: string[] },
 ) => {
   const entry = documentation.entrypoints.find((candidate) => candidate.name === entrypoint);
-  const known = new Set(entry?.methods.map((method) => method.name));
-  const unknown = methods.filter((method) => !known.has(method));
+  const methods = new Set(entry?.methods.map((method) => method.name));
+  const types = new Set(documentation.types.map((type) => type.name));
 
-  if (!entry || unknown.length) return { unknown: entry ? unknown : methods, selection: null };
-  const selected = entry.methods.filter((method) => methods.includes(method.name));
+  const unknown = {
+    entrypoint: !entry,
+    methods: entry ? selection.methods.filter((method) => !methods.has(method)) : selection.methods,
+    types: selection.types.filter((type) => !types.has(type)),
+  };
+
+  if (!entry || unknown.methods.length || unknown.types.length) return { unknown, selection: null };
+  const selected = entry.methods.filter((method) => selection.methods.includes(method.name));
+  const documented = { ...entry, methods: selected };
 
   const uses = selected.flatMap((method) =>
     method.signatures.flatMap((signature) => signature.uses),
@@ -195,8 +250,8 @@ export const selectServiceMethods = (
   return {
     unknown,
     selection: serviceMethodSelection.parse({
-      entrypoint: { ...entry, methods: selected },
-      types: referencedTypes(documentation.types, uses),
+      entrypoint: documented,
+      ...referencedTypes(documentation.types, [...selection.types, ...uses], size(documented)),
     }),
   };
 };

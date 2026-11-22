@@ -96,27 +96,46 @@ export const createConnectionService = (
 
       return Result.ok(contract.serviceReference.parse(active));
     }),
-  /** An app API's methods, with the documentation of the selected methods and their types. */
+  /** An app API's methods, with the documentation of the selected methods and types. */
   describe: (
     principal: Principal,
     service: string,
-    selection: { entrypoint: string; methods?: string[] | undefined } = { entrypoint: "default" },
+    selection: { entrypoint: string; methods: string[]; types: string[] } = {
+      entrypoint: "default",
+      methods: [],
+      types: [],
+    },
   ) =>
     Result.gen(async function* () {
       const { documentation, ...description } = yield* Result.await(
         activeService(database, storage, principal, service),
       );
 
+      const requested = selection.methods.length > 0 || selection.types.length > 0;
+
       const selected =
-        documentation && selection.methods
-          ? contract.selectServiceMethods(documentation, selection.entrypoint, selection.methods)
+        documentation && requested
+          ? contract.selectServiceMethods(documentation, selection.entrypoint, selection)
           : null;
 
-      if (selection.methods && !selected?.selection)
+      if (requested && !selected?.selection) {
+        // Without documentation, every requested name is unknown.
+        const unknown = selected?.unknown ?? {
+          entrypoint: false,
+          methods: selection.methods,
+          types: selection.types,
+        };
+
         return yield* new InvalidOperation({
           code: "NOT_FOUND",
-          message: `${selection.entrypoint} has no documented method ${(selected?.unknown ?? selection.methods).join(", ")}`,
+          message: unknown.entrypoint
+            ? `${selection.entrypoint} is not a documented entrypoint`
+            : `${selection.entrypoint} has no documented ${[
+                ...unknown.methods.map((method) => `method ${method}`),
+                ...unknown.types.map((type) => `type ${type}`),
+              ].join(", ")}`,
         });
+      }
 
       return Result.ok(
         contract.serviceDescription.parse({

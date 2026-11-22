@@ -96,19 +96,31 @@ export const describeMcpMethods = async (
   claims: z.infer<typeof mcpClaims>,
   hostname: string,
   entrypoint: string,
-  methods: string[],
+  request: { methods: string[]; types: string[] },
 ) => {
   const app = await target(environment, claims, hostname, entrypoint);
   const documentation = await readServiceDocumentation(environment, app);
 
   if (!documentation)
     throw new Error(`${hostname} has no API documentation; deploy it with the current CLI`);
-  const { selection, unknown } = selectServiceMethods(documentation, entrypoint, methods);
+  const { selection, unknown } = selectServiceMethods(documentation, entrypoint, request);
+
+  if (unknown.entrypoint)
+    throw new Error(
+      `${entrypoint} on ${hostname} is not a documented entrypoint. ` +
+        "Search with this hostname to list its entrypoints and methods.",
+    );
+
+  if (unknown.methods.length)
+    throw new Error(
+      `${entrypoint} on ${hostname} has no documented method ${unknown.methods.join(", ")}. ` +
+        "Search with this hostname and entrypoint to list its methods.",
+    );
 
   if (!selection)
     throw new Error(
-      `${entrypoint} on ${hostname} has no documented method ${unknown.join(", ")}. ` +
-        "Search with this hostname and entrypoint to list its methods.",
+      `${hostname} has no documented type ${unknown.types.join(", ")}. ` +
+        "Describe a method first; its types, uses and omittedTypes name the documented types.",
     );
 
   return {
@@ -117,6 +129,7 @@ export const describeMcpMethods = async (
     entrypoint,
     documentation: selection.entrypoint,
     types: selection.types,
+    omittedTypes: selection.omittedTypes,
   };
 };
 

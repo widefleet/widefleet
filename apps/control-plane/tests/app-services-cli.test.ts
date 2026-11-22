@@ -109,8 +109,12 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
               deploymentId: app.activeDeploymentId,
               documented: true,
               methods: [{ entrypoint: "Reader", name: "read", summary: "Read inventory" }],
-              documentation: url.searchParams.has("methods")
-                ? { entrypoint: { name: "Reader", summary: "Read inventory" }, types: [] }
+              documentation: url.searchParams.has("methods[]")
+                ? {
+                    entrypoint: { name: "Reader", summary: "Read inventory" },
+                    types: [],
+                    omittedTypes: [],
+                  }
                 : null,
             }),
           );
@@ -565,6 +569,8 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       "read",
       "--method",
       "count",
+      "--type",
+      "Page<T, U>",
     );
 
     expect(JSON.parse(selected.stdout)).toMatchObject({
@@ -572,7 +578,9 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     });
     const query = new URL(requests[1]?.path ?? "", "http://cli.test").searchParams;
     expect(query.get("entrypoint")).toBe("Reader");
-    expect(query.get("methods")).toBe("read,count");
+    expect(query.getAll("methods[]")).toEqual(["read", "count"]);
+    // Type names can contain commas, so each is its own parameter.
+    expect(query.getAll("types[]")).toEqual(["Page<T, U>"]);
   });
 
   it("rejects the nonstandard widefleet Wrangler property", async () => {

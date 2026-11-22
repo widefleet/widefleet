@@ -7,6 +7,7 @@ import { afterEach, expect, it } from "vitest";
 import {
   executionWorkerMetadata,
   selectServiceMethods,
+  serviceDescriptionBudget,
   serviceDocumentation,
   workerMetadata,
 } from "@platform/contracts";
@@ -289,14 +290,16 @@ native(
       methods?.find((method) => method.name === "read")?.signatures[0]?.parameters[1]?.type,
     ).toBe("Map<string, Item>");
     expect(
-      selectServiceMethods(result.documentation, "default", ["read"]).selection?.types.map(
-        (type) => type.name,
-      ),
+      selectServiceMethods(result.documentation, "default", {
+        methods: ["read"],
+        types: [],
+      }).selection?.types.map((type) => type.name),
     ).toEqual(expect.arrayContaining(["Item", "Page<T>"]));
     expect(
-      selectServiceMethods(result.documentation, "default", ["names"]).selection?.types.map(
-        (type) => type.name,
-      ),
+      selectServiceMethods(result.documentation, "default", {
+        methods: ["names"],
+        types: [],
+      }).selection?.types.map((type) => type.name),
     ).toEqual(["Item", "Page<T>"]);
   },
 );
@@ -317,9 +320,10 @@ native("documents generic type aliases with their own structure", async () => {
   expect(tree?.definition).toMatch(/value: T;[\s\S]*children: Tree<T>\[\]/);
   // The alias inside a nullable union stays a documented reference.
   expect(
-    selectServiceMethods(result.documentation, "Reader", ["role"]).selection?.types.map(
-      (type) => type.name,
-    ),
+    selectServiceMethods(result.documentation, "Reader", {
+      methods: ["role"],
+      types: [],
+    }).selection?.types.map((type) => type.name),
   ).toEqual(["Role"]);
 });
 
@@ -402,9 +406,10 @@ native("records types named only by a nested signature's type parameters", async
   const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
   expect(result.warnings).toEqual([]);
   expect(
-    selectServiceMethods(result.documentation, "Reader", ["subscribe"]).selection?.types.map(
-      (type) => type.name,
-    ),
+    selectServiceMethods(result.documentation, "Reader", {
+      methods: ["subscribe"],
+      types: [],
+    }).selection?.types.map((type) => type.name),
   ).toEqual(expect.arrayContaining(["Callback", "Item"]));
 });
 
@@ -438,9 +443,10 @@ native("qualifies conflicting names without discarding either type", async () =>
         ?.signatures[0]?.returns.type,
     ).toBe(`Promise<${type}>`);
     expect(
-      selectServiceMethods(result.documentation, "Reader", [method]).selection?.types.map(
-        (entry) => entry.name,
-      ),
+      selectServiceMethods(result.documentation, "Reader", {
+        methods: [method],
+        types: [],
+      }).selection?.types.map((entry) => entry.name),
     ).toEqual([type]);
   }
 });
@@ -481,7 +487,7 @@ native.each([false, true])(
 
     for (const method of ["readA", "readB"])
       expect(
-        selectServiceMethods(result.documentation, "Reader", [method])
+        selectServiceMethods(result.documentation, "Reader", { methods: [method], types: [] })
           .selection?.types.map((type) => type.name)
           .toSorted(),
       ).toEqual(["A<T>", "B<T>"]);
@@ -775,10 +781,10 @@ native(
 );
 
 it("selects the types a method uses by following recorded uses", () => {
-  const type = (name: string, uses: string[] = []) => ({
+  const type = (name: string, uses: string[] = [], definition = `interface ${name} {}`) => ({
     name,
     kind: "interface",
-    definition: `interface ${name} {}`,
+    definition,
     summary: "",
     remarks: "",
     examples: [],
@@ -818,14 +824,103 @@ it("selects the types a method uses by following recorded uses", () => {
   });
 
   expect(
-    selectServiceMethods(documentation, "Reader", ["first"]).selection?.types.map(
-      (entry) => entry.name,
-    ),
+    selectServiceMethods(documentation, "Reader", { methods: ["first"], types: [] }).selection,
+  ).toMatchObject({ omittedTypes: [] });
+  expect(
+    selectServiceMethods(documentation, "Reader", {
+      methods: ["first"],
+      types: [],
+    }).selection?.types.map((entry) => entry.name),
   ).toEqual(["One.Item", "Page<Item>", "Item", "Owner"]);
-  expect(selectServiceMethods(documentation, "Reader", ["first", "missing"])).toEqual({
-    unknown: ["missing"],
+  expect(
+    selectServiceMethods(documentation, "Reader", {
+      methods: [],
+      types: ["Item"],
+    }).selection?.types.map((entry) => entry.name),
+  ).toEqual(["Item", "Owner"]);
+  expect(
+    selectServiceMethods(documentation, "Reader", {
+      methods: ["first", "missing"],
+      types: ["Gone"],
+    }),
+  ).toEqual({
+    unknown: { entrypoint: false, methods: ["missing"], types: ["Gone"] },
     selection: null,
   });
+  expect(selectServiceMethods(documentation, "Writer", { methods: [], types: ["Item"] })).toEqual({
+    unknown: { entrypoint: true, methods: [], types: [] },
+    selection: null,
+  });
+});
+
+it("includes the types a selection names and further types within the budget", () => {
+  const type = (name: string, bytes: number, uses: string[] = []) => ({
+    name,
+    kind: "type",
+    definition: "x".repeat(bytes),
+    summary: "",
+    remarks: "",
+    examples: [],
+    uses,
+  });
+
+  const documentation = serviceDocumentation.parse({
+    format: 3,
+    entrypoints: [
+      {
+        name: "Reader",
+        summary: "",
+        remarks: "",
+        examples: [],
+        http: false,
+        methods: [
+          {
+            name: "read",
+            summary: "",
+            remarks: "",
+            examples: [],
+            throws: [],
+            signatures: [
+              {
+                parameters: [],
+                returns: { type: "Promise<Large>", description: "" },
+                uses: ["Large", "Small"],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    types: [
+      // Named directly by the signature, so always included.
+      type("Large", serviceDescriptionBudget - 1500, ["Big", "Near"]),
+      type("Small", 100, ["Tiny"]),
+      // Reached through other types: Big does not fit, the smaller ones do.
+      type("Big", 1000, ["Hidden"]),
+      type("Near", 10),
+      type("Tiny", 10),
+      type("Hidden", 10),
+    ],
+  });
+
+  const selection = (types: string[]) =>
+    selectServiceMethods(documentation, "Reader", { methods: types.length ? [] : ["read"], types })
+      .selection;
+
+  expect(selection([])?.types.map((entry) => entry.name)).toEqual([
+    "Large",
+    "Small",
+    "Near",
+    "Tiny",
+  ]);
+  expect(selection([])?.omittedTypes).toEqual(["Big"]);
+  // An omitted type is described by name with the types it leads to.
+  expect(selection(["Big", "Tiny"])?.types.map((entry) => entry.name)).toEqual([
+    "Big",
+    "Tiny",
+    "Hidden",
+  ]);
+  expect(selection(["Big", "Tiny"])?.omittedTypes).toEqual([]);
 });
 
 it("renders replacement advice, examples and short names on referenced types", () => {
