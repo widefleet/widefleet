@@ -27,6 +27,14 @@ export const cliScopes = [
   "network:manage",
 ];
 
+// Clients continue with the named provider, as when the email field finds it.
+export const companySsoRequired = (providerId: string) =>
+  new APIError("FORBIDDEN", {
+    code: "COMPANY_SSO_REQUIRED",
+    message: "Your organization signs you in with company SSO",
+    providerId,
+  });
+
 export const apiResource = (configuration: Configuration) => `${configuration.PLATFORM_URL}/api/v1`;
 
 export const cliResourcePolicy = (configuration: Configuration) => ({
@@ -43,6 +51,7 @@ export const authenticationOptions = (
     allowEmail,
     allowUser,
     signInLimit,
+    domainSsoProvider,
     tokenClaims,
     rateLimit,
     ipAddressHeaders,
@@ -54,6 +63,7 @@ export const authenticationOptions = (
     allowEmail?: (email: string) => Promise<boolean>;
     allowUser?: AuthenticationExtension["allowUser"];
     signInLimit?: (signIn: SignIn) => Promise<string | null>;
+    domainSsoProvider?: (email: string) => Promise<{ providerId: string } | null>;
     tokenClaims?: (
       input: OAuthClaimExtensionInput,
     ) => Promise<{ reference_id: string; organization_id?: string }>;
@@ -77,7 +87,9 @@ export const authenticationOptions = (
     trustedOrigins: [configuration.PLATFORM_URL],
     socialProviders: providers,
     user: Object.keys(providers).length
-      ? { validateUserInfo: validateSocialUser(allowEmail, allowUser) }
+      ? {
+          validateUserInfo: validateSocialUser(allowEmail, allowUser, domainSsoProvider),
+        }
       : undefined,
     // Membership mutations use the shared organization services for UI, API and CLI.
     disabledPaths: [
@@ -211,6 +223,10 @@ export const authenticationOptions = (
               name: z.string().trim().min(1).max(100).optional(),
             })
             .parse(context.body);
+
+          const company = await domainSsoProvider?.(input.email.toLowerCase());
+
+          if (company) throw companySsoRequired(company.providerId);
 
           if (!(await allowEmail(input.email.toLowerCase()))) {
             if (context.path === "/email-otp/send-verification-otp")

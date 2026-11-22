@@ -24,6 +24,11 @@ enum Command {
     VerifyDomain,
     /// Require company SSO for this organization after domain verification.
     ActivateSso,
+    /// Require company SSO for every sign-in with an address on the verified domains.
+    DomainSso {
+        #[arg(action = clap::ArgAction::Set)]
+        enabled: bool,
+    },
     /// Export editable settings without saved secrets.
     Export,
     /// Validate a JSON configuration and report whether app sign-in must restart.
@@ -128,9 +133,13 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
             .await?;
             super::print_json(&view)
         }
-        Command::ExternalManagement { enabled } => {
+        Command::ExternalManagement { enabled } | Command::DomainSso { enabled } => {
+            let path = match options.command {
+                Command::DomainSso { .. } => "/settings/domain-sso",
+                _ => "/settings/external-management",
+            };
             let view: Value = json(
-                api.authenticated(Method::PUT, "/settings/external-management", token)
+                api.authenticated(Method::PUT, path, token)
                     .json(&value!({ "enabled": enabled }))
                     .send()
                     .await?,

@@ -239,6 +239,9 @@ const createOrganizationSettingsService = (
       ssoRequired: Boolean(
         connection && companySsoAvailable(configuration, connection) && connection.required,
       ),
+      domainSsoRequired: Boolean(
+        connection?.domainVerified && connection.required && connection.domainSsoRequired,
+      ),
       ssoPolicy: ssoPolicy(configuration, organizationId),
       managementCallbackUrl: sso
         ? `${configuration.PLATFORM_URL}/api/auth/sso/callback/${sso.providerId}`
@@ -436,6 +439,7 @@ const createOrganizationSettingsService = (
         .set({
           directorySecret: directorySecret ?? null,
           ssoRequired: next.sso ? undefined : false,
+          domainSsoRequired: next.sso ? undefined : false,
           settings: installationSettings.parse({
             directory,
             externallyManaged: next.externallyManaged,
@@ -624,11 +628,31 @@ const createOrganizationSettingsService = (
           });
         await transaction
           .update(organizationSettings)
-          .set({ ssoRequired: true })
+          .set({ ssoRequired: true, domainSsoRequired: true })
           .where(eq(organizationSettings.organizationId, organizationId));
       });
 
       return inspect(true);
+    },
+    setDomainSso: async (principal: Principal, enabled: boolean) => {
+      requireAdmin(principal, organizationId);
+      await database.transaction(async (transaction) => {
+        await lockSettings(transaction);
+        const provider = await readSsoProvider(transaction, organizationId);
+
+        // Without DNS proof the organization does not own the addresses it would claim.
+        if (enabled && !(provider?.required && provider.domainVerified))
+          throw new InvalidOperation({
+            code: "CONFLICT",
+            message: "Activate company SSO with a verified domain first",
+          });
+        await transaction
+          .update(organizationSettings)
+          .set({ domainSsoRequired: enabled })
+          .where(eq(organizationSettings.organizationId, organizationId));
+      });
+
+      return inspect();
     },
   };
 };
@@ -715,5 +739,7 @@ export const createSettingsService = (
       scoped(principal.application.organizationId).verifyDomain(principal, domain),
     activateSso: (principal: Principal) =>
       scoped(principal.application.organizationId).activateSso(principal),
+    setDomainSso: (principal: Principal, enabled: boolean) =>
+      scoped(principal.application.organizationId).setDomainSso(principal, enabled),
   };
 };

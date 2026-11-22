@@ -1,4 +1,4 @@
-import { command, getRequestEvent, query } from "$app/server";
+import { command, getRequestEvent, query, requested } from "$app/server";
 import { error, redirect } from "@sveltejs/kit";
 import { eq } from "drizzle-orm";
 import {
@@ -105,6 +105,16 @@ export const setExternalManagement = command(
       getSettings({ organizationId }).refresh(),
       getSettingsActivation({ organizationId }).refresh(),
     ]);
+  },
+);
+
+export const setDomainSso = command(
+  organizationSelection.extend({ enabled: z.boolean() }),
+  async ({ enabled, organizationId }) => {
+    const { runtime, principal } = await commandContext({ organizationId });
+    await remoteOperation(() => runtime.settings.setDomainSso(principal, enabled));
+    // The page requests its settings with the optimistic value.
+    await requested(getSettings, 1).refreshAll();
   },
 );
 

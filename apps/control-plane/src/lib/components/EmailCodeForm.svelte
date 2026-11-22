@@ -81,6 +81,15 @@
 
   const oauthRedirect = z.object({ redirect: z.literal(true), url: z.url() });
 
+  // Addresses on a domain with required company SSO continue there, as from the email field.
+  const companySso = z.object({ code: z.literal("COMPANY_SSO_REQUIRED"), providerId: z.string() });
+
+  const continueWithCompanySso = async (providerId: string, recipient: string) => {
+    const result = await authClient.signIn.sso({ providerId, email: recipient, callbackURL: next });
+
+    if (result.error) message = "Could not start sign-in. Please try again.";
+  };
+
   const showError = (cause: unknown) => {
     message = isHttpError(cause)
       ? cause.body.message
@@ -96,7 +105,10 @@
     });
 
     if (result.error) {
-      message = "Could not send a sign-in code. Please try again.";
+      const company = companySso.safeParse(result.error);
+
+      if (company.success) await continueWithCompanySso(company.data.providerId, recipient);
+      else message = "Could not send a sign-in code. Please try again.";
 
       return false;
     }
@@ -188,8 +200,12 @@
         if (register) input["name"] = name.trim();
         const result = await authClient.signIn.emailOtp(input);
 
-        if (result.error) message = "Invalid or expired code. Request another code and try again.";
-        else if (!oauthRedirect.safeParse(result.data).success)
+        if (result.error) {
+          const company = companySso.safeParse(result.error);
+
+          if (company.success) await continueWithCompanySso(company.data.providerId, sentTo);
+          else message = "Invalid or expired code. Request another code and try again.";
+        } else if (!oauthRedirect.safeParse(result.data).success)
           await goto(next, { invalidateAll: true });
       }
     } catch (cause) {

@@ -179,6 +179,36 @@ describe("Organization login settings", () => {
     ).resolves.toBeDefined();
   });
 
+  it("requires company SSO for company addresses once SSO is active until administrators allow others", async () => {
+    const target = await company("domain-sso");
+
+    const stored = async () =>
+      (
+        await environment.database.db
+          .select({
+            ssoRequired: organizationSettings.ssoRequired,
+            domainSsoRequired: organizationSettings.domainSsoRequired,
+          })
+          .from(organizationSettings)
+          .where(eq(organizationSettings.organizationId, target.organizationId))
+      )[0];
+
+    expect((await settings.read(target.principal)).domainSsoRequired).toBe(true);
+    expect((await settings.setDomainSso(target.principal, false)).domainSsoRequired).toBe(false);
+    expect((await settings.setDomainSso(target.principal, true)).domainSsoRequired).toBe(true);
+    await settings.update(
+      target.principal,
+      { ...settingsInput.parse({ sso: null }), acknowledgeRestart: false },
+      false,
+      await organizationCredential(environment, target.principal),
+    );
+    expect(await stored()).toEqual({ ssoRequired: false, domainSsoRequired: false });
+    await expect(settings.setDomainSso(target.principal, true)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Activate company SSO with a verified domain first",
+    });
+  });
+
   it("disables the built-in app client for company SSO and restores the encrypted secret on return", async () => {
     const target = await company("settings-toggle");
     const fallback = { ...settingsInput.parse({ sso: null }), acknowledgeRestart: false };

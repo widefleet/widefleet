@@ -1,5 +1,6 @@
 import type { BetterAuthOptions, BetterAuthPlugin } from "better-auth";
 import { getSessionFromCtx } from "better-auth/api";
+import { symmetricDecodeJWT, symmetricEncodeJWT, type SecretConfig } from "better-auth/crypto";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
 
@@ -109,10 +110,23 @@ export const personalSocialAccounts = {
   }),
 } satisfies BetterAuthPlugin;
 
+const companySsoHint = z.object({ providerId: z.string(), email: z.email() });
+
+const companySsoHintSalt = "widefleet.company-sso-hint";
+
+// The callback reports only an error code and description, so the description carries
+// where to continue. Encryption keeps the address out of URLs that analytics or logs read.
+export const readCompanySsoHint = async (secret: string | SecretConfig, token: string) =>
+  companySsoHint
+    .nullable()
+    .catch(null)
+    .parse(await symmetricDecodeJWT(token, secret, companySsoHintSalt));
+
 export const validateSocialUser =
   (
     allowEmail: ((email: string) => Promise<boolean>) | undefined,
     allowUser: ((userId: string) => Promise<boolean>) | undefined,
+    domainSsoProvider?: (email: string) => Promise<{ providerId: string } | null>,
   ): NonNullable<NonNullable<BetterAuthOptions["user"]>["validateUserInfo"]> =>
   async ({ user, source }, context) => {
     const provider = source.oauth?.providerId;
@@ -166,6 +180,19 @@ export const validateSocialUser =
 
     if (local && allowUser && !(await allowUser(local.id))) return reject("sign_in_not_allowed");
     const email = source.action === "sign-in" ? local?.email : user.email;
+    const company = email ? await domainSsoProvider?.(email.toLowerCase()) : null;
+
+    // Addresses on a domain with required company SSO continue there instead.
+    if (email && company)
+      return {
+        error: "company_sso_required",
+        errorDescription: await symmetricEncodeJWT(
+          companySsoHint.parse({ providerId: company.providerId, email: email.toLowerCase() }),
+          context.context.secretConfig,
+          companySsoHintSalt,
+          600,
+        ),
+      };
 
     if (!email || !allowEmail || !(await allowEmail(email.toLowerCase())))
       return reject("sign_in_not_allowed");
