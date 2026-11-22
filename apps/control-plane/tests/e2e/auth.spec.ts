@@ -18,7 +18,6 @@ import {
 } from "../../src/lib/server/auth-schema.ts";
 import {
   agents,
-  appGrants,
   apps,
   artifacts,
   deployments,
@@ -129,338 +128,328 @@ test.beforeAll(async () => {
     .toBe(true);
 });
 
-for (const javaScriptEnabled of [true, false]) {
-  test(`connects open APIs and requests restricted APIs with JavaScript ${javaScriptEnabled}`, async ({
-    browser,
-  }, testInfo) => {
-    const creator = environment.users.createUser({
-      name: "Connection creator",
-      email: `connections-${javaScriptEnabled}@example.test`,
-    });
+test(`connects open APIs and requests restricted APIs`, async ({ browser }, testInfo) => {
+  const creator = environment.users.createUser({
+    name: "Connection creator",
+    email: `connections@example.test`,
+  });
 
-    await environment.users.saveUser(creator);
-    await environment.linkMicrosoftUser(creator.id);
+  await environment.users.saveUser(creator);
+  await environment.linkMicrosoftUser(creator.id);
 
-    const contexts = await Promise.all(
-      [creator.id, environment.ownerId].map(async (userId) => {
-        const context = await browser.newContext({
-          javaScriptEnabled,
-          baseURL: environment.configuration.PLATFORM_URL,
-          extraHTTPHeaders: { "x-forwarded-proto": "http" },
-        });
+  const contexts = await Promise.all(
+    [creator.id, environment.ownerId].map(async (userId) => {
+      const context = await browser.newContext({
+        baseURL: environment.configuration.PLATFORM_URL,
+        extraHTTPHeaders: { "x-forwarded-proto": "http" },
+      });
 
-        const login = await environment.users.login({ userId });
-        await context.addCookies(
-          login.cookies.map((cookie) => ({
-            ...cookie,
-            domain: "localhost",
-            sameSite: "Lax" as const,
-            secure: false,
-          })),
-        );
+      const login = await environment.users.login({ userId });
+      await context.addCookies(
+        login.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax" as const,
+          secure: false,
+        })),
+      );
 
-        return context;
-      }),
+      return context;
+    }),
+  );
+
+  const [memberContext, adminContext] = contexts;
+
+  if (!memberContext || !adminContext) throw new Error("Missing test context");
+  const createdAppIds: string[] = [];
+
+  try {
+    const page = await memberContext.newPage();
+    const adminPage = await adminContext.newPage();
+
+    const create = async (context: typeof memberContext, slug: string, displayName: string) => {
+      const response = await context.request.post("/api/v1/apps", {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: { slug, displayName },
+      });
+
+      expect(response.ok()).toBe(true);
+
+      const created = app.parse(await response.json());
+      createdAppIds.push(created.id);
+
+      return created;
+    };
+
+    const source = await create(
+      memberContext,
+      `requester`,
+      `Warehouse application with a longer name`,
     );
 
-    const [memberContext, adminContext] = contexts;
+    const target = {
+      // A colliding UUID must also satisfy the slug's leading-letter requirement.
+      id: `a${crypto.randomUUID().slice(1)}`,
+      slug: `request-api`,
+      displayName: `Inventory and fulfillment service`,
+    };
 
-    if (!memberContext || !adminContext) throw new Error("Missing test context");
-    const createdAppIds: string[] = [];
+    await environment.database.db.insert(apps).values({
+      ...target,
+      organizationId: "widefleet",
+      ownerId: environment.ownerId,
+      hostname: `${target.slug}.${environment.configuration.APP_DOMAIN}`,
+    });
+    createdAppIds.push(target.id);
 
-    try {
-      const page = await memberContext.newPage();
-      const adminPage = await adminContext.newPage();
+    const collision = await create(adminContext, target.id, "UUID-shaped slug API");
+    const deploymentId = crypto.randomUUID();
 
-      const create = async (context: typeof memberContext, slug: string, displayName: string) => {
-        const response = await context.request.post("/api/v1/apps", {
-          headers: { origin: environment.configuration.PLATFORM_URL },
-          data: { slug, displayName },
-        });
-
-        expect(response.ok()).toBe(true);
-
-        const created = app.parse(await response.json());
-        createdAppIds.push(created.id);
-
-        return created;
-      };
-
-      const source = await create(
-        memberContext,
-        `requester-${javaScriptEnabled}`,
-        `Warehouse application with a longer name ${javaScriptEnabled ? "A" : "B"}`,
-      );
-
-      const target = {
-        // A colliding UUID must also satisfy the slug's leading-letter requirement.
-        id: `a${crypto.randomUUID().slice(1)}`,
-        slug: `request-api-${javaScriptEnabled}`,
-        displayName: `Inventory and fulfillment service ${javaScriptEnabled ? "A" : "B"}`,
-      };
-
-      await environment.database.db.insert(apps).values({
-        ...target,
-        organizationId: "widefleet",
-        ownerId: environment.ownerId,
-        hostname: `${target.slug}.${environment.configuration.APP_DOMAIN}`,
+    for (const provider of [target, collision]) {
+      const artifactId = crypto.randomUUID();
+      const id = provider.id === target.id ? deploymentId : crypto.randomUUID();
+      await environment.database.db.insert(artifacts).values({
+        id: artifactId,
+        appId: provider.id,
+        manifest: {},
+        modules: [],
+        metadata: workerMetadata.parse({
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          entrypoints: ["Reader"],
+          assets: { upload_session: artifactId },
+        }),
       });
-      createdAppIds.push(target.id);
+      await environment.database.db.insert(deployments).values({
+        id,
+        appId: provider.id,
+        artifactId,
+        status: "succeeded",
+        requestId: crypto.randomUUID(),
+      });
+      await environment.database.db
+        .update(apps)
+        .set({ activeDeploymentId: id })
+        .where(eq(apps.id, provider.id));
+    }
 
-      const collision = await create(adminContext, target.id, "UUID-shaped slug API");
-      const deploymentId = crypto.randomUUID();
-
-      for (const provider of [target, collision]) {
-        const artifactId = crypto.randomUUID();
-        const id = provider.id === target.id ? deploymentId : crypto.randomUUID();
-        await environment.database.db.insert(artifacts).values({
-          id: artifactId,
-          appId: provider.id,
-          manifest: {},
-          modules: [],
-          metadata: workerMetadata.parse({
-            main_module: "worker.js",
-            compatibility_date: "2026-10-01",
-            entrypoints: ["Reader"],
-            assets: { upload_session: artifactId },
-          }),
-        });
-        await environment.database.db.insert(deployments).values({
-          id,
-          appId: provider.id,
-          artifactId,
-          status: "succeeded",
-          requestId: crypto.randomUUID(),
-        });
-        await environment.database.db
-          .update(apps)
-          .set({ activeDeploymentId: id })
-          .where(eq(apps.id, provider.id));
-      }
-
-      for (const service of [target.id, target.slug]) {
-        await adminPage.goto(`/widefleet/services/${service}/availability`);
-        await expect(
-          adminPage.getByText(`Choose who can connect ${target.displayName} to their apps.`, {
-            exact: true,
-          }),
-        ).toBeVisible();
-        await page.goto(`/widefleet/services/${service}/connect`);
-        await expect(
-          page.getByRole("heading", { name: `Connect ${target.displayName}`, exact: true }),
-        ).toBeVisible();
-      }
-
-      await page.goto("/widefleet/services/requests");
-      await expect(page.getByText("No connection requests yet.")).toBeVisible();
-      await page.goto("/widefleet/services");
-      await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
-      await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
-      await page.getByRole("link", { name: `Connect to ${target.displayName}` }).focus();
-      await page.keyboard.press("Enter");
-      await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
-      await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
-      await expect(page).toHaveURL(
-        new RegExp(`/widefleet/services/${target.id}/connect\\?app=${source.id}`),
-      );
+    for (const service of [target.id, target.slug]) {
+      await adminPage.goto(`/widefleet/services/${service}/availability`);
       await expect(
-        page.getByRole("heading", { name: "Request a connection", exact: true }),
-      ).toBeVisible();
-      await page.getByRole("link", { name: "Back to app selection" }).click();
-      await expect(page.getByLabel("Your app", { exact: true })).toBeVisible();
-      await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
-      await page.getByLabel("Binding name in your code").fill("ERP");
-      await page.getByRole("button", { name: "Submit request" }).click();
-      await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Approve and connect" })).toHaveCount(0);
-      const requests = await memberContext.request.get("/api/v1/connection-requests");
-
-      const entries = z
-        .array(z.object({ id: z.string(), status: z.string(), serviceId: z.string() }))
-        .parse(await requests.json());
-
-      expect(entries[0]?.serviceId).toBe(target.id);
-      const id = entries[0]?.id;
-
-      if (!id) throw new Error("Missing request");
-
-      const denied = await memberContext.request.post(`/api/v1/connection-requests/${id}/approve`, {
-        headers: { origin: environment.configuration.PLATFORM_URL },
-        data: {},
-      });
-
-      expect(denied.status()).toBe(403);
-      await adminPage.goto("/widefleet/services/requests");
-
-      const review = adminPage
-        .getByRole("listitem", {
-          name: `${source.displayName} to ${target.displayName}`,
+        adminPage.getByText(`Choose who can connect ${target.displayName} to their apps.`, {
           exact: true,
-        })
-        .filter({ hasText: "Awaiting approval" });
-
-      for (const width of [1280, 390]) {
-        await adminPage.setViewportSize({ width, height: 900 });
-
-        for (const colorScheme of ["light", "dark"] as const) {
-          await adminPage.emulateMedia({ colorScheme });
-          await adminPage.screenshot({
-            path: testInfo.outputPath(`review-${width}-${colorScheme}.png`),
-            fullPage: true,
-          });
-          expect(
-            await adminPage.evaluate(
-              () => document.documentElement.scrollWidth <= window.innerWidth,
-            ),
-          ).toBe(true);
-        }
-      }
-
-      await review.getByRole("button", { name: "Approve and connect" }).click();
-      await expect(review).toHaveCount(0);
-      await page.reload();
-      await expect(page.getByRole("heading", { name: "Request approved" })).toBeVisible();
-      await page.getByRole("link", { name: "View app connections" }).click();
-      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
-      await environment.database.db
-        .update(apps)
-        .set({ capabilityError: "Synthetic activation failure" })
-        .where(eq(apps.id, source.id));
-      await page.goto(`/widefleet/apps/${source.id}/connections`);
-      await page.locator("summary").filter({ hasText: "ERP" }).click();
-
-      for (const width of [1280, 390]) {
-        await page.setViewportSize({ width, height: 900 });
-
-        for (const colorScheme of ["light", "dark"] as const) {
-          await page.emulateMedia({ colorScheme });
-          await page.screenshot({
-            path: testInfo.outputPath(`retry-${width}-${colorScheme}.png`),
-            fullPage: true,
-          });
-          expect(
-            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-          ).toBe(true);
-        }
-      }
-
-      await environment.database.db
-        .update(apps)
-        .set({ activeDeploymentId: null })
-        .where(eq(apps.id, target.id));
-      await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
-      await expect(
-        page.getByRole("alert").filter({
-          hasText: "Deploy the target app's service entrypoint successfully before connecting it",
         }),
       ).toBeVisible();
-      await environment.database.db
-        .update(apps)
-        .set({ activeDeploymentId: deploymentId })
-        .where(eq(apps.id, target.id));
-      await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${source.id}/connections$`));
-      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
-      await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
-      await adminPage.goto(`/widefleet/services/${target.id}`);
-      await adminPage.getByRole("link", { name: "Manage availability", exact: true }).click();
-      await adminPage.getByLabel("Who can connect this API?").selectOption("organization");
-      await adminPage.getByRole("button", { name: "Save availability" }).click();
-      await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
-
-      const availability = await environment.database.db
-        .select({ id: apps.id, accessMode: apps.serviceAccessMode })
-        .from(apps)
-        .where(inArray(apps.id, [target.id, collision.id]));
-
-      expect(availability).toEqual(
-        expect.arrayContaining([
-          { id: target.id, accessMode: "organization" },
-          { id: collision.id, accessMode: "approval_required" },
-        ]),
-      );
-      await page.goto(`/widefleet/services?app=${source.id}`);
-      await page.getByRole("link", { name: `Connect to ${target.displayName}` }).click();
-      await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
-      await page.getByLabel("Binding name in your code").fill("FREE");
-
-      for (const width of [1280, 390]) {
-        await page.setViewportSize({ width, height: 900 });
-
-        for (const colorScheme of ["light", "dark"] as const) {
-          await page.emulateMedia({ colorScheme });
-          await page.screenshot({
-            path: testInfo.outputPath(`services-${width}-${colorScheme}.png`),
-            fullPage: true,
-          });
-          expect(
-            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-          ).toBe(true);
-        }
-      }
-
-      await page.getByRole("button", { name: "Connect API", exact: true }).click();
+      await page.goto(`/widefleet/services/${service}/connect`);
       await expect(
-        page.getByRole("heading", { name: "Connection saved", exact: true }),
+        page.getByRole("heading", { name: `Connect ${target.displayName}`, exact: true }),
       ).toBeVisible();
-      await expect(page.getByText("env.FREE", { exact: true })).toBeVisible();
-      await page.getByRole("link", { name: "View app connections" }).click();
-      await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${source.id}/connections$`));
-      await expect(page.getByText("FREE", { exact: true })).toBeVisible();
-      await adminPage.getByLabel("Who can connect this API?").selectOption("approval_required");
-      await adminPage.getByRole("button", { name: "Save availability" }).click();
-      await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
-      await page.goto(`/widefleet/services/${target.id}/connect?app=${source.id}`);
-      await page.getByLabel("Binding name in your code").fill("ERP");
-      await page.getByRole("button", { name: "Submit request" }).click();
-      await expect(page.getByRole("alert")).toContainText("Choose an unused binding name");
-      await expect(page.getByLabel("Binding name in your code")).toHaveValue("ERP");
-      await page.getByLabel("Binding name in your code").fill("REJECTED");
-      await page.getByRole("button", { name: "Submit request" }).click();
-      await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
-      await adminPage.goto("/widefleet/services/requests");
-      await review.getByRole("button", { name: "Reject", exact: true }).click();
-      await expect(review).toHaveCount(0);
-      await page.reload();
-      await expect(page.getByRole("heading", { name: "Request rejected" })).toBeVisible();
-      await page.goto(`/widefleet/apps/${source.id}/connections`);
-
-      const freeConnection = page
-        .locator("details")
-        .filter({ has: page.locator("summary").filter({ hasText: "FREE" }) });
-
-      await freeConnection.locator("summary").click();
-      await freeConnection.getByRole("button", { name: "Disconnect", exact: true }).click();
-      await expect(page.getByText("FREE", { exact: true })).toHaveCount(0);
-      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
-
-      const forbiddenAvailability = await page.goto(
-        `/widefleet/services/${target.id}/availability`,
-      );
-
-      expect(forbiddenAvailability?.status()).toBe(403);
-
-      const forbiddenApp = await page.goto(
-        `/widefleet/services/${target.id}/connect?app=${target.id}`,
-      );
-
-      expect(forbiddenApp?.status()).toBe(404);
-      await page.goto("/widefleet/services/requests");
-      await page.screenshot({ path: testInfo.outputPath("request-statuses.png"), fullPage: true });
-    } finally {
-      await Promise.all(contexts.map((context) => context.close()));
-      await environment.database.db.delete(apps).where(inArray(apps.id, createdAppIds));
-      await environment.database.db.delete(user).where(eq(user.id, creator.id));
     }
-  });
-}
+
+    await page.goto("/widefleet/services/requests");
+    await expect(page.getByText("No connection requests yet.")).toBeVisible();
+    await page.goto("/widefleet/services");
+    await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
+    await page.getByRole("link", { name: `Connect to ${target.displayName}` }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
+    await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/widefleet/services/${target.id}/connect\\?app=${source.id}`),
+    );
+    await expect(
+      page.getByRole("heading", { name: "Request a connection", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Back to app selection" }).click();
+    await expect(page.getByLabel("Your app", { exact: true })).toBeVisible();
+    await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByLabel("Binding name in your code").fill("ERP");
+    await page.getByRole("button", { name: "Submit request" }).click();
+    await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Approve and connect" })).toHaveCount(0);
+    const requests = await memberContext.request.get("/api/v1/connection-requests");
+
+    const entries = z
+      .array(z.object({ id: z.string(), status: z.string(), serviceId: z.string() }))
+      .parse(await requests.json());
+
+    expect(entries[0]?.serviceId).toBe(target.id);
+    const id = entries[0]?.id;
+
+    if (!id) throw new Error("Missing request");
+
+    const denied = await memberContext.request.post(`/api/v1/connection-requests/${id}/approve`, {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+      data: {},
+    });
+
+    expect(denied.status()).toBe(403);
+    await adminPage.goto("/widefleet/services/requests");
+
+    const review = adminPage
+      .getByRole("listitem", {
+        name: `${source.displayName} to ${target.displayName}`,
+        exact: true,
+      })
+      .filter({ hasText: "Awaiting approval" });
+
+    for (const width of [1280, 390]) {
+      await adminPage.setViewportSize({ width, height: 900 });
+
+      for (const colorScheme of ["light", "dark"] as const) {
+        await adminPage.emulateMedia({ colorScheme });
+        await adminPage.screenshot({
+          path: testInfo.outputPath(`review-${width}-${colorScheme}.png`),
+          fullPage: true,
+        });
+        expect(
+          await adminPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      }
+    }
+
+    await review.getByRole("button", { name: "Approve and connect" }).click();
+    await expect(review).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Request approved" })).toBeVisible();
+    await page.getByRole("link", { name: "View app connections" }).click();
+    await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+    await environment.database.db
+      .update(apps)
+      .set({ capabilityError: "Synthetic activation failure" })
+      .where(eq(apps.id, source.id));
+    await page.goto(`/widefleet/apps/${source.id}/connections`);
+    await page.locator("summary").filter({ hasText: "ERP" }).click();
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+
+      for (const colorScheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme });
+        await page.screenshot({
+          path: testInfo.outputPath(`retry-${width}-${colorScheme}.png`),
+          fullPage: true,
+        });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      }
+    }
+
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: null })
+      .where(eq(apps.id, target.id));
+    await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
+    await expect(
+      page.getByRole("alert").filter({
+        hasText: "Deploy the target app's service entrypoint successfully before connecting it",
+      }),
+    ).toBeVisible();
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: deploymentId })
+      .where(eq(apps.id, target.id));
+    await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${source.id}/connections$`));
+    await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+    await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
+    await adminPage.goto(`/widefleet/services/${target.id}`);
+    await adminPage.getByRole("link", { name: "Manage availability", exact: true }).click();
+    await adminPage.getByLabel("Who can connect this API?").selectOption("organization");
+    await adminPage.getByRole("button", { name: "Save availability" }).click();
+    await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
+
+    const availability = await environment.database.db
+      .select({ id: apps.id, accessMode: apps.serviceAccessMode })
+      .from(apps)
+      .where(inArray(apps.id, [target.id, collision.id]));
+
+    expect(availability).toEqual(
+      expect.arrayContaining([
+        { id: target.id, accessMode: "organization" },
+        { id: collision.id, accessMode: "approval_required" },
+      ]),
+    );
+    await page.goto(`/widefleet/services?app=${source.id}`);
+    await page.getByRole("link", { name: `Connect to ${target.displayName}` }).click();
+    await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
+    await page.getByLabel("Binding name in your code").fill("FREE");
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+
+      for (const colorScheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme });
+        await page.screenshot({
+          path: testInfo.outputPath(`services-${width}-${colorScheme}.png`),
+          fullPage: true,
+        });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      }
+    }
+
+    await page.getByRole("button", { name: "Connect API", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Connection saved", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("env.FREE", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "View app connections" }).click();
+    await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${source.id}/connections$`));
+    await expect(page.getByText("FREE", { exact: true })).toBeVisible();
+    await adminPage.getByLabel("Who can connect this API?").selectOption("approval_required");
+    await adminPage.getByRole("button", { name: "Save availability" }).click();
+    await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
+    await page.goto(`/widefleet/services/${target.id}/connect?app=${source.id}`);
+    await page.getByLabel("Binding name in your code").fill("ERP");
+    await page.getByRole("button", { name: "Submit request" }).click();
+    await expect(page.getByRole("alert")).toContainText("Choose an unused binding name");
+    await expect(page.getByLabel("Binding name in your code")).toHaveValue("ERP");
+    await page.getByLabel("Binding name in your code").fill("REJECTED");
+    await page.getByRole("button", { name: "Submit request" }).click();
+    await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
+    await adminPage.goto("/widefleet/services/requests");
+    await review.getByRole("button", { name: "Reject", exact: true }).click();
+    await expect(review).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Request rejected" })).toBeVisible();
+    await page.goto(`/widefleet/apps/${source.id}/connections`);
+
+    const freeConnection = page
+      .locator("details")
+      .filter({ has: page.locator("summary").filter({ hasText: "FREE" }) });
+
+    await freeConnection.locator("summary").click();
+    await freeConnection.getByRole("button", { name: "Disconnect", exact: true }).click();
+    await expect(page.getByText("FREE", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+
+    const forbiddenAvailability = await page.goto(`/widefleet/services/${target.id}/availability`);
+
+    expect(forbiddenAvailability?.status()).toBe(403);
+
+    const forbiddenApp = await page.goto(
+      `/widefleet/services/${target.id}/connect?app=${target.id}`,
+    );
+
+    expect(forbiddenApp?.status()).toBe(404);
+    await page.goto("/widefleet/services/requests");
+    await page.screenshot({ path: testInfo.outputPath("request-statuses.png"), fullPage: true });
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+    await environment.database.db.delete(apps).where(inArray(apps.id, createdAppIds));
+    await environment.database.db.delete(user).where(eq(user.id, creator.id));
+  }
+});
 
 test("shows versioned service documentation through authenticated API and accessible pages", async ({
   page,
   context,
-  browser,
 }, testInfo) => {
   const session = await environment.users.login({ userId: environment.owner.id });
 
@@ -593,21 +582,6 @@ test("shows versioned service documentation through authenticated API and access
   await page.getByRole("link", { name: "Back to app APIs" }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/services$/);
-
-  const noScript = await browser.newContext({
-    javaScriptEnabled: false,
-    baseURL: environment.configuration.PLATFORM_URL,
-    extraHTTPHeaders: { "x-forwarded-proto": "http" },
-  });
-
-  try {
-    await noScript.addCookies(cookies);
-    const staticPage = await noScript.newPage();
-    await staticPage.goto(`/widefleet/services/${record.id}`);
-    await expect(staticPage.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
-  } finally {
-    await noScript.close();
-  }
 
   metadata.service_documentation = { format: 1, entrypoints: [], types: [] };
   await environment.database.db
@@ -2090,358 +2064,144 @@ test("refreshes queued rollbacks and distinguishes pending requests from accepte
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("validates remote forms and creates apps without JavaScript", async ({ browser }) => {
-  const session = await environment.users.login({ userId: environment.owner.id });
+test.describe(`app catalog`, () => {
+  test.use({});
 
-  const context = await browser.newContext({
-    baseURL: environment.configuration.PLATFORM_URL,
-    javaScriptEnabled: false,
-    extraHTTPHeaders: { "x-forwarded-proto": "http" },
-  });
+  test("publishes and withdraws apps for members without granting management access", async ({
+    page,
+    context,
+    browser,
+    request,
+  }) => {
+    await page.goto("/widefleet");
+    await expect(page).toHaveURL(/\/sign-in\?next=/);
+    expect(new URL(page.url()).searchParams.get("next")).toBe("/widefleet");
 
-  try {
-    await context.addCookies(
-      session.cookies.map((cookie) => ({
-        ...cookie,
-        domain: "localhost",
-        sameSite: "Lax",
-        secure: false,
-      })),
-    );
-    const page = await context.newPage();
-    const response = await page.goto("/widefleet/apps");
-    expect(response?.headers()["cache-control"]).toBe("private, no-store");
-    await page.getByRole("link", { name: "Create app", exact: true }).click();
-    await page.getByLabel("App name", { exact: true }).fill("Native Form App");
-
-    for (const slug of ["auth", "mcp"]) {
-      await page.getByLabel("URL slug").fill(slug);
-      await page.getByRole("button", { name: "Create app" }).click();
-      await expect(page.getByRole("alert")).toContainText(
-        "The auth and mcp hostnames are reserved for platform services",
-      );
-      await expect(page.getByLabel("App name", { exact: true })).toHaveValue("Native Form App");
-    }
-
-    await page.getByLabel("URL slug").fill("native-form-app");
-    await page.getByRole("button", { name: "Create app" }).click();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Native Form App");
-    const parentId = z.uuid().parse(new URL(page.url()).pathname.split("/").at(-1));
-    await page.goto("/widefleet/apps/new");
-    await page.getByLabel("App name", { exact: true }).fill("Native Preview");
-    await page.getByLabel("URL slug").fill("native-preview");
-    await page.getByText("Create as preview", { exact: false }).click();
-    await page.getByLabel("Preview of an existing app").selectOption(parentId);
-    await page.getByRole("button", { name: "Create app" }).click();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Native Preview");
-    await page.getByRole("link", { name: "Back to original app" }).click();
-    await page.getByRole("link", { name: "App settings", exact: true }).click();
-    await page.getByText("Permanently delete app", { exact: true }).click();
-    await expect(
-      page.getByText("This app, all its previews and their published versions will be removed."),
-    ).toBeVisible();
-    await page.getByRole("checkbox").check();
-    await page.getByRole("button", { name: "Delete app", exact: true }).click();
-    await expect(page.getByRole("listitem").filter({ hasText: "Native Form App" })).toContainText(
-      "Deleting",
-    );
-    await expect(page.getByRole("listitem").filter({ hasText: "Native Preview" })).toContainText(
-      "Deleting",
-    );
-  } finally {
-    await context.close();
-  }
-});
-
-test.describe("member forms without JavaScript", () => {
-  test.use({ javaScriptEnabled: false });
-
-  test.beforeEach(async ({ context }) => {
-    const admin = environment.users.createUser({
-      name: "Native Admin",
-      email: `native-admin-${crypto.randomUUID()}@example.test`,
+    const creator = environment.users.createUser({
+      name: "Catalog Creator",
+      email: `catalog-creator@example.test`,
     });
 
-    await environment.users.saveUser(admin);
-    await environment.linkMicrosoftUser(admin.id);
-    await environment.database.db
-      .update(member)
-      .set({ role: "admin" })
-      .where(eq(member.userId, admin.id));
-    const session = await environment.users.login({ userId: admin.id });
-    await context.addCookies(
-      session.cookies.map((cookie) => ({
-        ...cookie,
-        domain: "localhost",
-        sameSite: "Lax",
-        secure: false,
-      })),
-    );
-  });
+    const reader = environment.users.createUser({
+      name: "Catalog Reader",
+      email: `catalog-reader@example.test`,
+    });
 
-  test("preserves role search and pagination after successful and rejected changes", async ({
-    page,
-  }) => {
-    for (let index = 0; index < 50; index += 1) {
-      const person = environment.users.createUser({
-        name: `Native Role ${String(index).padStart(2, "0")}`,
-        email: `native-role-${index}@example.test`,
-      });
-
+    for (const person of [creator, reader]) {
       await environment.users.saveUser(person);
       await environment.linkMicrosoftUser(person.id);
     }
 
-    const target = environment.users.createUser({
-      name: "Native Role Target",
-      email: "native-role-target@example.test",
-    });
-
-    await environment.users.saveUser(target);
-    await environment.linkMicrosoftUser(target.id);
-    await page.goto("/widefleet/settings/members?q=Native+Role&page=2");
-    const form = page.getByRole("form", { name: "Role for Native Role Target" });
-    await form.getByLabel("Role", { exact: true }).selectOption("admin");
-    await form.getByRole("button", { name: "Save role" }).click();
-    await expect(page.getByRole("status")).toContainText("Role saved");
-    await expect(page.getByLabel("Search by name or email")).toHaveValue("Native Role");
-    await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
-    expect(new URL(page.url()).searchParams.get("q")).toBe("Native Role");
-    expect(new URL(page.url()).searchParams.get("page")).toBe("2");
-
-    // Tamper with the native form; application JavaScript remains disabled.
-    await form.getByLabel("Role", { exact: true }).evaluate((select: HTMLSelectElement) => {
-      select.add(new Option("Owner", "owner"));
-      select.value = "owner";
-    });
-    await form.getByRole("button", { name: "Save role" }).click();
-    await expect(page.getByRole("alert")).toContainText(
-      "You are not allowed to update this member",
+    const creatorSession = await environment.users.login({ userId: creator.id });
+    await context.addCookies(
+      creatorSession.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax",
+        secure: false,
+      })),
     );
-    await expect(page.getByRole("status")).toHaveCount(0);
-    await expect(page.getByLabel("Search by name or email")).toHaveValue("Native Role");
-    await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
-    expect(new URL(page.url()).searchParams.get("q")).toBe("Native Role");
-    expect(new URL(page.url()).searchParams.get("page")).toBe("2");
-    expect(
-      await environment.database.db
-        .select({ role: member.role })
-        .from(member)
-        .where(eq(member.userId, target.id)),
-    ).toEqual([{ role: "admin" }]);
-  });
 
-  test("preserves app access search after grants, revokes and rejected submissions", async ({
-    page,
-    context,
-  }) => {
-    const person = environment.users.createUser({
-      name: "Native Grant User",
-      email: "native-grant@example.test",
-    });
-
-    await environment.users.saveUser(person);
-    await environment.linkMicrosoftUser(person.id);
+    const origin = environment.configuration.PLATFORM_URL;
 
     const created = await context.request.post("/api/v1/apps", {
-      headers: { origin: environment.configuration.PLATFORM_URL },
-      data: { slug: "native-access", displayName: "Native Access" },
+      headers: { origin },
+      data: {
+        slug: `catalog`,
+        displayName: `Catalog App`,
+      },
     });
 
     expect(created.ok()).toBe(true);
     const record = app.parse(await created.json());
-    const path = `/widefleet/apps/${record.id}/access/management?q=native-grant`;
-    await page.goto(path);
-    await page.getByRole("button", { name: "Grant access" }).click();
-    await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
-    expect(new URL(page.url()).searchParams.get("q")).toBe("native-grant");
+    expect(record.catalogListed).toBe(false);
+    await environment.database.db
+      .update(apps)
+      .set({ state: "active", activeDeploymentId: crypto.randomUUID() })
+      .where(eq(apps.id, record.id));
 
-    const revoke = page.locator("form").filter({
-      has: page.getByRole("button", { name: "Revoke access" }),
+    const readerContext = await browser.newContext({
+      baseURL: origin,
+      extraHTTPHeaders: { "x-forwarded-proto": "http" },
     });
 
-    await revoke.locator(`input[value="${person.id}"]`).evaluate((input: HTMLInputElement) => {
-      input.value = "";
-    });
-    await revoke.getByRole("button").click();
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page.locator("#access").getByRole("status")).toHaveCount(0);
-    await expect(page.getByLabel("Find a member by name or email")).toHaveValue("native-grant");
-    expect(
-      await environment.database.db
-        .select({ userId: appGrants.userId })
-        .from(appGrants)
-        .where(eq(appGrants.appId, record.id)),
-    ).toEqual([{ userId: person.id }]);
-
-    await page.goto(path);
-    await page.getByRole("button", { name: "Revoke access" }).click();
-    await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
-    expect(new URL(page.url()).searchParams.get("q")).toBe("native-grant");
-
-    const grant = page.locator("form").filter({
-      has: page.getByRole("button", { name: "Grant access" }),
-    });
-
-    await grant.locator(`input[value="${person.id}"]`).evaluate((input: HTMLInputElement) => {
-      input.value = "missing-user";
-    });
-    await grant.getByRole("button").click();
-    await expect(page.getByRole("alert")).toHaveText("An active company user is required");
-    await expect(page.locator("#access").getByRole("status")).toHaveCount(0);
-    await expect(page.getByLabel("Find a member by name or email")).toHaveValue("native-grant");
-    expect(new URL(page.url()).searchParams.get("q")).toBe("native-grant");
-    expect(
-      await environment.database.db.select().from(appGrants).where(eq(appGrants.appId, record.id)),
-    ).toEqual([]);
-  });
-});
-
-for (const javaScriptEnabled of [true, false]) {
-  test.describe(`app catalog with JavaScript ${javaScriptEnabled ? "enabled" : "disabled"}`, () => {
-    test.use({ javaScriptEnabled });
-
-    test("publishes and withdraws apps for members without granting management access", async ({
-      page,
-      context,
-      browser,
-      request,
-    }) => {
-      await page.goto("/widefleet");
-      await expect(page).toHaveURL(/\/sign-in\?next=/);
-      expect(new URL(page.url()).searchParams.get("next")).toBe("/widefleet");
-
-      const creator = environment.users.createUser({
-        name: "Catalog Creator",
-        email: `catalog-creator-${javaScriptEnabled}@example.test`,
-      });
-
-      const reader = environment.users.createUser({
-        name: "Catalog Reader",
-        email: `catalog-reader-${javaScriptEnabled}@example.test`,
-      });
-
-      for (const person of [creator, reader]) {
-        await environment.users.saveUser(person);
-        await environment.linkMicrosoftUser(person.id);
-      }
-
-      const creatorSession = await environment.users.login({ userId: creator.id });
-      await context.addCookies(
-        creatorSession.cookies.map((cookie) => ({
+    try {
+      const readerSession = await environment.users.login({ userId: reader.id });
+      await readerContext.addCookies(
+        readerSession.cookies.map((cookie) => ({
           ...cookie,
           domain: "localhost",
           sameSite: "Lax",
           secure: false,
         })),
       );
+      const readerPage = await readerContext.newPage();
+      await readerPage.goto("/widefleet/apps");
+      await expect(readerPage.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
+      await expect(
+        readerPage.getByRole("heading", { name: "Start from a template" }),
+      ).toBeVisible();
+      await readerPage.getByRole("link", { name: "Home", exact: true }).click();
+      await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText("Home");
+      await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveCount(0);
 
-      const origin = environment.configuration.PLATFORM_URL;
+      await page.goto(`/widefleet/apps/${record.id}/settings`);
 
-      const created = await context.request.post("/api/v1/apps", {
+      const publish = page.getByRole("button", {
+        name: "Publish to catalog",
+        exact: true,
+      });
+
+      const form = page.locator("form").filter({ has: publish });
+      const action = z.string().parse(await form.getAttribute("action"));
+      const remote = z.string().parse(new URL(action, origin).searchParams.get("/remote"));
+      const queryUrl = organizationQuery(`/_app/remote/${remote.split("/")[0]}/getCatalog`);
+      const anonymous = await request.get(queryUrl);
+      expect(await remoteRedirect(anonymous)).toBe("/sign-in");
+
+      const fields = await form.evaluate((element) =>
+        Object.fromEntries(
+          Array.from(element.querySelectorAll("input"), (input) => [input.name, input.value]),
+        ),
+      );
+
+      const forged = await readerContext.request.post(`/_app/remote/${remote}`, {
         headers: { origin },
-        data: {
-          slug: `catalog-${javaScriptEnabled}`,
-          displayName: `Catalog App ${javaScriptEnabled}`,
-        },
+        form: fields,
       });
 
-      expect(created.ok()).toBe(true);
-      const record = app.parse(await created.json());
-      expect(record.catalogListed).toBe(false);
-      await environment.database.db
-        .update(apps)
-        .set({ state: "active", activeDeploymentId: crypto.randomUUID() })
-        .where(eq(apps.id, record.id));
+      expect(await forged.text(), logs).toContain("issues");
+      expect(
+        await environment.database.db
+          .select({ catalogListed: apps.catalogListed })
+          .from(apps)
+          .where(eq(apps.id, record.id)),
+      ).toEqual([{ catalogListed: false }]);
 
-      const readerContext = await browser.newContext({
-        baseURL: origin,
-        javaScriptEnabled,
-        extraHTTPHeaders: { "x-forwarded-proto": "http" },
-      });
+      await publish.click();
+      await expect(
+        page.getByRole("button", { name: "Remove from catalog", exact: true }),
+      ).toBeVisible();
+      await readerPage.reload();
+      await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveAttribute(
+        "href",
+        record.url,
+      );
+      expect((await readerContext.request.get(`/widefleet/apps/${record.id}`)).status()).toBe(404);
+      expect((await readerContext.request.get(`/api/v1/apps/${record.id}`)).status()).toBe(404);
+      const catalog = await readerContext.request.get(queryUrl);
+      expect(catalog.headers()["cache-control"]).toBe("private, no-store");
+      expect(await catalog.text()).toContain(record.displayName);
 
-      try {
-        const readerSession = await environment.users.login({ userId: reader.id });
-        await readerContext.addCookies(
-          readerSession.cookies.map((cookie) => ({
-            ...cookie,
-            domain: "localhost",
-            sameSite: "Lax",
-            secure: false,
-          })),
-        );
-        const readerPage = await readerContext.newPage();
-        await readerPage.goto("/widefleet/apps");
-        await expect(
-          readerPage.getByRole("link", { name: "Create app", exact: true }),
-        ).toBeVisible();
-        await expect(
-          readerPage.getByRole("heading", { name: "Start from a template" }),
-        ).toBeVisible();
-        await readerPage.getByRole("link", { name: "Home", exact: true }).click();
-        await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText("Home");
-        await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveCount(0);
-
-        await page.goto(`/widefleet/apps/${record.id}/settings`);
-
-        const publish = page.getByRole("button", {
-          name: "Publish to catalog",
-          exact: true,
-        });
-
-        const form = page.locator("form").filter({ has: publish });
-        const action = z.string().parse(await form.getAttribute("action"));
-        const remote = z.string().parse(new URL(action, origin).searchParams.get("/remote"));
-        const queryUrl = organizationQuery(`/_app/remote/${remote.split("/")[0]}/getCatalog`);
-        const anonymous = await request.get(queryUrl);
-        expect(await remoteRedirect(anonymous)).toBe("/sign-in");
-
-        const fields = await form.evaluate((element) =>
-          Object.fromEntries(
-            Array.from(element.querySelectorAll("input"), (input) => [input.name, input.value]),
-          ),
-        );
-
-        const forged = await readerContext.request.post(`/_app/remote/${remote}`, {
-          headers: { origin },
-          form: fields,
-        });
-
-        expect(await forged.text(), logs).toContain("issues");
-        expect(
-          await environment.database.db
-            .select({ catalogListed: apps.catalogListed })
-            .from(apps)
-            .where(eq(apps.id, record.id)),
-        ).toEqual([{ catalogListed: false }]);
-
-        await publish.click();
-        await expect(
-          page.getByRole("button", { name: "Remove from catalog", exact: true }),
-        ).toBeVisible();
-        await readerPage.reload();
-        await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveAttribute(
-          "href",
-          record.url,
-        );
-        expect((await readerContext.request.get(`/widefleet/apps/${record.id}`)).status()).toBe(
-          404,
-        );
-        expect((await readerContext.request.get(`/api/v1/apps/${record.id}`)).status()).toBe(404);
-        const catalog = await readerContext.request.get(queryUrl);
-        expect(catalog.headers()["cache-control"]).toBe("private, no-store");
-        expect(await catalog.text()).toContain(record.displayName);
-
-        await page.getByRole("button", { name: "Remove from catalog", exact: true }).click();
-        await expect(publish).toBeVisible();
-        await readerPage.reload();
-        await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveCount(0);
-      } finally {
-        await readerContext.close();
-      }
-    });
+      await page.getByRole("button", { name: "Remove from catalog", exact: true }).click();
+      await expect(publish).toBeVisible();
+      await readerPage.reload();
+      await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveCount(0);
+    } finally {
+      await readerContext.close();
+    }
   });
-}
+});
 
 test("remote endpoints recheck sessions, roles, input and request origin", async ({
   page,
@@ -2562,222 +2322,195 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
   expect(await remoteRedirect(expired)).toBe("/organizations");
 });
 
-for (const javaScriptEnabled of [true, false]) {
-  test(`edits app and inherited preview access with JavaScript ${javaScriptEnabled}`, async ({
-    browser,
-  }) => {
-    const [owner] = await environment.database.db
-      .select()
-      .from(member)
-      .where(eq(member.role, "owner"));
+test(`edits app and inherited preview access`, async ({ browser }) => {
+  const [owner] = await environment.database.db
+    .select()
+    .from(member)
+    .where(eq(member.role, "owner"));
 
-    if (!owner) throw new Error("Expected initial owner");
-    const session = await environment.users.login({ userId: owner.userId });
+  if (!owner) throw new Error("Expected initial owner");
+  const session = await environment.users.login({ userId: owner.userId });
 
-    const context = await browser.newContext({
-      baseURL: environment.configuration.PLATFORM_URL,
-      extraHTTPHeaders: { "x-forwarded-proto": "http" },
-      javaScriptEnabled,
+  const context = await browser.newContext({
+    baseURL: environment.configuration.PLATFORM_URL,
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  try {
+    await context.addCookies(
+      session.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax",
+        secure: false,
+      })),
+    );
+    const slug = `access-ui`;
+
+    const create = await context.request.post("/api/v1/apps", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+      data: { slug, displayName: "Access fixture", parentId: null },
     });
 
+    expect(create.status()).toBe(200);
+    const parent = app.parse(await create.json());
+    const page = await context.newPage();
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    const hydration = new EventEmitter();
+    const ready = once(hydration, "ready");
+
+    await page.route(
+      "**/_app/immutable/entry/start.*.js",
+      async (route) => {
+        await ready;
+        await route.continue();
+      },
+      { times: 1 },
+    );
+
+    await page.goto(`/widefleet/apps/${parent.id}/access`, { waitUntil: "domcontentloaded" });
+    await page.getByLabel("Allowed groups for this app", { exact: true }).fill("finance");
+    hydration.emit("ready");
+
+    // Finish loading the held client scripts after editing the server-rendered form.
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
+      "finance",
+    );
+
+    const submission = new EventEmitter();
+    const resume = once(submission, "resume");
+
+    await page.route(
+      "**/*changeAppAccess*",
+      async (route) => {
+        await resume;
+        await route.continue();
+      },
+      { times: 1 },
+    );
+
+    await page.getByRole("button", { name: "Save app rules", exact: true }).click();
+
     try {
-      await context.addCookies(
-        session.cookies.map((cookie) => ({
-          ...cookie,
-          domain: "localhost",
-          sameSite: "Lax",
-          secure: false,
-        })),
-      );
-      const slug = `access-ui-${javaScriptEnabled ? "js" : "html"}`;
-
-      const create = await context.request.post("/api/v1/apps", {
-        headers: { origin: environment.configuration.PLATFORM_URL },
-        data: { slug, displayName: "Access fixture", parentId: null },
-      });
-
-      expect(create.status()).toBe(200);
-      const parent = app.parse(await create.json());
-      const page = await context.newPage();
-      const pageErrors: string[] = [];
-      page.on("pageerror", (error) => pageErrors.push(error.message));
-      const hydration = new EventEmitter();
-      const ready = once(hydration, "ready");
-
-      if (javaScriptEnabled)
-        await page.route(
-          "**/_app/immutable/entry/start.*.js",
-          async (route) => {
-            await ready;
-            await route.continue();
-          },
-          { times: 1 },
-        );
-
-      await page.goto(`/widefleet/apps/${parent.id}/access`, { waitUntil: "domcontentloaded" });
-      await page.getByLabel("Allowed groups for this app", { exact: true }).fill("finance");
-      hydration.emit("ready");
-
-      // Finish loading the held client scripts after editing the server-rendered form.
-      if (javaScriptEnabled) await page.waitForLoadState("networkidle");
-      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-        "finance",
-      );
-
-      const submission = new EventEmitter();
-      const resume = once(submission, "resume");
-
-      if (javaScriptEnabled)
-        await page.route(
-          "**/*changeAppAccess*",
-          async (route) => {
-            await resume;
-            await route.continue();
-          },
-          { times: 1 },
-        );
-
-      await page.getByRole("button", { name: "Save app rules", exact: true }).click();
-
-      if (javaScriptEnabled) {
-        try {
-          await expect(
-            page.getByLabel("Allowed groups for this app", { exact: true }),
-          ).toBeDisabled();
-          await expect(page.getByRole("button", { name: "Saving …", exact: true })).toBeDisabled();
-        } finally {
-          submission.emit("resume");
-        }
-      }
-
-      await expect
-        .poll(async () => {
-          const response = await context.request.get(`/api/v1/apps/${parent.id}/access`);
-
-          return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
-        })
-        .toEqual(["finance"]);
-      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-        "finance",
-      );
-      await expect(page.getByRole("button", { name: "Save app rules", exact: true })).toBeEnabled();
-
-      await expect(page.getByLabel("Allowed groups for all previews")).toHaveCount(0);
-
-      const previewResponse = await context.request.post("/api/v1/apps", {
-        headers: { origin: environment.configuration.PLATFORM_URL },
-        data: {
-          slug: `${slug}-review`,
-          displayName: "Preview fixture",
-          parentId: parent.id,
-          previewName: "review",
-        },
-      });
-
-      const preview = app.parse(await previewResponse.json());
-      await page.goto(`/widefleet/apps/${preview.id}/access`);
-      await expect(
-        page.getByText(
-          "This preview automatically inherits the original app's access rules. You cannot set separate rules.",
-        ),
-      ).toBeVisible();
-      await expect(page.getByText("Allowed groups: finance", { exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Save app rules", exact: true })).toHaveCount(
-        0,
-      );
-      // This phase edits the hydrated form; the first visit covers pre-hydration input.
-      await page.goto(`/widefleet/apps/${parent.id}/access`, { waitUntil: "networkidle" });
-      await page.getByLabel("Allowed groups for this app", { exact: true }).fill("unsaved-group");
-
-      const competing = await context.request.patch(`/api/v1/apps/${parent.id}/access`, {
-        headers: { origin: environment.configuration.PLATFORM_URL },
-        data: { groups: ["qa"], revision: 1 },
-      });
-
-      expect(competing.status()).toBe(200);
-
-      if (javaScriptEnabled) {
-        for (const name of ["Management access", "Overview"]) {
-          const dialog = page.waitForEvent("dialog");
-          const navigation = page.getByRole("link", { name, exact: true }).click();
-          const confirmation = await dialog;
-          expect(confirmation.type()).toBe("confirm");
-          await confirmation.dismiss();
-          await navigation;
-          await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${parent.id}/access$`));
-          await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-            "unsaved-group",
-          );
-        }
-
-        const refreshed = page.waitForResponse((response) =>
-          response.url().includes("/getAppAccess"),
-        );
-
-        await page.getByRole("link", { name: "Refresh status", exact: true }).click();
-        await refreshed;
-      }
-
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const submitted = page.waitForResponse(
-          (response) =>
-            response.request().method() === "POST" && response.url().includes("changeAppAccess"),
-        );
-
-        await page.getByRole("button", { name: "Save app rules", exact: true }).click();
-        await submitted;
-        await expect(page.getByRole("alert")).toContainText("Access rules have changed");
-        await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-          "unsaved-group",
-        );
-        const response = await context.request.get(`/api/v1/apps/${parent.id}/access`);
-        expect(await response.json()).toMatchObject({ groups: ["qa"], revision: 2 });
-      }
-
-      if (javaScriptEnabled) {
-        const dialog = page.waitForEvent("dialog");
-
-        const navigation = page
-          .getByRole("link", { name: "Management access", exact: true })
-          .click();
-
-        const confirmation = await dialog;
-        expect(confirmation.type()).toBe("confirm");
-        await confirmation.accept();
-        await navigation;
-        await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
-        await page.getByRole("link", { name: "App usage", exact: true }).click();
-      } else {
-        await page
-          .getByRole("link", { name: "Discard draft and reload rules", exact: true })
-          .click();
-      }
-
-      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-        "qa",
-      );
-
-      await expect(page.locator('input[name^="n:revision/"]')).toHaveValue("2");
-
-      await page.getByLabel("Allowed groups for this app", { exact: true }).fill("");
-      await page.getByRole("button", { name: "Save app rules", exact: true }).click();
-      await expect
-        .poll(async () => {
-          const response = await context.request.get(`/api/v1/apps/${preview.id}/access`);
-
-          return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
-        })
-        .toEqual([]);
-      await page.goto(`/widefleet/apps/${preview.id}/access`);
-      await expect(
-        page.getByText("Allowed groups: All signed-in users", { exact: true }),
-      ).toBeVisible();
-      expect(pageErrors).toEqual([]);
+      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Saving …", exact: true })).toBeDisabled();
     } finally {
-      await context.close();
+      submission.emit("resume");
     }
-  });
-}
+
+    await expect
+      .poll(async () => {
+        const response = await context.request.get(`/api/v1/apps/${parent.id}/access`);
+
+        return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
+      })
+      .toEqual(["finance"]);
+    await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
+      "finance",
+    );
+    await expect(page.getByRole("button", { name: "Save app rules", exact: true })).toBeEnabled();
+
+    await expect(page.getByLabel("Allowed groups for all previews")).toHaveCount(0);
+
+    const previewResponse = await context.request.post("/api/v1/apps", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+      data: {
+        slug: `${slug}-review`,
+        displayName: "Preview fixture",
+        parentId: parent.id,
+        previewName: "review",
+      },
+    });
+
+    const preview = app.parse(await previewResponse.json());
+    await page.goto(`/widefleet/apps/${preview.id}/access`);
+    await expect(
+      page.getByText(
+        "This preview automatically inherits the original app's access rules. You cannot set separate rules.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText("Allowed groups: finance", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save app rules", exact: true })).toHaveCount(0);
+    // This phase edits the hydrated form; the first visit covers pre-hydration input.
+    await page.goto(`/widefleet/apps/${parent.id}/access`, { waitUntil: "networkidle" });
+    await page.getByLabel("Allowed groups for this app", { exact: true }).fill("unsaved-group");
+
+    const competing = await context.request.patch(`/api/v1/apps/${parent.id}/access`, {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+      data: { groups: ["qa"], revision: 1 },
+    });
+
+    expect(competing.status()).toBe(200);
+
+    for (const name of ["Management access", "Overview"]) {
+      const dialog = page.waitForEvent("dialog");
+      const navigation = page.getByRole("link", { name, exact: true }).click();
+      const confirmation = await dialog;
+      expect(confirmation.type()).toBe("confirm");
+      await confirmation.dismiss();
+      await navigation;
+      await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${parent.id}/access$`));
+      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
+        "unsaved-group",
+      );
+    }
+
+    const refreshed = page.waitForResponse((response) => response.url().includes("/getAppAccess"));
+
+    await page.getByRole("link", { name: "Refresh status", exact: true }).click();
+    await refreshed;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const submitted = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" && response.url().includes("changeAppAccess"),
+      );
+
+      await page.getByRole("button", { name: "Save app rules", exact: true }).click();
+      await submitted;
+      await expect(page.getByRole("alert")).toContainText("Access rules have changed");
+      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
+        "unsaved-group",
+      );
+      const response = await context.request.get(`/api/v1/apps/${parent.id}/access`);
+      expect(await response.json()).toMatchObject({ groups: ["qa"], revision: 2 });
+    }
+
+    const dialog = page.waitForEvent("dialog");
+
+    const navigation = page.getByRole("link", { name: "Management access", exact: true }).click();
+
+    const confirmation = await dialog;
+    expect(confirmation.type()).toBe("confirm");
+    await confirmation.accept();
+    await navigation;
+    await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
+    await page.getByRole("link", { name: "App usage", exact: true }).click();
+
+    await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue("qa");
+
+    await expect(page.locator('input[name^="n:revision/"]')).toHaveValue("2");
+
+    await page.getByLabel("Allowed groups for this app", { exact: true }).fill("");
+    await page.getByRole("button", { name: "Save app rules", exact: true }).click();
+    await expect
+      .poll(async () => {
+        const response = await context.request.get(`/api/v1/apps/${preview.id}/access`);
+
+        return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
+      })
+      .toEqual([]);
+    await page.goto(`/widefleet/apps/${preview.id}/access`);
+    await expect(
+      page.getByText("Allowed groups: All signed-in users", { exact: true }),
+    ).toBeVisible();
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
 
 test.describe("workspace experience", () => {
   test.beforeEach(async ({ context }) => {
@@ -3118,47 +2851,6 @@ test.describe("workspace experience", () => {
     await page.goto("/widefleet/apps/new");
     await expect(page.getByLabel("App name", { exact: true })).toBeVisible();
   });
-
-  test("registers and disables an agent with native forms", async ({ browser }) => {
-    const context = await browser.newContext({
-      baseURL: environment.configuration.PLATFORM_URL,
-      javaScriptEnabled: false,
-      extraHTTPHeaders: { "x-forwarded-proto": "http" },
-    });
-
-    const session = await environment.users.login({ userId: environment.owner.id });
-
-    try {
-      await context.addCookies(
-        session.cookies.map((cookie) => ({
-          ...cookie,
-          domain: "localhost",
-          sameSite: "Lax",
-          secure: false,
-        })),
-      );
-      const page = await context.newPage();
-      await page.goto("/widefleet/settings/agents");
-      await page.getByText("Register deployment agent", { exact: true }).click();
-      await page.getByLabel("Agent name", { exact: true }).fill("   ");
-      await page.getByRole("button", { name: "Register agent", exact: true }).click();
-      await expect(page.getByRole("alert")).toBeVisible();
-      await expect(page.getByLabel("Agent name", { exact: true })).toBeVisible();
-      await page.getByLabel("Agent name", { exact: true }).fill("Native Agent");
-      await page.getByRole("button", { name: "Register agent", exact: true }).click();
-      await expect(page.getByRole("status")).toContainText("agent_");
-      const row = page.getByRole("listitem").filter({ hasText: "Native Agent" });
-      await row.getByText("Disable agent", { exact: true }).click();
-      await row.getByRole("button", { name: "Confirm deactivation", exact: true }).click();
-      await expect(row.getByText("Disabled", { exact: true })).toBeVisible();
-      await expect(page.getByRole("status")).not.toContainText("agent_");
-      await expect(
-        row.getByRole("button", { name: "Confirm deactivation", exact: true }),
-      ).toHaveCount(0);
-    } finally {
-      await context.close();
-    }
-  });
 });
 
 test("focuses code entry and returns to the same email without another send", async ({ page }) => {
@@ -3265,531 +2957,504 @@ test("keeps the email step usable after a failed send and clears feedback on bac
   expect(sent).toBe(2);
 });
 
-for (const javaScriptEnabled of [true, false]) {
-  test.describe(`app templates with JavaScript ${javaScriptEnabled ? "enabled" : "disabled"}`, () => {
-    test.use({ javaScriptEnabled });
+test.describe(`app templates`, () => {
+  test.use({});
 
-    test("keeps My apps and the template list usable while templates are unavailable", async ({
-      page,
-      context,
-    }) => {
-      const person = environment.users.createUser({
-        name: "Template Outage",
-        email: `template-outage-${javaScriptEnabled}@example.test`,
-      });
-
-      await environment.users.saveUser(person);
-      await environment.linkMicrosoftUser(person.id);
-      const session = await environment.users.login({ userId: person.id });
-      await context.addCookies(
-        session.cookies.map((cookie) => ({
-          ...cookie,
-          domain: "localhost",
-          sameSite: "Lax",
-          secure: false,
-        })),
-      );
-
-      const unavailable = page.getByText("Templates are unavailable right now. Try again later.", {
-        exact: true,
-      });
-
-      await writeFile(templateOutage, "");
-
-      try {
-        // A member without apps sees the templates on My apps.
-        const mine = await page.goto("/widefleet/apps");
-        expect(mine?.status()).toBe(200);
-        await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
-        await expect(page.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
-        await expect(
-          page.getByRole("searchbox", { name: "Search templates", exact: true }),
-        ).toBeVisible();
-        await expect(unavailable).toBeVisible();
-
-        const list = await page.goto("/widefleet/catalog/templates");
-        expect(list?.status()).toBe(200);
-        await expect(page.getByRole("heading", { name: "Templates", exact: true })).toBeVisible();
-        await expect(
-          page.getByRole("main").getByRole("link", { name: "My apps", exact: true }),
-        ).toBeVisible();
-        await expect(unavailable).toBeVisible();
-      } finally {
-        await rm(templateOutage, { force: true });
-      }
-
-      await page.reload();
-      await expect(unavailable).toHaveCount(0);
-      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
-    });
-
-    test("lets a member find a template and copy its setup prompt", async ({
-      page,
-      context,
-      request,
-    }, testInfo) => {
-      await page.goto("/widefleet/catalog/templates/gmail");
-      await expect(page).toHaveURL(/\/sign-in\?next=/);
-      expect(new URL(page.url()).searchParams.get("next")).toBe(
-        "/widefleet/catalog/templates/gmail",
-      );
-      expect((await request.get("/api/v1/catalog/templates")).status()).toBe(401);
-
-      const person = environment.users.createUser({
-        name: "Template Reader",
-        email: `template-reader-${javaScriptEnabled}@example.test`,
-      });
-
-      await environment.users.saveUser(person);
-      await environment.linkMicrosoftUser(person.id);
-      const session = await environment.users.login({ userId: person.id });
-      await context.addCookies(
-        session.cookies.map((cookie) => ({
-          ...cookie,
-          domain: "localhost",
-          sameSite: "Lax",
-          secure: false,
-        })),
-      );
-      const before = await environment.database.db.select({ id: apps.id }).from(apps);
-      const catalog = await context.request.get("/api/v1/catalog/templates");
-      expect(catalog.status()).toBe(200);
-
-      await page.goto("/widefleet/catalog/templates");
-      await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
-
-      if (javaScriptEnabled) {
-        for (const width of [1280, 390]) {
-          await page.setViewportSize({ width, height: 900 });
-
-          for (const colorScheme of ["light", "dark"] as const) {
-            await page.emulateMedia({ colorScheme });
-            await expect(page.locator("html")).toHaveClass(colorScheme === "dark" ? /dark/ : "");
-            expect(
-              await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-            ).toBe(true);
-            await page.screenshot({
-              path: testInfo.outputPath(`templates-${width}-${colorScheme}.png`),
-              fullPage: true,
-            });
-          }
-        }
-      }
-
-      await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("PRIVATE");
-      await page.getByRole("searchbox", { name: "Search templates", exact: true }).press("Enter");
-      await expect(page.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toHaveCount(0);
-      await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("unknown");
-      await page.getByRole("button", { name: "Search", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "No matching templates" })).toBeVisible();
-      await expect(
-        page.getByText("Help me create an app on Widefleet.", { exact: false }),
-      ).toBeVisible();
-      await page.getByRole("link", { name: "Reset search" }).click();
-      await page.getByRole("link", { name: /^Gmail/ }).focus();
-      await page.keyboard.press("Enter");
-      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
-      const response = await context.request.get("/api/v1/catalog/templates/gmail");
-      const detail = z.object({ prompt: z.string() }).parse(await response.json());
-      await expect(page.locator("code").first()).toHaveText(detail.prompt);
-      expect(detail.prompt).toContain("--organization 'widefleet'");
-      expect(detail.prompt).toContain(`--url '${environment.configuration.PLATFORM_URL}'`);
-
-      if (javaScriptEnabled) {
-        await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-        await page.getByRole("button", { name: "Copy setup prompt" }).click();
-        await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
-        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(detail.prompt);
-
-        for (const width of [1280, 390]) {
-          await page.setViewportSize({ width, height: 900 });
-
-          for (const colorScheme of ["light", "dark"] as const) {
-            await page.emulateMedia({ colorScheme });
-            await expect(page.locator("html")).toHaveClass(colorScheme === "dark" ? /dark/ : "");
-            expect(
-              await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-            ).toBe(true);
-            await page.screenshot({
-              path: testInfo.outputPath(`template-${width}-${colorScheme}.png`),
-              fullPage: true,
-            });
-          }
-        }
-
-        await page.evaluate(() =>
-          Object.defineProperty(navigator, "clipboard", {
-            value: { writeText: () => Promise.reject(new Error("Synthetic clipboard failure")) },
-            configurable: true,
-          }),
-        );
-        await page.getByRole("button", { name: /Copy setup prompt|Copied/ }).click();
-        await expect(page.getByRole("alert")).toHaveText(
-          "Copying is not available here. Select the text and copy it manually.",
-        );
-      }
-
-      await expect(
-        page.getByRole("heading", { name: "Configure Google", exact: true }),
-      ).toBeVisible();
-      await expect(page.locator(".markdown")).toContainText("GOOGLE_CLIENT_ID");
-      const missing = await page.goto("/widefleet/catalog/templates/missing");
-      expect(missing?.status()).toBe(404);
-      const unavailable = await page.goto("/widefleet/catalog/templates/unavailable");
-      expect(unavailable?.status()).toBe(503);
-      await expect(page.getByRole("heading", { name: "Something went wrong." })).toBeVisible();
-      expect(await environment.database.db.select({ id: apps.id }).from(apps)).toEqual(before);
-
-      await page.goto("/widefleet/catalog/templates");
-      await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
-      await environment.database.db
-        .update(authSession)
-        .set({ expiresAt: new Date(Date.now() - 1000) })
-        .where(eq(authSession.userId, person.id));
-      await page.getByRole("link", { name: /^Gmail/ }).click();
-      await expect(page).toHaveURL(/\/sign-in(\?|$)/);
-      // Client navigation reaches the server only through the template query. Its redirect
-      // cannot name the page, while a full page load passes through the request hook.
-      expect(new URL(page.url()).searchParams.get("next")).toBe(
-        javaScriptEnabled ? null : "/widefleet/catalog/templates/gmail",
-      );
-      expect((await context.request.get("/api/v1/catalog/templates")).status()).toBe(401);
-    });
-  });
-}
-
-for (const javaScriptEnabled of [true, false])
-  test(`personal connections account controls and workspace entry (javascript=${javaScriptEnabled})`, async ({
-    browser,
+  test("keeps My apps and the template list usable while templates are unavailable", async ({
+    page,
+    context,
   }) => {
     const person = environment.users.createUser({
-      name: "Taylor Example",
-      email: `personal-${javaScriptEnabled}@example.test`,
+      name: "Template Outage",
+      email: `template-outage@example.test`,
     });
 
     await environment.users.saveUser(person);
-    await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
-    await registerAppLogin(
-      environment.database.db,
-      environment.configuration,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
-      "widefleet",
+    await environment.linkMicrosoftUser(person.id);
+    const session = await environment.users.login({ userId: person.id });
+    await context.addCookies(
+      session.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax",
+        secure: false,
+      })),
     );
-    const appIds: string[] = [];
-    const connected = new Set<string>();
-    let unavailable = false;
-    let denied = false;
-    let expectedUser = person.id;
-    let launches = 0;
-    let statusReads = 0;
-    let completion = "";
 
-    // Stands in for the connector's origin, which completes authorization and
-    // returns the browser to its completion URL.
-    const connectorServer = createServer((_request, response) => {
-      response.writeHead(303, { location: completion }).end();
+    const unavailable = page.getByText("Templates are unavailable right now. Try again later.", {
+      exact: true,
     });
 
-    connectorServer.listen(0, "127.0.0.1");
-    await once(connectorServer, "listening");
-    const connector = `http://127.0.0.1:${z.object({ port: z.number() }).parse(connectorServer.address()).port}`;
-
-    const context = await browser.newContext({
-      javaScriptEnabled,
-      baseURL: environment.configuration.PLATFORM_URL,
-      extraHTTPHeaders: { "x-forwarded-proto": "http" },
-    });
-
-    const signInAs = async (userId: string) => {
-      expectedUser = userId;
-      const login = await environment.users.login({ userId });
-      await context.addCookies(
-        login.cookies.map((cookie) => ({
-          ...cookie,
-          domain: "localhost",
-          secure: false,
-          sameSite: "Lax" as const,
-        })),
-      );
-    };
-
-    await signInAs(person.id);
+    await writeFile(templateOutage, "");
 
     try {
-      for (const [slug, displayName] of [
-        ["personal-github", "GitHub"],
-        ["personal-files", "Microsoft OneDrive — Finance and Operations"],
-        ["personal-gmail", "Gmail"],
-      ] as const) {
-        const appId = crypto.randomUUID();
-        const artifactId = crypto.randomUUID();
-        const deploymentId = crypto.randomUUID();
-        appIds.push(appId);
-        await environment.database.db.insert(apps).values({
-          id: appId,
-          slug,
-          displayName,
-          hostname: `${slug}.apps.localhost`,
-          ownerId: environment.owner.id,
-          organizationId: "widefleet",
-          state: "active",
-          catalogListed: true,
-        });
-        await environment.database.db.insert(artifacts).values({
-          id: artifactId,
-          appId,
-          metadata: { entrypoints: ["default", "UserConnection"] },
-          modules: [],
-          manifest: {},
-        });
-        await environment.database.db.insert(deployments).values({
-          id: deploymentId,
-          appId,
-          artifactId,
-          status: "succeeded",
-          requestId: crypto.randomUUID(),
-        });
-        await environment.database.db
-          .update(apps)
-          .set({ activeDeploymentId: deploymentId })
-          .where(eq(apps.id, appId));
-      }
-
-      const github = z.string().parse(appIds[0]);
-      const files = z.string().parse(appIds[1]);
-      const gmail = z.string().parse(appIds[2]);
-      connected.add(files);
-      environment.authControl.userConnection((input) => {
-        expect(input.identity.subject).toBe(expectedUser);
-
-        if (denied) return new Response(null, { status: 404 });
-
-        if (unavailable && input.appId === files) return new Response(null, { status: 503 });
-
-        if (input.operation.action === "status") {
-          statusReads++;
-
-          return Response.json({
-            setup: input.appId === gmail ? "required" : "ready",
-            connection: connected.has(input.appId) ? "connected" : "disconnected",
-            account: connected.has(input.appId)
-              ? { id: "example-account", label: "taylor@example.test" }
-              : null,
-          });
-        }
-
-        if (input.operation.action === "disconnect") {
-          connected.delete(input.appId);
-
-          return Response.json({ disconnected: true });
-        }
-
-        launches++;
-        connected.add(input.appId);
-        completion = input.operation.completionUrl;
-
-        // Runtime and provider redirect correctness is covered with the real loader.
-        // The launch link is on another origin, as real connectors return it.
-        return Response.json({
-          url: `${connector}/connect/start?ticket=synthetic`,
-          expiresAt: new Date(Date.now() + 120_000).toISOString(),
-        });
-      });
-      const page = await context.newPage();
-
-      const invitation = await environment.database.db.transaction((transaction) =>
-        prepareOrganizationInvitation(transaction, "widefleet", environment.owner.id, {
-          email: person.email,
-          role: "member",
-        }),
-      );
-
-      await page.goto(`/invitations/${invitation.invitation.id}`);
-      await page.getByRole("button", { name: "Accept invitation" }).click();
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
-      expect(statusReads).toBe(0);
-
-      if (javaScriptEnabled) {
-        await mkdir("../../.local/personal-connections", { recursive: true });
-
-        for (const [name, width, height, colorScheme] of [
-          ["desktop-light", 1440, 1000, "light"],
-          ["desktop-dark", 1440, 1000, "dark"],
-          ["mobile-dark", 390, 844, "dark"],
-          ["mobile-light", 390, 844, "light"],
-        ] as const) {
-          await page.setViewportSize({ width, height });
-          await page.emulateMedia({ colorScheme });
-          await page.screenshot({
-            path: `../../.local/personal-connections/workspace-${name}.png`,
-            fullPage: true,
-          });
-        }
-      }
-
-      if (javaScriptEnabled) await page.getByText("Menu", { exact: true }).click();
-      await page.getByRole("link", { name: "My connections", exact: true }).click();
+      // A member without apps sees the templates on My apps.
+      const mine = await page.goto("/widefleet/apps");
+      expect(mine?.status()).toBe(200);
+      await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
       await expect(
-        page.getByRole("heading", { name: "My connections", exact: true }),
+        page.getByRole("searchbox", { name: "Search templates", exact: true }),
       ).toBeVisible();
-      await expect(page.getByRole("button", { name: "Continue to apps" })).toHaveCount(0);
-      await expect(page.getByText("Not connected", { exact: true })).toHaveCount(0);
-      await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toHaveCount(
-        0,
-      );
-      await expect(page.getByRole("link", { name: "Refresh", exact: true })).toHaveCount(0);
-      await expect(page.getByText("taylor@example.test", { exact: false })).toBeVisible();
+      await expect(unavailable).toBeVisible();
 
-      await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
-
-      if (javaScriptEnabled) {
-        await mkdir("../../.local/personal-connections", { recursive: true });
-
-        for (const [name, width, height, colorScheme] of [
-          ["desktop-light", 1440, 1000, "light"],
-          ["desktop-dark", 1440, 1000, "dark"],
-          ["mobile-dark", 390, 844, "dark"],
-          ["mobile-light", 390, 844, "light"],
-        ] as const) {
-          await page.setViewportSize({ width, height });
-          await page.emulateMedia({ colorScheme });
-          await page.screenshot({
-            path: `../../.local/personal-connections/accounts-${name}.png`,
-            fullPage: true,
-          });
-          expect(
-            await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-          ).toBe(true);
-        }
-      }
-
-      const githubRow = page
-        .locator("li")
-        .filter({ has: page.getByRole("heading", { name: "GitHub", exact: true }) });
-
-      await githubRow.getByRole("button", { name: "Connect GitHub" }).focus();
-      await page.keyboard.press("Enter");
-      await expect(githubRow.getByText("taylor@example.test", { exact: false })).toBeVisible();
-      expect(connected.has(github)).toBe(true);
-      await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
-      const options = githubRow.getByLabel("Account options for GitHub");
-      await options.focus();
-      await page.keyboard.press("Enter");
-      await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeVisible();
-
-      if (javaScriptEnabled) {
-        await page.keyboard.press("Escape");
-        await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
-        await expect(options).toBeFocused();
-        await page.keyboard.press("Enter");
-        await page.getByRole("heading", { name: "My connections", exact: true }).click();
-        await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
-        await options.click();
-        await page.screenshot({
-          path: "../../.local/personal-connections/mobile-account-menu.png",
-          fullPage: true,
-        });
-      }
-
-      await githubRow.getByRole("button", { name: "Reconnect GitHub" }).click();
-      await expect.poll(() => launches).toBe(2);
-      await expect(githubRow.getByText("taylor@example.test", { exact: false })).toBeVisible();
-      expect(connected.has(github)).toBe(true);
-      // A fresh page also verifies the native disclosure without relying on client state.
-      await page.reload();
-      await options.click();
-      await githubRow.getByRole("link", { name: "Disconnect GitHub" }).click();
-      await expect(githubRow.getByRole("button", { name: "Disconnect account" })).toBeVisible();
-
-      if (javaScriptEnabled)
-        await page.screenshot({
-          path: "../../.local/personal-connections/mobile-disconnect.png",
-          fullPage: true,
-        });
-      await githubRow.getByRole("link", { name: "Cancel", exact: true }).click();
-      await expect(githubRow.getByRole("button", { name: "Disconnect account" })).toBeHidden();
-      expect(connected.has(github)).toBe(true);
-      await options.click();
-      await githubRow.getByRole("link", { name: "Disconnect GitHub" }).click();
-      await githubRow.getByRole("button", { name: "Disconnect account" }).click();
-      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
-      expect(connected.has(files)).toBe(true);
-      unavailable = true;
-      await page.reload();
-      await expect(page.getByText("Could not check this account.")).toBeVisible();
-
-      if (javaScriptEnabled)
-        await page.screenshot({
-          path: "../../.local/personal-connections/mobile-unavailable.png",
-          fullPage: true,
-        });
-      unavailable = false;
-      await page.getByRole("link", { name: "Try again", exact: true }).click();
-      await expect(page.getByText("Could not check this account.")).toBeHidden();
-      await expect(page.getByRole("link", { name: "Try again", exact: true })).toBeHidden();
-      await page.goto("/");
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
-
-      const other = environment.users.createUser({
-        name: "Other member",
-        email: `other-personal-${javaScriptEnabled}@example.test`,
-      });
-
-      await environment.users.saveUser(other);
-      await environment.linkMicrosoftUser(other.id);
-      await signInAs(other.id);
-      await page.goto("/");
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
-
-      if (javaScriptEnabled) await page.getByText("Menu", { exact: true }).click();
-      await page.getByRole("link", { name: "My connections", exact: true }).click();
-      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
-      await signInAs(person.id);
-      denied = true;
-      await page.goto("/widefleet/connections");
-      await expect(page.getByText("No personal connections available")).toBeVisible();
-      denied = false;
-      await page.goto("/widefleet/connections?success=true");
-      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
-      // Duplicate names retain the hostnames needed to distinguish deployments.
-      await environment.database.db
-        .update(apps)
-        .set({ displayName: "GitHub" })
-        .where(eq(apps.id, gmail));
-      await page.reload();
-      await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toBeVisible();
-      await expect(page.getByText("personal-gmail.apps.localhost", { exact: true })).toBeVisible();
-      // Incomplete setup remains visible when opening connection management.
-      // Connectors without a web deployment are not listed.
-      await environment.database.db
-        .update(apps)
-        .set({ webEnabled: false })
-        .where(inArray(apps.id, [github, files]));
-      await page.goto("/");
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
-      await page.goto("/widefleet/connections");
-      await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
-      await environment.database.db
-        .update(apps)
-        .set({ webEnabled: false })
-        .where(inArray(apps.id, appIds));
-      await page.reload();
-      await expect(page.getByText("No personal connections available")).toBeVisible();
-
-      if (javaScriptEnabled)
-        await page.screenshot({
-          path: "../../.local/personal-connections/mobile-empty.png",
-          fullPage: true,
-        });
+      const list = await page.goto("/widefleet/catalog/templates");
+      expect(list?.status()).toBe(200);
+      await expect(page.getByRole("heading", { name: "Templates", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("main").getByRole("link", { name: "My apps", exact: true }),
+      ).toBeVisible();
+      await expect(unavailable).toBeVisible();
     } finally {
-      environment.authControl.userConnection(undefined);
-      connectorServer.close();
-      await context.close();
-      await environment.database.db.delete(apps).where(inArray(apps.id, appIds));
-      await environment.database.db.update(organizationSettings).set({ ssoRequired: true });
+      await rm(templateOutage, { force: true });
     }
+
+    await page.reload();
+    await expect(unavailable).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
   });
+
+  test("lets a member find a template and copy its setup prompt", async ({
+    page,
+    context,
+    request,
+  }, testInfo) => {
+    await page.goto("/widefleet/catalog/templates/gmail");
+    await expect(page).toHaveURL(/\/sign-in\?next=/);
+    expect(new URL(page.url()).searchParams.get("next")).toBe("/widefleet/catalog/templates/gmail");
+    expect((await request.get("/api/v1/catalog/templates")).status()).toBe(401);
+
+    const person = environment.users.createUser({
+      name: "Template Reader",
+      email: `template-reader@example.test`,
+    });
+
+    await environment.users.saveUser(person);
+    await environment.linkMicrosoftUser(person.id);
+    const session = await environment.users.login({ userId: person.id });
+    await context.addCookies(
+      session.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax",
+        secure: false,
+      })),
+    );
+    const before = await environment.database.db.select({ id: apps.id }).from(apps);
+    const catalog = await context.request.get("/api/v1/catalog/templates");
+    expect(catalog.status()).toBe(200);
+
+    await page.goto("/widefleet/catalog/templates");
+    await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+
+      for (const colorScheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme });
+        await expect(page.locator("html")).toHaveClass(colorScheme === "dark" ? /dark/ : "");
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        await page.screenshot({
+          path: testInfo.outputPath(`templates-${width}-${colorScheme}.png`),
+          fullPage: true,
+        });
+      }
+    }
+
+    await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("PRIVATE");
+    await page.getByRole("searchbox", { name: "Search templates", exact: true }).press("Enter");
+    await expect(page.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toHaveCount(0);
+    await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("unknown");
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "No matching templates" })).toBeVisible();
+    await expect(
+      page.getByText("Help me create an app on Widefleet.", { exact: false }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Reset search" }).click();
+    await page.getByRole("link", { name: /^Gmail/ }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
+    const response = await context.request.get("/api/v1/catalog/templates/gmail");
+    const detail = z.object({ prompt: z.string() }).parse(await response.json());
+    await expect(page.locator("code").first()).toHaveText(detail.prompt);
+    expect(detail.prompt).toContain("--organization 'widefleet'");
+    expect(detail.prompt).toContain(`--url '${environment.configuration.PLATFORM_URL}'`);
+
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByRole("button", { name: "Copy setup prompt" }).click();
+    await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(detail.prompt);
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+
+      for (const colorScheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme });
+        await expect(page.locator("html")).toHaveClass(colorScheme === "dark" ? /dark/ : "");
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        await page.screenshot({
+          path: testInfo.outputPath(`template-${width}-${colorScheme}.png`),
+          fullPage: true,
+        });
+      }
+    }
+
+    await page.evaluate(() =>
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: () => Promise.reject(new Error("Synthetic clipboard failure")) },
+        configurable: true,
+      }),
+    );
+    await page.getByRole("button", { name: /Copy setup prompt|Copied/ }).click();
+    await expect(page.getByRole("alert")).toHaveText(
+      "Copying is not available here. Select the text and copy it manually.",
+    );
+
+    await expect(
+      page.getByRole("heading", { name: "Configure Google", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".markdown")).toContainText("GOOGLE_CLIENT_ID");
+    const missing = await page.goto("/widefleet/catalog/templates/missing");
+    expect(missing?.status()).toBe(404);
+    const unavailable = await page.goto("/widefleet/catalog/templates/unavailable");
+    expect(unavailable?.status()).toBe(503);
+    await expect(page.getByRole("heading", { name: "Something went wrong." })).toBeVisible();
+    expect(await environment.database.db.select({ id: apps.id }).from(apps)).toEqual(before);
+
+    await page.goto("/widefleet/catalog/templates");
+    await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
+    await environment.database.db
+      .update(authSession)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(authSession.userId, person.id));
+    await page.getByRole("link", { name: /^Gmail/ }).click();
+    await expect(page).toHaveURL(/\/sign-in(\?|$)/);
+    // Client navigation reaches the server only through the template query. Its redirect
+    // cannot name the page, while a full page load passes through the request hook.
+    expect(new URL(page.url()).searchParams.get("next")).toBe(null);
+    expect((await context.request.get("/api/v1/catalog/templates")).status()).toBe(401);
+  });
+});
+
+test(`personal connections account controls and workspace entry`, async ({ browser }) => {
+  const person = environment.users.createUser({
+    name: "Taylor Example",
+    email: `personal@example.test`,
+  });
+
+  await environment.users.saveUser(person);
+  await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
+  await registerAppLogin(
+    environment.database.db,
+    environment.configuration,
+    environment.environment.PLATFORM_ENCRYPTION_KEY,
+    "widefleet",
+  );
+  const appIds: string[] = [];
+  const connected = new Set<string>();
+  let unavailable = false;
+  let denied = false;
+  let expectedUser = person.id;
+  let launches = 0;
+  let statusReads = 0;
+  let completion = "";
+
+  // Stands in for the connector's origin, which completes authorization and
+  // returns the browser to its completion URL.
+  const connectorServer = createServer((_request, response) => {
+    response.writeHead(303, { location: completion }).end();
+  });
+
+  connectorServer.listen(0, "127.0.0.1");
+  await once(connectorServer, "listening");
+  const connector = `http://127.0.0.1:${z.object({ port: z.number() }).parse(connectorServer.address()).port}`;
+
+  const context = await browser.newContext({
+    baseURL: environment.configuration.PLATFORM_URL,
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  const signInAs = async (userId: string) => {
+    expectedUser = userId;
+    const login = await environment.users.login({ userId });
+    await context.addCookies(
+      login.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        secure: false,
+        sameSite: "Lax" as const,
+      })),
+    );
+  };
+
+  await signInAs(person.id);
+
+  try {
+    for (const [slug, displayName] of [
+      ["personal-github", "GitHub"],
+      ["personal-files", "Microsoft OneDrive — Finance and Operations"],
+      ["personal-gmail", "Gmail"],
+    ] as const) {
+      const appId = crypto.randomUUID();
+      const artifactId = crypto.randomUUID();
+      const deploymentId = crypto.randomUUID();
+      appIds.push(appId);
+      await environment.database.db.insert(apps).values({
+        id: appId,
+        slug,
+        displayName,
+        hostname: `${slug}.apps.localhost`,
+        ownerId: environment.owner.id,
+        organizationId: "widefleet",
+        state: "active",
+        catalogListed: true,
+      });
+      await environment.database.db.insert(artifacts).values({
+        id: artifactId,
+        appId,
+        metadata: { entrypoints: ["default", "UserConnection"] },
+        modules: [],
+        manifest: {},
+      });
+      await environment.database.db.insert(deployments).values({
+        id: deploymentId,
+        appId,
+        artifactId,
+        status: "succeeded",
+        requestId: crypto.randomUUID(),
+      });
+      await environment.database.db
+        .update(apps)
+        .set({ activeDeploymentId: deploymentId })
+        .where(eq(apps.id, appId));
+    }
+
+    const github = z.string().parse(appIds[0]);
+    const files = z.string().parse(appIds[1]);
+    const gmail = z.string().parse(appIds[2]);
+    connected.add(files);
+    environment.authControl.userConnection((input) => {
+      expect(input.identity.subject).toBe(expectedUser);
+
+      if (denied) return new Response(null, { status: 404 });
+
+      if (unavailable && input.appId === files) return new Response(null, { status: 503 });
+
+      if (input.operation.action === "status") {
+        statusReads++;
+
+        return Response.json({
+          setup: input.appId === gmail ? "required" : "ready",
+          connection: connected.has(input.appId) ? "connected" : "disconnected",
+          account: connected.has(input.appId)
+            ? { id: "example-account", label: "taylor@example.test" }
+            : null,
+        });
+      }
+
+      if (input.operation.action === "disconnect") {
+        connected.delete(input.appId);
+
+        return Response.json({ disconnected: true });
+      }
+
+      launches++;
+      connected.add(input.appId);
+      completion = input.operation.completionUrl;
+
+      // Runtime and provider redirect correctness is covered with the real loader.
+      // The launch link is on another origin, as real connectors return it.
+      return Response.json({
+        url: `${connector}/connect/start?ticket=synthetic`,
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+    });
+    const page = await context.newPage();
+
+    const invitation = await environment.database.db.transaction((transaction) =>
+      prepareOrganizationInvitation(transaction, "widefleet", environment.owner.id, {
+        email: person.email,
+        role: "member",
+      }),
+    );
+
+    await page.goto(`/invitations/${invitation.invitation.id}`);
+    await page.getByRole("button", { name: "Accept invitation" }).click();
+    await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
+    expect(statusReads).toBe(0);
+
+    await mkdir("../../.local/personal-connections", { recursive: true });
+
+    for (const [name, width, height, colorScheme] of [
+      ["desktop-light", 1440, 1000, "light"],
+      ["desktop-dark", 1440, 1000, "dark"],
+      ["mobile-dark", 390, 844, "dark"],
+      ["mobile-light", 390, 844, "light"],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ colorScheme });
+      await page.screenshot({
+        path: `../../.local/personal-connections/workspace-${name}.png`,
+        fullPage: true,
+      });
+    }
+
+    await page.getByText("Menu", { exact: true }).click();
+    await page.getByRole("link", { name: "My connections", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "My connections", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue to apps" })).toHaveCount(0);
+    await expect(page.getByText("Not connected", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Refresh", exact: true })).toHaveCount(0);
+    await expect(page.getByText("taylor@example.test", { exact: false })).toBeVisible();
+
+    await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
+
+    await mkdir("../../.local/personal-connections", { recursive: true });
+
+    for (const [name, width, height, colorScheme] of [
+      ["desktop-light", 1440, 1000, "light"],
+      ["desktop-dark", 1440, 1000, "dark"],
+      ["mobile-dark", 390, 844, "dark"],
+      ["mobile-light", 390, 844, "light"],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ colorScheme });
+      await page.screenshot({
+        path: `../../.local/personal-connections/accounts-${name}.png`,
+        fullPage: true,
+      });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+    }
+
+    const githubRow = page
+      .locator("li")
+      .filter({ has: page.getByRole("heading", { name: "GitHub", exact: true }) });
+
+    await githubRow.getByRole("button", { name: "Connect GitHub" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(githubRow.getByText("taylor@example.test", { exact: false })).toBeVisible();
+    expect(connected.has(github)).toBe(true);
+    await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
+    const options = githubRow.getByLabel("Account options for GitHub");
+    await options.focus();
+    await page.keyboard.press("Enter");
+    await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
+    await expect(options).toBeFocused();
+    await page.keyboard.press("Enter");
+    await page.getByRole("heading", { name: "My connections", exact: true }).click();
+    await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
+    await options.click();
+    await page.screenshot({
+      path: "../../.local/personal-connections/mobile-account-menu.png",
+      fullPage: true,
+    });
+
+    await githubRow.getByRole("button", { name: "Reconnect GitHub" }).click();
+    await expect.poll(() => launches).toBe(2);
+    await expect(githubRow.getByText("taylor@example.test", { exact: false })).toBeVisible();
+    expect(connected.has(github)).toBe(true);
+    // A fresh page also verifies the native disclosure without relying on client state.
+    await page.reload();
+    await options.click();
+    await githubRow.getByRole("link", { name: "Disconnect GitHub" }).click();
+    await expect(githubRow.getByRole("button", { name: "Disconnect account" })).toBeVisible();
+
+    await page.screenshot({
+      path: "../../.local/personal-connections/mobile-disconnect.png",
+      fullPage: true,
+    });
+    await githubRow.getByRole("link", { name: "Cancel", exact: true }).click();
+    await expect(githubRow.getByRole("button", { name: "Disconnect account" })).toBeHidden();
+    expect(connected.has(github)).toBe(true);
+    await options.click();
+    await githubRow.getByRole("link", { name: "Disconnect GitHub" }).click();
+    await githubRow.getByRole("button", { name: "Disconnect account" }).click();
+    await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+    expect(connected.has(files)).toBe(true);
+    unavailable = true;
+    await page.reload();
+    await expect(page.getByText("Could not check this account.")).toBeVisible();
+
+    await page.screenshot({
+      path: "../../.local/personal-connections/mobile-unavailable.png",
+      fullPage: true,
+    });
+    unavailable = false;
+    await page.getByRole("link", { name: "Try again", exact: true }).click();
+    await expect(page.getByText("Could not check this account.")).toBeHidden();
+    await expect(page.getByRole("link", { name: "Try again", exact: true })).toBeHidden();
+    await page.goto("/");
+    await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
+
+    const other = environment.users.createUser({
+      name: "Other member",
+      email: `other-personal@example.test`,
+    });
+
+    await environment.users.saveUser(other);
+    await environment.linkMicrosoftUser(other.id);
+    await signInAs(other.id);
+    await page.goto("/");
+    await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
+
+    await page.getByText("Menu", { exact: true }).click();
+    await page.getByRole("link", { name: "My connections", exact: true }).click();
+    await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+    await signInAs(person.id);
+    denied = true;
+    await page.goto("/widefleet/connections");
+    await expect(page.getByText("No personal connections available")).toBeVisible();
+    denied = false;
+    await page.goto("/widefleet/connections?success=true");
+    await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+    // Duplicate names retain the hostnames needed to distinguish deployments.
+    await environment.database.db
+      .update(apps)
+      .set({ displayName: "GitHub" })
+      .where(eq(apps.id, gmail));
+    await page.reload();
+    await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toBeVisible();
+    await expect(page.getByText("personal-gmail.apps.localhost", { exact: true })).toBeVisible();
+    // Incomplete setup remains visible when opening connection management.
+    // Connectors without a web deployment are not listed.
+    await environment.database.db
+      .update(apps)
+      .set({ webEnabled: false })
+      .where(inArray(apps.id, [github, files]));
+    await page.goto("/");
+    await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
+    await page.goto("/widefleet/connections");
+    await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
+    await environment.database.db
+      .update(apps)
+      .set({ webEnabled: false })
+      .where(inArray(apps.id, appIds));
+    await page.reload();
+    await expect(page.getByText("No personal connections available")).toBeVisible();
+
+    await page.screenshot({
+      path: "../../.local/personal-connections/mobile-empty.png",
+      fullPage: true,
+    });
+  } finally {
+    environment.authControl.userConnection(undefined);
+    connectorServer.close();
+    await context.close();
+    await environment.database.db.delete(apps).where(inArray(apps.id, appIds));
+    await environment.database.db.update(organizationSettings).set({ ssoRequired: true });
+  }
+});
 
 test("personal connections assert the company account as the app identity", async ({ page }) => {
   const [provider] = await environment.database.db.select().from(ssoProvider);

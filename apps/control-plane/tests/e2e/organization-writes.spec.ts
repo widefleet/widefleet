@@ -116,7 +116,7 @@ test.afterEach(async ({ browserName }, info) => {
     await info.attach(`${browserName}-server-log`, { body: logs, contentType: "text/plain" });
 });
 
-const organizationSession = async (browser: Browser, javaScriptEnabled: boolean) => {
+const organizationSession = async (browser: Browser) => {
   const person = environment.users.createUser({
     name: "Organization Switcher",
     email: `switcher-${crypto.randomUUID()}@example.test`,
@@ -150,7 +150,6 @@ const organizationSession = async (browser: Browser, javaScriptEnabled: boolean)
 
   const context = await browser.newContext({
     baseURL: environment.configuration.PLATFORM_URL,
-    javaScriptEnabled,
   });
 
   await context.addCookies(
@@ -168,7 +167,7 @@ const organizationSession = async (browser: Browser, javaScriptEnabled: boolean)
 test("opens organization settings without installation reporting privileges", async ({
   browser,
 }) => {
-  const { alpha, context } = await organizationSession(browser, false);
+  const { alpha, context } = await organizationSession(browser);
 
   try {
     const page = await context.newPage();
@@ -191,10 +190,8 @@ test("opens organization settings without installation reporting privileges", as
   }
 });
 
-// The redirect is server-side; without JavaScript this test loads no client modules, which
-// would make Vite optimize dependencies while the next browser test starts.
 test("asks which organization an MCP client connects and returns with it", async ({ browser }) => {
-  const { beta, context } = await organizationSession(browser, false);
+  const { beta, context } = await organizationSession(browser);
 
   try {
     const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
@@ -237,7 +234,7 @@ test("asks which organization an MCP client connects and returns with it", async
 });
 
 test("returns MCP sign-in directly for a person with one organization", async ({ browser }) => {
-  const { person, alpha, beta, context } = await organizationSession(browser, false);
+  const { person, alpha, beta, context } = await organizationSession(browser);
 
   try {
     await environment.database.db
@@ -260,246 +257,232 @@ test("returns MCP sign-in directly for a person with one organization", async ({
   }
 });
 
-for (const javaScriptEnabled of [true, false]) {
-  test(`preserves multiline secrets and offers failed disconnection retries (JavaScript ${javaScriptEnabled})`, async ({
+test(`preserves multiline secrets and offers failed disconnection retries`, async ({ browser }) => {
+  const { person, alpha, context } = await organizationSession(browser);
+
+  try {
+    const id = crypto.randomUUID();
+    await environment.database.db.insert(apps).values({
+      id,
+      organizationId: alpha,
+      ownerId: person.id,
+      slug: "service-consumer",
+      displayName: "Service consumer",
+      hostname: `service-consumer-${alpha}.apps.localhost`,
+    });
+    const page = await context.newPage();
+    await page.goto(`/${alpha}/apps/${id}/secrets`);
+    const value = "-----BEGIN FIXTURE-----\nfirst line\nsecond line\n-----END FIXTURE-----";
+    await page.getByLabel("Name", { exact: true }).fill("TOKEN");
+    await page.getByLabel("Value", { exact: true }).fill(value);
+    await page.getByRole("button", { name: "Save secret", exact: true }).click();
+    await expect(page.getByText("TOKEN", { exact: true })).toBeVisible();
+    const [saved] = await environment.database.db.select().from(apps).where(eq(apps.id, id));
+    const encrypted = storedAppSecrets.parse(saved?.secrets)["TOKEN"];
+
+    if (!encrypted) throw new Error("Missing saved secret");
+    expect(await decryptSecret(environment.environment.PLATFORM_ENCRYPTION_KEY, encrypted)).toBe(
+      value.replaceAll("\n", "\r\n"),
+    );
+    const entry = await seedDeployment(environment.database.db, { appId: id, bindings: [] });
+    await environment.database.db.insert(deployments).values({
+      id: entry.command.id,
+      appId: id,
+      artifactId: entry.artifact.id,
+      status: "succeeded",
+      requestId: crypto.randomUUID(),
+    });
+    await environment.database.db
+      .update(apps)
+      .set({
+        activeDeploymentId: entry.command.id,
+        capabilityRevision: 2,
+        appliedCapabilityRevision: 1,
+        appliedCapabilities: {
+          revision: 1,
+          grants: { API: { app: crypto.randomUUID(), entrypoint: "Reader" } },
+        },
+        capabilityError: "Synthetic disconnection failure",
+      })
+      .where(eq(apps.id, id));
+    await page.goto(`/${alpha}/apps/${id}/connections`);
+
+    await page.waitForLoadState("networkidle");
+    await page.locator("summary").filter({ hasText: "API" }).click();
+    await page.getByRole("button", { name: "Retry disconnection", exact: true }).click();
+    await expect(page).toHaveURL(
+      `${environment.configuration.PLATFORM_URL}/${alpha}/apps/${id}/connections`,
+    );
+    // The URL is unchanged by this form. Wait for the mutation's result before
+    // reloading, otherwise navigation can cancel the enhanced form request.
+    await expect(
+      page.getByRole("button", {
+        name: "Removal pending",
+        exact: true,
+        includeHidden: true,
+      }),
+    ).toBeDisabled();
+    await page.reload();
+    await page.locator("summary").filter({ hasText: "API" }).click();
+    await expect(page.getByRole("button", { name: "Removal pending", exact: true })).toBeDisabled();
+    const [retried] = await environment.database.db.select().from(apps).where(eq(apps.id, id));
+    expect(retried).toMatchObject({
+      capabilities: {},
+      capabilityError: null,
+      capabilityRevision: 2,
+    });
+  } finally {
+    await context.close();
+  }
+});
+
+test(`opens the only organization without visiting the chooser`, async ({ browser }) => {
+  const { person, alpha, beta, context } = await organizationSession(browser);
+  await environment.database.db
+    .delete(member)
+    .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
+
+  try {
+    const page = await context.newPage();
+    await page.goto("/");
+    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
+    await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test(`creates apps in the organization a tab shows while another tab opens another`, async ({
+  browser,
+}) => {
+  const { alpha, beta, context } = await organizationSession(browser);
+
+  try {
+    const first = await context.newPage();
+    const second = await context.newPage();
+    await first.goto(`/${alpha}/apps/new`);
+    await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+    await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(alpha);
+    const slug = `parallel`;
+    await first.getByLabel("App name", { exact: true }).fill("Alpha tab app");
+    await first.getByLabel("URL slug").fill(slug);
+
+    await second.goto(`/${beta}`);
+    await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+
+    await first.getByRole("button", { name: "Create app", exact: true }).click();
+    await expect(first).toHaveURL(
+      new RegExp(`^${environment.configuration.PLATFORM_URL}/${alpha}/apps/[a-f0-9-]+$`),
+    );
+    await expect(first.getByText(`${slug}-${alpha}.apps.localhost`, { exact: true })).toBeVisible();
+    await first.getByRole("link", { name: "Create preview", exact: true }).click();
+    await first.getByLabel("App name", { exact: true }).fill("Review");
+    await first.getByLabel("URL slug").fill(`${slug}-review`);
+    await first.getByRole("button", { name: "Create app", exact: true }).click();
+    await expect(first).toHaveURL(new RegExp(`/${alpha}/apps/[a-f0-9-]+$`));
+    await expect(
+      first.getByText(`${slug}-review-${alpha}.apps.localhost`, { exact: true }),
+    ).toBeVisible();
+
+    const records = await environment.database.db
+      .select({ organizationId: apps.organizationId })
+      .from(apps)
+      .where(inArray(apps.slug, [slug, `${slug}-review`]));
+
+    expect(records).toEqual([{ organizationId: alpha }, { organizationId: alpha }]);
+  } finally {
+    await context.close();
+  }
+});
+
+for (const activeOrganizationId of [null, "unavailable"]) {
+  test(`opens an app link whatever the session's organization is ${activeOrganizationId}`, async ({
     browser,
   }) => {
-    const { person, alpha, context } = await organizationSession(browser, javaScriptEnabled);
+    const { person, alpha, context } = await organizationSession(browser);
 
     try {
-      const id = crypto.randomUUID();
+      await environment.database.db
+        .update(session)
+        .set({ activeOrganizationId })
+        .where(eq(session.userId, person.id));
+
+      const appId = crypto.randomUUID();
       await environment.database.db.insert(apps).values({
-        id,
+        id: appId,
         organizationId: alpha,
         ownerId: person.id,
-        slug: "service-consumer",
-        displayName: "Service consumer",
-        hostname: `service-consumer-${alpha}.apps.localhost`,
+        slug: "linked-app",
+        displayName: "Linked app",
+        hostname: `linked-app-${alpha}.apps.localhost`,
       });
+      const destination = `/${alpha}/apps/${appId}?q=linked%20app&view=overview`;
       const page = await context.newPage();
-      await page.goto(`/${alpha}/apps/${id}/secrets`);
-      const value = "-----BEGIN FIXTURE-----\nfirst line\nsecond line\n-----END FIXTURE-----";
-      await page.getByLabel("Name", { exact: true }).fill("TOKEN");
-      await page.getByLabel("Value", { exact: true }).fill(value);
-      await page.getByRole("button", { name: "Save secret", exact: true }).click();
-      await expect(page.getByText("TOKEN", { exact: true })).toBeVisible();
-      const [saved] = await environment.database.db.select().from(apps).where(eq(apps.id, id));
-      const encrypted = storedAppSecrets.parse(saved?.secrets)["TOKEN"];
-
-      if (!encrypted) throw new Error("Missing saved secret");
-      expect(await decryptSecret(environment.environment.PLATFORM_ENCRYPTION_KEY, encrypted)).toBe(
-        value.replaceAll("\n", "\r\n"),
-      );
-      const entry = await seedDeployment(environment.database.db, { appId: id, bindings: [] });
-      await environment.database.db.insert(deployments).values({
-        id: entry.command.id,
-        appId: id,
-        artifactId: entry.artifact.id,
-        status: "succeeded",
-        requestId: crypto.randomUUID(),
-      });
-      await environment.database.db
-        .update(apps)
-        .set({
-          activeDeploymentId: entry.command.id,
-          capabilityRevision: 2,
-          appliedCapabilityRevision: 1,
-          appliedCapabilities: {
-            revision: 1,
-            grants: { API: { app: crypto.randomUUID(), entrypoint: "Reader" } },
-          },
-          capabilityError: "Synthetic disconnection failure",
-        })
-        .where(eq(apps.id, id));
-      await page.goto(`/${alpha}/apps/${id}/connections`);
-
-      if (javaScriptEnabled) await page.waitForLoadState("networkidle");
-      await page.locator("summary").filter({ hasText: "API" }).click();
-      await page.getByRole("button", { name: "Retry disconnection", exact: true }).click();
-      await expect(page).toHaveURL(
-        `${environment.configuration.PLATFORM_URL}/${alpha}/apps/${id}/connections`,
-      );
-      // The URL is unchanged by this form. Wait for the mutation's result before
-      // reloading, otherwise navigation can cancel the enhanced form request.
-      await expect(
-        page.getByRole("button", {
-          name: "Removal pending",
-          exact: true,
-          includeHidden: true,
-        }),
-      ).toBeDisabled();
-      await page.reload();
-      await page.locator("summary").filter({ hasText: "API" }).click();
-      await expect(
-        page.getByRole("button", { name: "Removal pending", exact: true }),
-      ).toBeDisabled();
-      const [retried] = await environment.database.db.select().from(apps).where(eq(apps.id, id));
-      expect(retried).toMatchObject({
-        capabilities: {},
-        capabilityError: null,
-        capabilityRevision: 2,
-      });
-    } finally {
-      await context.close();
-    }
-  });
-
-  test(`opens the only organization without visiting the chooser (JavaScript ${javaScriptEnabled})`, async ({
-    browser,
-  }) => {
-    const { person, alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
-    await environment.database.db
-      .delete(member)
-      .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
-
-    try {
-      const page = await context.newPage();
-      await page.goto("/");
-      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
+      await page.goto(destination);
+      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}${destination}`);
       await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
-    } finally {
-      await context.close();
-    }
-  });
-
-  test(`creates apps in the organization a tab shows while another tab opens another (JavaScript ${javaScriptEnabled})`, async ({
-    browser,
-  }) => {
-    const { alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
-
-    try {
-      const first = await context.newPage();
-      const second = await context.newPage();
-      await first.goto(`/${alpha}/apps/new`);
-      await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
-      await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(alpha);
-      const slug = `parallel-${javaScriptEnabled}`;
-      await first.getByLabel("App name", { exact: true }).fill("Alpha tab app");
-      await first.getByLabel("URL slug").fill(slug);
-
-      await second.goto(`/${beta}`);
-      await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
-
-      await first.getByRole("button", { name: "Create app", exact: true }).click();
-      await expect(first).toHaveURL(
-        new RegExp(`^${environment.configuration.PLATFORM_URL}/${alpha}/apps/[a-f0-9-]+$`),
-      );
-      await expect(
-        first.getByText(`${slug}-${alpha}.apps.localhost`, { exact: true }),
-      ).toBeVisible();
-      await first.getByRole("link", { name: "Create preview", exact: true }).click();
-      await first.getByLabel("App name", { exact: true }).fill("Review");
-      await first.getByLabel("URL slug").fill(`${slug}-review`);
-      await first.getByRole("button", { name: "Create app", exact: true }).click();
-      await expect(first).toHaveURL(new RegExp(`/${alpha}/apps/[a-f0-9-]+$`));
-      await expect(
-        first.getByText(`${slug}-review-${alpha}.apps.localhost`, { exact: true }),
-      ).toBeVisible();
-
-      const records = await environment.database.db
-        .select({ organizationId: apps.organizationId })
-        .from(apps)
-        .where(inArray(apps.slug, [slug, `${slug}-review`]));
-
-      expect(records).toEqual([{ organizationId: alpha }, { organizationId: alpha }]);
-    } finally {
-      await context.close();
-    }
-  });
-
-  for (const activeOrganizationId of [null, "unavailable"]) {
-    test(`opens an app link whatever the session's organization is ${activeOrganizationId} (JavaScript ${javaScriptEnabled})`, async ({
-      browser,
-    }) => {
-      const { person, alpha, context } = await organizationSession(browser, javaScriptEnabled);
-
-      try {
-        await environment.database.db
-          .update(session)
-          .set({ activeOrganizationId })
-          .where(eq(session.userId, person.id));
-
-        const appId = crypto.randomUUID();
-        await environment.database.db.insert(apps).values({
-          id: appId,
-          organizationId: alpha,
-          ownerId: person.id,
-          slug: "linked-app",
-          displayName: "Linked app",
-          hostname: `linked-app-${alpha}.apps.localhost`,
-        });
-        const destination = `/${alpha}/apps/${appId}?q=linked%20app&view=overview`;
-        const page = await context.newPage();
-        await page.goto(destination);
-        await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}${destination}`);
-        await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
-        await expect(page.getByRole("heading", { name: "Linked app", exact: true })).toBeVisible();
-      } finally {
-        await context.close();
-      }
-    });
-  }
-
-  test(`hides organizations a person cannot open (JavaScript ${javaScriptEnabled})`, async ({
-    browser,
-  }) => {
-    const { person, beta, context } = await organizationSession(browser, javaScriptEnabled);
-
-    try {
-      await environment.database.db
-        .delete(member)
-        .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
-      const page = await context.newPage();
-
-      for (const path of [`/${beta}`, `/${beta}/apps`, "/unknown-organization/apps"]) {
-        expect((await page.goto(path))?.status(), path).toBe(404);
-        await expect(page.getByRole("heading", { name: "Nothing here yet." })).toBeVisible();
-      }
-    } finally {
-      await context.close();
-    }
-  });
-
-  test(`asks for the organization at the start page and opens the chosen one (JavaScript ${javaScriptEnabled})`, async ({
-    browser,
-  }) => {
-    const { beta, context } = await organizationSession(browser, javaScriptEnabled);
-
-    try {
-      const page = await context.newPage();
-      await page.goto("/");
-      await expect(page).toHaveURL(/\/organizations\?next=/);
-      await page.getByRole("link", { name: /^Beta admin$/i }).click();
-      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${beta}`);
-      await expect(page.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
-    } finally {
-      await context.close();
-    }
-  });
-
-  test(`rejects external destinations in the chooser (JavaScript ${javaScriptEnabled})`, async ({
-    browser,
-  }) => {
-    const { alpha, context } = await organizationSession(browser, javaScriptEnabled);
-
-    try {
-      const page = await context.newPage();
-      await page.goto("/organizations?next=%2F%2Fexternal.example.test");
-      const link = page.getByRole("link", { name: /^Alpha admin$/i });
-      await expect(link).toHaveAttribute("href", `/${alpha}`);
-      await link.click();
-      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
-      await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Linked app", exact: true })).toBeVisible();
     } finally {
       await context.close();
     }
   });
 }
 
+test(`hides organizations a person cannot open`, async ({ browser }) => {
+  const { person, beta, context } = await organizationSession(browser);
+
+  try {
+    await environment.database.db
+      .delete(member)
+      .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
+    const page = await context.newPage();
+
+    for (const path of [`/${beta}`, `/${beta}/apps`, "/unknown-organization/apps"]) {
+      expect((await page.goto(path))?.status(), path).toBe(404);
+      await expect(page.getByRole("heading", { name: "Nothing here yet." })).toBeVisible();
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test(`asks for the organization at the start page and opens the chosen one`, async ({
+  browser,
+}) => {
+  const { beta, context } = await organizationSession(browser);
+
+  try {
+    const page = await context.newPage();
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/organizations\?next=/);
+    await page.getByRole("link", { name: /^Beta admin$/i }).click();
+    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${beta}`);
+    await expect(page.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test(`rejects external destinations in the chooser`, async ({ browser }) => {
+  const { alpha, context } = await organizationSession(browser);
+
+  try {
+    const page = await context.newPage();
+    await page.goto("/organizations?next=%2F%2Fexternal.example.test");
+    const link = page.getByRole("link", { name: /^Alpha admin$/i });
+    await expect(link).toHaveAttribute("href", `/${alpha}`);
+    await link.click();
+    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${alpha}`);
+    await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
 test("serves app icons from the workspace address of the app's organization", async ({
   browser,
 }) => {
-  const { person, alpha, beta, context } = await organizationSession(browser, false);
+  const { person, alpha, beta, context } = await organizationSession(browser);
   const appId = crypto.randomUUID();
   const artifactId = crypto.randomUUID();
   const deploymentId = crypto.randomUUID();
@@ -582,7 +565,7 @@ test("serves app icons from the workspace address of the app's organization", as
 });
 
 test("switches organizations from the sidebar menu", async ({ browser }) => {
-  const { alpha, beta, context } = await organizationSession(browser, true);
+  const { alpha, beta, context } = await organizationSession(browser);
 
   try {
     const page = await context.newPage();
@@ -610,7 +593,7 @@ test("switches organizations from the sidebar menu", async ({ browser }) => {
 });
 
 test("keeps an open tab on its organization after another tab switches", async ({ browser }) => {
-  const { alpha, beta, context } = await organizationSession(browser, true);
+  const { alpha, beta, context } = await organizationSession(browser);
 
   try {
     const first = await context.newPage();

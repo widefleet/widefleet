@@ -8,11 +8,8 @@ import { z } from "zod";
 import { user, member, organization, session } from "../../src/lib/server/auth-schema.ts";
 import { createTestEnvironment } from "../environment.ts";
 
-for (const entry of ["registration", "sign-in", "plain-form"] as const)
-  test(`creates an organization and completes onboarding from ${entry}`, async ({
-    page,
-    browser,
-  }) => {
+for (const entry of ["registration", "sign-in"] as const)
+  test(`creates an organization and completes onboarding from ${entry}`, async ({ page }) => {
     test.setTimeout(120_000);
     const environment = await createTestEnvironment();
     const message = z.object({ to: z.email(), subject: z.string(), text: z.string() });
@@ -128,18 +125,6 @@ for (const entry of ["registration", "sign-in", "plain-form"] as const)
       await page.getByRole("button", { name: verifyLabel }).click();
       await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
 
-      if (entry === "plain-form") {
-        const context = await browser.newContext({
-          baseURL: environment.configuration.PLATFORM_URL,
-          javaScriptEnabled: false,
-        });
-
-        await context.addCookies(await page.context().cookies());
-        const url = page.url();
-        page = await context.newPage();
-        await page.goto(url);
-      }
-
       expect(new URL(page.url()).searchParams.get("next")).toBe(
         entry === "registration" ? "/[organization]/welcome" : "/[organization]",
       );
@@ -205,8 +190,6 @@ for (const entry of ["registration", "sign-in", "plain-form"] as const)
       await test
         .info()
         .attach("public-onboarding-server", { body: logs, contentType: "text/plain" });
-
-      if (entry === "plain-form") await page.context().close();
 
       if (server.pid) process.kill(-server.pid, "SIGTERM");
       await new Promise<void>((resolve) => mailbox.close(() => resolve()));

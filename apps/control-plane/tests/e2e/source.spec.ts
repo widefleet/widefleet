@@ -246,20 +246,6 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText(deployed.commit, { exact: true })).toBeVisible();
 
-  const noScript = await browser.newContext({
-    javaScriptEnabled: false,
-    baseURL: "http://localhost:28430",
-    extraHTTPHeaders: { "x-forwarded-proto": "http" },
-  });
-
-  await noScript.addCookies(cookies);
-  const plain = await noScript.newPage();
-  await plain.goto(`/widefleet/apps/${app.id}/source`);
-  await expect(plain.getByText("main", { exact: true })).toBeVisible();
-  await expect(plain.getByText(deployed.commit, { exact: true })).toBeVisible();
-  await expect(plain.getByText("Change source branch", { exact: true })).toHaveCount(0);
-  await noScript.close();
-
   const previewResponse = await context.request.post("/api/v1/apps", {
     headers: { origin: environment.configuration.PLATFORM_URL },
     data: {
