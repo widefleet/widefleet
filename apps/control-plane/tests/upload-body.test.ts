@@ -51,13 +51,7 @@ describe("App multipart upload", () => {
     expect(new TextDecoder().decode(file.modules[0]?.bytes)).toBe(source);
   });
 
-  it("bounds API documentation separately from the rest of the metadata", async () => {
-    const body = form();
-
-    const configuration = z
-      .record(z.string(), z.json())
-      .parse(JSON.parse(z.string().parse(body.get("metadata"))));
-
+  it("reads API documentation from its own part, separate from the module list", async () => {
     const documentation = {
       format: 1,
       entrypoints: [],
@@ -70,21 +64,18 @@ describe("App multipart upload", () => {
       })),
     };
 
-    body.set(
-      "metadata",
-      JSON.stringify({ ...configuration, service_documentation: documentation }),
-    );
-    expect((await read(request(body))).unwrap().metadata.service_documentation).toEqual(
-      documentation,
-    );
-    body.set(
-      "metadata",
-      JSON.stringify({
-        ...configuration,
-        compatibility_flags: ["x".repeat(64 * 1024)],
-        service_documentation: documentation,
-      }),
-    );
+    const part = (value: typeof documentation | { format: number }) =>
+      new Blob([JSON.stringify(value)], { type: "application/json" });
+
+    const body = form();
+    expect((await read(request(body))).unwrap().documentation).toBeNull();
+    body.set(contract.serviceDocumentationPart, part(documentation), "documentation.json");
+    const upload = (await read(request(body))).unwrap();
+    expect(upload.documentation).toEqual(documentation);
+    expect(upload.modules.map((module) => module.name)).toEqual(["worker.js"]);
+    body.append(contract.serviceDocumentationPart, part(documentation), "documentation.json");
+    expect((await read(request(body))).isErr()).toBe(true);
+    body.set(contract.serviceDocumentationPart, part({ format: 2 }), "documentation.json");
     expect((await read(request(body))).isErr()).toBe(true);
   });
 

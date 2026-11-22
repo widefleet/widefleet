@@ -242,7 +242,6 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   const metadata = contract.workerMetadata.parse(artifact?.metadata);
 
-  expect(metadata.service_documentation).toBeUndefined();
   expect(
     JSON.parse(
       new TextDecoder().decode(
@@ -479,6 +478,7 @@ it("compares allowed origins with the latest deployment's declaration", async ()
         assets: { upload_session: session.id, binding: "ASSETS" },
         network: { backend: ["https://second.example.test"] },
       }),
+      null,
       [{ name: "worker.js", type: "esm", bytes: new TextEncoder().encode(worker) }],
       crypto.randomUUID(),
     )
@@ -533,6 +533,7 @@ it("does not install over an app deployed while the template builds", async () =
           bindings: [],
           assets: { upload_session: session.id, binding: "ASSETS" },
         }),
+        null,
         [{ name: "worker.js", type: "esm", bytes: new TextEncoder().encode(worker) }],
         crypto.randomUUID(),
       )

@@ -330,7 +330,7 @@ describe("App source repositories", () => {
       });
 
       expect(
-        await uploads.publish(creator, target.id, metadata, [], crypto.randomUUID()),
+        await uploads.publish(creator, target.id, metadata, null, [], crypto.randomUUID()),
       ).toMatchObject({
         error: {
           code: "BAD_REQUEST",
@@ -652,7 +652,7 @@ describe("App source repositories", () => {
       source: { branch: "main", commit: "f".repeat(40), directory: "." },
     });
 
-    const result = await uploads.publish(creator, app.id, metadata, [], crypto.randomUUID());
+    const result = await uploads.publish(creator, app.id, metadata, null, [], crypto.randomUUID());
     expect(result).toMatchObject({
       error: {
         code: "BAD_REQUEST",

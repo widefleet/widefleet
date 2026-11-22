@@ -809,7 +809,7 @@ it("shortens only unambiguous documented type references", () => {
   expect(reference.entrypoints[0]?.methods[0]?.throws).toHaveLength(2);
 });
 
-it("rejects oversized and mismatched artifact documentation and renders authored HTML as text", () => {
+it("rejects oversized artifact documentation and renders authored HTML as text", () => {
   const docs = {
     format: 1,
     entrypoints: [
@@ -825,15 +825,6 @@ it("rejects oversized and mismatched artifact documentation and renders authored
     types: [],
   };
 
-  expect(
-    workerMetadata.safeParse({
-      main_module: "worker.js",
-      compatibility_date: "2026-10-01",
-      entrypoints: ["Other"],
-      service_documentation: docs,
-      assets: { upload_session: crypto.randomUUID() },
-    }).success,
-  ).toBe(false);
   expect(
     serviceDocumentation.safeParse({
       ...docs,
@@ -863,14 +854,11 @@ it("rejects oversized and mismatched artifact documentation and renders authored
     main_module: "worker.js",
     compatibility_date: "2026-10-01",
     entrypoints: ["Reader"],
-    service_documentation: docs,
     network: { backend: ["https://api.example.test"] },
     assets: { upload_session: crypto.randomUUID() },
   });
 
-  expect(executionWorkerMetadata(metadata)).not.toHaveProperty("service_documentation");
   // Runtimes of earlier releases accept no declared origins in their snapshots.
   expect(executionWorkerMetadata(metadata)).not.toHaveProperty("network");
-  expect(metadata.service_documentation).toEqual(docs);
   expect(metadata.network).toEqual({ backend: ["https://api.example.test"], browser: [] });
 });

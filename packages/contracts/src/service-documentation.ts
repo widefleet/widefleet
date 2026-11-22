@@ -43,6 +43,12 @@ const text = z.string().max(262144);
 
 const name = z.string().min(1).max(128);
 
+/**
+ * The worker upload part that carries API documentation. Module names cannot
+ * use the platform prefix, so it never collides with a module.
+ */
+export const serviceDocumentationPart = "__widefleet_documentation";
+
 /** Largest encoded service documentation an artifact may carry. */
 export const serviceDocumentationMaxBytes = 8 * 1024 * 1024;
 

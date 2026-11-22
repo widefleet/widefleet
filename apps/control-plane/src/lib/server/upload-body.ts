@@ -1,12 +1,15 @@
-import { moduleName, serviceDocumentationMaxBytes } from "@platform/contracts";
+import {
+  moduleName,
+  serviceDocumentation,
+  serviceDocumentationMaxBytes,
+  serviceDocumentationPart,
+} from "@platform/contracts";
 import { Result } from "better-result";
 import { z } from "zod";
 import { InvalidOperation } from "./errors.ts";
 import type { WorkerModule } from "./worker-modules.ts";
 
 const encoder = new TextEncoder();
-
-const metadataMaxBytes = 64 * 1024;
 
 export const readBody = (request: Request | Response, limit: number) =>
   Result.tryPromise({
@@ -96,27 +99,30 @@ export const parseWorkerUpload = <T>(request: Request, metadataSchema: z.ZodType
         const value = metadataPart[0];
         const metadataText = value instanceof File ? await value.text() : z.string().parse(value);
 
-        const size = encoder.encode(metadataText).byteLength;
-
-        if (size > metadataMaxBytes + serviceDocumentationMaxBytes)
+        if (encoder.encode(metadataText).byteLength > 64 * 1024)
           throw new Error("Metadata is too large");
-        const parsed = z.record(z.string(), z.json()).parse(JSON.parse(metadataText));
-        const documentation = parsed["service_documentation"];
+        const metadata = metadataSchema.parse(JSON.parse(metadataText));
+        const documentationParts = form.getAll(serviceDocumentationPart);
 
-        // API documentation has its own limit; the rest of the metadata keeps 64 KiB.
+        if (documentationParts.length > 1)
+          throw new Error("At most one documentation part is allowed");
+        const documentationPart = documentationParts[0];
+
         if (
-          size -
-            (documentation === undefined
-              ? 0
-              : encoder.encode(JSON.stringify(documentation)).byteLength) >
-          metadataMaxBytes
+          documentationPart !== undefined &&
+          (!(documentationPart instanceof File) ||
+            documentationPart.size > serviceDocumentationMaxBytes)
         )
-          throw new Error("Metadata is too large");
-        const metadata = metadataSchema.parse(parsed);
+          throw new Error("Documentation must be a file within the documentation limit");
+
+        const documentation = documentationPart
+          ? serviceDocumentation.parse(JSON.parse(await documentationPart.text()))
+          : null;
+
         const modules: WorkerModule[] = [];
 
         for (const [name, part] of form.entries()) {
-          if (name === "metadata") continue;
+          if (name === "metadata" || name === serviceDocumentationPart) continue;
 
           if (!(part instanceof File)) throw new Error("Worker modules must be file parts");
 
@@ -135,7 +141,7 @@ export const parseWorkerUpload = <T>(request: Request, metadataSchema: z.ZodType
         if (modules.filter((module) => module.type === "sourcemap").length > 500)
           throw new Error("Too many source maps");
 
-        return { metadata, modules };
+        return { metadata, documentation, modules };
       },
       catch: () =>
         new InvalidOperation({ code: "BAD_REQUEST", message: "Invalid worker multipart upload" }),

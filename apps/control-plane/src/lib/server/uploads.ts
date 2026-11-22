@@ -129,6 +129,7 @@ export const createUploadService = (
     principal: Principal,
     appId: string,
     metadata: z.infer<typeof contract.workerMetadata>,
+    documentation: z.infer<typeof contract.serviceDocumentation> | null,
     modules: WorkerModule[],
     requestId: string,
     options: { firstDeployment?: boolean } = {},
@@ -204,8 +205,16 @@ export const createUploadService = (
         }
 
         const storedModules = yield* prepareModules(metadata.main_module, modules, metadata.debug);
-        // The documentation goes to artifact storage, so metadata stays small for every reader.
-        const { service_documentation: documentation, ...storedMetadata } = metadata;
+        const documented = documentation?.entrypoints.map((entry) => entry.name) ?? [];
+
+        if (
+          new Set(documented).size !== documented.length ||
+          documented.some((name) => !metadata.entrypoints?.includes(name))
+        )
+          return yield* new InvalidOperation({
+            code: "BAD_REQUEST",
+            message: "Documentation must reference unique published entrypoints",
+          });
         const encoded = documentation ? encodeDocumentation(documentation) : null;
 
         const artifactId = session.id;
@@ -257,7 +266,7 @@ export const createUploadService = (
 
         if (existing) {
           if (
-            !isDeepStrictEqual(existing.metadata, storedMetadata) ||
+            !isDeepStrictEqual(existing.metadata, metadata) ||
             !isDeepStrictEqual(existing.documentation, encoded?.summary ?? null) ||
             !isDeepStrictEqual(existing.modules, storedModules)
           ) {
@@ -284,7 +293,7 @@ export const createUploadService = (
         await transaction.insert(artifacts).values({
           id: artifactId,
           appId,
-          metadata: storedMetadata,
+          metadata,
           manifest: session.manifest,
           modules: storedModules,
           documentation: encoded?.summary ?? null,
