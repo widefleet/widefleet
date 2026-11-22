@@ -4,7 +4,14 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Environment } from "./context.ts";
 import type { LinearResult } from "./results.ts";
 import { type LinearProperties, run } from "./run.ts";
-import type { JsonObject, JsonValue, Selection, ValueResult, Variants } from "./selection.ts";
+import type {
+  Exact,
+  JsonObject,
+  JsonValue,
+  Selection,
+  ValueResult,
+  Variants,
+} from "./selection.ts";
 
 /**
  * An access key for CI/CD integrations. Unlike personal API keys, access keys are not tied to a specific user's permissions but are scoped to an organization with specific capabilities and resource access (e.g., specific release pipelines). They support revocation with a grace period, allowing existing deployments to complete before the key becomes fully invalid.
@@ -39177,7 +39184,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamConnection>>,
   ): Promise<LinearResult<ValueResult<TeamConnection, S>>> {
     return run(
       this.env,
@@ -39232,7 +39239,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentActivityConnection>>,
   ): Promise<LinearResult<ValueResult<AgentActivityConnection, S>>> {
     return run(
       this.env,
@@ -39257,7 +39264,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentActivity>>,
   ): Promise<LinearResult<ValueResult<AgentActivity, S>>> {
     return run(
       this.env,
@@ -39282,7 +39289,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentSession>>,
   ): Promise<LinearResult<ValueResult<AgentSession, S>>> {
     return run(
       this.env,
@@ -39332,7 +39339,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentSessionConnection>>,
   ): Promise<LinearResult<ValueResult<AgentSessionConnection, S>>> {
     return run(
       this.env,
@@ -39357,7 +39364,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentSkill>>,
   ): Promise<LinearResult<ValueResult<AgentSkill, S>>> {
     return run(
       this.env,
@@ -39412,7 +39419,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentSkillConnection>>,
   ): Promise<LinearResult<ValueResult<AgentSkillConnection, S>>> {
     return run(
       this.env,
@@ -39437,7 +39444,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       clientId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Application>>,
   ): Promise<LinearResult<ValueResult<Application, S>>> {
     return run(
       this.env,
@@ -39456,7 +39463,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async archivedIntegrations<S extends Selection<ArchivedIntegrationPayload>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<ArchivedIntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<ArchivedIntegrationPayload[], S>>> {
     return run(
       this.env,
@@ -39481,7 +39488,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Attachment>>,
   ): Promise<LinearResult<ValueResult<Attachment, S>>> {
     return run(
       this.env,
@@ -39506,7 +39513,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentSourcesPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentSourcesPayload, S>>> {
     return run(
       this.env,
@@ -39561,7 +39568,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentConnection>>,
   ): Promise<LinearResult<ValueResult<AttachmentConnection, S>>> {
     return run(
       this.env,
@@ -39616,7 +39623,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentConnection>>,
   ): Promise<LinearResult<ValueResult<AttachmentConnection, S>>> {
     return run(
       this.env,
@@ -39671,7 +39678,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AuditEntryConnection>>,
   ): Promise<LinearResult<ValueResult<AuditEntryConnection, S>>> {
     return run(
       this.env,
@@ -39690,7 +39697,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async auditEntryTypes<S extends Selection<AuditEntryType>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<AuditEntryType>>,
   ): Promise<LinearResult<ValueResult<AuditEntryType[], S>>> {
     return run(
       this.env,
@@ -39709,7 +39716,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async authenticationSessions<S extends Selection<AuthenticationSessionResponse>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<AuthenticationSessionResponse>>,
   ): Promise<LinearResult<ValueResult<AuthenticationSessionResponse[], S>>> {
     return run(
       this.env,
@@ -39728,7 +39735,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async availableUsers<S extends Selection<AuthResolverResponse>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<AuthResolverResponse>>,
   ): Promise<LinearResult<ValueResult<AuthResolverResponse, S>>> {
     return run(
       this.env,
@@ -39758,7 +39765,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<Comment>>,
   ): Promise<LinearResult<ValueResult<Comment, S>>> {
     return run(
       this.env,
@@ -39813,7 +39820,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CommentConnection>>,
   ): Promise<LinearResult<ValueResult<CommentConnection, S>>> {
     return run(
       this.env,
@@ -39838,7 +39845,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomView>>,
   ): Promise<LinearResult<ValueResult<CustomView, S>>> {
     return run(
       this.env,
@@ -39863,7 +39870,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomViewHasSubscribersPayload>>,
   ): Promise<LinearResult<ValueResult<CustomViewHasSubscribersPayload, S>>> {
     return run(
       this.env,
@@ -39923,7 +39930,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: CustomViewSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomViewConnection>>,
   ): Promise<LinearResult<ValueResult<CustomViewConnection, S>>> {
     return run(
       this.env,
@@ -39948,7 +39955,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Customer>>,
   ): Promise<LinearResult<ValueResult<Customer, S>>> {
     return run(
       this.env,
@@ -39978,7 +39985,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerNeed>>,
   ): Promise<LinearResult<ValueResult<CustomerNeed, S>>> {
     return run(
       this.env,
@@ -40033,7 +40040,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerNeedConnection>>,
   ): Promise<LinearResult<ValueResult<CustomerNeedConnection, S>>> {
     return run(
       this.env,
@@ -40058,7 +40065,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerStatus>>,
   ): Promise<LinearResult<ValueResult<CustomerStatus, S>>> {
     return run(
       this.env,
@@ -40108,7 +40115,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerStatusConnection>>,
   ): Promise<LinearResult<ValueResult<CustomerStatusConnection, S>>> {
     return run(
       this.env,
@@ -40133,7 +40140,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerTier>>,
   ): Promise<LinearResult<ValueResult<CustomerTier, S>>> {
     return run(
       this.env,
@@ -40183,7 +40190,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerTierConnection>>,
   ): Promise<LinearResult<ValueResult<CustomerTierConnection, S>>> {
     return run(
       this.env,
@@ -40243,7 +40250,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sorts?: CustomerSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerConnection>>,
   ): Promise<LinearResult<ValueResult<CustomerConnection, S>>> {
     return run(
       this.env,
@@ -40268,7 +40275,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Cycle>>,
   ): Promise<LinearResult<ValueResult<Cycle, S>>> {
     return run(
       this.env,
@@ -40323,7 +40330,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CycleConnection>>,
   ): Promise<LinearResult<ValueResult<CycleConnection, S>>> {
     return run(
       this.env,
@@ -40348,7 +40355,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       packages: DependencyPackageInput[];
     },
-    select: S,
+    select: S & Exact<S, Selection<DependencyPackageMetadataResult>>,
   ): Promise<LinearResult<ValueResult<DependencyPackageMetadataResult[], S>>> {
     return run(
       this.env,
@@ -40373,7 +40380,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Document>>,
   ): Promise<LinearResult<ValueResult<Document, S>>> {
     return run(
       this.env,
@@ -40398,7 +40405,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DocumentContentHistoryPayload>>,
   ): Promise<LinearResult<ValueResult<DocumentContentHistoryPayload, S>>> {
     return run(
       this.env,
@@ -40458,7 +40465,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: DocumentSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<DocumentConnection>>,
   ): Promise<LinearResult<ValueResult<DocumentConnection, S>>> {
     return run(
       this.env,
@@ -40483,7 +40490,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<EmailIntakeAddress>>,
   ): Promise<LinearResult<ValueResult<EmailIntakeAddress, S>>> {
     return run(
       this.env,
@@ -40533,7 +40540,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<EmailIntakeAddressConnection>>,
   ): Promise<LinearResult<ValueResult<EmailIntakeAddressConnection, S>>> {
     return run(
       this.env,
@@ -40558,7 +40565,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Emoji>>,
   ): Promise<LinearResult<ValueResult<Emoji, S>>> {
     return run(
       this.env,
@@ -40618,7 +40625,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: EmojiSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<EmojiConnection>>,
   ): Promise<LinearResult<ValueResult<EmojiConnection, S>>> {
     return run(
       this.env,
@@ -40643,7 +40650,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<EntityExternalLink>>,
   ): Promise<LinearResult<ValueResult<EntityExternalLink, S>>> {
     return run(
       this.env,
@@ -40668,7 +40675,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ExternalUser>>,
   ): Promise<LinearResult<ValueResult<ExternalUser, S>>> {
     return run(
       this.env,
@@ -40718,7 +40725,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ExternalUserConnection>>,
   ): Promise<LinearResult<ValueResult<ExternalUserConnection, S>>> {
     return run(
       this.env,
@@ -40743,7 +40750,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Favorite>>,
   ): Promise<LinearResult<ValueResult<Favorite, S>>> {
     return run(
       this.env,
@@ -40793,7 +40800,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<FavoriteConnection>>,
   ): Promise<LinearResult<ValueResult<FavoriteConnection, S>>> {
     return run(
       this.env,
@@ -40828,7 +40835,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       unreadOnly?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationConnection>>,
   ): Promise<LinearResult<ValueResult<NotificationConnection, S>>> {
     return run(
       this.env,
@@ -40853,7 +40860,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Initiative>>,
   ): Promise<LinearResult<ValueResult<Initiative, S>>> {
     return run(
       this.env,
@@ -40883,7 +40890,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeFilterSuggestionPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeFilterSuggestionPayload, S>>> {
     return run(
       this.env,
@@ -40908,7 +40915,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeLabel>>,
   ): Promise<LinearResult<ValueResult<InitiativeLabel, S>>> {
     return run(
       this.env,
@@ -40963,7 +40970,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeLabelConnection>>,
   ): Promise<LinearResult<ValueResult<InitiativeLabelConnection, S>>> {
     return run(
       this.env,
@@ -40988,7 +40995,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeRelation>>,
   ): Promise<LinearResult<ValueResult<InitiativeRelation, S>>> {
     return run(
       this.env,
@@ -41038,7 +41045,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeRelationConnection>>,
   ): Promise<LinearResult<ValueResult<InitiativeRelationConnection, S>>> {
     return run(
       this.env,
@@ -41063,7 +41070,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeToProject>>,
   ): Promise<LinearResult<ValueResult<InitiativeToProject, S>>> {
     return run(
       this.env,
@@ -41113,7 +41120,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeToProjectConnection>>,
   ): Promise<LinearResult<ValueResult<InitiativeToProjectConnection, S>>> {
     return run(
       this.env,
@@ -41138,7 +41145,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeUpdate>>,
   ): Promise<LinearResult<ValueResult<InitiativeUpdate, S>>> {
     return run(
       this.env,
@@ -41193,7 +41200,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeUpdateConnection>>,
   ): Promise<LinearResult<ValueResult<InitiativeUpdateConnection, S>>> {
     return run(
       this.env,
@@ -41253,7 +41260,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: InitiativeSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeConnection>>,
   ): Promise<LinearResult<ValueResult<InitiativeConnection, S>>> {
     return run(
       this.env,
@@ -41278,7 +41285,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Integration>>,
   ): Promise<LinearResult<ValueResult<Integration, S>>> {
     return run(
       this.env,
@@ -41308,7 +41315,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       scopes: string[];
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationHasScopesPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationHasScopesPayload, S>>> {
     return run(
       this.env,
@@ -41333,7 +41340,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationTemplate>>,
   ): Promise<LinearResult<ValueResult<IntegrationTemplate, S>>> {
     return run(
       this.env,
@@ -41383,7 +41390,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationTemplateConnection>>,
   ): Promise<LinearResult<ValueResult<IntegrationTemplateConnection, S>>> {
     return run(
       this.env,
@@ -41433,7 +41440,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationConnection>>,
   ): Promise<LinearResult<ValueResult<IntegrationConnection, S>>> {
     return run(
       this.env,
@@ -41458,7 +41465,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationsSettings>>,
   ): Promise<LinearResult<ValueResult<IntegrationsSettings, S>>> {
     return run(
       this.env,
@@ -41483,7 +41490,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Issue>>,
   ): Promise<LinearResult<ValueResult<Issue, S>>> {
     return run(
       this.env,
@@ -41538,7 +41545,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueConnection>>,
   ): Promise<LinearResult<ValueResult<IssueConnection, S>>> {
     return run(
       this.env,
@@ -41573,7 +41580,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueFilterSuggestionPayload>>,
   ): Promise<LinearResult<ValueResult<IssueFilterSuggestionPayload, S>>> {
     return run(
       this.env,
@@ -41603,7 +41610,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       service: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportCheckPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportCheckPayload, S>>> {
     return run(
       this.env,
@@ -41628,7 +41635,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       issueImportId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportSyncCheckPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportSyncCheckPayload, S>>> {
     return run(
       this.env,
@@ -41673,7 +41680,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       jql: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportJqlCheckPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportJqlCheckPayload, S>>> {
     return run(
       this.env,
@@ -41698,7 +41705,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueLabel>>,
   ): Promise<LinearResult<ValueResult<IssueLabel, S>>> {
     return run(
       this.env,
@@ -41753,7 +41760,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueLabelConnection>>,
   ): Promise<LinearResult<ValueResult<IssueLabelConnection, S>>> {
     return run(
       this.env,
@@ -41772,7 +41779,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async issuePriorityValues<S extends Selection<IssuePriorityValue>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<IssuePriorityValue>>,
   ): Promise<LinearResult<ValueResult<IssuePriorityValue[], S>>> {
     return run(
       this.env,
@@ -41797,7 +41804,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueRelation>>,
   ): Promise<LinearResult<ValueResult<IssueRelation, S>>> {
     return run(
       this.env,
@@ -41847,7 +41854,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueRelationConnection>>,
   ): Promise<LinearResult<ValueResult<IssueRelationConnection, S>>> {
     return run(
       this.env,
@@ -41882,7 +41889,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       issueId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<RepositorySuggestionsPayload>>,
   ): Promise<LinearResult<ValueResult<RepositorySuggestionsPayload, S>>> {
     return run(
       this.env,
@@ -41942,7 +41949,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       query?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueConnection>>,
   ): Promise<LinearResult<ValueResult<IssueConnection, S>>> {
     return run(
       this.env,
@@ -41969,7 +41976,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       request: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueTitleSuggestionFromCustomerRequestPayload>>,
   ): Promise<LinearResult<ValueResult<IssueTitleSuggestionFromCustomerRequestPayload, S>>> {
     return run(
       this.env,
@@ -41994,7 +42001,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueToRelease>>,
   ): Promise<LinearResult<ValueResult<IssueToRelease, S>>> {
     return run(
       this.env,
@@ -42044,7 +42051,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueToReleaseConnection>>,
   ): Promise<LinearResult<ValueResult<IssueToReleaseConnection, S>>> {
     return run(
       this.env,
@@ -42069,7 +42076,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       branchName: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Issue>>,
   ): Promise<LinearResult<ValueResult<Issue | null, S>>> {
     return run(
       this.env,
@@ -42129,7 +42136,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: IssueSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueConnection>>,
   ): Promise<LinearResult<ValueResult<IssueConnection, S>>> {
     return run(
       this.env,
@@ -42154,7 +42161,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<JiraProject>>,
   ): Promise<LinearResult<ValueResult<JiraProject, S>>> {
     return run(
       this.env,
@@ -42209,7 +42216,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<JiraProjectConnection>>,
   ): Promise<LinearResult<ValueResult<JiraProjectConnection, S>>> {
     return run(
       this.env,
@@ -42234,7 +42241,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Notification>>,
   ): Promise<LinearResult<ValueResult<Notification, S>>> {
     return run(
       this.env,
@@ -42259,7 +42266,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationSubscription>>,
   ): Promise<LinearResult<ValueResult<NotificationSubscription, S>>> {
     return run(
       this.env,
@@ -42309,7 +42316,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationSubscriptionConnection>>,
   ): Promise<LinearResult<ValueResult<NotificationSubscriptionConnection, S>>> {
     return run(
       this.env,
@@ -42364,7 +42371,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationConnection>>,
   ): Promise<LinearResult<ValueResult<NotificationConnection, S>>> {
     return run(
       this.env,
@@ -42383,7 +42390,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async organization<S extends Selection<Organization>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<Organization>>,
   ): Promise<LinearResult<ValueResult<Organization, S>>> {
     return run(
       this.env,
@@ -42408,7 +42415,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       urlKey: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationExistsPayload>>,
   ): Promise<LinearResult<ValueResult<OrganizationExistsPayload, S>>> {
     return run(
       this.env,
@@ -42433,7 +42440,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationInvite>>,
   ): Promise<LinearResult<ValueResult<OrganizationInvite, S>>> {
     return run(
       this.env,
@@ -42483,7 +42490,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationInviteConnection>>,
   ): Promise<LinearResult<ValueResult<OrganizationInviteConnection, S>>> {
     return run(
       this.env,
@@ -42508,7 +42515,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Project>>,
   ): Promise<LinearResult<ValueResult<Project, S>>> {
     return run(
       this.env,
@@ -42538,7 +42545,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectFilterSuggestionPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectFilterSuggestionPayload, S>>> {
     return run(
       this.env,
@@ -42563,7 +42570,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectLabel>>,
   ): Promise<LinearResult<ValueResult<ProjectLabel, S>>> {
     return run(
       this.env,
@@ -42618,7 +42625,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectLabelConnection>>,
   ): Promise<LinearResult<ValueResult<ProjectLabelConnection, S>>> {
     return run(
       this.env,
@@ -42643,7 +42650,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectMilestone>>,
   ): Promise<LinearResult<ValueResult<ProjectMilestone, S>>> {
     return run(
       this.env,
@@ -42698,7 +42705,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectMilestoneConnection>>,
   ): Promise<LinearResult<ValueResult<ProjectMilestoneConnection, S>>> {
     return run(
       this.env,
@@ -42723,7 +42730,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectRelation>>,
   ): Promise<LinearResult<ValueResult<ProjectRelation, S>>> {
     return run(
       this.env,
@@ -42773,7 +42780,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectRelationConnection>>,
   ): Promise<LinearResult<ValueResult<ProjectRelationConnection, S>>> {
     return run(
       this.env,
@@ -42798,7 +42805,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectStatus>>,
   ): Promise<LinearResult<ValueResult<ProjectStatus, S>>> {
     return run(
       this.env,
@@ -42848,7 +42855,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectStatusConnection>>,
   ): Promise<LinearResult<ValueResult<ProjectStatusConnection, S>>> {
     return run(
       this.env,
@@ -42878,7 +42885,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       projectId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectUpdate>>,
   ): Promise<LinearResult<ValueResult<ProjectUpdate, S>>> {
     return run(
       this.env,
@@ -42933,7 +42940,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectUpdateConnection>>,
   ): Promise<LinearResult<ValueResult<ProjectUpdateConnection, S>>> {
     return run(
       this.env,
@@ -42993,7 +43000,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: ProjectSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectConnection>>,
   ): Promise<LinearResult<ValueResult<ProjectConnection, S>>> {
     return run(
       this.env,
@@ -43023,7 +43030,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       targetMobile?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<PushSubscriptionTestPayload>>,
   ): Promise<LinearResult<ValueResult<PushSubscriptionTestPayload, S>>> {
     return run(
       this.env,
@@ -43068,7 +43075,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       last?: number | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationQuotaConnection>>,
   ): Promise<LinearResult<ValueResult<OrganizationQuotaConnection, S>>> {
     return run(
       this.env,
@@ -43087,7 +43094,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async rateLimitStatus<S extends Selection<RateLimitPayload>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<RateLimitPayload>>,
   ): Promise<LinearResult<ValueResult<RateLimitPayload, S>>> {
     return run(
       this.env,
@@ -43112,7 +43119,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Release>>,
   ): Promise<LinearResult<ValueResult<Release, S>>> {
     return run(
       this.env,
@@ -43137,7 +43144,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseNote>>,
   ): Promise<LinearResult<ValueResult<ReleaseNote, S>>> {
     return run(
       this.env,
@@ -43192,7 +43199,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseNoteConnection>>,
   ): Promise<LinearResult<ValueResult<ReleaseNoteConnection, S>>> {
     return run(
       this.env,
@@ -43217,7 +43224,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePipeline>>,
   ): Promise<LinearResult<ValueResult<ReleasePipeline, S>>> {
     return run(
       this.env,
@@ -43277,7 +43284,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: ReleasePipelineSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePipelineConnection>>,
   ): Promise<LinearResult<ValueResult<ReleasePipelineConnection, S>>> {
     return run(
       this.env,
@@ -43312,7 +43319,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       term?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<Release>>,
   ): Promise<LinearResult<ValueResult<Release[], S>>> {
     return run(
       this.env,
@@ -43337,7 +43344,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseStage>>,
   ): Promise<LinearResult<ValueResult<ReleaseStage, S>>> {
     return run(
       this.env,
@@ -43392,7 +43399,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseStageConnection>>,
   ): Promise<LinearResult<ValueResult<ReleaseStageConnection, S>>> {
     return run(
       this.env,
@@ -43452,7 +43459,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: ReleaseSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseConnection>>,
   ): Promise<LinearResult<ValueResult<ReleaseConnection, S>>> {
     return run(
       this.env,
@@ -43522,7 +43529,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       term: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DocumentSearchPayload>>,
   ): Promise<LinearResult<ValueResult<DocumentSearchPayload, S>>> {
     return run(
       this.env,
@@ -43592,7 +43599,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       term: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueSearchPayload>>,
   ): Promise<LinearResult<ValueResult<IssueSearchPayload, S>>> {
     return run(
       this.env,
@@ -43657,7 +43664,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       term: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectSearchPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectSearchPayload, S>>> {
     return run(
       this.env,
@@ -43702,7 +43709,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       types?: SemanticSearchResultType[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<SemanticSearchPayload>>,
   ): Promise<LinearResult<ValueResult<SemanticSearchPayload, S>>> {
     return run(
       this.env,
@@ -43727,7 +43734,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<SlaConfiguration>>,
   ): Promise<LinearResult<ValueResult<SlaConfiguration[], S>>> {
     return run(
       this.env,
@@ -43752,7 +43759,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Team>>,
   ): Promise<LinearResult<ValueResult<Team, S>>> {
     return run(
       this.env,
@@ -43777,7 +43784,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamMembership>>,
   ): Promise<LinearResult<ValueResult<TeamMembership, S>>> {
     return run(
       this.env,
@@ -43827,7 +43834,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamMembershipConnection>>,
   ): Promise<LinearResult<ValueResult<TeamMembershipConnection, S>>> {
     return run(
       this.env,
@@ -43882,7 +43889,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamConnection>>,
   ): Promise<LinearResult<ValueResult<TeamConnection, S>>> {
     return run(
       this.env,
@@ -43907,7 +43914,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Template>>,
   ): Promise<LinearResult<ValueResult<Template, S>>> {
     return run(
       this.env,
@@ -43942,7 +43949,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       includeArchived?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<Template>>,
   ): Promise<LinearResult<ValueResult<Template[], S>>> {
     return run(
       this.env,
@@ -43961,7 +43968,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async templates<S extends Selection<Template>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<Template>>,
   ): Promise<LinearResult<ValueResult<Template[], S>>> {
     return run(
       this.env,
@@ -43986,7 +43993,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       integrationType: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Template>>,
   ): Promise<LinearResult<ValueResult<Template[], S>>> {
     return run(
       this.env,
@@ -44011,7 +44018,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<TimeSchedule>>,
   ): Promise<LinearResult<ValueResult<TimeSchedule, S>>> {
     return run(
       this.env,
@@ -44061,7 +44068,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<TimeScheduleConnection>>,
   ): Promise<LinearResult<ValueResult<TimeScheduleConnection, S>>> {
     return run(
       this.env,
@@ -44111,7 +44118,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<TriageResponsibilityConnection>>,
   ): Promise<LinearResult<ValueResult<TriageResponsibilityConnection, S>>> {
     return run(
       this.env,
@@ -44136,7 +44143,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<TriageResponsibility>>,
   ): Promise<LinearResult<ValueResult<TriageResponsibility, S>>> {
     return run(
       this.env,
@@ -44161,7 +44168,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<UsageAlert>>,
   ): Promise<LinearResult<ValueResult<UsageAlert, S>>> {
     return run(
       this.env,
@@ -44216,7 +44223,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<UsageAlertConnection>>,
   ): Promise<LinearResult<ValueResult<UsageAlertConnection, S>>> {
     return run(
       this.env,
@@ -44241,7 +44248,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<User>>,
   ): Promise<LinearResult<ValueResult<User, S>>> {
     return run(
       this.env,
@@ -44266,7 +44273,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AuthenticationSessionResponse>>,
   ): Promise<LinearResult<ValueResult<AuthenticationSessionResponse[], S>>> {
     return run(
       this.env,
@@ -44285,7 +44292,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async userSettings<S extends Selection<UserSettings>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<UserSettings>>,
   ): Promise<LinearResult<ValueResult<UserSettings, S>>> {
     return run(
       this.env,
@@ -44310,7 +44317,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       viewType: ViewType;
     },
-    select: S,
+    select: S & Exact<S, Selection<ViewPreferences>>,
   ): Promise<LinearResult<ValueResult<ViewPreferences | null, S>>> {
     return run(
       this.env,
@@ -44375,7 +44382,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sort?: UserSortInput[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserConnection>>,
   ): Promise<LinearResult<ValueResult<UserConnection, S>>> {
     return run(
       this.env,
@@ -44402,7 +44409,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       integrationId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<GitHubEnterpriseServerInstallVerificationPayload>>,
   ): Promise<LinearResult<ValueResult<GitHubEnterpriseServerInstallVerificationPayload, S>>> {
     return run(
       this.env,
@@ -44421,7 +44428,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async viewer<S extends Selection<User>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<User>>,
   ): Promise<LinearResult<ValueResult<User, S>>> {
     return run(
       this.env,
@@ -44446,7 +44453,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<Webhook>>,
   ): Promise<LinearResult<ValueResult<Webhook, S>>> {
     return run(
       this.env,
@@ -44496,7 +44503,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<WebhookConnection>>,
   ): Promise<LinearResult<ValueResult<WebhookConnection, S>>> {
     return run(
       this.env,
@@ -44521,7 +44528,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<WorkflowState>>,
   ): Promise<LinearResult<ValueResult<WorkflowState, S>>> {
     return run(
       this.env,
@@ -44576,7 +44583,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       orderBy?: PaginationOrderBy | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<WorkflowStateConnection>>,
   ): Promise<LinearResult<ValueResult<WorkflowStateConnection, S>>> {
     return run(
       this.env,
@@ -44608,7 +44615,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: AgentSessionUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentSessionPayload>>,
   ): Promise<LinearResult<ValueResult<AgentSessionPayload, S>>> {
     return run(
       this.env,
@@ -44635,7 +44642,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: AgentSkillCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentSkillPayload>>,
   ): Promise<LinearResult<ValueResult<AgentSkillPayload, S>>> {
     return run(
       this.env,
@@ -44662,7 +44669,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -44694,7 +44701,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: AgentSkillUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<AgentSkillPayload>>,
   ): Promise<LinearResult<ValueResult<AgentSkillPayload, S>>> {
     return run(
       this.env,
@@ -44721,7 +44728,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: AirbyteConfigurationInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationPayload, S>>> {
     return run(
       this.env,
@@ -44748,7 +44755,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: AttachmentCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -44775,7 +44782,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -44837,7 +44844,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -44889,7 +44896,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       title?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<FrontAttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<FrontAttachmentPayload, S>>> {
     return run(
       this.env,
@@ -44941,7 +44948,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -44998,7 +45005,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45060,7 +45067,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45117,7 +45124,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       title?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45174,7 +45181,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45226,7 +45233,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45283,7 +45290,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45335,7 +45342,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45392,7 +45399,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45419,7 +45426,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45451,7 +45458,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: AttachmentUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<AttachmentPayload>>,
   ): Promise<LinearResult<ValueResult<AttachmentPayload, S>>> {
     return run(
       this.env,
@@ -45478,7 +45485,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CommentCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CommentPayload>>,
   ): Promise<LinearResult<ValueResult<CommentPayload, S>>> {
     return run(
       this.env,
@@ -45505,7 +45512,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -45537,7 +45544,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       resolvingCommentId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CommentPayload>>,
   ): Promise<LinearResult<ValueResult<CommentPayload, S>>> {
     return run(
       this.env,
@@ -45564,7 +45571,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CommentPayload>>,
   ): Promise<LinearResult<ValueResult<CommentPayload, S>>> {
     return run(
       this.env,
@@ -45601,7 +45608,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       skipEditedAt?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CommentPayload>>,
   ): Promise<LinearResult<ValueResult<CommentPayload, S>>> {
     return run(
       this.env,
@@ -45628,7 +45635,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ContactCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ContactPayload>>,
   ): Promise<LinearResult<ValueResult<ContactPayload, S>>> {
     return run(
       this.env,
@@ -45660,7 +45667,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       includeRestrictedTeamIds?: string[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<CreateCsvExportReportPayload>>,
   ): Promise<LinearResult<ValueResult<CreateCsvExportReportPayload, S>>> {
     return run(
       this.env,
@@ -45692,7 +45699,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       userId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeUpdateReminderPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeUpdateReminderPayload, S>>> {
     return run(
       this.env,
@@ -45724,7 +45731,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       userId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectUpdateReminderPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectUpdateReminderPayload, S>>> {
     return run(
       this.env,
@@ -45751,7 +45758,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomViewCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomViewPayload>>,
   ): Promise<LinearResult<ValueResult<CustomViewPayload, S>>> {
     return run(
       this.env,
@@ -45778,7 +45785,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -45810,7 +45817,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomViewUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomViewPayload>>,
   ): Promise<LinearResult<ValueResult<CustomViewPayload, S>>> {
     return run(
       this.env,
@@ -45837,7 +45844,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerPayload, S>>> {
     return run(
       this.env,
@@ -45864,7 +45871,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -45896,7 +45903,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       targetCustomerId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerPayload, S>>> {
     return run(
       this.env,
@@ -45923,7 +45930,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerNeedArchivePayload>>,
   ): Promise<LinearResult<ValueResult<CustomerNeedArchivePayload, S>>> {
     return run(
       this.env,
@@ -45950,7 +45957,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerNeedCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerNeedPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerNeedPayload, S>>> {
     return run(
       this.env,
@@ -45977,7 +45984,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerNeedCreateFromAttachmentInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerNeedPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerNeedPayload, S>>> {
     return run(
       this.env,
@@ -46009,7 +46016,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       keepAttachment?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -46036,7 +46043,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerNeedArchivePayload>>,
   ): Promise<LinearResult<ValueResult<CustomerNeedArchivePayload, S>>> {
     return run(
       this.env,
@@ -46073,7 +46080,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerNeedUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerNeedUpdatePayload>>,
   ): Promise<LinearResult<ValueResult<CustomerNeedUpdatePayload, S>>> {
     return run(
       this.env,
@@ -46100,7 +46107,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerStatusCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerStatusPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerStatusPayload, S>>> {
     return run(
       this.env,
@@ -46127,7 +46134,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -46159,7 +46166,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerStatusUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerStatusPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerStatusPayload, S>>> {
     return run(
       this.env,
@@ -46186,7 +46193,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerTierCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerTierPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerTierPayload, S>>> {
     return run(
       this.env,
@@ -46213,7 +46220,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -46245,7 +46252,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerTierUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerTierPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerTierPayload, S>>> {
     return run(
       this.env,
@@ -46272,7 +46279,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerPayload, S>>> {
     return run(
       this.env,
@@ -46304,7 +46311,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerPayload, S>>> {
     return run(
       this.env,
@@ -46331,7 +46338,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CustomerUpsertInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CustomerPayload>>,
   ): Promise<LinearResult<ValueResult<CustomerPayload, S>>> {
     return run(
       this.env,
@@ -46358,7 +46365,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CycleArchivePayload>>,
   ): Promise<LinearResult<ValueResult<CycleArchivePayload, S>>> {
     return run(
       this.env,
@@ -46385,7 +46392,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CycleShiftAllInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CyclePayload>>,
   ): Promise<LinearResult<ValueResult<CyclePayload, S>>> {
     return run(
       this.env,
@@ -46412,7 +46419,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<CyclePayload>>,
   ): Promise<LinearResult<ValueResult<CyclePayload, S>>> {
     return run(
       this.env,
@@ -46444,7 +46451,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: CycleUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<CyclePayload>>,
   ): Promise<LinearResult<ValueResult<CyclePayload, S>>> {
     return run(
       this.env,
@@ -46471,7 +46478,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: DocumentCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<DocumentPayload>>,
   ): Promise<LinearResult<ValueResult<DocumentPayload, S>>> {
     return run(
       this.env,
@@ -46503,7 +46510,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       ifParentDocumentId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<DocumentArchivePayload>>,
   ): Promise<LinearResult<ValueResult<DocumentArchivePayload, S>>> {
     return run(
       this.env,
@@ -46530,7 +46537,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DocumentArchivePayload>>,
   ): Promise<LinearResult<ValueResult<DocumentArchivePayload, S>>> {
     return run(
       this.env,
@@ -46562,7 +46569,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: DocumentUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<DocumentPayload>>,
   ): Promise<LinearResult<ValueResult<DocumentPayload, S>>> {
     return run(
       this.env,
@@ -46589,7 +46596,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: EmailIntakeAddressCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<EmailIntakeAddressPayload>>,
   ): Promise<LinearResult<ValueResult<EmailIntakeAddressPayload, S>>> {
     return run(
       this.env,
@@ -46616,7 +46623,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -46645,7 +46652,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<EmailIntakeAddressRefreshSesDomainStatusPayload>>,
   ): Promise<LinearResult<ValueResult<EmailIntakeAddressRefreshSesDomainStatusPayload, S>>> {
     return run(
       this.env,
@@ -46672,7 +46679,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<EmailIntakeAddressPayload>>,
   ): Promise<LinearResult<ValueResult<EmailIntakeAddressPayload, S>>> {
     return run(
       this.env,
@@ -46704,7 +46711,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: EmailIntakeAddressUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<EmailIntakeAddressPayload>>,
   ): Promise<LinearResult<ValueResult<EmailIntakeAddressPayload, S>>> {
     return run(
       this.env,
@@ -46731,7 +46738,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: EmojiCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<EmojiPayload>>,
   ): Promise<LinearResult<ValueResult<EmojiPayload, S>>> {
     return run(
       this.env,
@@ -46758,7 +46765,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -46785,7 +46792,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: EntityExternalLinkCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<EntityExternalLinkPayload>>,
   ): Promise<LinearResult<ValueResult<EntityExternalLinkPayload, S>>> {
     return run(
       this.env,
@@ -46812,7 +46819,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -46844,7 +46851,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: EntityExternalLinkUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<EntityExternalLinkPayload>>,
   ): Promise<LinearResult<ValueResult<EntityExternalLinkPayload, S>>> {
     return run(
       this.env,
@@ -46871,7 +46878,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: FavoriteCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<FavoritePayload>>,
   ): Promise<LinearResult<ValueResult<FavoritePayload, S>>> {
     return run(
       this.env,
@@ -46898,7 +46905,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -46930,7 +46937,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: FavoriteUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<FavoritePayload>>,
   ): Promise<LinearResult<ValueResult<FavoritePayload, S>>> {
     return run(
       this.env,
@@ -46977,7 +46984,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       size: number;
     },
-    select: S,
+    select: S & Exact<S, Selection<UploadPayload>>,
   ): Promise<LinearResult<ValueResult<UploadPayload, S>>> {
     return run(
       this.env,
@@ -47004,7 +47011,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       assetUrl: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<FileUploadDeletePayload>>,
   ): Promise<LinearResult<ValueResult<FileUploadDeletePayload, S>>> {
     return run(
       this.env,
@@ -47031,7 +47038,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: GitAutomationStateCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<GitAutomationStatePayload>>,
   ): Promise<LinearResult<ValueResult<GitAutomationStatePayload, S>>> {
     return run(
       this.env,
@@ -47058,7 +47065,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -47090,7 +47097,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: GitAutomationStateUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<GitAutomationStatePayload>>,
   ): Promise<LinearResult<ValueResult<GitAutomationStatePayload, S>>> {
     return run(
       this.env,
@@ -47117,7 +47124,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: GitAutomationTargetBranchCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<GitAutomationTargetBranchPayload>>,
   ): Promise<LinearResult<ValueResult<GitAutomationTargetBranchPayload, S>>> {
     return run(
       this.env,
@@ -47144,7 +47151,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -47176,7 +47183,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: GitAutomationTargetBranchUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<GitAutomationTargetBranchPayload>>,
   ): Promise<LinearResult<ValueResult<GitAutomationTargetBranchPayload, S>>> {
     return run(
       this.env,
@@ -47203,7 +47210,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       url: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ImageUploadFromUrlPayload>>,
   ): Promise<LinearResult<ValueResult<ImageUploadFromUrlPayload, S>>> {
     return run(
       this.env,
@@ -47245,7 +47252,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       size: number;
     },
-    select: S,
+    select: S & Exact<S, Selection<UploadPayload>>,
   ): Promise<LinearResult<ValueResult<UploadPayload, S>>> {
     return run(
       this.env,
@@ -47277,7 +47284,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InboxNotificationUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InboxNotificationUpdatePayload>>,
   ): Promise<LinearResult<ValueResult<InboxNotificationUpdatePayload, S>>> {
     return run(
       this.env,
@@ -47309,7 +47316,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       labelId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativePayload, S>>> {
     return run(
       this.env,
@@ -47336,7 +47343,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeArchivePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeArchivePayload, S>>> {
     return run(
       this.env,
@@ -47363,7 +47370,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativePayload, S>>> {
     return run(
       this.env,
@@ -47390,7 +47397,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -47417,7 +47424,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeLabelCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeLabelPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeLabelPayload, S>>> {
     return run(
       this.env,
@@ -47444,7 +47451,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -47471,7 +47478,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeLabelPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeLabelPayload, S>>> {
     return run(
       this.env,
@@ -47498,7 +47505,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeLabelPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeLabelPayload, S>>> {
     return run(
       this.env,
@@ -47530,7 +47537,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeLabelUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeLabelPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeLabelPayload, S>>> {
     return run(
       this.env,
@@ -47557,7 +47564,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeRelationCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeRelationPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeRelationPayload, S>>> {
     return run(
       this.env,
@@ -47584,7 +47591,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -47616,7 +47623,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeRelationUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeRelationPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeRelationPayload, S>>> {
     return run(
       this.env,
@@ -47648,7 +47655,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       labelId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativePayload, S>>> {
     return run(
       this.env,
@@ -47675,7 +47682,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeToProjectCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeToProjectPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeToProjectPayload, S>>> {
     return run(
       this.env,
@@ -47702,7 +47709,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -47734,7 +47741,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeToProjectUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeToProjectPayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeToProjectPayload, S>>> {
     return run(
       this.env,
@@ -47761,7 +47768,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeArchivePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeArchivePayload, S>>> {
     return run(
       this.env,
@@ -47793,7 +47800,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativePayload, S>>> {
     return run(
       this.env,
@@ -47820,7 +47827,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeUpdateArchivePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeUpdateArchivePayload, S>>> {
     return run(
       this.env,
@@ -47847,7 +47854,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeUpdateCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeUpdatePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeUpdatePayload, S>>> {
     return run(
       this.env,
@@ -47874,7 +47881,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeUpdateArchivePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeUpdateArchivePayload, S>>> {
     return run(
       this.env,
@@ -47906,7 +47913,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: InitiativeUpdateUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<InitiativeUpdatePayload>>,
   ): Promise<LinearResult<ValueResult<InitiativeUpdatePayload, S>>> {
     return run(
       this.env,
@@ -47933,7 +47940,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -47965,7 +47972,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       skipInstallationDeletion?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -47999,7 +48006,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       organizationName: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<GitHubEnterpriseServerPayload>>,
   ): Promise<LinearResult<ValueResult<GitHubEnterpriseServerPayload, S>>> {
     return run(
       this.env,
@@ -48020,7 +48027,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async integrationGithubCommitCreate<S extends Selection<GitHubCommitIntegrationPayload>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<GitHubCommitIntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<GitHubCommitIntegrationPayload, S>>> {
     return run(
       this.env,
@@ -48047,7 +48054,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationPayload, S>>> {
     return run(
       this.env,
@@ -48076,7 +48083,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       integrationId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationGithubRemoveCodeAccessPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationGithubRemoveCodeAccessPayload, S>>> {
     return run(
       this.env,
@@ -48123,7 +48130,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       validationProjectPath?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<GitLabIntegrationCreatePayload>>,
   ): Promise<LinearResult<ValueResult<GitLabIntegrationCreatePayload, S>>> {
     return run(
       this.env,
@@ -48150,7 +48157,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       integrationId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationPayload, S>>> {
     return run(
       this.env,
@@ -48177,7 +48184,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       integrationId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<GitLabTestConnectionPayload>>,
   ): Promise<LinearResult<ValueResult<GitLabTestConnectionPayload, S>>> {
     return run(
       this.env,
@@ -48209,7 +48216,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       integrationId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationPayload, S>>> {
     return run(
       this.env,
@@ -48251,7 +48258,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       readonly?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationPayload, S>>> {
     return run(
       this.env,
@@ -48272,7 +48279,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async integrationIntercomDelete<S extends Selection<IntegrationPayload>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<IntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationPayload, S>>> {
     return run(
       this.env,
@@ -48309,7 +48316,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       workspaceIntegrationId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationPayload, S>>> {
     return run(
       this.env,
@@ -48338,7 +48345,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       integrationId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationSlackWorkspaceNamePayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationSlackWorkspaceNamePayload, S>>> {
     return run(
       this.env,
@@ -48365,7 +48372,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IntegrationTemplateCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationTemplatePayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationTemplatePayload, S>>> {
     return run(
       this.env,
@@ -48392,7 +48399,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -48419,7 +48426,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IntegrationsSettingsCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationsSettingsPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationsSettingsPayload, S>>> {
     return run(
       this.env,
@@ -48451,7 +48458,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IntegrationsSettingsUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationsSettingsPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationsSettingsPayload, S>>> {
     return run(
       this.env,
@@ -48483,7 +48490,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       labelId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -48515,7 +48522,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       trash?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueArchivePayload>>,
   ): Promise<LinearResult<ValueResult<IssueArchivePayload, S>>> {
     return run(
       this.env,
@@ -48542,7 +48549,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IssueBatchCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueBatchPayload>>,
   ): Promise<LinearResult<ValueResult<IssueBatchPayload, S>>> {
     return run(
       this.env,
@@ -48574,7 +48581,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IssueUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueBatchPayload>>,
   ): Promise<LinearResult<ValueResult<IssueBatchPayload, S>>> {
     return run(
       this.env,
@@ -48601,7 +48608,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IssueCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -48633,7 +48640,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       permanentlyDelete?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueArchivePayload>>,
   ): Promise<LinearResult<ValueResult<IssueArchivePayload, S>>> {
     return run(
       this.env,
@@ -48660,7 +48667,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       attachmentId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -48722,7 +48729,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamName?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportPayload, S>>> {
     return run(
       this.env,
@@ -48774,7 +48781,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamName?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportPayload, S>>> {
     return run(
       this.env,
@@ -48831,7 +48838,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamName?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportPayload, S>>> {
     return run(
       this.env,
@@ -48883,7 +48890,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamName?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportPayload, S>>> {
     return run(
       this.env,
@@ -48955,7 +48962,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       teamName?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportPayload, S>>> {
     return run(
       this.env,
@@ -48982,7 +48989,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       issueImportId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportDeletePayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportDeletePayload, S>>> {
     return run(
       this.env,
@@ -49014,7 +49021,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       mapping: JsonObject;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportPayload, S>>> {
     return run(
       this.env,
@@ -49046,7 +49053,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IssueImportUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueImportPayload>>,
   ): Promise<LinearResult<ValueResult<IssueImportPayload, S>>> {
     return run(
       this.env,
@@ -49078,7 +49085,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       replaceTeamLabels?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueLabelPayload>>,
   ): Promise<LinearResult<ValueResult<IssueLabelPayload, S>>> {
     return run(
       this.env,
@@ -49105,7 +49112,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -49132,7 +49139,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueLabelPayload>>,
   ): Promise<LinearResult<ValueResult<IssueLabelPayload, S>>> {
     return run(
       this.env,
@@ -49159,7 +49166,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueLabelPayload>>,
   ): Promise<LinearResult<ValueResult<IssueLabelPayload, S>>> {
     return run(
       this.env,
@@ -49196,7 +49203,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       replaceTeamLabels?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueLabelPayload>>,
   ): Promise<LinearResult<ValueResult<IssueLabelPayload, S>>> {
     return run(
       this.env,
@@ -49228,7 +49235,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       overrideCreatedAt?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueRelationPayload>>,
   ): Promise<LinearResult<ValueResult<IssueRelationPayload, S>>> {
     return run(
       this.env,
@@ -49255,7 +49262,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -49287,7 +49294,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IssueRelationUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueRelationPayload>>,
   ): Promise<LinearResult<ValueResult<IssueRelationPayload, S>>> {
     return run(
       this.env,
@@ -49319,7 +49326,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       reminderAt: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -49351,7 +49358,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       labelId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -49383,7 +49390,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       userId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -49420,7 +49427,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       userId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -49447,7 +49454,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IssueToReleaseCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueToReleasePayload>>,
   ): Promise<LinearResult<ValueResult<IssueToReleasePayload, S>>> {
     return run(
       this.env,
@@ -49474,7 +49481,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -49506,7 +49513,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       releaseId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -49533,7 +49540,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssueArchivePayload>>,
   ): Promise<LinearResult<ValueResult<IssueArchivePayload, S>>> {
     return run(
       this.env,
@@ -49565,7 +49572,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       userId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -49602,7 +49609,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       userId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -49634,7 +49641,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: IssueUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<IssuePayload>>,
   ): Promise<LinearResult<ValueResult<IssuePayload, S>>> {
     return run(
       this.env,
@@ -49661,7 +49668,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: JiraProjectBatchMigrateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<JiraProjectBatchMigratePayload>>,
   ): Promise<LinearResult<ValueResult<JiraProjectBatchMigratePayload, S>>> {
     return run(
       this.env,
@@ -49688,7 +49695,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationArchivePayload>>,
   ): Promise<LinearResult<ValueResult<NotificationArchivePayload, S>>> {
     return run(
       this.env,
@@ -49715,7 +49722,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: NotificationEntityInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationBatchActionPayload>>,
   ): Promise<LinearResult<ValueResult<NotificationBatchActionPayload, S>>> {
     return run(
       this.env,
@@ -49752,7 +49759,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       subscribe: boolean;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserSettingsPayload>>,
   ): Promise<LinearResult<ValueResult<UserSettingsPayload, S>>> {
     return run(
       this.env,
@@ -49788,7 +49795,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       readAt: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationBatchActionPayload>>,
   ): Promise<LinearResult<ValueResult<NotificationBatchActionPayload, S>>> {
     return run(
       this.env,
@@ -49815,7 +49822,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: NotificationEntityInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationBatchActionPayload>>,
   ): Promise<LinearResult<ValueResult<NotificationBatchActionPayload, S>>> {
     return run(
       this.env,
@@ -49847,7 +49854,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       snoozedUntilAt: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationBatchActionPayload>>,
   ): Promise<LinearResult<ValueResult<NotificationBatchActionPayload, S>>> {
     return run(
       this.env,
@@ -49874,7 +49881,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: NotificationSubscriptionCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationSubscriptionPayload>>,
   ): Promise<LinearResult<ValueResult<NotificationSubscriptionPayload, S>>> {
     return run(
       this.env,
@@ -49906,7 +49913,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: NotificationSubscriptionUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationSubscriptionPayload>>,
   ): Promise<LinearResult<ValueResult<NotificationSubscriptionPayload, S>>> {
     return run(
       this.env,
@@ -49933,7 +49940,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationArchivePayload>>,
   ): Promise<LinearResult<ValueResult<NotificationArchivePayload, S>>> {
     return run(
       this.env,
@@ -49965,7 +49972,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       unsnoozedAt: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationBatchActionPayload>>,
   ): Promise<LinearResult<ValueResult<NotificationBatchActionPayload, S>>> {
     return run(
       this.env,
@@ -49997,7 +50004,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: NotificationUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<NotificationPayload>>,
   ): Promise<LinearResult<ValueResult<NotificationPayload, S>>> {
     return run(
       this.env,
@@ -50018,7 +50025,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async organizationCancelDelete<S extends Selection<OrganizationCancelDeletePayload>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<OrganizationCancelDeletePayload>>,
   ): Promise<LinearResult<ValueResult<OrganizationCancelDeletePayload, S>>> {
     return run(
       this.env,
@@ -50045,7 +50052,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: DeleteOrganizationInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationDeletePayload>>,
   ): Promise<LinearResult<ValueResult<OrganizationDeletePayload, S>>> {
     return run(
       this.env,
@@ -50066,7 +50073,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
    */
   async organizationDeleteChallenge<S extends Selection<OrganizationDeletePayload>>(
     input: Record<string, never>,
-    select: S,
+    select: S & Exact<S, Selection<OrganizationDeletePayload>>,
   ): Promise<LinearResult<ValueResult<OrganizationDeletePayload, S>>> {
     return run(
       this.env,
@@ -50093,7 +50100,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -50120,7 +50127,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: OrganizationInviteCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationInvitePayload>>,
   ): Promise<LinearResult<ValueResult<OrganizationInvitePayload, S>>> {
     return run(
       this.env,
@@ -50147,7 +50154,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -50179,7 +50186,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: OrganizationInviteUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationInvitePayload>>,
   ): Promise<LinearResult<ValueResult<OrganizationInvitePayload, S>>> {
     return run(
       this.env,
@@ -50206,7 +50213,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: OrganizationStartTrialInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationStartTrialPayload>>,
   ): Promise<LinearResult<ValueResult<OrganizationStartTrialPayload, S>>> {
     return run(
       this.env,
@@ -50233,7 +50240,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: OrganizationUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<OrganizationPayload>>,
   ): Promise<LinearResult<ValueResult<OrganizationPayload, S>>> {
     return run(
       this.env,
@@ -50265,7 +50272,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       labelId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectPayload, S>>> {
     return run(
       this.env,
@@ -50307,7 +50314,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       slackChannelName?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectPayload, S>>> {
     return run(
       this.env,
@@ -50334,7 +50341,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectArchivePayload, S>>> {
     return run(
       this.env,
@@ -50366,7 +50373,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       syncSource: ExternalSyncService;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectPayload, S>>> {
     return run(
       this.env,
@@ -50398,7 +50405,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       replaceTeamLabels?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectLabelPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectLabelPayload, S>>> {
     return run(
       this.env,
@@ -50425,7 +50432,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -50452,7 +50459,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectLabelPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectLabelPayload, S>>> {
     return run(
       this.env,
@@ -50479,7 +50486,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectLabelPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectLabelPayload, S>>> {
     return run(
       this.env,
@@ -50516,7 +50523,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       replaceTeamLabels?: boolean | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectLabelPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectLabelPayload, S>>> {
     return run(
       this.env,
@@ -50543,7 +50550,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectMilestoneCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectMilestonePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectMilestonePayload, S>>> {
     return run(
       this.env,
@@ -50570,7 +50577,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -50602,7 +50609,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectMilestoneMoveInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectMilestoneMovePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectMilestoneMovePayload, S>>> {
     return run(
       this.env,
@@ -50634,7 +50641,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectMilestoneUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectMilestonePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectMilestonePayload, S>>> {
     return run(
       this.env,
@@ -50661,7 +50668,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectRelationCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectRelationPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectRelationPayload, S>>> {
     return run(
       this.env,
@@ -50688,7 +50695,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -50720,7 +50727,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectRelationUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectRelationPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectRelationPayload, S>>> {
     return run(
       this.env,
@@ -50752,7 +50759,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       labelId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectPayload, S>>> {
     return run(
       this.env,
@@ -50779,7 +50786,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectStatusArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectStatusArchivePayload, S>>> {
     return run(
       this.env,
@@ -50806,7 +50813,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectStatusCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectStatusPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectStatusPayload, S>>> {
     return run(
       this.env,
@@ -50833,7 +50840,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectStatusArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectStatusArchivePayload, S>>> {
     return run(
       this.env,
@@ -50865,7 +50872,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectStatusUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectStatusPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectStatusPayload, S>>> {
     return run(
       this.env,
@@ -50892,7 +50899,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectArchivePayload, S>>> {
     return run(
       this.env,
@@ -50924,7 +50931,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectPayload>>,
   ): Promise<LinearResult<ValueResult<ProjectPayload, S>>> {
     return run(
       this.env,
@@ -50951,7 +50958,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectUpdateArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectUpdateArchivePayload, S>>> {
     return run(
       this.env,
@@ -50978,7 +50985,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectUpdateCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectUpdatePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectUpdatePayload, S>>> {
     return run(
       this.env,
@@ -51005,7 +51012,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectUpdateArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectUpdateArchivePayload, S>>> {
     return run(
       this.env,
@@ -51037,7 +51044,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ProjectUpdateUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ProjectUpdatePayload>>,
   ): Promise<LinearResult<ValueResult<ProjectUpdatePayload, S>>> {
     return run(
       this.env,
@@ -51064,7 +51071,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: PushSubscriptionCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<PushSubscriptionPayload>>,
   ): Promise<LinearResult<ValueResult<PushSubscriptionPayload, S>>> {
     return run(
       this.env,
@@ -51091,7 +51098,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<PushSubscriptionPayload>>,
   ): Promise<LinearResult<ValueResult<PushSubscriptionPayload, S>>> {
     return run(
       this.env,
@@ -51118,7 +51125,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReactionCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReactionPayload>>,
   ): Promise<LinearResult<ValueResult<ReactionPayload, S>>> {
     return run(
       this.env,
@@ -51145,7 +51152,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -51177,7 +51184,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       type?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<IntegrationPayload>>,
   ): Promise<LinearResult<ValueResult<IntegrationPayload, S>>> {
     return run(
       this.env,
@@ -51204,7 +51211,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseArchivePayload, S>>> {
     return run(
       this.env,
@@ -51231,7 +51238,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseCompleteInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePayload, S>>> {
     return run(
       this.env,
@@ -51258,7 +51265,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePayload, S>>> {
     return run(
       this.env,
@@ -51285,7 +51292,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseArchivePayload, S>>> {
     return run(
       this.env,
@@ -51312,7 +51319,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseNoteCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseNotePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseNotePayload, S>>> {
     return run(
       this.env,
@@ -51339,7 +51346,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -51371,7 +51378,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseNoteUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseNotePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseNotePayload, S>>> {
     return run(
       this.env,
@@ -51398,7 +51405,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePipelineArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePipelineArchivePayload, S>>> {
     return run(
       this.env,
@@ -51425,7 +51432,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleasePipelineCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePipelinePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePipelinePayload, S>>> {
     return run(
       this.env,
@@ -51452,7 +51459,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePipelineArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePipelineArchivePayload, S>>> {
     return run(
       this.env,
@@ -51479,7 +51486,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePipelineArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePipelineArchivePayload, S>>> {
     return run(
       this.env,
@@ -51511,7 +51518,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleasePipelineUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePipelinePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePipelinePayload, S>>> {
     return run(
       this.env,
@@ -51538,7 +51545,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseStageArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseStageArchivePayload, S>>> {
     return run(
       this.env,
@@ -51565,7 +51572,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseStageCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseStagePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseStagePayload, S>>> {
     return run(
       this.env,
@@ -51592,7 +51599,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseStageArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseStageArchivePayload, S>>> {
     return run(
       this.env,
@@ -51624,7 +51631,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseStageUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseStagePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseStagePayload, S>>> {
     return run(
       this.env,
@@ -51651,7 +51658,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseSyncInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePayload, S>>> {
     return run(
       this.env,
@@ -51678,7 +51685,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleaseArchivePayload>>,
   ): Promise<LinearResult<ValueResult<ReleaseArchivePayload, S>>> {
     return run(
       this.env,
@@ -51710,7 +51717,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePayload, S>>> {
     return run(
       this.env,
@@ -51737,7 +51744,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ReleaseUpdateByPipelineInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ReleasePayload>>,
   ): Promise<LinearResult<ValueResult<ReleasePayload, S>>> {
     return run(
       this.env,
@@ -51764,7 +51771,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -51791,7 +51798,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       email: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -51818,7 +51825,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: RoadmapToProjectCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<RoadmapToProjectPayload>>,
   ): Promise<LinearResult<ValueResult<RoadmapToProjectPayload, S>>> {
     return run(
       this.env,
@@ -51845,7 +51852,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -51877,7 +51884,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: RoadmapToProjectUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<RoadmapToProjectPayload>>,
   ): Promise<LinearResult<ValueResult<RoadmapToProjectPayload, S>>> {
     return run(
       this.env,
@@ -51909,7 +51916,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TeamCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamPayload>>,
   ): Promise<LinearResult<ValueResult<TeamPayload, S>>> {
     return run(
       this.env,
@@ -51936,7 +51943,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamPayload>>,
   ): Promise<LinearResult<ValueResult<TeamPayload, S>>> {
     return run(
       this.env,
@@ -51963,7 +51970,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -51990,7 +51997,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -52017,7 +52024,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TeamMembershipCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamMembershipPayload>>,
   ): Promise<LinearResult<ValueResult<TeamMembershipPayload, S>>> {
     return run(
       this.env,
@@ -52049,7 +52056,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -52081,7 +52088,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TeamMembershipUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamMembershipPayload>>,
   ): Promise<LinearResult<ValueResult<TeamMembershipPayload, S>>> {
     return run(
       this.env,
@@ -52108,7 +52115,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamArchivePayload>>,
   ): Promise<LinearResult<ValueResult<TeamArchivePayload, S>>> {
     return run(
       this.env,
@@ -52145,7 +52152,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       mapping?: InheritanceEntityMapping | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<TeamPayload>>,
   ): Promise<LinearResult<ValueResult<TeamPayload, S>>> {
     return run(
       this.env,
@@ -52172,7 +52179,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TemplateCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TemplatePayload>>,
   ): Promise<LinearResult<ValueResult<TemplatePayload, S>>> {
     return run(
       this.env,
@@ -52199,7 +52206,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -52231,7 +52238,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TemplateUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TemplatePayload>>,
   ): Promise<LinearResult<ValueResult<TemplatePayload, S>>> {
     return run(
       this.env,
@@ -52258,7 +52265,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TimeScheduleCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TimeSchedulePayload>>,
   ): Promise<LinearResult<ValueResult<TimeSchedulePayload, S>>> {
     return run(
       this.env,
@@ -52285,7 +52292,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -52312,7 +52319,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<TimeSchedulePayload>>,
   ): Promise<LinearResult<ValueResult<TimeSchedulePayload, S>>> {
     return run(
       this.env,
@@ -52344,7 +52351,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TimeScheduleUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TimeSchedulePayload>>,
   ): Promise<LinearResult<ValueResult<TimeSchedulePayload, S>>> {
     return run(
       this.env,
@@ -52376,7 +52383,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TimeScheduleUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TimeSchedulePayload>>,
   ): Promise<LinearResult<ValueResult<TimeSchedulePayload, S>>> {
     return run(
       this.env,
@@ -52403,7 +52410,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TriageResponsibilityCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TriageResponsibilityPayload>>,
   ): Promise<LinearResult<ValueResult<TriageResponsibilityPayload, S>>> {
     return run(
       this.env,
@@ -52430,7 +52437,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -52462,7 +52469,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: TriageResponsibilityUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<TriageResponsibilityPayload>>,
   ): Promise<LinearResult<ValueResult<TriageResponsibilityPayload, S>>> {
     return run(
       this.env,
@@ -52494,7 +52501,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       role: UserRoleType;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserAdminPayload>>,
   ): Promise<LinearResult<ValueResult<UserAdminPayload, S>>> {
     return run(
       this.env,
@@ -52526,7 +52533,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       workspaceIntegrationId?: string | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserPayload>>,
   ): Promise<LinearResult<ValueResult<UserPayload, S>>> {
     return run(
       this.env,
@@ -52558,7 +52565,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       operation: UserFlagUpdateOperation;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserSettingsFlagPayload>>,
   ): Promise<LinearResult<ValueResult<UserSettingsFlagPayload, S>>> {
     return run(
       this.env,
@@ -52585,7 +52592,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserAdminPayload>>,
   ): Promise<LinearResult<ValueResult<UserAdminPayload, S>>> {
     return run(
       this.env,
@@ -52617,7 +52624,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       sessionId: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserAdminPayload>>,
   ): Promise<LinearResult<ValueResult<UserAdminPayload, S>>> {
     return run(
       this.env,
@@ -52644,7 +52651,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       flags?: UserFlagType[] | null;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserSettingsFlagsResetPayload>>,
   ): Promise<LinearResult<ValueResult<UserSettingsFlagsResetPayload, S>>> {
     return run(
       this.env,
@@ -52676,7 +52683,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: UserSettingsUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserSettingsPayload>>,
   ): Promise<LinearResult<ValueResult<UserSettingsPayload, S>>> {
     return run(
       this.env,
@@ -52708,7 +52715,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserAdminPayload>>,
   ): Promise<LinearResult<ValueResult<UserAdminPayload, S>>> {
     return run(
       this.env,
@@ -52735,7 +52742,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserAdminPayload>>,
   ): Promise<LinearResult<ValueResult<UserAdminPayload, S>>> {
     return run(
       this.env,
@@ -52767,7 +52774,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserAdminPayload>>,
   ): Promise<LinearResult<ValueResult<UserAdminPayload, S>>> {
     return run(
       this.env,
@@ -52799,7 +52806,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: UserUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<UserPayload>>,
   ): Promise<LinearResult<ValueResult<UserPayload, S>>> {
     return run(
       this.env,
@@ -52826,7 +52833,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ViewPreferencesCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ViewPreferencesPayload>>,
   ): Promise<LinearResult<ValueResult<ViewPreferencesPayload, S>>> {
     return run(
       this.env,
@@ -52853,7 +52860,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -52885,7 +52892,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: ViewPreferencesUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<ViewPreferencesPayload>>,
   ): Promise<LinearResult<ValueResult<ViewPreferencesPayload, S>>> {
     return run(
       this.env,
@@ -52912,7 +52919,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: WebhookCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<WebhookPayload>>,
   ): Promise<LinearResult<ValueResult<WebhookPayload, S>>> {
     return run(
       this.env,
@@ -52939,7 +52946,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<DeletePayload>>,
   ): Promise<LinearResult<ValueResult<DeletePayload, S>>> {
     return run(
       this.env,
@@ -52966,7 +52973,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<WebhookRotateSecretPayload>>,
   ): Promise<LinearResult<ValueResult<WebhookRotateSecretPayload, S>>> {
     return run(
       this.env,
@@ -52998,7 +53005,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: WebhookUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<WebhookPayload>>,
   ): Promise<LinearResult<ValueResult<WebhookPayload, S>>> {
     return run(
       this.env,
@@ -53025,7 +53032,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       id: string;
     },
-    select: S,
+    select: S & Exact<S, Selection<WorkflowStateArchivePayload>>,
   ): Promise<LinearResult<ValueResult<WorkflowStateArchivePayload, S>>> {
     return run(
       this.env,
@@ -53052,7 +53059,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: WorkflowStateCreateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<WorkflowStatePayload>>,
   ): Promise<LinearResult<ValueResult<WorkflowStatePayload, S>>> {
     return run(
       this.env,
@@ -53084,7 +53091,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
        */
       input: WorkflowStateUpdateInput;
     },
-    select: S,
+    select: S & Exact<S, Selection<WorkflowStatePayload>>,
   ): Promise<LinearResult<ValueResult<WorkflowStatePayload, S>>> {
     return run(
       this.env,

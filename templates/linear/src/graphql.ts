@@ -72,7 +72,8 @@ export const graphqlRequest = (
   const declarations: string[] = [];
 
   const argumentsOf = (owner: string, types: Record<string, string>, values: JsonInput) => {
-    const parsed = argumentValues.safeParse(values ?? {});
+    // Undefined fields are left out at every depth, as JSON leaves them out.
+    const parsed = argumentValues.safeParse(JSON.parse(JSON.stringify(values ?? {})));
 
     if (!parsed.success) throw new InvalidRequest(`Arguments of ${owner} must be an object`);
 

@@ -274,7 +274,7 @@ const offer = (
   methods.push(
     isLeafType(target)
       ? `${description}  async ${name}(input: ${input}): Promise<LinearResult<${result}>> {\n    return run(this.env, this.ctx.props, ${operation}, input);\n  }\n`
-      : `${description}  async ${name}<S extends Selection<${target.name}>>(input: ${input}, select: S): Promise<LinearResult<ValueResult<${result}, S>>> {\n    return run(this.env, this.ctx.props, ${operation}, input, select);\n  }\n`,
+      : `${description}  async ${name}<S extends Selection<${target.name}>>(input: ${input}, select: S & Exact<S, Selection<${target.name}>>): Promise<LinearResult<ValueResult<${result}, S>>> {\n    return run(this.env, this.ctx.props, ${operation}, input, select);\n  }\n`,
   );
 
   return undefined;
@@ -332,7 +332,7 @@ writeFileSync(
 import type { Environment } from "./context.ts";
 import type { LinearResult } from "./results.ts";
 import { type LinearProperties, run } from "./run.ts";
-import type { JsonObject, JsonValue, Selection, ValueResult, Variants } from "./selection.ts";
+import type { Exact, JsonObject, JsonValue, Selection, ValueResult, Variants } from "./selection.ts";
 
 ${models}/**
  * Every query and mutation of Linear's GraphQL API that a user's token can use,

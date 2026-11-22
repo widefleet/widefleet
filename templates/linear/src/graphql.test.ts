@@ -57,6 +57,20 @@ describe("Linear GraphQL requests", () => {
     );
   });
 
+  it("leaves out undefined input at every depth", () => {
+    expect(
+      graphqlRequest(
+        "Mutation",
+        "issueCreate",
+        { input: { teamId: "team-1", description: undefined } },
+        { success: true },
+      ),
+    ).toEqual({
+      query: "mutation($v0: IssueCreateInput!) { issueCreate(input: $v0) { success } }",
+      variables: { v0: { teamId: "team-1" } },
+    });
+  });
+
   it("rejects requests that do not match Linear's schema before sending them", () => {
     const invalid = (input: Arguments, select: FieldSelection | undefined) => () =>
       graphqlRequest("Query", "issue", input, select);

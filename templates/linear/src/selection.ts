@@ -48,6 +48,20 @@ export type Selection<T> = {
     : FieldSelection<T[K]>;
 };
 
+type Keys<T> = T extends unknown ? keyof T : never;
+
+type At<T, K> = T extends unknown ? (K extends keyof T ? T[K] : never) : never;
+
+/**
+ * A selection with each field the allowed selection does not name typed as `never`, so a
+ * misspelled field or argument fails to compile, also next to valid ones.
+ */
+export type Exact<S, Allowed> = S extends readonly unknown[]
+  ? S
+  : S extends object
+    ? { [K in keyof S]: K extends Keys<Allowed> ? Exact<S[K], NonNullable<At<Allowed, K>>> : never }
+    : S;
+
 type FieldResult<V, S> = V extends (args: never) => infer R
   ? NonNullable<R> extends Leaf
     ? R
