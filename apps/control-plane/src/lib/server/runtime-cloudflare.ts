@@ -83,6 +83,9 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     encryptionKey: configuration.PLATFORM_ENCRYPTION_KEY,
     authRateLimit: cloudflareAuthRateLimit(bindings, configuration.PLATFORM_URL),
     authIpAddressHeaders: ["cf-connecting-ip"],
+    // Each request builds its own auth instance, and Better Auth checks the schema on an
+    // instance's first use. Node runs the check once per process, and tests cover it there.
+    authValidateSchema: false,
     authCookies: sveltekitCookies(getRequestEvent),
   };
 

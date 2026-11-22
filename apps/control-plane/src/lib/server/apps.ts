@@ -17,14 +17,14 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
-import type { Database } from "./database.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 import { member, user } from "./auth-schema.ts";
 import { findMembers } from "./member-directory.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { observe, type Observation } from "./observation.ts";
 import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
-import { transact, type Transaction } from "./transactions.ts";
+import { readOnly, transact, type Transaction } from "./transactions.ts";
 import { lockOrganizationRuntime, requireAgentExecution } from "./organization-runtime.ts";
 import { operationId, type HostedExecution } from "./deployment-execution.ts";
 
@@ -58,6 +58,23 @@ export const managedApp = async (
     .from(apps)
     .where(and(eq(apps.id, appId), appVisibility(transaction, principal)))
     .for("update");
+
+  if (!record)
+    return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
+
+  return Result.ok(record);
+};
+
+// Reads see the app without locking its row, so they need no transaction.
+export const readableApp = async (
+  executor: DatabaseExecutor,
+  principal: Pick<Principal, "id" | "application">,
+  appId: string,
+) => {
+  const [record] = await executor
+    .select()
+    .from(apps)
+    .where(and(eq(apps.id, appId), appVisibility(executor, principal)));
 
   if (!record)
     return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
@@ -426,7 +443,7 @@ export const createAppService = (
   sourceSupported = false,
 ) => ({
   catalog: (principal: Principal) =>
-    transact(database, async (transaction) => {
+    readOnly(database, async (transaction) => {
       const records = await transaction
         .select({
           id: apps.id,
@@ -486,7 +503,7 @@ export const createAppService = (
       return Result.ok({ listed });
     }),
   list: (principal: Principal) =>
-    transact(database, async (transaction) => {
+    readOnly(database, async (transaction) => {
       const records = await transaction
         .select({ app: apps, metadata: artifacts.metadata })
         .from(apps)
@@ -507,8 +524,8 @@ export const createAppService = (
       );
     }),
   get: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
-      const record = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const record = await readableApp(transaction, principal, appId);
 
       if (record.isErr()) return record;
 
@@ -614,8 +631,8 @@ export const createAppService = (
       observation,
     ),
   history: async (principal: Principal, appId: string) => {
-    const history = await transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    const history = await readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
 
@@ -712,8 +729,8 @@ export const createAppService = (
     });
   },
   access: (principal: Principal, appId: string, search: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
 

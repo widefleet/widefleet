@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { companySsoAvailable, operatorTrustedSso } from "./sso-policy.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { observe, type Observation } from "./observation.ts";
@@ -122,11 +123,24 @@ export const createAuthentication = (
     hooks: {
       ...settings.hooks,
       after: createAuthMiddleware(async (context) => {
-        const error = context.context.returned;
+        const returned = context.context.returned;
+        const allowUser = options.authentication?.allowUser;
+
+        // Session lookups run on every request, so an unavailable account is refused using the
+        // session the endpoint already read instead of reading it again beforehand.
+        if (context.path === "/get-session" && allowUser) {
+          const found = z
+            .object({ user: z.object({ id: z.string() }) })
+            .nullable()
+            .safeParse(returned);
+
+          if (found.success && found.data && !(await allowUser(found.data.user.id)))
+            throw new APIError("FORBIDDEN", { message: "This account is unavailable" });
+        }
 
         // Direct auth.api calls throw to the page/API handler instead.
-        if (context.request && error instanceof APIError && error.statusCode >= 500)
-          reportException(error);
+        if (context.request && returned instanceof APIError && returned.statusCode >= 500)
+          reportException(returned);
       }),
     },
     disabledPaths: [...settings.disabledPaths, ...managedPluginPaths],

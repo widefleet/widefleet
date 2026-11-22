@@ -47,6 +47,7 @@ export const authenticationOptions = (
     rateLimit,
     ipAddressHeaders,
     publicSignup = false,
+    validateSchema = true,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
@@ -59,6 +60,8 @@ export const authenticationOptions = (
     rateLimit?: BetterAuthOptions["rateLimit"];
     ipAddressHeaders?: string[];
     publicSignup?: boolean;
+    /** Better Auth checks the schema the first time each instance is used. */
+    validateSchema?: boolean;
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
@@ -122,13 +125,10 @@ export const authenticationOptions = (
         ];
 
         const current =
-          (allowUser && ["/get-session", "/token"].includes(context.path)) ||
+          (allowUser && context.path === "/token") ||
           ["/device/approve", "/device/deny"].includes(context.path) ||
           accountPaths.includes(context.path)
-            ? await getSessionFromCtx(context, {
-                // Leave renewal to the endpoint so its response owns the refreshed cookie.
-                disableRefresh: context.path === "/get-session",
-              })
+            ? await getSessionFromCtx(context)
             : null;
 
         if (current && allowUser && !(await allowUser(current.user.id)))
@@ -264,7 +264,7 @@ export const authenticationOptions = (
       },
     },
     advanced: {
-      database: { generateId: () => crypto.randomUUID() },
+      database: { generateId: () => crypto.randomUUID(), validateSchema },
       ipAddress: { ipAddressHeaders: ipAddressHeaders ?? ["x-forwarded-for"] },
       cookiePrefix: "platform",
       crossSubDomainCookies: { enabled: false },
