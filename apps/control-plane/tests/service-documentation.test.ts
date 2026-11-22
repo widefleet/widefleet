@@ -358,6 +358,23 @@ native(
   },
 );
 
+native("records types named only by a nested signature's type parameters", async () => {
+  const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    interface Item { id: string }
+    interface Callback { <T extends Item = Item>(value: T): void }
+    export class Reader extends WorkerEntrypoint {
+      subscribe(callback: Callback) { return true; }
+    }`);
+
+  const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+  expect(result.warnings).toEqual([]);
+  expect(
+    selectServiceMethods(result.documentation, "Reader", ["subscribe"]).selection?.types.map(
+      (type) => type.name,
+    ),
+  ).toEqual(expect.arrayContaining(["Callback", "Item"]));
+});
+
 native("qualifies conflicting names without discarding either type", async () => {
   const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
     namespace One { export interface Item { id: string } }

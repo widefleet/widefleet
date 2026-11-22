@@ -212,6 +212,16 @@ impl Types {
                         for &parameter in signature.parameters() {
                             children.push(checker.get_type_of_symbol_exported(parameter));
                         }
+                        // Constraints and defaults of the signature's own type parameters are
+                        // rendered with the definition, so the types they name are used too.
+                        for &parameter in signature.type_parameters() {
+                            children.extend(
+                                checker.get_constraint_of_type_parameter_exported(parameter),
+                            );
+                            children.extend(
+                                checker.get_default_from_type_parameter_exported(parameter),
+                            );
+                        }
                     }
                 }
             }
