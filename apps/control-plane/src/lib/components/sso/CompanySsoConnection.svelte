@@ -123,7 +123,10 @@
 
   let domainSsoSaves = Promise.resolve();
 
+  let domainSsoClicks = 0;
+
   const changeDomainSso = (enabled: boolean) => {
+    const click = ++domainSsoClicks;
     domainSsoChoice = enabled;
     domainSsoSaves = domainSsoSaves.then(async () => {
       try {
@@ -133,7 +136,8 @@
           description: failureMessage(cause, "Try again."),
         });
       } finally {
-        if (domainSsoChoice === enabled) domainSsoChoice = null;
+        // Only the latest click's save hands the switch back to the saved state.
+        if (click === domainSsoClicks) domainSsoChoice = null;
       }
     });
   };
