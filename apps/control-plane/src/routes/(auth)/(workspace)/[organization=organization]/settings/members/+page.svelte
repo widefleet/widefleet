@@ -57,29 +57,36 @@
     ...(data.principal.role === "owner" ? [{ value: "owner", label: "Owner" }] : []),
   ]);
 
-  // The chosen role shows at once and is its own confirmation. A rejected change drops the
+  // Saves for one member run in the order they were chosen, so the last choice is the one kept.
+  const roleSaves = new Map<string, Promise<void>>();
+
+  // The chosen role shows at once and is its own confirmation. A rejected change drops its
   // override, so the previous role returns, and the toast explains why without moving the list.
-  const changeRole = async (person: { id: string; name: string }, value: string) => {
+  const changeRole = (person: { id: string; name: string }, value: string) => {
     const role = memberRoleInput.shape.role.parse(value);
 
-    try {
-      await setMemberRole({
-        organizationId: workspace.organizationId,
-        memberId: person.id,
-        role,
-      }).updates(
-        members.withOverride((current) => ({
-          ...current,
-          members: current.members.map((entry) =>
-            entry.id === person.id ? { ...entry, role } : entry,
-          ),
-        })),
-      );
-    } catch (cause) {
-      toast.error(`Could not change the role of ${person.name}.`, {
-        description: failureMessage(cause, "Try again."),
-      });
-    }
+    const override = members.withOverride((current) => ({
+      ...current,
+      members: current.members.map((entry) =>
+        entry.id === person.id ? { ...entry, role } : entry,
+      ),
+    }));
+
+    const save = (roleSaves.get(person.id) ?? Promise.resolve()).then(async () => {
+      try {
+        await setMemberRole({
+          organizationId: workspace.organizationId,
+          memberId: person.id,
+          role,
+        }).updates(override);
+      } catch (cause) {
+        toast.error(`Could not change the role of ${person.name}.`, {
+          description: failureMessage(cause, "Try again."),
+        });
+      }
+    });
+
+    roleSaves.set(person.id, save);
   };
 
   const invited = $derived(

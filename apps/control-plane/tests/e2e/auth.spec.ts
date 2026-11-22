@@ -1890,6 +1890,33 @@ test("saves a role on selection and restores it when saving fails", async ({ pag
   await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
   expect(new URL(page.url()).searchParams.get("page")).toBe("2");
 
+  // Two quick choices reach the server in order, so the later one is kept.
+  await role.click();
+  await page.getByRole("option", { name: "Member", exact: true }).click();
+  await role.click();
+  await page.getByRole("option", { name: "Admin", exact: true }).click();
+  await expect(role).toHaveText("Admin");
+  await release();
+  await expect
+    .poll(async () =>
+      environment.database.db
+        .select({ role: member.role })
+        .from(member)
+        .where(eq(member.userId, target.id)),
+    )
+    .toEqual([{ role: "member" }]);
+  await expect(role).toHaveText("Admin");
+  await release();
+  await expect
+    .poll(async () =>
+      environment.database.db
+        .select({ role: member.role })
+        .from(member)
+        .where(eq(member.userId, target.id)),
+    )
+    .toEqual([{ role: "admin" }]);
+  await expect(role).toHaveText("Admin");
+
   // The membership ends while the page is open, so the server rejects the change.
   await environment.database.db.delete(member).where(eq(member.userId, target.id));
   await role.click();
