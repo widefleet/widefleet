@@ -171,6 +171,8 @@
   };
 
   // The member's role can change while the tab is in the background. Recheck when it returns.
+  // The member's role or the session can change while this tab is hidden, and the workspace
+  // query does not rerun on navigation. Recheck when the tab returns.
   const recheckWorkspace = async () => {
     if (document.visibilityState !== "visible") return;
 

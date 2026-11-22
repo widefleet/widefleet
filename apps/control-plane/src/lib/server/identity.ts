@@ -204,7 +204,6 @@ export const createIdentityService = (
 
         return Result.ok({
           userId: current.id,
-          sessionId: null,
           identityOrganizationId: verified.authority.organizationId,
         });
       }
@@ -237,7 +236,6 @@ export const createIdentityService = (
       return Result.ok({
         identityOrganizationId: session.session.identityOrganizationId ?? null,
         userId: session.user.id,
-        sessionId: session.session.id,
       });
     });
 
