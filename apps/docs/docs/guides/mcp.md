@@ -1,7 +1,7 @@
 ---
 title: Connect AI clients with MCP
 description: Use your organization's app services from Claude and other MCP clients.
-lastModified: 2026-11-18
+lastModified: 2026-11-22
 ---
 
 Connect an AI client such as Claude to Widefleet. The client can then find the
@@ -37,14 +37,15 @@ The client gets five tools:
 
 | Tool       | Purpose                                                     |
 | ---------- | ----------------------------------------------------------- |
-| `search`   | Find services available to you.                             |
-| `describe` | Read a service's method signatures and documentation.       |
+| `search`   | Find methods of the services available to you.              |
+| `describe` | Read the signatures, documentation and types of methods.    |
 | `call`     | Call a service method.                                      |
 | `execute`  | Combine several calls in a short JavaScript script.         |
 | `skills`   | Read the `widefleet` skill for building and deploying apps. |
 
-A client typically searches for a service, describes it and then calls a method.
-For a service with a `Reader.status()` method, the `call` arguments are:
+A client typically searches for a method, describes it and then calls it. Search
+with a service's hostname and entrypoint to list all of its methods. For a service
+with a `Reader.status()` method, the `call` arguments are:
 
 ```json
 {
