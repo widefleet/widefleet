@@ -464,7 +464,7 @@ describe("App service connections", () => {
 
   it("describes only the active provider version in the selected organization, including rollback and legacy artifacts", async () => {
     const target = await app(["Reader"]);
-    const legacy = (await services().describe(principal, target.id)).unwrap();
+    const legacy = (await services().reference(principal, target.id)).unwrap();
     expect(legacy.documentation).toBeNull();
 
     const first = contract.workerMetadata.parse(
@@ -512,11 +512,11 @@ describe("App service connections", () => {
       status: "queued",
       requestId: crypto.randomUUID(),
     });
-    expect((await services().describe(principal, target.slug)).unwrap().documentation).toEqual(
+    expect((await services().reference(principal, target.slug)).unwrap().documentation).toEqual(
       documentation("First version"),
     );
     expect(
-      await services().describe(
+      await services().reference(
         { ...principal, application: { organizationId: "foreign", admin: true } },
         target.id,
       ),
@@ -525,7 +525,7 @@ describe("App service connections", () => {
       .update(apps)
       .set({ activeDeploymentId: nextDeployment })
       .where(eq(apps.id, target.id));
-    expect((await services().describe(principal, target.id)).unwrap()).toMatchObject({
+    expect((await services().reference(principal, target.id)).unwrap()).toMatchObject({
       deploymentId: nextDeployment,
       documentation: documentation("Next version"),
     });
@@ -533,9 +533,97 @@ describe("App service connections", () => {
       .update(apps)
       .set({ activeDeploymentId: legacy.deploymentId })
       .where(eq(apps.id, target.id));
-    expect((await services().describe(principal, target.id)).unwrap().documentation).toEqual(
+    expect((await services().reference(principal, target.id)).unwrap().documentation).toEqual(
       documentation("First version"),
     );
+  });
+
+  it("lists an API's methods and describes selected methods with the types they use", async () => {
+    const signature = (parameter: string, returns: string) => ({
+      parameters: [
+        { name: "input", type: parameter, description: "", optional: false, rest: false },
+      ],
+      returns: { type: returns, description: "" },
+    });
+
+    const method = (name: string, summary: string, parameter: string, returns: string) => ({
+      name,
+      summary,
+      remarks: "",
+      examples: [],
+      throws: [],
+      signatures: [signature(parameter, returns)],
+    });
+
+    const type = (name: string, definition: string) => ({
+      name,
+      definition,
+      summary: "",
+      remarks: "",
+      examples: [],
+    });
+
+    const target = await app(["Reader"], principal, {
+      format: 1,
+      entrypoints: [
+        {
+          name: "Reader",
+          summary: "Read inventory.\nRemarks for every method.",
+          remarks: "Pages hold up to 50 items.",
+          examples: [],
+          http: false,
+          methods: [
+            method("findItems", "Find items.\nMatches names.", "Query", "Promise<Page>"),
+            method("countItems", "Count items.", "string", "Promise<number>"),
+          ],
+        },
+      ],
+      types: [
+        type("Query", "type Query = { text: string };"),
+        type("Page", "type Page = { items: Item[] };"),
+        type("Item", "type Item = { id: string };"),
+        type("Unused", "type Unused = { id: string };"),
+      ],
+    });
+
+    const overview = (await services().describe(principal, target.id)).unwrap();
+    expect(overview).toMatchObject({
+      documented: true,
+      methods: [
+        { entrypoint: "Reader", name: "findItems", summary: "Find items." },
+        { entrypoint: "Reader", name: "countItems", summary: "Count items." },
+      ],
+      documentation: null,
+    });
+
+    const selected = (
+      await services().describe(principal, target.id, {
+        entrypoint: "Reader",
+        methods: ["findItems"],
+      })
+    ).unwrap().documentation;
+
+    expect(selected?.entrypoint).toMatchObject({
+      name: "Reader",
+      remarks: "Pages hold up to 50 items.",
+      methods: [{ name: "findItems" }],
+    });
+    // Types reached through other types are included; unrelated ones are not.
+    expect(selected?.types.map((entry) => entry.name)).toEqual(["Query", "Page", "Item"]);
+
+    const unknown = await services().describe(principal, target.id, {
+      entrypoint: "Reader",
+      methods: ["findItems", "deleteItems"],
+    });
+
+    expect(unknown).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(unknown.isErr() ? unknown.error.message : "").toContain("deleteItems");
+    expect(
+      await services().describe(principal, target.id, {
+        entrypoint: "Writer",
+        methods: ["findItems"],
+      }),
+    ).toMatchObject({ error: { code: "NOT_FOUND" } });
   });
 
   it("resolves UUID-shaped slugs with app IDs taking precedence within the selected organization", async () => {

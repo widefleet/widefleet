@@ -15,72 +15,117 @@ import { readDocumentation } from "./artifact-documentation.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { ArtifactStorage } from "./storage.ts";
 
+// The active deployment of an app API in the principal's organization, with its documentation.
+const activeService = (
+  database: Database,
+  storage: ArtifactStorage,
+  principal: Principal,
+  service: string,
+) =>
+  Result.gen(async function* () {
+    const described = yield* Result.await(
+      readOnly(database, async (transaction) => {
+        const byId = contract.identifier.safeParse(service).success
+          ? eq(apps.id, service)
+          : undefined;
+
+        const [record] = await transaction
+          .select({
+            app: apps,
+            metadata: artifacts.metadata,
+            documentation: artifacts.documentation,
+            artifactId: artifacts.id,
+            deploymentId: deployments.id,
+          })
+          .from(apps)
+          .innerJoin(
+            deployments,
+            and(eq(deployments.id, apps.activeDeploymentId), eq(deployments.appId, apps.id)),
+          )
+          .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+          .where(
+            and(
+              eq(apps.organizationId, principal.application.organizationId),
+              isNull(apps.removedAt),
+              ne(apps.state, "deleting"),
+              or(byId, eq(apps.slug, service)),
+            ),
+          )
+          .orderBy(desc(byId ?? apps.slug))
+          .limit(1);
+
+        if (!record)
+          return Result.err(
+            new InvalidOperation({ code: "NOT_FOUND", message: "App service not found" }),
+          );
+        const metadata = contract.workerMetadata.parse(record.metadata);
+
+        return Result.ok({
+          appId: record.app.id,
+          slug: record.app.slug,
+          displayName: record.app.displayName,
+          accessMode: record.app.serviceAccessMode,
+          deploymentId: record.deploymentId,
+          entrypoints: metadata.entrypoints ?? [],
+          artifactId: record.artifactId,
+          documented: record.documentation !== null,
+        });
+      }),
+    );
+
+    const { artifactId, documented, ...description } = described;
+
+    // Read outside the transaction: the artifact and its documentation never change.
+    const documentation = documented
+      ? yield* Result.await(readDocumentation(storage, description.appId, artifactId))
+      : null;
+
+    return Result.ok({ ...description, documentation });
+  });
+
 export const createConnectionService = (
   database: Database,
   storage: ArtifactStorage,
   execution?: HostedExecution,
 ) => ({
   ...createServiceAccess(database, execution),
-  describe: (principal: Principal, service: string) =>
+  /** An app API's complete documentation, for its reference page. */
+  reference: (principal: Principal, service: string) =>
     Result.gen(async function* () {
-      const described = yield* Result.await(
-        readOnly(database, async (transaction) => {
-          const byId = contract.identifier.safeParse(service).success
-            ? eq(apps.id, service)
-            : undefined;
+      const active = yield* Result.await(activeService(database, storage, principal, service));
 
-          const [record] = await transaction
-            .select({
-              app: apps,
-              metadata: artifacts.metadata,
-              documentation: artifacts.documentation,
-              artifactId: artifacts.id,
-              deploymentId: deployments.id,
-            })
-            .from(apps)
-            .innerJoin(
-              deployments,
-              and(eq(deployments.id, apps.activeDeploymentId), eq(deployments.appId, apps.id)),
-            )
-            .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
-            .where(
-              and(
-                eq(apps.organizationId, principal.application.organizationId),
-                isNull(apps.removedAt),
-                ne(apps.state, "deleting"),
-                or(byId, eq(apps.slug, service)),
-              ),
-            )
-            .orderBy(desc(byId ?? apps.slug))
-            .limit(1);
-
-          if (!record)
-            return Result.err(
-              new InvalidOperation({ code: "NOT_FOUND", message: "App service not found" }),
-            );
-          const metadata = contract.workerMetadata.parse(record.metadata);
-
-          return Result.ok({
-            appId: record.app.id,
-            slug: record.app.slug,
-            displayName: record.app.displayName,
-            accessMode: record.app.serviceAccessMode,
-            deploymentId: record.deploymentId,
-            entrypoints: metadata.entrypoints ?? [],
-            artifactId: record.artifactId,
-            documented: record.documentation !== null,
-          });
-        }),
+      return Result.ok(contract.serviceReference.parse(active));
+    }),
+  /** An app API's methods, with the documentation of the selected methods and their types. */
+  describe: (
+    principal: Principal,
+    service: string,
+    selection: { entrypoint: string; methods?: string[] | undefined } = { entrypoint: "default" },
+  ) =>
+    Result.gen(async function* () {
+      const { documentation, ...description } = yield* Result.await(
+        activeService(database, storage, principal, service),
       );
 
-      const { artifactId, documented, ...description } = described;
+      const selected =
+        documentation && selection.methods
+          ? contract.selectServiceMethods(documentation, selection.entrypoint, selection.methods)
+          : null;
 
-      // Read outside the transaction: the artifact and its documentation never change.
-      const documentation = documented
-        ? yield* Result.await(readDocumentation(storage, description.appId, artifactId))
-        : null;
+      if (selection.methods && !selected?.selection)
+        return yield* new InvalidOperation({
+          code: "NOT_FOUND",
+          message: `${selection.entrypoint} has no documented method ${(selected?.unknown ?? selection.methods).join(", ")}`,
+        });
 
-      return Result.ok(contract.serviceDescription.parse({ ...description, documentation }));
+      return Result.ok(
+        contract.serviceDescription.parse({
+          ...description,
+          documented: documentation !== null,
+          methods: documentation ? contract.listServiceMethods(documentation) : [],
+          documentation: selected?.selection ?? null,
+        }),
+      );
     }),
   services: (principal: Principal) =>
     readOnly(database, async (transaction) => {

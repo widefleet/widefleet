@@ -91,7 +91,8 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
         response.end(JSON.stringify(catalog));
       } else if (request.method === "GET" && request.url?.startsWith("/api/v1/app-services/")) {
         // Mirror the service description lookup: an app ID wins over a UUID-shaped slug.
-        const target = decodeURIComponent(request.url.slice("/api/v1/app-services/".length));
+        const url = new URL(request.url, "http://cli.test");
+        const target = decodeURIComponent(url.pathname.slice("/api/v1/app-services/".length));
         const deployed = [...catalog, ...unlisted];
 
         const entry =
@@ -106,11 +107,11 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
             JSON.stringify({
               ...entry,
               deploymentId: app.activeDeploymentId,
-              documentation: {
-                format: 1,
-                entrypoints: [{ name: "Reader", summary: "Read inventory" }],
-                types: [],
-              },
+              documented: true,
+              methods: [{ entrypoint: "Reader", name: "read", summary: "Read inventory" }],
+              documentation: url.searchParams.has("methods")
+                ? { entrypoint: { name: "Reader", summary: "Read inventory" }, types: [] }
+                : null,
             }),
           );
       } else if (
@@ -545,13 +546,33 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     const result = await command("services", "describe", "erp-app");
     expect(JSON.parse(result.stdout)).toMatchObject({
       slug: "erp-app",
-      documentation: { format: 1 },
+      methods: [{ entrypoint: "Reader", name: "read" }],
+      documentation: null,
     });
     expect(requests[0]).toMatchObject({
       path: "/api/v1/app-services/erp-app",
       method: "GET",
       authorization: "Bearer normal-credential",
     });
+
+    const selected = await command(
+      "services",
+      "describe",
+      "erp-app",
+      "--entrypoint",
+      "Reader",
+      "--method",
+      "read",
+      "--method",
+      "count",
+    );
+
+    expect(JSON.parse(selected.stdout)).toMatchObject({
+      documentation: { entrypoint: { name: "Reader" } },
+    });
+    const query = new URL(requests[1]?.path ?? "", "http://cli.test").searchParams;
+    expect(query.get("entrypoint")).toBe("Reader");
+    expect(query.get("methods")).toBe("read,count");
   });
 
   it("rejects the nonstandard widefleet Wrangler property", async () => {

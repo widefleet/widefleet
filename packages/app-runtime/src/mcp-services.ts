@@ -2,6 +2,7 @@ import { serviceTarget } from "./service-target.ts";
 import {
   mcpServiceCall,
   hasAppAccess,
+  selectServiceMethods,
   type InputAnswer,
   type mcpClaims,
 } from "@platform/contracts";
@@ -13,7 +14,7 @@ import { invokeApp } from "./app-rpc.ts";
 import { openInput, rebindInput, requestedInput, sealInput } from "./service-input.ts";
 import { signAppCaller } from "./app-caller.ts";
 import { executionOptions } from "./execution-limits.ts";
-import { rankServices, type SearchRequest } from "./mcp-search.ts";
+import { rankMethods, type SearchRequest } from "./mcp-search.ts";
 import { readServiceIndex } from "./service-index.ts";
 import type { ParentEnvironment } from "./types.ts";
 
@@ -36,7 +37,7 @@ const target = async (
   return app;
 };
 
-export const searchMcpServices = async (
+export const searchMcpMethods = async (
   environment: ParentEnvironment,
   claims: z.infer<typeof mcpClaims>,
   request: SearchRequest,
@@ -45,21 +46,24 @@ export const searchMcpServices = async (
 
   const permitted = Object.entries(services).flatMap(([hostname, service]) =>
     hasAppAccess(service.access.groups, claims.mcp.identity.groups)
-      ? service.entrypoints.map((entrypoint) => ({
-          appId: service.appId,
-          hostname,
-          entrypoint: entrypoint.name,
-          summary: entrypoint.summary,
-          terms: entrypoint.terms,
-        }))
+      ? service.entrypoints.flatMap((entrypoint) =>
+          entrypoint.methods.map((method) => ({
+            appId: service.appId,
+            hostname,
+            entrypoint: entrypoint.name,
+            method: method.name,
+            summary: method.summary,
+            terms: method.terms,
+          })),
+        )
       : [],
   );
 
-  const page = rankServices(permitted, request);
+  const page = rankMethods(permitted, request);
 
   // The index can trail a failed refresh. Authorize each returned service against
   // its current route; describe and call check it again.
-  const hostnames = [...new Set(page.services.map((service) => service.hostname))];
+  const hostnames = [...new Set(page.methods.map((method) => method.hostname))];
 
   const allowed = new Set(
     (
@@ -81,27 +85,38 @@ export const searchMcpServices = async (
   return {
     ...page,
     complete,
-    services: page.services.flatMap(({ appId, hostname, entrypoint, summary }) =>
-      allowed.has(hostname) ? [{ appId, hostname, entrypoint, summary }] : [],
+    methods: page.methods.flatMap(({ appId, hostname, entrypoint, method, summary }) =>
+      allowed.has(hostname) ? [{ appId, hostname, entrypoint, method, summary }] : [],
     ),
   };
 };
 
-export const describeMcpService = async (
+export const describeMcpMethods = async (
   environment: ParentEnvironment,
   claims: z.infer<typeof mcpClaims>,
   hostname: string,
   entrypoint: string,
+  methods: string[],
 ) => {
   const app = await target(environment, claims, hostname, entrypoint);
   const documentation = await readServiceDocumentation(environment, app);
+
+  if (!documentation)
+    throw new Error(`${hostname} has no API documentation; deploy it with the current CLI`);
+  const { selection, unknown } = selectServiceMethods(documentation, entrypoint, methods);
+
+  if (!selection)
+    throw new Error(
+      `${entrypoint} on ${hostname} has no documented method ${unknown.join(", ")}. ` +
+        "Search with this hostname and entrypoint to list its methods.",
+    );
 
   return {
     appId: app.appId,
     hostname,
     entrypoint,
-    documentation: documentation?.entrypoints.find((entry) => entry.name === entrypoint) ?? null,
-    types: documentation?.types ?? [],
+    documentation: selection.entrypoint,
+    types: selection.types,
   };
 };
 
