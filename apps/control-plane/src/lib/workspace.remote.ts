@@ -3,6 +3,7 @@ import { z } from "zod";
 import { organizationSlug } from "@platform/contracts";
 import { remoteContext, queryValue } from "#server/remote-support";
 import { getRuntime } from "#server/runtime";
+import { sessionSignIn } from "#server/identity";
 import { error, redirect } from "@sveltejs/kit";
 
 // The workspace shell names its organization by the slug in the page URL. Its pages and
@@ -17,7 +18,7 @@ export const getWorkspace = query(
     const runtime = await getRuntime();
 
     const organizations = queryValue(
-      await runtime.identity.listOrganizations(user.id, session.identityOrganizationId ?? null),
+      await runtime.identity.listOrganizations(sessionSignIn(user, session)),
     );
 
     const selected = organizations.find((organization) => organization.slug === slug);

@@ -111,7 +111,7 @@ export const createMcpCliLogin = (
           .set({
             status: "approved",
             userId,
-            // A company login authorizes only its own organization, like an SSO session.
+            // Like an SSO session, a company login keeps its organization as authority.
             referenceId: authenticationReference(userId, organizationId),
             sessionId: null,
             authTime: new Date(),

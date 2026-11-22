@@ -22,6 +22,7 @@ import {
   createInvitationService,
   prepareOrganizationInvitation,
 } from "../src/lib/server/members.ts";
+import { createOnboardingService } from "../src/lib/server/onboarding.ts";
 
 const cookies = (response: Response) =>
   response.headers
@@ -167,6 +168,12 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
       "platform:read",
     );
 
+  const guestDomain = (providerId: string) =>
+    environment.database.db
+      .update(ssoProvider)
+      .set({ domain: "partner.test", domainVerified: true })
+      .where(eq(ssoProvider.providerId, providerId));
+
   beforeAll(async () => {
     environment = await createTestEnvironment(origin);
     firstProvider = await createIdentityProvider(`${authUrl}/sso/callback/company-alpha`, false);
@@ -233,6 +240,9 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     const second = await loginCompany("company-bravo");
     secondCookie = second.cookie;
     expect(second.current?.session.identityOrganizationId).toBe(secondOrg);
+    // Both companies keep this person as an external guest: the address is on neither domain.
+    await guestDomain("company-alpha");
+    await guestDomain("company-bravo");
   });
 
   afterAll(async () => {
@@ -389,6 +399,163 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
       expect(response.status, await response.clone().text()).toBe(403);
     },
   );
+
+  it("lets a company login reach other memberships for an address on its verified domain", async () => {
+    const personal = crypto.randomUUID();
+    await environment.database.db.insert(organization).values({
+      id: personal,
+      slug: "personal-fixture",
+      name: "Personal fixture",
+      createdAt: new Date(),
+    });
+    await environment.database.db.insert(organizationRuntimes).values({ organizationId: personal });
+    await environment.database.db.insert(member).values({
+      id: crypto.randomUUID(),
+      userId,
+      organizationId: personal,
+      role: "member",
+      createdAt: new Date(),
+    });
+
+    const browser = (organizationId: string) =>
+      new Request(`${apiResource(environment.configuration)}/organizations`, {
+        headers: { cookie: firstCookie, origin, "x-widefleet-organization": organizationId },
+      });
+
+    const listed = async () =>
+      (await identity.organizations(browser(firstOrg)))
+        .unwrap()
+        .map(({ id, ssoRequired }) => ({ id, ssoRequired }));
+
+    const invited = await environment.database.db.transaction(async (transaction) => {
+      const organizationId = crypto.randomUUID();
+      await transaction.insert(organization).values({
+        id: organizationId,
+        slug: "domain-invitation",
+        name: "Domain invitation",
+        createdAt: new Date(),
+      });
+      await transaction.insert(organizationRuntimes).values({ organizationId });
+
+      return prepareOrganizationInvitation(transaction, organizationId, environment.owner.id, {
+        email: "user@example.test",
+        role: "member",
+      });
+    });
+
+    const invitations = createInvitationService(
+      environment.database.db,
+      environment.configuration,
+      undefined,
+      { filterOrganizations: async (candidates) => candidates.map(({ id }) => id) },
+    );
+
+    const onboarding = createOnboardingService(
+      environment.database.db,
+      { publish: () => Promise.reject(new Error("Publication is not expected")) },
+      () => Promise.reject(new Error("Creation reached")),
+    );
+
+    const signIn = (await identity.authenticateUser(browser(firstOrg), "platform:read")).unwrap();
+
+    const device = await start();
+    await confirmed(await approve(await consent(device.user_code, firstCookie), firstCookie));
+    const tokens = tokenResponse.parse(await (await poll(device.device_code)).json());
+    expect(decodeJwt(tokens.access_token)["reference_id"]).toBe(`organization:${firstOrg}`);
+    expect(await listed()).toEqual([{ id: firstOrg, ssoRequired: false }]);
+    expect(await access(tokens.access_token, personal)).toMatchObject({
+      error: { code: "FORBIDDEN" },
+    });
+    await expect(invitations.read(signIn, invited.invitation.id)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(onboarding.create(signIn, { name: "Own", slug: "own" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+
+    try {
+      await environment.database.db
+        .update(ssoProvider)
+        .set({ domain: "example.test" })
+        .where(eq(ssoProvider.providerId, "company-alpha"));
+
+      // Another company that requires its own SSO still requires it.
+      expect(await listed()).toEqual([
+        { id: firstOrg, ssoRequired: false },
+        { id: secondOrg, ssoRequired: true },
+        { id: personal, ssoRequired: false },
+      ]);
+      expect((await identity.authenticate(browser(personal), "platform:read")).isOk()).toBe(true);
+      expect(await identity.authenticate(browser(secondOrg), "platform:read")).toMatchObject({
+        error: { code: "SSO_REQUIRED" },
+      });
+      expect((await access(tokens.access_token, personal)).isOk()).toBe(true);
+      expect(await access(tokens.access_token, secondOrg)).toMatchObject({
+        error: { code: "SSO_REQUIRED" },
+      });
+
+      expect(await invitations.read(signIn, invited.invitation.id)).toMatchObject({
+        organizationName: "Domain invitation",
+      });
+      await expect(onboarding.create(signIn, { name: "Own", slug: "own" })).rejects.toThrow(
+        "Creation reached",
+      );
+
+      for (const path of ["/list-accounts", "/list-sessions"])
+        expect((await request(path, undefined, firstCookie)).status).toBe(200);
+      const renamed = await request("/update-user", { name: "Renamed by owner" }, firstCookie);
+      expect(renamed.status, await renamed.clone().text()).toBe(200);
+
+      // The company keeps its address and the person's links to other providers.
+      const moved = await request(
+        "/change-email",
+        { newEmail: "user@elsewhere.test" },
+        firstCookie,
+      );
+
+      expect(moved.status).toBe(403);
+      expect(await moved.json()).toMatchObject({
+        message: "Your organization manages this email address",
+      });
+      expect(
+        (await request("/link-social", { provider: "company-bravo" }, firstCookie)).status,
+      ).toBe(403);
+
+      // Recovery stays in the organization it opened, even for an address on its domain.
+      const recovery = await environment.users.login({ userId });
+      await environment.database.db
+        .update(session)
+        .set({ recovery: true, identityOrganizationId: firstOrg })
+        .where(eq(session.token, recovery.token));
+
+      expect(
+        (
+          await identity.organizations(
+            new Request(`${apiResource(environment.configuration)}/organizations`, {
+              headers: { cookie: new Headers(recovery.headers).get("cookie") ?? "", origin },
+            }),
+          )
+        )
+          .unwrap()
+          .map(({ id }) => id),
+      ).toEqual([firstOrg]);
+
+      // Losing the domain proof limits existing sessions and tokens again.
+      await environment.database.db
+        .update(ssoProvider)
+        .set({ domainVerified: false })
+        .where(eq(ssoProvider.providerId, "company-alpha"));
+      expect(await listed()).toEqual([{ id: firstOrg, ssoRequired: false }]);
+      expect(await access(tokens.access_token, personal)).toMatchObject({
+        error: { code: "FORBIDDEN" },
+      });
+    } finally {
+      await guestDomain("company-alpha");
+      await environment.database.db
+        .delete(member)
+        .where(and(eq(member.userId, userId), eq(member.organizationId, personal)));
+    }
+  });
 
   it("preserves rejection and blocks replay of a consumed device code", async () => {
     const denied = await start();
