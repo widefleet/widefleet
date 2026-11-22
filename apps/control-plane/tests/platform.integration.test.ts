@@ -979,7 +979,60 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const app = await createApp("jobs");
     const firstSession = await start(app.id);
-    const first = contract.deployment.parse(await (await publish(app.id, firstSession.id)).json());
+
+    // Extracted names carry module paths; the stored document names types without them.
+    const extracted: z.input<typeof contract.serviceDocumentation> = {
+      format: 3,
+      entrypoints: [],
+      types: [
+        {
+          name: 'import("./src/model").Item',
+          kind: "type",
+          definition: '{ next?: import("./src/model").Item; page: import("./src/model").Page }',
+          summary: "",
+          remarks: "",
+          examples: [],
+          uses: ['import("./src/model").Page'],
+        },
+        {
+          name: 'import("./src/model").Page',
+          kind: "type",
+          definition: "{ size: number }",
+          summary: "",
+          remarks: "",
+          examples: [],
+          uses: [],
+        },
+      ],
+    } as const;
+
+    const stored = {
+      ...extracted,
+      types: [
+        {
+          ...extracted.types[0],
+          name: "Item",
+          definition: "{ next?: Item; page: Page }",
+          uses: ["Page"],
+        },
+        { ...extracted.types[1], name: "Page" },
+      ],
+    };
+
+    const first = contract.deployment.parse(
+      await (
+        await publish(
+          app.id,
+          firstSession.id,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          extracted,
+        )
+      ).json(),
+    );
+
     const secondSession = await start(app.id);
 
     const second = contract.deployment.parse(
@@ -1047,7 +1100,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect(packages.serviceDocumentation).toEqual({
       artifactId: first.artifactId,
-      documentation: { format: 3, entrypoints: [], types: [] },
+      documentation: stored,
     });
 
     const [storedArtifact] = await environment.database.db
@@ -1068,7 +1121,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
           ).unwrap(),
         ),
       ),
-    ).toEqual({ format: 3, entrypoints: [], types: [] });
+    ).toEqual(stored);
     expect(
       (
         await json(
