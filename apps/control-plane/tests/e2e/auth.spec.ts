@@ -1,6 +1,13 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  CreateBucketCommand,
+  DeleteBucketCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { expect, test, type APIResponse } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
@@ -61,6 +68,8 @@ const remoteRedirect = async (response: APIResponse) => {
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
+let s3: S3Client | undefined;
+
 let server: ReturnType<typeof spawn>;
 
 let logs = "";
@@ -90,6 +99,20 @@ const edge = createServer((request, response) => {
 
 test.beforeAll(async () => {
   environment = await createTestEnvironment();
+  // The server keeps API documentation in artifact storage.
+  const bucket = `test-${crypto.randomUUID()}`;
+  environment.environment.S3_BUCKET = bucket;
+  environment.configuration.S3_BUCKET = bucket;
+  s3 = new S3Client({
+    endpoint: environment.configuration.S3_ENDPOINT,
+    region: "us-east-1",
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: environment.environment.S3_ACCESS_KEY_ID,
+      secretAccessKey: environment.environment.S3_SECRET_ACCESS_KEY,
+    },
+  });
+  await s3.send(new CreateBucketCommand({ Bucket: bucket }));
   edge.listen(25430);
   await once(edge, "listening");
   server = spawn(
@@ -718,6 +741,21 @@ test.afterAll(async () => {
     server.kill("SIGTERM");
     await exited;
     clearTimeout(timeout);
+  }
+
+  if (s3) {
+    const Bucket = environment.configuration.S3_BUCKET;
+    const contents = await s3.send(new ListObjectsV2Command({ Bucket }));
+
+    if (contents.Contents?.length)
+      await s3.send(
+        new DeleteObjectsCommand({
+          Bucket,
+          Delete: { Objects: contents.Contents.map(({ Key }) => ({ Key })) },
+        }),
+      );
+    await s3.send(new DeleteBucketCommand({ Bucket }));
+    s3.destroy();
   }
 
   await environment?.close();
