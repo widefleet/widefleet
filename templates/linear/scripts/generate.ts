@@ -148,6 +148,8 @@ let models = "";
 // object, and the types of its arguments.
 const graph: Record<string, Record<string, [string] | [string, Record<string, string>]>> = {};
 
+const variantNames: string[] = [];
+
 const named = Object.values(schema.getTypeMap())
   .filter((type) => !type.name.startsWith("__") && !isScalarType(type) && !roots.has(type))
   .toSorted((left, right) => left.name.localeCompare(right.name, "en"));
@@ -158,6 +160,8 @@ for (const type of named) {
     models += `${comment(type.description)}export type ${type.name} = ${values.join(" | ") || "never"};\n\n`;
     continue;
   }
+
+  if (isUnionType(type) || isInterfaceType(type)) variantNames.push(type.name);
 
   if (isUnionType(type)) {
     models += `${comment(type.description)}export interface ${type.name} extends Variants<${type
@@ -354,6 +358,9 @@ writeFileSync(
 export type Graph = Record<string, Record<string, [string] | [string, Record<string, string>]>>;
 
 export const graph = ${JSON.stringify(graph)} satisfies Graph;
+
+/** Unions and interfaces, whose results always carry \`__typename\`. */
+export const variants = new Set(${JSON.stringify(variantNames)});
 `,
 );
 

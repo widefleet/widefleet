@@ -4633,3 +4633,19 @@ export const graph = {
     ],
   },
 } satisfies Graph;
+
+/** Unions and interfaces, whose results always carry `__typename`. */
+export const variants = new Set([
+  "AgentActivityContent",
+  "ArchivePayload",
+  "DataWebhookPayload",
+  "Entity",
+  "EntityActorWebhookPayload",
+  "ExternalEntityInfoMetadata",
+  "GuidanceRuleOriginWebhookPayload",
+  "Node",
+  "Notification",
+  "NotificationSubscription",
+  "NotificationWebhookPayload",
+  "OrganizationInviteDetailsPayload",
+]);

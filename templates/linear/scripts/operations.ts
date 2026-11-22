@@ -3,7 +3,8 @@
 //
 // Every mutation is listed with the kind of change it makes, which decides when
 // it asks the user first (see src/approval.ts), or with the reason it is not
-// offered. Queries are offered unless listed.
+// offered. A mutation that creates data but can also change existing data counts
+// as an update. Queries are offered unless listed.
 
 /** Why an operation is not offered as a method. */
 export const reasons = {
@@ -31,7 +32,8 @@ export const mutations = {
   agentSkillDelete: "delete",
   agentSkillUpdate: "update",
   airbyteIntegrationConnect: "create",
-  attachmentCreate: "create",
+  // Creates, but updates the attachment with the same URL.
+  attachmentCreate: "update",
   attachmentDelete: "delete",
   attachmentLinkDiscord: "create",
   attachmentLinkFront: "create",
@@ -98,7 +100,8 @@ export const mutations = {
   entityExternalLinkCreate: "create",
   entityExternalLinkDelete: "delete",
   entityExternalLinkUpdate: "update",
-  favoriteCreate: "create",
+  // Creates, but moves an existing favorite.
+  favoriteCreate: "update",
   favoriteDelete: "delete",
   favoriteUpdate: "update",
   fileUpload: "create",
@@ -122,7 +125,8 @@ export const mutations = {
   initiativeLabelRestore: "update",
   initiativeLabelRetire: "update",
   initiativeLabelUpdate: "update",
-  initiativeRelationCreate: "create",
+  // Creates, but removes overlapping parent links.
+  initiativeRelationCreate: "update",
   initiativeRelationDelete: "delete",
   initiativeRelationUpdate: "update",
   initiativeRemoveLabel: "update",
@@ -193,12 +197,14 @@ export const mutations = {
   issueImportDelete: "delete",
   issueImportProcess: "create",
   issueImportUpdate: "update",
-  issueLabelCreate: "create",
+  // Creates, but can replace team labels.
+  issueLabelCreate: "update",
   issueLabelDelete: "delete",
   issueLabelRestore: "update",
   issueLabelRetire: "update",
   issueLabelUpdate: "update",
-  issueRelationCreate: "create",
+  // Creates, but replaces conflicting relations, closes duplicates.
+  issueRelationCreate: "update",
   issueRelationDelete: "delete",
   issueRelationUpdate: "update",
   issueReminder: "update",
@@ -246,7 +252,8 @@ export const mutations = {
   projectCreate: "create",
   projectDelete: "delete",
   projectExternalSyncDisable: "update",
-  projectLabelCreate: "create",
+  // Creates, but can replace team labels.
+  projectLabelCreate: "update",
   projectLabelDelete: "delete",
   projectLabelRestore: "update",
   projectLabelRetire: "update",
@@ -336,7 +343,8 @@ export const mutations = {
   userUnlinkFromIdentityProvider: "delete",
   userUnsuspend: "update",
   userUpdate: "update",
-  viewPreferencesCreate: "create",
+  // Creates, but replaces conflicting preferences.
+  viewPreferencesCreate: "update",
   viewPreferencesDelete: "delete",
   viewPreferencesUpdate: "update",
   webhookCreate: "create",

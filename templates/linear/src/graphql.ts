@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { JsonValue } from "./selection.ts";
-import { type Graph, graph } from "./schema.ts";
+import { type Graph, graph, variants } from "./schema.ts";
 
 /** Linear's GraphQL API. */
 export const linearApi = "https://api.linear.app/graphql";
@@ -163,6 +163,9 @@ export const graphqlRequest = (
     });
 
     if (!written.length) throw new InvalidRequest(`Select at least one field of ${type}`);
+
+    // The result type of a union or interface promises its concrete type.
+    if (variants.has(type) && !written.includes("__typename")) written.unshift("__typename");
 
     return written.join(" ");
   };

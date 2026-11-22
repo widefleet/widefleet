@@ -44742,7 +44742,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Creates an attachment, or updates the existing attachment with the same URL on the same issue. This is useful for links and metadata managed by your integration. Use attachmentLinkURL or a service-specific link mutation when you want Linear to fetch integration metadata and apply its supported link behavior.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The attachment object to create.
@@ -44760,7 +44760,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "attachmentCreate", change: "create" },
+      { root: "Mutation", field: "attachmentCreate", change: "update" },
       input,
       select,
     );
@@ -46865,7 +46865,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Creates a sidebar favorite for the authenticated user. If it already exists, updates its position and supplied folder instead.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The favorite object to create.
@@ -46883,7 +46883,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "favoriteCreate", change: "create" },
+      { root: "Mutation", field: "favoriteCreate", change: "update" },
       input,
       select,
     );
@@ -47551,7 +47551,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Adds a child initiative to a parent. Both must be accessible and unarchived, and the workspace must support sub-initiatives. When the new parent overlaps the child’s existing hierarchy, the overlapping parent links are removed as part of the move. Cycles and excessive nesting are rejected.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The initiative relation to create.
@@ -47569,7 +47569,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "initiativeRelationCreate", change: "create" },
+      { root: "Mutation", field: "initiativeRelationCreate", change: "update" },
       input,
       select,
     );
@@ -49067,7 +49067,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Create a workspace or team label. Requires permission to manage labels in its scope.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The issue label to create.
@@ -49090,7 +49090,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "issueLabelCreate", change: "create" },
+      { root: "Mutation", field: "issueLabelCreate", change: "update" },
       input,
       select,
     );
@@ -49217,7 +49217,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Creates a relationship between two issues, replacing any conflicting relation between the pair and reusing an identical one. A duplicate relation closes the source as a duplicate of the target and can move linked customer requests to the target. You must have access to both issues and any permissions required for the merge.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The issue relation to create.
@@ -49240,7 +49240,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "issueRelationCreate", change: "create" },
+      { root: "Mutation", field: "issueRelationCreate", change: "update" },
       input,
       select,
     );
@@ -50387,7 +50387,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Creates a label or label group for projects. Workspace labels require workspace label-management permission; team labels require label-management permission in that team and a plan that supports team project labels. replaceTeamLabels can migrate matching labels into the new scope.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The project label to create.
@@ -50410,7 +50410,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "projectLabelCreate", change: "create" },
+      { root: "Mutation", field: "projectLabelCreate", change: "update" },
       input,
       select,
     );
@@ -52820,7 +52820,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Saves display settings for a view and scope. Existing records that conflict with the supplied type, view type, and scope are deleted and replaced, so supply the settings you want to retain. Personal preferences are owned by the current user.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The ViewPreferences object to create.
@@ -52838,7 +52838,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "viewPreferencesCreate", change: "create" },
+      { root: "Mutation", field: "viewPreferencesCreate", change: "update" },
       input,
       select,
     );
