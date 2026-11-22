@@ -115,6 +115,13 @@ describe("service binding types", () => {
       reason: "name",
       message: "The API documents a type named Promise, which the binding's methods need",
     });
+
+    for (const binding of ["class", "string", "keyof", "Promise", "globalThis", "1API"])
+      expect(generate(documentation("number", []), binding).failure).toEqual({
+        reason: "name",
+        message: `${binding} cannot name a TypeScript interface; choose another binding name`,
+      });
+
     expect(
       serviceBindingTypes(value, { app: "inventory", entrypoint: "Reader", binding: "INVENTORY" })
         .failure,

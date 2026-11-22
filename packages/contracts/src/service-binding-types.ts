@@ -164,8 +164,21 @@ const placeFieldComments = (type: string, fields: { name: string; description: s
   return remaining.length ? `${placed}\n${remaining.join("\n")}` : placed;
 };
 
-// Globals a binding's members name themselves, which a documented type must not shadow.
+// Globals a binding's members name themselves, which neither the binding nor a documented type
+// may shadow.
 const requiredGlobals = ["Promise", "globalThis"];
+
+// Words that cannot name the binding's interface and namespace: reserved words, including those
+// of strict mode and modules, built-in type names and type operators.
+const reservedNames = new Set(
+  [
+    "break case catch class const continue debugger default delete do else enum export extends",
+    "false finally for function if import in instanceof new null return super switch this throw",
+    "true try typeof var void while with implements interface let package private protected",
+    "public static yield await any unknown never number bigint boolean string symbol object",
+    "undefined infer keyof readonly unique",
+  ].flatMap((words) => words.split(" ")),
+);
 
 // `entrypoint`: the entrypoint is not documented. `name`: a name the declarations need is taken.
 const failure = (reason: "entrypoint" | "name", message: string) => ({
@@ -194,8 +207,15 @@ export const serviceBindingTypes = (
   documentation: Documentation,
   { app, entrypoint, binding }: ServiceBindingTypesOptions,
 ) => {
-  if (!validIdentifier.test(binding))
-    return failure("name", `${binding} is not a valid TypeScript identifier`);
+  if (
+    !validIdentifier.test(binding) ||
+    reservedNames.has(binding) ||
+    requiredGlobals.includes(binding)
+  )
+    return failure(
+      "name",
+      `${binding} cannot name a TypeScript interface; choose another binding name`,
+    );
   const entry = documentation.entrypoints.find((candidate) => candidate.name === entrypoint);
 
   if (!entry) return failure("entrypoint", `${entrypoint} is not a documented entrypoint`);
