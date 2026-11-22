@@ -126,6 +126,9 @@ const createSharedRuntime = (
     encryptionKey: configuration.PLATFORM_ENCRYPTION_KEY,
     authRateLimit: cloudflareAuthRateLimit(bindings, configuration.PLATFORM_URL),
     authIpAddressHeaders: ["cf-connecting-ip"],
+    // Isolates start often at low traffic, and the check would run on each start. Node keeps it,
+    // so tests still compare Better Auth's expected schema with ours.
+    authValidateSchema: false,
     authCookies: sveltekitCookies(getRequestEvent),
   };
 
