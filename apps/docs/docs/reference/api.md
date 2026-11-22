@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-16
+lastModified: 2026-11-22
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -180,7 +180,10 @@ Organization administrators use `POST /api/v1/settings/domain-verification` to o
 `{ "name": "_better-auth-token-PROVIDER_ID.example.com", "type": "TXT", "value": "..." }`.
 After publishing the record, `POST /api/v1/settings/verify-domain` verifies ownership.
 `POST /api/v1/settings/activate-sso` separately makes company SSO required; it requires
-verified DNS but does not require a completed test login. These operations accept the
+verified DNS but does not require a completed test login. Activation also requires company
+SSO for every address on the verified domains; `PUT /api/v1/settings/domain-sso` with
+`{ "enabled": false }` allows other sign-in methods for them again. Email sign-in for such
+an address returns `403` with code `COMPANY_SSO_REQUIRED` and the `providerId` to continue with. These operations accept the
 same browser or CLI write credentials as settings changes and operate on the selected organization.
 See [company sign-in setup](/guides/company-sign-in#verify-and-activate) and the
 [settings reference](/reference/company-sign-in) for CLI and API configuration.

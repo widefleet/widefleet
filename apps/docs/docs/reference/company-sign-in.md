@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-15
+lastModified: 2026-11-22
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -68,6 +68,19 @@ widefleet login
 
 The new login replaces CLI credentials authorized through email sign-in.
 `widefleet account` shows the account's company-link status and browser URL.
+
+Activation also makes company SSO the sign-in for every address on the
+organization's verified domains, in all organizations the person belongs to.
+Email codes, Google and Microsoft continue with company SSO for these addresses.
+Guests with other addresses keep their sign-in. To allow other sign-in methods
+for company addresses, or to require company SSO again:
+
+```sh
+widefleet settings domain-sso false
+widefleet settings domain-sso true
+```
+
+Each domain can be verified by one organization.
 
 A company login grants access within that organization. Selecting another
 organization does not extend that login's authority; an organization with a
@@ -189,6 +202,9 @@ for when access changes take effect and what happens during provider outages.
 The settings API uses `GET/PUT /api/v1/settings` and
 `POST /api/v1/settings/plan`. Domain verification and SSO activation use the
 [company sign-in endpoints](/reference/api#members-invitations-and-company-sign-in).
+
+`PUT /api/v1/settings/domain-sso` with `{ "enabled": false }` changes the
+company-address rule; `GET /api/v1/settings` reports it as `domainSsoRequired`.
 
 Use `widefleet settings external-management true` or
 `PUT /api/v1/settings/external-management` to make the settings UI read-only.
