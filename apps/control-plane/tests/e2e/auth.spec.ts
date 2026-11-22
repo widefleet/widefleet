@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIResponse } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
 import { EventEmitter, once } from "node:events";
@@ -30,6 +30,18 @@ import { createTestEnvironment } from "../environment.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
 import { prepareOrganizationInvitation } from "../../src/lib/server/members.ts";
+
+// A remote function's redirect arrives as a result whose serialized data names the location.
+const remoteRedirect = async (response: APIResponse) => {
+  const { data } = z
+    .object({ type: z.literal("result"), data: z.string() })
+    .parse(await response.json());
+
+  const values = z.array(z.unknown()).parse(JSON.parse(data));
+  const { redirect } = z.object({ redirect: z.number() }).parse(values[0]);
+
+  return z.string().parse(values[redirect]);
+};
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -844,12 +856,19 @@ test("selects an organization, repairs stale selection and explains removed acce
   await page.getByRole("button", { name: "Widefleet Member" }).click();
   await expect(page).toHaveURL("http://localhost:25430/");
   await expect(page.getByRole("link", { name: "Choose organization: Widefleet" })).toBeVisible();
+  await page.goto("/catalog/templates");
+  await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
   await environment.database.db
     .update(authSession)
     .set({ activeOrganizationId: "unavailable" })
     .where(eq(authSession.userId, person.id));
 
-  // Page queries may run alongside the layout. Its organization-selection
+  // Client navigation to a query-only page reaches the server only through its query, which
+  // redirects to the organization choice without a return path.
+  await page.getByRole("link", { name: /^Gmail/ }).click();
+  await expect(page).toHaveURL("http://localhost:25430/organizations");
+
+  // Page queries may run alongside the page loads. The request hook's organization-selection
   // redirect must still reach the client when those queries reject access.
   for (const path of ["/", "/catalog", "/catalog/templates", "/catalog/templates/gmail"]) {
     const response = await context.request.get(`${path.replace(/\/$/, "")}/__data.json`);
@@ -1597,6 +1616,9 @@ test("manages organization roles and app access by name while members create the
       .getByRole("navigation", { name: "Main navigation" })
       .getByRole("link", { name: "My apps", exact: true })
       .click();
+    await expect(memberPage).toHaveURL(/\/apps$/);
+    // Another member's role change reaches an open workspace when it next loads.
+    await memberPage.reload();
     await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
     await expect(
       memberPage
@@ -1616,6 +1638,8 @@ test("manages organization roles and app access by name while members create the
     expect((await memberContext.request.get("/settings/members")).status()).toBe(403);
 
     await memberPage.getByRole("link", { name: "Create app", exact: true }).click();
+    await expect(memberPage).toHaveURL(/\/apps\/new$/);
+    await memberPage.reload();
     await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
     await expect(
       memberPage.getByRole("button", { name: /^Account:/ }).getByText("Member", { exact: true }),
@@ -2277,7 +2301,7 @@ for (const javaScriptEnabled of [true, false]) {
         const remote = z.string().parse(new URL(action, origin).searchParams.get("/remote"));
         const queryUrl = `/_app/remote/${remote.split("/")[0]}/getCatalog`;
         const anonymous = await request.get(queryUrl);
-        expect(await anonymous.json()).toMatchObject({ type: "error", error: { status: 401 } });
+        expect(await remoteRedirect(anonymous)).toBe("/sign-in");
 
         const fields = await form.evaluate((element) =>
           Object.fromEntries(
@@ -2378,7 +2402,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
 
   const anonymous = await request.get(queryUrl);
   expect(anonymous.headers()["cache-control"]).toBe("private, no-store");
-  expect(await anonymous.json()).toMatchObject({ type: "error", error: { status: 401 } });
+  expect(await remoteRedirect(anonymous)).toBe("/sign-in");
 
   // Remote callers control their page-context headers. Neither an auth-group
   // page nor a public page may replace the remote function's own authorization.
@@ -2389,7 +2413,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
     });
 
     expect(response.headers()["location"]).toBeUndefined();
-    expect(await response.json()).toMatchObject({ type: "error", error: { status: 401 } });
+    expect(await remoteRedirect(response)).toBe("/sign-in");
   }
 
   const authenticated = await context.request.get(queryUrl);
@@ -2440,7 +2464,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
   await environment.database.db.delete(member).where(eq(member.userId, person.id));
   const expired = await context.request.get(queryUrl);
   // The session remains valid, but its organization membership has been removed.
-  expect(await expired.json()).toMatchObject({ type: "error", error: { status: 403 } });
+  expect(await remoteRedirect(expired)).toBe("/organizations");
 });
 
 for (const javaScriptEnabled of [true, false]) {
@@ -3327,8 +3351,12 @@ for (const javaScriptEnabled of [true, false]) {
         .set({ expiresAt: new Date(Date.now() - 1000) })
         .where(eq(authSession.userId, person.id));
       await page.getByRole("link", { name: /^Gmail/ }).click();
-      await expect(page).toHaveURL(/\/sign-in\?next=/);
-      expect(new URL(page.url()).searchParams.get("next")).toBe("/catalog/templates/gmail");
+      await expect(page).toHaveURL(/\/sign-in(\?|$)/);
+      // Client navigation reaches the server only through the template query. Its redirect
+      // cannot name the page, while a full page load passes through the request hook.
+      expect(new URL(page.url()).searchParams.get("next")).toBe(
+        javaScriptEnabled ? null : "/catalog/templates/gmail",
+      );
       expect((await context.request.get("/api/v1/catalog/templates")).status()).toBe(401);
     });
   });

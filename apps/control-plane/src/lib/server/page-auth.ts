@@ -58,8 +58,10 @@ export const invitationIdentity = async (invitationId: string) => {
 
 export const pagePrincipal = async () => {
   const { user, session } = getUserSession();
-  const { url } = getRequestEvent();
+  const { url, request } = getRequestEvent();
   const runtime = await getRuntime();
+  // Like the sign-in redirect, a form post returns to its page without the action parameter.
+  const next = request.method === "GET" ? url.pathname + url.search : url.pathname;
 
   const result = await runtime.identity.principal(
     user.id,
@@ -82,12 +84,12 @@ export const pagePrincipal = async () => {
   if (cause.code === "SSO_REQUIRED")
     redirect(
       303,
-      `/sign-in?${new URLSearchParams({ organization: cause.organizationSlug ?? "", next: url.pathname + url.search })}`,
+      `/sign-in?${new URLSearchParams({ organization: cause.organizationSlug ?? "", next })}`,
     );
 
   // A stale selection can be repaired without signing out of a valid session.
   if (cause.code === "ORGANIZATION_REQUIRED" || cause.code === "FORBIDDEN")
-    redirect(303, `/organizations?${new URLSearchParams({ next: url.pathname + url.search })}`);
+    redirect(303, `/organizations?${new URLSearchParams({ next })}`);
 
   return pageFailure(cause);
 };

@@ -9,17 +9,12 @@
 
   onMount(startBrowserReporting);
 
+  // Signed-in workspace pages identify the member; see Workspace.svelte.
   $effect(() => {
-    const principal = page.data.principal;
-
-    const organization = page.data.organizations?.find(
-      (entry) => entry.id === principal?.application.organizationId,
-    );
-
     updateClientContext({
-      user: principal ?? null,
-      organization: organization ? { id: organization.id, name: organization.name } : null,
-      role: principal?.role ?? null,
+      user: null,
+      organization: null,
+      role: null,
       analytics: page.data.analytics ?? null,
     });
   });

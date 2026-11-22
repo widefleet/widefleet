@@ -4,6 +4,7 @@ import { DrizzleQueryError } from "drizzle-orm";
 import { error, redirect } from "@sveltejs/kit";
 import type { Handle } from "@sveltejs/kit/hooks";
 import { DatabaseUnavailable } from "./errors.ts";
+import { pagePrincipal } from "./page-auth.ts";
 
 export const handleSession: Handle = async ({ event, resolve }) => {
   event.locals.user = null;
@@ -65,6 +66,11 @@ export const handleSession: Handle = async ({ event, resolve }) => {
 
     redirect(303, `/sign-in?${next}`);
   }
+
+  // Workspace pages need an organization the member can open. Checking here, before any load
+  // runs, keeps the page as the return path. Remote functions authorize their own requests.
+  if (!building && !event.isRemoteRequest && event.route.id?.split("/").includes("(workspace)"))
+    await pagePrincipal();
 
   return resolve(event);
 };
