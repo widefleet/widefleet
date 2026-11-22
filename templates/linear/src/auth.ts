@@ -5,7 +5,6 @@ import { createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import type { Caller, Environment } from "./context.ts";
 import { ensureUser } from "./database.ts";
-import { callTool, profile, rpcRequest, rpcResult, toolOutput } from "./linear.ts";
 
 export const authentication = (
   environment: Environment,
@@ -69,41 +68,11 @@ export const authentication = (
       linear: {
         clientId: credentials.clientId,
         clientSecret: credentials.clientSecret,
-        // Better Auth adds the read scope; write enables every tool.
+        // Better Auth adds the read scope; write enables mutations.
         scope: ["write"],
         disableSignUp: true,
-        // Linear's MCP server accepts tokens from both registrations, so the
-        // profile comes from the same origin the connector calls.
-        getUserInfo: async (tokens) => {
-          if (!tokens.accessToken) return null;
-
-          const call = callTool({ name: "get_user", arguments: { query: "me" } });
-
-          const result = toolOutput(
-            await rpcResult(call, await fetch(rpcRequest(call, tokens.accessToken))),
-          );
-
-          if (result.status !== "connected") return null;
-          const account = profile.parse(result.result);
-
-          return {
-            user: {
-              name: account.name,
-              email: account.email,
-              emailVerified: false,
-              providerEmail: account.email,
-            },
-            data: {
-              id: account.id,
-              name: account.name,
-              email: account.email,
-              avatarUrl: account.avatarUrl ?? "",
-              active: account.isActive ?? true,
-              createdAt: account.createdAt ?? "",
-              updatedAt: account.updatedAt ?? "",
-            },
-          };
-        },
+        // Better Auth reads the account from Linear's viewer query.
+        mapProfileToUser: (profile) => ({ providerEmail: profile.email }),
       },
     },
     plugins: [

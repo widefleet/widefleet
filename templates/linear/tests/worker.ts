@@ -122,11 +122,11 @@ export class TestUserConnection extends UserConnection {
 type Binding = Pick<
   TestApp,
   | "connectionStatus"
-  | "listIssues"
-  | "saveIssue"
-  | "deleteComment"
-  | "extractImages"
-  | "getWorkspace"
+  | "issues"
+  | "issueCreate"
+  | "issueDelete"
+  | "approvalLevel"
+  | "setApprovalLevel"
   | "fetch"
 >;
 
@@ -173,26 +173,39 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
 
     if (path === "/rpc/status") return Response.json(await app.connectionStatus());
 
-    if (path === "/rpc/list") return Response.json(await app.listIssues({ assignee: "me" }));
-
-    if (path === "/rpc/workspace") return Response.json(await app.getWorkspace());
-
-    // Linear allows at most 250 results per page.
-    if (path === "/rpc/invalid") return Response.json(await app.listIssues({ limit: 500 }));
-
-    if (path === "/rpc/image")
+    if (path === "/rpc/list")
       return Response.json(
-        await app.extractImages({ markdown: "![](https://example.test/x.png)" }),
+        await app.issues({ first: 5 }, { nodes: { identifier: true, title: true } }),
+      );
+
+    if (path === "/rpc/invalid")
+      return Response.json(
+        // @ts-expect-error A related object needs a selection of its fields.
+        await app.issues({ first: 5 }, { nodes: { team: true } }),
       );
 
     if (path === "/rpc/create")
       return Response.json(
-        await app.saveIssue({ title: "From Widefleet", team: "ENG", labels: ["bug"] }),
+        await app.issueCreate(
+          { input: { teamId: "team-1", title: url.searchParams.get("title") ?? "From Widefleet" } },
+          { success: true, issue: { identifier: true } },
+        ),
       );
 
     if (path === "/rpc/delete")
       return Response.json(
-        await app.deleteComment({ id: url.searchParams.get("id") ?? "comment-1" }),
+        await app.issueDelete({ id: url.searchParams.get("id") ?? "ENG-1" }, { success: true }),
+      );
+
+    if (path === "/rpc/level") return Response.json(await app.approvalLevel());
+
+    if (path === "/rpc/set-level")
+      return Response.json(
+        await app.setApprovalLevel({
+          level: z
+            .enum(["all_changes", "updates_and_deletions", "none"])
+            .parse(url.searchParams.get("level")),
+        }),
       );
 
     return app.fetch(request);

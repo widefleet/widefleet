@@ -1,10 +1,11 @@
 import { connectionLaunch } from "./connection-launch.ts";
 import { oauthCredentials, revokeManagedGrant } from "./oauth.ts";
 import { z } from "zod";
+import { approvals } from "./approval.ts";
 import { authentication } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
-import { LinearRequestError, type Rpc, rpcRequest, rpcResult } from "./linear.ts";
+import { type GraphQLRequest, graphqlResponse, linearApi, linearErrors } from "./graphql.ts";
 import { authorizationPage, connectionPage } from "./page.ts";
 
 const linkedAccount = z.object({
@@ -219,38 +220,66 @@ export const accountConnection = (environment: Environment, properties: Properti
       if (config.status !== "configured") return config;
       const linked = await account(id);
 
+      if (!linked)
+        return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
       return {
-        status: linked ? "connected" : "connection_required",
-        accountId: linked?.accountId ?? null,
+        status: "connected",
+        accountId: linked.accountId,
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
     },
-    rpc: async <Result extends z.ZodType>(rpc: Rpc<Result>) => {
+    /** Sends one GraphQL request with the user's token. */
+    graphql: async (body: GraphQLRequest) => {
       const result = await token();
 
       if (result.status !== "connected") return result;
 
-      const response = await fetch(rpcRequest(rpc, result.accessToken), {
+      const response = await fetch(linearApi, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${result.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
         redirect: "manual",
       });
 
-      if (response.status === 401)
-        return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+      const reconnect = {
+        status: "reconnect_required",
+        connectUrl: environment.WIDEFLEET_ORIGIN,
+      } as const;
 
-      if (response.status === 403) return { status: "access_denied" } as const;
+      const limited = {
+        status: "rate_limited",
+        retryAfter: response.headers.get("retry-after"),
+      } as const;
 
-      if (response.status === 429)
-        return { status: "rate_limited", retryAfter: response.headers.get("retry-after") } as const;
+      if (response.status === 401) return reconnect;
 
-      if (!response.ok) throw new Error(`Linear request failed (HTTP ${response.status})`);
+      if (response.status === 429) return limited;
 
-      try {
-        return { status: "connected", result: await rpcResult(rpc, response) } as const;
-      } catch (error) {
-        if (!(error instanceof LinearRequestError)) throw error;
+      // Linear answers request errors with GraphQL errors, partly with HTTP 400.
+      const parsed = response.headers.get("content-type")?.startsWith("application/json")
+        ? graphqlResponse.safeParse(await response.json())
+        : null;
 
-        return { status: "linear_error", message: error.message } as const;
+      if (!parsed?.success) {
+        if (response.status === 403) return { status: "access_denied" } as const;
+
+        throw new Error(`Linear request failed (HTTP ${response.status})`);
       }
+
+      const errors = parsed.data.errors ?? [];
+      const types = new Set(errors.map((error) => error.extensions?.type));
+
+      if (types.has("authentication error")) return reconnect;
+
+      if (types.has("ratelimited")) return limited;
+
+      if (errors.length) return { status: "linear_error", errors: linearErrors(errors) } as const;
+
+      return { status: "connected", data: parsed.data.data ?? {} } as const;
     },
     fetch: async (request: Request) => {
       if (!caller.safeParse(properties.caller).success) return new Response(null, { status: 401 });
@@ -308,6 +337,7 @@ export const accountConnection = (environment: Environment, properties: Properti
           config.status === "setup_required" ? config.missing : [],
           url.origin,
           url.searchParams.has("error"),
+          await approvals(environment.DB, id).level(),
         );
       }
 

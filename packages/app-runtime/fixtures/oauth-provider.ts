@@ -11,10 +11,6 @@ const base64url = (value: Uint8Array) =>
 const encode = (value: string) => base64url(new TextEncoder().encode(value));
 
 // Synthetic providers check PKCE, callback URI, credentials and one-use codes.
-// Linear's MCP authorization server knows the installation by its Client ID
-// Metadata Document; Linear OAuth applications use a registered client.
-const linearDocument = "https://oauth.example.test:25453/oauth/client-metadata.json";
-
 export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear") => {
   const codes = new Map<string, { user: string; challenge: string | null; redirect: string }>();
   const access = new Map<string, string>();
@@ -45,7 +41,11 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
     linear: "https://api.linear.app/oauth/token",
   };
 
-  const linearToken = "https://mcp.linear.app/token";
+  // RFC 7009 revocation, where the provider offers it.
+  const revocationURLs: Partial<Record<typeof kind, string>> = {
+    google: "https://oauth2.googleapis.com/revoke",
+    linear: "https://api.linear.app/oauth/revoke",
+  };
 
   const tokens = (user: string) => {
     const accessToken = `synthetic-access-${crypto.randomUUID()}`;
@@ -132,8 +132,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
       if (url.pathname.endsWith("/certs") || url.pathname.endsWith("/keys"))
         return Response.json({ keys: [jwk] });
 
-      // RFC 7009 revocation, as Google offers it.
-      if (url.href === "https://oauth2.googleapis.com/revoke") {
+      if (url.href === revocationURLs[kind]) {
         const form = new URLSearchParams(await request.text());
         const token = form.get("token") ?? "";
 
@@ -148,34 +147,16 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
         return new Response(null);
       }
 
-      const metadataDocumentClient = kind === "linear" && url.href === linearToken;
-
-      if (url.href === tokenURLs[kind] || metadataDocumentClient) {
+      if (url.href === tokenURLs[kind]) {
         const form = request.headers.get("content-type")?.includes("application/json")
           ? new URLSearchParams(z.record(z.string(), z.string()).parse(await request.json()))
           : new URLSearchParams(await request.text());
 
-        // A public client authenticates by PKCE alone and names its tokens' resource.
         if (
-          metadataDocumentClient
-            ? form.get("client_id") !== linearDocument ||
-              form.has("client_secret") ||
-              (form.has("grant_type") && form.get("resource") !== "https://mcp.linear.app/mcp")
-            : form.get("client_id") !== `test-${kind}-client` ||
-              form.get("client_secret") !== `test-${kind}-secret`
+          form.get("client_id") !== `test-${kind}-client` ||
+          form.get("client_secret") !== `test-${kind}-secret`
         )
           return Response.json({ error: "invalid_client" }, { status: 400 });
-
-        // Linear revokes at its token endpoint (RFC 7009).
-        if (metadataDocumentClient && !form.has("grant_type")) {
-          const token = form.get("token") ?? "";
-
-          if (!(refresh.delete(token) || access.delete(token)))
-            return Response.json({ error: "invalid_token" }, { status: 400 });
-          state.revocations++;
-
-          return new Response(null);
-        }
 
         if (form.get("grant_type") === "authorization_code") {
           const code = form.get("code") ?? "";
@@ -233,19 +214,26 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
 
       if (url.pathname === "/v1.0/me/drive/root/children") return Response.json({ value: [] });
 
-      if (url.href === "https://mcp.linear.app/mcp") {
-        const { name } = z
-          .object({ params: z.object({ name: z.string() }) })
-          .parse(await request.json()).params;
+      // Linear's GraphQL API: the viewer for the account profile, otherwise issues.
+      if (url.href === "https://api.linear.app/graphql") {
+        const { query } = z.object({ query: z.string() }).parse(await request.json());
 
-        const output =
-          name === "get_user"
-            ? { id: user, name: user, email: `${user}@example.test` }
-            : { issues: [], hasNextPage: false };
-
-        return new Response(
-          `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify(output) }] } })}\n\n`,
-          { headers: { "content-type": "text/event-stream" } },
+        return Response.json(
+          query.includes("viewer")
+            ? {
+                data: {
+                  viewer: {
+                    id: user,
+                    name: user,
+                    email: `${user}@example.test`,
+                    avatarUrl: null,
+                    active: true,
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                    updatedAt: "2026-01-01T00:00:00.000Z",
+                  },
+                },
+              }
+            : { data: { issues: { nodes: [] } } },
         );
       }
 

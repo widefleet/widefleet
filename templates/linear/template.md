@@ -1,12 +1,12 @@
 ---
 name: Linear
-description: Read and change a Linear workspace through every tool of Linear's MCP server.
+description: Read and change a Linear workspace through Linear's complete GraphQL API, with typed results.
 ---
 
-Connect a personal Linear account and use every tool of Linear's MCP server as a typed
-method: issues, projects, comments, documents, cycles and more. Each signed-in user
-connects their own account. Tools that Linear marks as able to delete or overwrite data
-ask the user before they run.
+Connect a personal Linear account and use every query and mutation of Linear's
+GraphQL API as a typed method: issues, projects, cycles, comments, documents,
+initiatives and more. Each signed-in user connects their own account. Changes ask
+the user first, as each user's approval level says.
 
 ## Deploy
 
@@ -37,18 +37,18 @@ accounts directly. Otherwise, an administrator needs to:
    Secrets page or `widefleet secret put NAME --file /path/to/secret` to provide
    values.
 
-In both cases, allow the backend origins that `widefleet.jsonc` declares. A one-click
-install from the template page allows them, as does `widefleet catalog templates
+In both cases, allow the backend origin that `widefleet.jsonc` declares. A one-click
+install from the template page allows it, as does `widefleet catalog templates
 install` with the CLI's `network:manage` scope. After `widefleet deploy`, run from
 the app directory:
 
 ```sh
-widefleet network allow https://mcp.linear.app https://api.linear.app
+widefleet network allow https://api.linear.app
 ```
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration
 to activate, then open the app URL and connect your Linear account. The connector
-requests the `read` and `write` scopes, so callers can use Linear's writing tools.
+requests the `read` and `write` scopes.
 
 ## Use from another app
 
@@ -61,44 +61,73 @@ widefleet connect linear --as LINEAR
 Replace `linear` if you chose another name. Call the service while handling a
 signed-in user's request so Widefleet forwards the verified caller identity.
 
+Each query and mutation is a method with the same name. Methods that return objects
+take the fields to return, and the result has exactly the selected fields:
+
 ```ts
-const result = await env.LINEAR.listIssues({ assignee: "me", state: "started" });
+const result = await env.LINEAR.issues(
+  { first: 10, filter: { assignee: { isMe: { eq: true } } } },
+  { nodes: { identifier: true, title: true, state: { name: true } } },
+);
 if (result.status === "connected") {
-  console.log(result.result);
+  for (const issue of result.data.nodes) console.log(issue.identifier, issue.state.name);
 }
 ```
 
-Each tool of Linear's MCP server is a method named after it: `list_issues` is
-`listIssues`, `save_issue` is `saveIssue`. See `src/tools.ts` for every method, its
-input and Linear's description; `connectionStatus` reports setup and linking. Arguments
-are checked against the tool's schema before anything reaches Linear. `result` holds
-the tool's JSON output and `content` every part Linear returned.
+A selection names a field with `true`, or with a nested selection for a related
+object. `$args` passes a field's arguments, such as
+`{ comments: { $args: { first: 5 }, nodes: { body: true } } }`. For a field that
+returns one of several types, `$on` selects fields per type and the result carries
+`__typename`. See `src/api.ts` for every method, its input and Linear's description.
 
-Tools that Linear marks as able to delete or overwrite data, such as `saveIssue` and
-`deleteComment`, ask the user first: the method returns `input_required` with the tool
-and its arguments. MCP clients show the question to the user. A calling app shows it
-itself and answers with `withInput`, as described in
+The queries `initiativeUpdate` and `projectUpdate`, which read one status update,
+are `initiativeUpdateById` and `projectUpdateById`: the mutations of the same name
+update an initiative or project. `scripts/operations.ts` lists the operations that
+are not offered, such as Linear's own sign-in flows, with the reason for each.
+
+## Approvals
+
+Queries never ask. Mutations ask the user before they run, as their approval level
+says:
+
+- `all_changes`: every mutation asks.
+- `updates_and_deletions`, the default: mutations that change, archive or delete
+  existing data ask; mutations that only create data run at once.
+- `none`: no mutation asks.
+
+`scripts/operations.ts` records whether each mutation creates, updates or deletes.
+Users choose their level on the app's page. `approvalLevel` returns the current level
+and `setApprovalLevel` changes it: asking more takes effect at once, asking less asks
+the user to confirm.
+
+A mutation that asks returns `input_required` with the mutation and its input. MCP
+clients show the question to the user. A calling app shows it itself and answers with
+`withInput`, as described in
 [Ask the user before continuing](https://widefleet.com/docs/guides/app-services#ask-the-user-before-continuing).
-A declined call returns `declined` and does not run.
+A declined change returns `declined` and does not run.
 
-A `setup_required` result lists missing secrets. `connection_required` and
-`reconnect_required` provide a `connectUrl` for the user. `authentication_required`
-means the call has no signed-in user. `linear_error` carries Linear's message, for
-example for an unknown issue. Retry `refresh_failed` after a
-provider outage; respect `retryAfter` for `rate_limited`.
+## Results
+
+`connected` holds the selected `data`. `linear_error` carries Linear's `errors`, for
+example for an unknown issue or invalid input. A `setup_required` result lists
+missing secrets. `connection_required` and `reconnect_required` provide a
+`connectUrl` for the user. `authentication_required` means the call has no signed-in
+user. Retry `refresh_failed` after a provider outage; respect `retryAfter` for
+`rate_limited`. A selection or input that does not match Linear's schema fails
+before anything is sent.
 
 After connecting, verify an issue read through the consuming app. Users can
 disconnect their account on the Linear app's page.
 
-## Update the tools
+## Update the API
 
-`src/tools.ts` is generated from Linear's tool list. To pick up new or changed tools,
-run the generator with a Linear token that has the `read` and `write` scopes, such as a
-Linear API key:
+`src/api.ts` and `src/schema.ts` are generated from Linear's published GraphQL schema.
+To pick up Linear's changes, run:
 
 ```sh
-LINEAR_TOKEN=... pnpm generate
+pnpm generate
 ```
 
-Review the diff before deploying. It shows changed inputs and which tools ask the user
-before they run.
+The script stops when Linear adds a mutation that `scripts/operations.ts` does not
+list yet: add it with the kind of change it makes, or with the reason it is not
+offered. Review the diff before deploying.

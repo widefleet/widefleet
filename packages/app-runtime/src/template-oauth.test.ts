@@ -46,23 +46,11 @@ const clients = {
     issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
   },
   linear: {
-    registration: "client-id-metadata-document",
-    authorizationUrl: "https://mcp.linear.app/authorize",
-    tokenUrl: "https://mcp.linear.app/token",
-    resource: "https://mcp.linear.app/mcp",
-    revocationUrl: "https://mcp.linear.app/token",
+    provider: "linear",
     scopes: ["read", "write"],
-    hosts: ["https://mcp.linear.app"],
+    hosts: ["https://api.linear.app"],
+    revocationUrl: "https://api.linear.app/oauth/revoke",
   },
-};
-
-// Registered clients carry the operator's credentials; a metadata document client has none.
-const managedClient = (kind: keyof typeof clients) => {
-  const client = clients[kind];
-
-  return "registration" in client
-    ? client
-    : { ...client, clientId: `test-${kind}-client`, clientSecret: `test-${kind}-secret` };
 };
 
 // Origins the synthetic providers serve, as an app's network policy allows them.
@@ -76,7 +64,6 @@ const origins = [
   "https://login.microsoftonline.com",
   "https://graph.microsoft.com",
   "https://api.linear.app",
-  "https://mcp.linear.app",
 ];
 
 for (const [template, kind, prefix] of [
@@ -152,7 +139,13 @@ for (const [template, kind, prefix] of [
                   value: managed
                     ? JSON.stringify({
                         origin: "https://oauth.example.test:25453",
-                        clients: { [kind]: managedClient(kind) },
+                        clients: {
+                          [kind]: {
+                            ...clients[kind],
+                            clientId: `test-${kind}-client`,
+                            clientSecret: `test-${kind}-secret`,
+                          },
+                        },
                       })
                     : "",
                 },

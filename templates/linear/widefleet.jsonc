@@ -1,7 +1,8 @@
 {
-  // The provider origins this connector calls. Deploying requests them; the
-  // app's owner or an administrator allows them.
+  // The provider origin this connector calls: Linear's GraphQL API and its
+  // token endpoint. Deploying requests it; the app's owner or an administrator
+  // allows it.
   "network": {
-    "backend": ["https://mcp.linear.app", "https://api.linear.app"],
+    "backend": ["https://api.linear.app"],
   },
 }

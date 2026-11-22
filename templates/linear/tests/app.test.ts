@@ -118,7 +118,7 @@ describe("Linear personal account app", () => {
     expect(page).toContain("/auth/callback/linear");
     expect((await alice.request("/connect", "POST")).headers.get("location")).toBe("/");
   });
-  it("calls Linear tools through generated methods and isolates users and identity issuers", async () => {
+  it("sends typed requests through generated methods and isolates users and identity issuers", async () => {
     const alice = browser("alice");
     const bob = browser("bob");
     expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
@@ -132,25 +132,16 @@ describe("Linear personal account app", () => {
     expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
       account: { id: "user-alice", label: "alice@example.test" },
     });
-    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
       status: "connected",
-      result: { issues: [{ id: "ENG-1", title: "Synthetic issue" }], hasNextPage: false },
+      data: { nodes: [{ identifier: "ENG-1", title: "Synthetic issue" }] },
     });
-    expect(await (await alice.request("/rpc/workspace")).json()).toMatchObject({
-      status: "connected",
-      result: { id: "workspace-1", name: "Example" },
-    });
-
-    // Parts other than JSON text stay as the server sent them.
-    expect(await (await alice.request("/rpc/image")).json()).toEqual({
-      status: "connected",
-      result: null,
-      content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }],
-    });
+    // Arguments travel as variables with the types Linear's schema declares.
     expect(upstream.calls).toEqual([
-      { name: "list_issues", arguments: { assignee: "me" } },
-      { name: "get_workspace", arguments: {} },
-      { name: "extract_images", arguments: { markdown: "![](https://example.test/x.png)" } },
+      {
+        query: "query($v0: Int) { issues(first: $v0) { nodes { identifier title } } }",
+        variables: { v0: 5 },
+      },
     ]);
     expect(await (await bob.request("/rpc/status")).json()).toMatchObject({
       status: "connection_required",
@@ -169,56 +160,127 @@ describe("Linear personal account app", () => {
     expect(saved.accessToken).toMatch(/^v1\./);
     expect(JSON.stringify(saved)).not.toContain("synthetic-");
   });
-  it("asks the user before a destructive tool runs and runs it only after approval", async () => {
+
+  it("asks before changes as each user's approval level says and runs them only after approval", async () => {
     const alice = browser("alice");
     await connect(alice, "alice");
     upstream.calls.length = 0;
 
-    expect(await (await alice.request("/rpc/delete?id=comment-1")).json()).toEqual({
+    // By default, creating runs at once; deleting asks first.
+    expect(await (await alice.request("/rpc/level")).json()).toEqual({
+      status: "signed_in",
+      level: "updates_and_deletions",
+    });
+    expect(await (await alice.request("/rpc/create")).json()).toEqual({
+      status: "connected",
+      data: { success: true, issue: { identifier: "ENG-2" } },
+    });
+    expect(await (await alice.request("/rpc/delete?id=ENG-1")).json()).toEqual({
       resultType: "input_required",
       inputRequests: {
         approve: {
-          message: `Run the Linear tool "Delete comment"? Linear marks it as able to delete or overwrite data.\n\nArguments:\n${JSON.stringify({ id: "comment-1" }, null, 2)}`,
+          message: `Run the Linear change "issueDelete"? It deletes or replaces data.\n\nInput:\n${JSON.stringify({ id: "ENG-1" }, null, 2)}`,
           requestedSchema: { type: "object", properties: {} },
         },
       },
     });
-    expect(upstream.calls).toEqual([]);
+    expect(upstream.calls).toHaveLength(1);
 
     alice.identity.answer = "decline";
-    expect(await (await alice.request("/rpc/delete?id=comment-1")).json()).toEqual({
+    expect(await (await alice.request("/rpc/delete?id=ENG-1")).json()).toEqual({
       status: "declined",
     });
-    expect(upstream.calls).toEqual([]);
+    expect(upstream.calls).toHaveLength(1);
 
     alice.identity.answer = "accept";
-    expect(await (await alice.request("/rpc/delete?id=comment-1")).json()).toMatchObject({
+    expect(await (await alice.request("/rpc/delete?id=ENG-1")).json()).toEqual({
       status: "connected",
-      result: { deleted: true },
+      data: { success: true },
     });
-    expect(upstream.calls).toEqual([{ name: "delete_comment", arguments: { id: "comment-1" } }]);
+    expect(upstream.calls[1]).toEqual({
+      query: "mutation($v0: String!) { issueDelete(id: $v0) { success } }",
+      variables: { v0: "ENG-1" },
+    });
 
-    // Linear marks saving an issue destructive, as it can overwrite one.
+    // Asking more takes effect at once; then creating asks too.
     alice.identity.answer = "";
+    expect(await (await alice.request("/rpc/set-level?level=all_changes")).json()).toEqual({
+      status: "updated",
+      level: "all_changes",
+    });
     expect(await (await alice.request("/rpc/create")).json()).toMatchObject({
       resultType: "input_required",
     });
 
-    // Long arguments are shortened for review and fit Widefleet's question limit.
+    // Asking less needs the user's confirmation.
+    const loosening = z
+      .object({ inputRequests: z.object({ approve: z.object({ message: z.string() }) }) })
+      .parse(await (await alice.request("/rpc/set-level?level=none")).json());
+
+    expect(loosening.inputRequests.approve.message).toContain("New: Never ask");
+    alice.identity.answer = "decline";
+    expect(await (await alice.request("/rpc/set-level?level=none")).json()).toEqual({
+      status: "declined",
+    });
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/set-level?level=none")).json()).toEqual({
+      status: "updated",
+      level: "none",
+    });
+    alice.identity.answer = "";
+    expect(await (await alice.request("/rpc/delete?id=ENG-1")).json()).toMatchObject({
+      status: "connected",
+    });
+
+    // Each user has their own level.
+    const bob = browser("bob");
+    await connect(bob, "bob");
+    expect(await (await bob.request("/rpc/delete?id=ENG-1")).json()).toMatchObject({
+      resultType: "input_required",
+    });
+
+    // Long input is shortened for review and fits Widefleet's question limit.
     const asked = z
       .object({ inputRequests: z.object({ approve: z.object({ message: z.string() }) }) })
-      .parse(await (await alice.request(`/rpc/delete?id=${"x".repeat(5000)}`)).json());
+      .parse(await (await bob.request(`/rpc/delete?id=${"x".repeat(5000)}`)).json());
 
     expect(asked.inputRequests.approve.message.length).toBeLessThanOrEqual(4096);
     expect(asked.inputRequests.approve.message).toContain("(5000 characters)");
     expect(asked.inputRequests.approve.message).toContain(
-      "Approving runs the call with the complete arguments",
+      "Approving runs the change with the complete input",
     );
   });
 
-  it("asks only users who can run the tool", async () => {
+  it("lets users choose their approval level on the app's page", async () => {
+    const alice = browser("alice");
+    await connect(alice, "alice");
+    const page = await (await alice.request("/")).text();
+    expect(page).toContain('value="updates_and_deletions" checked');
+
+    const save = (level: string, requestOrigin = origin) =>
+      runtime.dispatchFetch(`${origin}/approval-level`, {
+        method: "POST",
+        body: new URLSearchParams({ level }).toString(),
+        headers: {
+          origin: requestOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+          "test-subject": "alice",
+        },
+      });
+
+    expect((await save("none", "https://other.example.test")).status).toBe(403);
+    expect((await save("sometimes")).status).toBe(400);
+    expect(await (await save("none")).json()).toEqual({ level: "none" });
+    expect(await (await alice.request("/rpc/level")).json()).toMatchObject({ level: "none" });
+    expect(await (await alice.request("/")).text()).toContain('value="none" checked');
+  });
+
+  it("asks only users who can run the change", async () => {
     expect(await (await browser("alice").request("/rpc/delete")).json()).toMatchObject({
       status: "connection_required",
+    });
+    expect(await (await runtime.dispatchFetch(`${origin}/rpc/level`)).json()).toEqual({
+      status: "authentication_required",
     });
   });
 
@@ -283,22 +345,32 @@ describe("Linear personal account app", () => {
       status: "connected",
     });
   });
-  it("reports Linear's tool errors, rate limits and revoked tokens", async () => {
+  it("reports Linear's errors, rate limits and revoked tokens", async () => {
     const alice = browser("alice");
     await connect(alice, "alice");
-    upstream.state.toolError =
-      '{"error":"invalid_request","message":"Could not find referenced Issue."}';
+    upstream.state.errors = [
+      {
+        message: "Entity not found: Issue",
+        path: ["issues"],
+        extensions: { type: "invalid input", userPresentableMessage: "Could not find the issue." },
+      },
+    ];
     expect(await (await alice.request("/rpc/list")).json()).toEqual({
       status: "linear_error",
-      message: '{"error":"invalid_request","message":"Could not find referenced Issue."}',
+      errors: [{ message: "Could not find the issue.", type: "invalid input", path: ["issues"] }],
     });
-    upstream.state.toolError = "";
-    // Arguments that do not match the tool's schema never reach Linear.
+    upstream.state.errors = [{ message: "Rate limited", extensions: { type: "ratelimited" } }];
+    upstream.state.apiHeaders.set("retry-after", "30");
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "rate_limited",
+      retryAfter: "30",
+    });
+    upstream.state.errors = [];
+    // Requests that do not match Linear's schema never reach Linear.
     upstream.calls.length = 0;
     expect((await alice.request("/rpc/invalid")).status).toBe(500);
     expect(upstream.calls).toEqual([]);
     upstream.state.apiStatus = 429;
-    upstream.state.apiHeaders.set("retry-after", "30");
     expect(await (await alice.request("/rpc/list")).json()).toEqual({
       status: "rate_limited",
       retryAfter: "30",
@@ -311,5 +383,11 @@ describe("Linear personal account app", () => {
     });
     upstream.state.apiStatus = 502;
     expect((await alice.request("/rpc/list")).status).toBe(500);
+    upstream.state.apiStatus = 200;
+    // Linear reports a revoked token as a GraphQL authentication error.
+    upstream.revokeAccess();
+    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+      status: "reconnect_required",
+    });
   });
 });

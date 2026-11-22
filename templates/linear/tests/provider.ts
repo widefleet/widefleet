@@ -4,45 +4,29 @@ import { z } from "zod";
 
 const kind = "linear";
 
-const rpc = z.object({
-  jsonrpc: z.literal("2.0"),
-  id: z.literal(1),
-  method: z.literal("tools/call"),
-  params: z.object({ name: z.string(), arguments: z.record(z.string(), z.json()) }),
+const graphqlRequest = z.object({
+  query: z.string(),
+  variables: z.record(z.string(), z.json()).optional(),
 });
 
-const issue = (id: string) => ({
-  id,
-  title: "Synthetic issue",
-  status: "In Progress",
-  statusType: "started",
-  priority: { value: 2, name: "High" },
-  url: `https://linear.app/example/issue/${id}`,
-  team: "Engineering",
-  teamId: "team-1",
-  assigneeId: null,
-  createdAt: "2026-01-01T00:00:00.000Z",
-  updatedAt: "2026-01-02T00:00:00.000Z",
-  completedAt: null,
-  dueDate: null,
-});
+type Json = z.infer<ReturnType<typeof z.json>>;
 
-// A synthetic Linear OAuth application and MCP server. Tool results arrive as
-// server-sent events, as Linear sends them.
+// A synthetic Linear OAuth application and GraphQL API. Answers follow the
+// operation a request names; `state.errors` replaces them with GraphQL errors.
 export const provider = () => {
   const codes = new Map<string, { user: string; challenge: string | null; redirect: string }>();
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
 
-  const calls: { name: string; arguments: Record<string, z.infer<ReturnType<typeof z.json>>> }[] =
-    [];
+  const calls: z.infer<typeof graphqlRequest>[] = [];
+  const errors: Json[] = [];
 
   const state = {
     refreshes: 0,
     unavailable: false,
     apiStatus: 200,
     apiHeaders: new Headers(),
-    toolError: "",
+    errors,
   };
 
   const tokens = (user: string) => {
@@ -60,17 +44,10 @@ export const provider = () => {
     });
   };
 
-  const event = (result: z.infer<ReturnType<typeof z.json>>) =>
-    new Response(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result })}\n\n`, {
-      headers: { "content-type": "text/event-stream" },
-    });
-
-  const output = (value: z.infer<ReturnType<typeof z.json>>) =>
-    event({ content: [{ type: "text", text: JSON.stringify(value) }] });
-
   return {
     state,
     calls,
+    revokeAccess: () => access.clear(),
     authorize: (location: string, user: string) => {
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));
@@ -135,56 +112,68 @@ export const provider = () => {
         }
       }
 
-      if (url.href !== "https://mcp.linear.app/mcp" || request.method !== "POST")
+      if (url.href !== "https://api.linear.app/graphql" || request.method !== "POST")
         throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
 
       const user = access.get((request.headers.get("authorization") ?? "").replace(/^Bearer /, ""));
 
+      // Linear reports an unknown token as a GraphQL authentication error.
       if (!user)
         return Response.json(
-          { error: "invalid_token" },
-          { status: 401, headers: { "www-authenticate": 'Bearer error="invalid_token"' } },
+          {
+            errors: [
+              { message: "Authentication required", extensions: { type: "authentication error" } },
+            ],
+          },
+          { status: 400 },
         );
+      const body = graphqlRequest.parse(await request.json());
 
-      if (!request.headers.get("accept")?.includes("text/event-stream"))
-        return new Response(null, { status: 406 });
-      const { params } = rpc.parse(await request.json());
-
-      if (params.name === "get_user")
-        return output({
-          id: `user-${user}`,
-          name: user,
-          email: `${user}@example.test`,
-          displayName: user,
-          isActive: true,
+      // Better Auth reads the account that authorized the app.
+      if (/^\s*query\s*\{\s*viewer\s*\{\s*id\s+name\s+email/.test(body.query))
+        return Response.json({
+          data: {
+            viewer: {
+              id: `user-${user}`,
+              name: user,
+              email: `${user}@example.test`,
+              avatarUrl: null,
+              active: true,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-02T00:00:00.000Z",
+            },
+          },
         });
-      calls.push(params);
+      calls.push(body);
 
       if (state.apiStatus !== 200)
         return new Response(null, { status: state.apiStatus, headers: state.apiHeaders });
 
-      if (state.toolError)
-        return event({ content: [{ type: "text", text: state.toolError }], isError: true });
+      if (state.errors.length)
+        return Response.json({ data: null, errors: state.errors }, { headers: state.apiHeaders });
 
-      if (params.name === "list_issues")
-        return output({ issues: [issue("ENG-1")], hasNextPage: false });
+      const field = /\{ (\w+)/.exec(body.query)?.[1];
 
-      if (params.name === "save_issue")
-        return output({ ...issue("ENG-2"), title: z.string().parse(params.arguments["title"]) });
-
-      if (params.name === "delete_comment") return output({ deleted: true });
-
-      if (params.name === "get_workspace") return output({ id: "workspace-1", name: "Example" });
-
-      if (params.name === "extract_images")
-        return event({
-          content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }],
+      if (field === "issues")
+        return Response.json({
+          data: { issues: { nodes: [{ identifier: "ENG-1", title: "Synthetic issue" }] } },
         });
 
-      // Linear answers a tool its token cannot use as unknown.
-      return new Response(
-        `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: `Tool ${params.name} not found` } })}\n\n`,
-        { headers: { "content-type": "text/event-stream" } },
+      if (field === "issueCreate")
+        return Response.json({
+          data: { issueCreate: { success: true, issue: { identifier: "ENG-2" } } },
+        });
+
+      if (field === "issueDelete")
+        return Response.json({ data: { issueDelete: { success: true } } });
+
+      return Response.json(
+        {
+          errors: [
+            { message: `Cannot query field "${field}"`, extensions: { type: "graphql error" } },
+          ],
+        },
+        { status: 400 },
       );
     },
   };
