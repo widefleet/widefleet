@@ -27,7 +27,7 @@ const map = JSON.stringify({ version: 3, sources: ["src/app.ts"], names: [], map
 const mapName = `map-${"a".repeat(64)}.map`;
 
 const documentation = {
-  format: 2,
+  format: 3,
   entrypoints: [
     {
       name: "default",

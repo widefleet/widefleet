@@ -37,6 +37,32 @@ impl Types {
         self.signatures.push(Vec::new());
     }
 
+    /// Adds the types a signature declaration names in its documented parameters, return type
+    /// and type parameters to the signature's uses. Its body is implementation, not interface.
+    pub fn declaration_references(
+        &mut self,
+        checker: &mut Checker,
+        node: P<ast::Node>,
+        parameters: usize,
+    ) {
+        let annotations = node
+            .parameters()
+            .iter()
+            .take(parameters)
+            .chain(node.type_parameters())
+            .copied()
+            .chain(node.type_node())
+            .collect::<Vec<_>>();
+        for annotation in annotations {
+            for value in referenced_declarations(checker, annotation) {
+                self.pending.push_back(value);
+                if let Some(roots) = self.signatures.last_mut() {
+                    roots.push(value);
+                }
+            }
+        }
+    }
+
     pub fn text(&mut self, checker: &mut Checker, value: P<Type>) -> String {
         self.pending.push_back(value);
         if let Some(roots) = self.signatures.last_mut() {
@@ -45,8 +71,28 @@ impl Types {
         self.render(checker, value, None)
     }
 
+    /// A signature's type parameter with its modifiers, constraint and default. The types it
+    /// names become uses of the current signature.
     pub fn type_parameter(&mut self, checker: &mut Checker, parameter: P<Type>) -> String {
-        let mut declaration = self.text(checker, parameter);
+        self.type_parameter_text(checker, parameter, true)
+    }
+
+    fn type_parameter_text(
+        &mut self,
+        checker: &mut Checker,
+        parameter: P<Type>,
+        signature: bool,
+    ) -> String {
+        // A declaration's type parameters are printed while documenting it; the types they name
+        // are already its uses through the declaration's references.
+        let print = |types: &mut Self, checker: &mut Checker, value: P<Type>| {
+            if signature {
+                types.text(checker, value)
+            } else {
+                types.render(checker, value, None)
+            }
+        };
+        let mut declaration = print(self, checker, parameter);
         if parameter.symbol().is_some_and(|symbol| {
             symbol.declarations().iter().any(|node| {
                 node.modifiers().is_some_and(|modifiers| {
@@ -61,11 +107,11 @@ impl Types {
         }
         if let Some(constraint) = checker.get_constraint_of_type_parameter_exported(parameter) {
             declaration.push_str(" extends ");
-            declaration.push_str(&self.text(checker, constraint));
+            declaration.push_str(&print(self, checker, constraint));
         }
         if let Some(default) = checker.get_default_from_type_parameter_exported(parameter) {
             declaration.push_str(" = ");
-            declaration.push_str(&self.text(checker, default));
+            declaration.push_str(&print(self, checker, default));
         }
         declaration
     }
@@ -179,6 +225,27 @@ impl Types {
                 self.follow(value, children);
                 continue;
             }
+            // A generic interface or type alias is documented once, as its declaration with its
+            // type parameters. Each instantiation passes its uses on to the declaration and to
+            // its type arguments, which keep their names in signatures, such as `Page<Item>`.
+            if let Some(symbol) = symbol.filter(|_| {
+                declaration.is_some_and(|node| {
+                    matches!(
+                        node.kind(),
+                        ast::Kind::InterfaceDeclaration | ast::Kind::TypeAliasDeclaration
+                    )
+                })
+            }) && !checker
+                .get_local_type_parameters_of_class_or_interface_or_type_alias_exported(symbol)
+                .is_empty()
+            {
+                let declared = checker.get_declared_type_of_symbol_exported(symbol);
+                if declared != value {
+                    children.push(declared);
+                    self.follow(value, children);
+                    continue;
+                }
+            }
             let properties = if value
                 .flags()
                 .intersects(TypeFlags::Object | TypeFlags::UnionOrIntersection)
@@ -228,6 +295,16 @@ impl Types {
             for &(property, node) in &properties {
                 children.extend(checker.get_type_of_symbol_at_location(property, Some(node)));
             }
+            // Declarations name types the checker's types no longer carry: a generic's type
+            // parameters hide its references, and `Alias | null` flattens the alias away.
+            if let Some(node) = declaration.filter(|node| {
+                matches!(
+                    node.kind(),
+                    ast::Kind::InterfaceDeclaration | ast::Kind::TypeAliasDeclaration
+                )
+            }) {
+                children.extend(referenced_declarations(checker, node));
+            }
             self.follow(value, children);
             if let Some(node) = declaration.filter(|node| {
                 matches!(
@@ -236,10 +313,31 @@ impl Types {
                 )
             }) {
                 let name = self.render(checker, value, None);
+                let generic = symbol.is_some_and(|symbol| {
+                    !checker
+                        .get_local_type_parameters_of_class_or_interface_or_type_alias_exported(
+                            symbol,
+                        )
+                        .is_empty()
+                });
                 let verbosity = P::new(VerbosityContext::default());
                 verbosity.level.set(1);
                 verbosity.max_truncation_length.set(crate::MAX_TEXT);
-                let mut definition = self.render(checker, value, Some(verbosity));
+                let mut definition = if generic && node.kind() == ast::Kind::TypeAliasDeclaration {
+                    // A generic alias prints its own structure; references inside it, including
+                    // to itself, keep their names, as a declaration file writes them.
+                    self.relative_imports(checker.type_to_string_ex_exported(
+                        value,
+                        None,
+                        TypeFormatFlags::NoTruncation
+                            | TypeFormatFlags::UseFullyQualifiedType
+                            | TypeFormatFlags::InTypeAlias
+                            | TypeFormatFlags::MultilineObjectLiterals,
+                        None,
+                    ))
+                } else {
+                    self.render(checker, value, Some(verbosity))
+                };
                 if verbosity.truncated.get() {
                     return None;
                 }
@@ -255,7 +353,27 @@ impl Types {
                 }
                 let mut entry = serde_json::to_value(documentation(node).comment).ok()?;
                 entry["name"] = json!(name);
+                entry["kind"] = json!(if node.kind() == ast::Kind::InterfaceDeclaration {
+                    "interface"
+                } else {
+                    "type"
+                });
                 entry["definition"] = json!(definition);
+                // The name shows the parameters, such as `Page<T>`; their constraints and
+                // defaults are listed as declared, such as `T extends Item = Item`.
+                if let Some(symbol) = symbol.filter(|_| generic) {
+                    let parameters = checker
+                        .get_local_type_parameters_of_class_or_interface_or_type_alias_exported(
+                            symbol,
+                        )
+                        .to_vec();
+                    entry["typeParameters"] = json!(
+                        parameters
+                            .into_iter()
+                            .map(|parameter| self.type_parameter_text(checker, parameter, false))
+                            .collect::<Vec<_>>()
+                    );
+                }
                 documented.insert(value, (definitions.len(), name));
                 definitions.push(entry);
             }
@@ -309,6 +427,36 @@ impl Types {
         uses.sort();
         uses
     }
+}
+
+/// The declared types of the interfaces and type aliases a declaration names.
+pub(crate) fn referenced_declarations(checker: &mut Checker, node: P<ast::Node>) -> Vec<P<Type>> {
+    let mut names = Vec::new();
+    type_reference_names(node, &mut names);
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let mut symbol = checker.get_symbol_at_location_exported(name)?;
+            if symbol.flags().intersects(ast::SymbolFlags::Alias) {
+                symbol = checker.get_aliased_symbol(symbol);
+            }
+            symbol
+                .flags()
+                .intersects(ast::SymbolFlags::Interface | ast::SymbolFlags::TypeAlias)
+                .then(|| checker.get_declared_type_of_symbol_exported(symbol))
+        })
+        .collect()
+}
+
+/// The names of the type references inside a declaration.
+fn type_reference_names(node: P<ast::Node>, names: &mut Vec<P<ast::Node>>) {
+    node.for_each_child(&mut |child| {
+        if child.kind() == ast::Kind::TypeReference {
+            names.push(child.as_type_reference_node().type_name());
+        }
+        type_reference_names(child, names);
+        false
+    });
 }
 
 #[cfg(test)]
