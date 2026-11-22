@@ -47,27 +47,39 @@ export const encodeDocumentation = (documentation: Documentation) => {
   };
 };
 
+const conflict = () =>
+  new InvalidOperation({
+    code: "CONFLICT",
+    message: "This upload session already contains different API documentation",
+  });
+
 /**
- * Stores an artifact's documentation before its row is inserted. Storage keeps
- * the first object written under a key, so a retry after a rolled-back publish
- * finds the earlier object and accepts it only when it holds the same bytes.
+ * Stores an artifact's documentation before its row is inserted. A publish can
+ * write the document and then roll back, and storage keeps the first object
+ * written under a key. A retry of the same upload session is accepted only when
+ * it carries the same bytes, or, without documentation, when none was written:
+ * the app runtime reads this key for every published artifact.
  */
 export const storeDocumentation = (
   storage: ArtifactStorage,
   appId: string,
   artifactId: string,
-  encoded: ReturnType<typeof encodeDocumentation>,
+  encoded: ReturnType<typeof encodeDocumentation> | null,
 ) =>
   Result.gen(async function* () {
     const key = documentationKey(appId, artifactId);
+
+    if (!encoded) {
+      if (yield* Result.await(storage.exists(key))) return yield* conflict();
+
+      return Result.ok(undefined);
+    }
+
     yield* Result.await(storage.put(key, encoded.bytes, "application/json"));
     const stored = yield* Result.await(storage.get(key));
 
     if (createHash("sha256").update(stored).digest("hex") !== encoded.summary.sha256)
-      return yield* new InvalidOperation({
-        code: "CONFLICT",
-        message: "This upload session already contains different API documentation",
-      });
+      return yield* conflict();
 
     return Result.ok(undefined);
   });

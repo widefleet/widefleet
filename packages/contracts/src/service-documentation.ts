@@ -43,7 +43,8 @@ const text = z.string().max(262144);
 
 const name = z.string().min(1).max(128);
 
-const maxBytes = 8 * 1024 * 1024;
+/** Largest encoded service documentation an artifact may carry. */
+export const serviceDocumentationMaxBytes = 8 * 1024 * 1024;
 
 const comment = {
   summary: text,
@@ -98,6 +99,7 @@ export const serviceDocumentation = z
     types: z.array(z.strictObject({ name, definition: text, ...comment })).max(4096),
   })
   .refine(
-    (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= maxBytes,
+    (value) =>
+      new TextEncoder().encode(JSON.stringify(value)).byteLength <= serviceDocumentationMaxBytes,
     "Service documentation exceeds 8 MiB",
   );

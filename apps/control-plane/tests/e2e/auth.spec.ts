@@ -8,7 +8,13 @@ import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { app, artifact, workerMetadata, type userConnectionInvocation } from "@platform/contracts";
+import {
+  app,
+  artifact,
+  serviceDocumentation,
+  workerMetadata,
+  type userConnectionInvocation,
+} from "@platform/contracts";
 import {
   account,
   member,
@@ -25,6 +31,11 @@ import {
   organizationSettings,
 } from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
+import {
+  encodeDocumentation,
+  storeDocumentation,
+} from "../../src/lib/server/artifact-documentation.ts";
+import { createStorage } from "../../src/lib/server/storage.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
@@ -469,87 +480,100 @@ test("shows versioned service documentation through authenticated API and access
 
   expect(created.ok()).toBe(true);
   const record = app.parse(await created.json());
-  const artifactId = crypto.randomUUID();
-  const deploymentId = crypto.randomUUID();
+  const storage = createStorage(environment.configuration);
 
-  const metadata = workerMetadata.parse({
-    main_module: "worker.js",
-    compatibility_date: "2026-10-01",
-    entrypoints: ["Reader"],
-    assets: { upload_session: artifactId },
-    service_documentation: {
-      format: 1,
-      types: [
-        {
-          name: "InventoryItem",
-          definition: "type InventoryItem = { id: string; displayName: string };",
-          summary: "An inventory item.",
-          remarks: "",
-          deprecated: "Use CatalogItem when migrating callers.",
-          examples: [
-            '```ts\nconst item: InventoryItem = { id: "one", displayName: "Spare part" };\n```',
-          ],
-        },
-      ],
-      entrypoints: [
-        {
-          name: "Reader",
-          summary: "Read inventory available to the signed-in user.",
-          remarks: "",
-          examples: [],
-          http: false,
-          methods: [
-            {
-              name: "findItems",
-              summary: "Find matching items.",
-              remarks: "Results are paginated. Continue with the returned cursor.",
-              examples: [
-                '```ts\nconst result = await env.INVENTORY.findItems("spare parts");\n```',
-              ],
-              throws: [],
-              signatures: [
-                {
-                  parameters: [
-                    {
-                      name: "query",
-                      type: "string",
-                      description: "Words to search for.",
-                      optional: false,
-                      rest: false,
-                    },
-                  ],
-                  returns: {
-                    type: "Promise<Array<InventoryItem>>",
-                    description: "Matching inventory items.",
+  const documentation = serviceDocumentation.parse({
+    format: 1,
+    types: [
+      {
+        name: "InventoryItem",
+        definition: "type InventoryItem = { id: string; displayName: string };",
+        summary: "An inventory item.",
+        remarks: "",
+        deprecated: "Use CatalogItem when migrating callers.",
+        examples: [
+          '```ts\nconst item: InventoryItem = { id: "one", displayName: "Spare part" };\n```',
+        ],
+      },
+    ],
+    entrypoints: [
+      {
+        name: "Reader",
+        summary: "Read inventory available to the signed-in user.",
+        remarks: "",
+        examples: [],
+        http: false,
+        methods: [
+          {
+            name: "findItems",
+            summary: "Find matching items.",
+            remarks: "Results are paginated. Continue with the returned cursor.",
+            examples: ['```ts\nconst result = await env.INVENTORY.findItems("spare parts");\n```'],
+            throws: [],
+            signatures: [
+              {
+                parameters: [
+                  {
+                    name: "query",
+                    type: "string",
+                    description: "Words to search for.",
+                    optional: false,
+                    rest: false,
                   },
+                ],
+                returns: {
+                  type: "Promise<Array<InventoryItem>>",
+                  description: "Matching inventory items.",
                 },
-              ],
-            },
-          ],
-        },
-      ],
-    },
+              },
+            ],
+          },
+        ],
+      },
+    ],
   });
 
-  await environment.database.db
-    .insert(artifacts)
-    .values({ id: artifactId, appId: record.id, metadata, manifest: {}, modules: [] });
-  await environment.database.db.insert(deployments).values({
-    id: deploymentId,
-    appId: record.id,
-    artifactId,
-    status: "succeeded",
-    requestId: crypto.randomUUID(),
-  });
-  await environment.database.db
-    .update(apps)
-    .set({ activeDeploymentId: deploymentId })
-    .where(eq(apps.id, record.id));
+  // Publishing keeps documentation in artifact storage and a summary on the artifact.
+  const activate = async (document?: z.infer<typeof serviceDocumentation>) => {
+    const artifactId = crypto.randomUUID();
+    const deploymentId = crypto.randomUUID();
+    const encoded = document ? encodeDocumentation(document) : null;
+
+    if (encoded) (await storeDocumentation(storage, record.id, artifactId, encoded)).unwrap();
+    await environment.database.db.insert(artifacts).values({
+      id: artifactId,
+      appId: record.id,
+      metadata: workerMetadata.parse({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        entrypoints: ["Reader"],
+        assets: { upload_session: artifactId },
+      }),
+      manifest: {},
+      modules: [],
+      documentation: encoded?.summary ?? null,
+    });
+    await environment.database.db.insert(deployments).values({
+      id: deploymentId,
+      appId: record.id,
+      artifactId,
+      status: "succeeded",
+      requestId: crypto.randomUUID(),
+    });
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: deploymentId })
+      .where(eq(apps.id, record.id));
+
+    return deploymentId;
+  };
+
+  const deploymentId = await activate(documentation);
   const description = await context.request.get(`/api/v1/app-services/${record.slug}`);
   expect(description.ok()).toBe(true);
   expect(await description.json()).toMatchObject({
     deploymentId,
-    documentation: metadata.service_documentation,
+    documentation,
   });
   await page.goto("/widefleet/services");
   await page
@@ -583,20 +607,12 @@ test("shows versioned service documentation through authenticated API and access
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/services$/);
 
-  metadata.service_documentation = { format: 1, entrypoints: [], types: [] };
-  await environment.database.db
-    .update(artifacts)
-    .set({ metadata })
-    .where(eq(artifacts.id, artifactId));
+  await activate({ format: 1, entrypoints: [], types: [] });
   await page.goto(`/widefleet/services/${record.id}`);
   await expect(
     page.getByText("No API documentation was generated.", { exact: false }),
   ).toBeVisible();
-  delete metadata.service_documentation;
-  await environment.database.db
-    .update(artifacts)
-    .set({ metadata })
-    .where(eq(artifacts.id, artifactId));
+  await activate();
   await page.reload();
   await expect(
     page.getByText("This deployment has no API documentation.", { exact: false }),

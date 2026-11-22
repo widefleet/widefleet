@@ -279,7 +279,7 @@ export const createUploadService = (
 
         yield* Result.await(storeModules(storage, `apps/${appId}`, modules));
 
-        if (encoded) yield* Result.await(storeDocumentation(storage, appId, artifactId, encoded));
+        yield* Result.await(storeDocumentation(storage, appId, artifactId, encoded));
 
         await transaction.insert(artifacts).values({
           id: artifactId,

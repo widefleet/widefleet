@@ -273,6 +273,7 @@ export const workerConfiguration = z.strictObject({
 export {
   appRpcMethod,
   serviceDocumentation,
+  serviceDocumentationMaxBytes,
   serviceDocumentationMaxSignatures,
 } from "./service-documentation.ts";
 

@@ -51,6 +51,43 @@ describe("App multipart upload", () => {
     expect(new TextDecoder().decode(file.modules[0]?.bytes)).toBe(source);
   });
 
+  it("bounds API documentation separately from the rest of the metadata", async () => {
+    const body = form();
+
+    const configuration = z
+      .record(z.string(), z.json())
+      .parse(JSON.parse(z.string().parse(body.get("metadata"))));
+
+    const documentation = {
+      format: 1,
+      entrypoints: [],
+      types: Array.from({ length: 2 }, (_, index) => ({
+        name: `Large${index}`,
+        definition: "x".repeat(200_000),
+        summary: "",
+        remarks: "",
+        examples: [],
+      })),
+    };
+
+    body.set(
+      "metadata",
+      JSON.stringify({ ...configuration, service_documentation: documentation }),
+    );
+    expect((await read(request(body))).unwrap().metadata.service_documentation).toEqual(
+      documentation,
+    );
+    body.set(
+      "metadata",
+      JSON.stringify({
+        ...configuration,
+        compatibility_flags: ["x".repeat(64 * 1024)],
+        service_documentation: documentation,
+      }),
+    );
+    expect((await read(request(body))).isErr()).toBe(true);
+  });
+
   it("rejects JSON bodies, repeated or oversized metadata and non-file modules", async () => {
     expect(
       (
