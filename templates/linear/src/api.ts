@@ -39134,13 +39134,6 @@ export interface WorkspaceAnnouncementNotification {
  */
 export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
-   * @param input - No arguments: pass `{}`.
-   */
-  async _dummy(input: Record<string, never>): Promise<LinearResult<string>> {
-    return run(this.env, this.ctx.props, { root: "Query", field: "_dummy", change: null }, input);
-  }
-
-  /**
    * All teams whose settings the user can administer. This includes teams the user can change settings for, but whose issues they may not have direct access to. This differs from the `teams` query which returns teams based on issue access.
    *
    * @param input - The arguments:
