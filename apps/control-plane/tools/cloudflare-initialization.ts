@@ -19,7 +19,7 @@ import type { Observation } from "../src/lib/server/observation.ts";
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { configuredAppSignInOrganizations } from "../src/lib/server/settings.ts";
-import { connectCloudflareSettings } from "./cloudflare-settings.ts";
+import { createCloudflareSettings } from "./cloudflare-settings.ts";
 import { loadRuntimeExtension } from "./runtime-extension.ts";
 
 export type InitializationPlatform = Pick<
@@ -101,7 +101,7 @@ export const initializeCloudflareInstallation = async ({
   if (publish) {
     const secrets = z.object({ APP_COOKIE_SECRET: z.string().min(1) }).parse(bindings);
 
-    const services = connectCloudflareSettings(
+    const services = createCloudflareSettings(
       configuration,
       database,
       configuration.PLATFORM_ENCRYPTION_KEY,
