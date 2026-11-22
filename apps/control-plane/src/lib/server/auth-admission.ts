@@ -70,13 +70,12 @@ export const createAuthenticationAdmission = (
 
     return providers[0]?.providerId ?? null;
   },
-  // One organization at most verifies a domain, so this names the only provider.
   domainSsoProvider: async (email: string) => {
     const domain = email.trim().toLowerCase().split("@")[1];
 
     if (!domain) return null;
 
-    const [provider] = await database
+    const providers = await database
       .select({ id: ssoProvider.organizationId, providerId: ssoProvider.providerId })
       .from(ssoProvider)
       .innerJoin(
@@ -90,11 +89,15 @@ export const createAuthenticationAdmission = (
           eq(organizationSettings.domainSsoRequired, true),
           sql`${domain} = any(string_to_array(${ssoProvider.domain}, ','))`,
         ),
-      );
+      )
+      .orderBy(ssoProvider.organizationId);
 
-    return provider && (await access.filterOrganizations([provider])).includes(provider.id)
-      ? { providerId: provider.providerId }
-      : null;
+    // Domains verified by several organizations before verification became exclusive
+    // still require company SSO; the first admitted organization receives the sign-in.
+    const admitted = new Set(await access.filterOrganizations(providers));
+    const provider = providers.find((candidate) => admitted.has(candidate.id));
+
+    return provider ? { providerId: provider.providerId } : null;
   },
   allowEmail: async (email: string) => {
     if (publicSignup && (await readInstallation(database)).ownerId) return true;

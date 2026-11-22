@@ -602,6 +602,29 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
 
       expect(await (await excluded.$context).internalAdapter.createSession(userId)).toBeTruthy();
 
+      // A domain both organizations verified before verification became exclusive still
+      // requires the SSO of the one the installation admits.
+      await environment.database.db
+        .update(ssoProvider)
+        .set({ domain: "example.test" })
+        .where(eq(ssoProvider.providerId, "company-bravo"));
+      await environment.database.db
+        .update(organizationSettings)
+        .set({ domainSsoRequired: true })
+        .where(eq(organizationSettings.organizationId, secondOrg));
+
+      const bravoOnly = createAuthentication(environment.configuration, environment.database.db, {
+        organizationAccess: {
+          filterOrganizations: async (candidates) =>
+            candidates.flatMap(({ id }) => (id === secondOrg ? [id] : [])),
+        },
+      });
+
+      await expect(
+        (await bravoOnly.$context).internalAdapter.createSession(userId),
+      ).rejects.toMatchObject({ body: { providerId: "company-bravo" } });
+      await guestDomain("company-bravo");
+
       await environment.database.db
         .update(organizationSettings)
         .set({ ssoRequired: false })
@@ -614,8 +637,13 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
       await rule(false);
       expect(await internalAdapter.createSession(userId)).toBeTruthy();
     } finally {
+      await environment.database.db
+        .update(organizationSettings)
+        .set({ domainSsoRequired: false })
+        .where(eq(organizationSettings.organizationId, secondOrg));
       await rule(false);
       await guestDomain("company-alpha");
+      await guestDomain("company-bravo");
     }
   });
 

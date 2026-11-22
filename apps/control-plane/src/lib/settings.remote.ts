@@ -112,7 +112,7 @@ export const setDomainSso = command(
   organizationSelection.extend({ enabled: z.boolean() }),
   async ({ enabled, organizationId }) => {
     const { runtime, principal } = await commandContext({ organizationId });
-    await remoteOperation(() => runtime.settings.setDomainSso(principal, enabled));
+    await remoteOperation(() => runtime.settings.setDomainSso(principal, enabled, true));
     // The page requests its settings with the optimistic value.
     await requested(getSettings, 1).refreshAll();
   },

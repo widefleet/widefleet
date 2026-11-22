@@ -635,7 +635,13 @@ export const createApi = (runtime: Runtime) => {
       .input(z.object({ enabled: z.boolean() }))
       .output(contract.settingsView)
       .handler(({ context, input }) =>
-        apiOperation(() => runtime.settings.setDomainSso(context.principal, input.enabled)),
+        apiOperation(() =>
+          runtime.settings.setDomainSso(
+            context.principal,
+            input.enabled,
+            !context.request.headers.has("authorization"),
+          ),
+        ),
       ),
     domainVerification: write
       .route({ method: "POST", path: "/settings/domain-verification" })

@@ -194,8 +194,18 @@ describe("Organization login settings", () => {
       )[0];
 
     expect((await settings.read(target.principal)).domainSsoRequired).toBe(true);
-    expect((await settings.setDomainSso(target.principal, false)).domainSsoRequired).toBe(false);
-    expect((await settings.setDomainSso(target.principal, true)).domainSsoRequired).toBe(true);
+    expect((await settings.setDomainSso(target.principal, false, true)).domainSsoRequired).toBe(
+      false,
+    );
+    // External management keeps browser pages read-only; API and CLI writes stay available.
+    await settings.setExternalManagement(target.principal, true);
+    await expect(settings.setDomainSso(target.principal, true, true)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect((await settings.setDomainSso(target.principal, true, false)).domainSsoRequired).toBe(
+      true,
+    );
+    await settings.setExternalManagement(target.principal, false);
     await settings.update(
       target.principal,
       { ...settingsInput.parse({ sso: null }), acknowledgeRestart: false },
@@ -203,7 +213,7 @@ describe("Organization login settings", () => {
       await organizationCredential(environment, target.principal),
     );
     expect(await stored()).toEqual({ ssoRequired: false, domainSsoRequired: false });
-    await expect(settings.setDomainSso(target.principal, true)).rejects.toMatchObject({
+    await expect(settings.setDomainSso(target.principal, true, false)).rejects.toMatchObject({
       code: "CONFLICT",
       message: "Activate company SSO with a verified domain first",
     });

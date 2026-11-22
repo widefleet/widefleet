@@ -116,21 +116,26 @@
     view.ssoDomains.filter((entry) => entry.verified).map((entry) => entry.domain),
   );
 
-  // The switch shows the choice at once. A rejected change drops the override, so the
-  // previous state returns, and the toast explains why without moving the page.
-  const changeDomainSso = async (enabled: boolean) => {
-    try {
-      await setDomainSso({ organizationId, enabled }).updates(
-        getSettings({ organizationId }).withOverride((current) => ({
-          ...current,
-          view: { ...current.view, domainSsoRequired: enabled },
-        })),
-      );
-    } catch (cause) {
-      toast.error("Could not change sign-in for company addresses.", {
-        description: failureMessage(cause, "Try again."),
-      });
-    }
+  // The switch shows the latest choice at once. Saves run in order, so a slower earlier
+  // save cannot overwrite it. When the latest save fails, the saved state returns and the
+  // toast explains why without moving the page.
+  let domainSsoChoice = $state<boolean | null>(null);
+
+  let domainSsoSaves = Promise.resolve();
+
+  const changeDomainSso = (enabled: boolean) => {
+    domainSsoChoice = enabled;
+    domainSsoSaves = domainSsoSaves.then(async () => {
+      try {
+        await setDomainSso({ organizationId, enabled }).updates(getSettings({ organizationId }));
+      } catch (cause) {
+        toast.error("Could not change sign-in for company addresses.", {
+          description: failureMessage(cause, "Try again."),
+        });
+      } finally {
+        if (domainSsoChoice === enabled) domainSsoChoice = null;
+      }
+    });
   };
 
   const remove = () =>
@@ -255,7 +260,7 @@
             aria-labelledby="domain-sso-title"
             aria-describedby="domain-sso-description"
             disabled={readonly}
-            bind:checked={() => view.domainSsoRequired, (enabled) => void changeDomainSso(enabled)}
+            bind:checked={() => domainSsoChoice ?? view.domainSsoRequired, changeDomainSso}
           />
         </div>
       </section>

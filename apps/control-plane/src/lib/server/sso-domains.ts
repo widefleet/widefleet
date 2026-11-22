@@ -296,9 +296,16 @@ export const verifySsoDomains = async (
     )
   ).filter((entry) => entry !== null);
 
-  // A domain's addresses sign in through a single organization's SSO.
-  const [claimed] = found.length
-    ? await database
+  if (found.length)
+    await database.transaction(async (transaction) => {
+      // A domain's addresses sign in through a single organization's SSO. Organizations
+      // verifying the same domain at once wait here, so the second sees the first claim.
+      for (const domain of found.toSorted())
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`sso_domain:${domain}`}))`,
+        );
+
+      const [claimed] = await transaction
         .select({ domain: ssoDomains.domain })
         .from(ssoDomains)
         .where(
@@ -308,17 +315,13 @@ export const verifySsoDomains = async (
             isNotNull(ssoDomains.verifiedAt),
           ),
         )
-        .limit(1)
-    : [];
+        .limit(1);
 
-  if (claimed)
-    throw new InvalidOperation({
-      code: "CONFLICT",
-      message: `${claimed.domain} is already verified by another organization`,
-    });
-
-  if (found.length)
-    await database.transaction(async (transaction) => {
+      if (claimed)
+        throw new InvalidOperation({
+          code: "CONFLICT",
+          message: `${claimed.domain} is already verified by another organization`,
+        });
       await lockProvider(transaction, organizationId);
       await adoptProviderDomains(transaction, organizationId);
       await transaction

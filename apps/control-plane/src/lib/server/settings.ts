@@ -634,8 +634,9 @@ const createOrganizationSettingsService = (
 
       return inspect(true);
     },
-    setDomainSso: async (principal: Principal, enabled: boolean) => {
+    setDomainSso: async (principal: Principal, enabled: boolean, browser: boolean) => {
       requireAdmin(principal, organizationId);
+      await requireEditable(browser);
       await database.transaction(async (transaction) => {
         await lockSettings(transaction);
         const provider = await readSsoProvider(transaction, organizationId);
@@ -739,7 +740,7 @@ export const createSettingsService = (
       scoped(principal.application.organizationId).verifyDomain(principal, domain),
     activateSso: (principal: Principal) =>
       scoped(principal.application.organizationId).activateSso(principal),
-    setDomainSso: (principal: Principal, enabled: boolean) =>
-      scoped(principal.application.organizationId).setDomainSso(principal, enabled),
+    setDomainSso: (principal: Principal, enabled: boolean, browser: boolean) =>
+      scoped(principal.application.organizationId).setDomainSso(principal, enabled, browser),
   };
 };
