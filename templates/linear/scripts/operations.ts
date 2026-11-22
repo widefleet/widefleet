@@ -16,6 +16,7 @@ export const reasons = {
   accessKey: "Authenticates with a release pipeline's access key instead of a user",
   linearWebsite: "Serves Linear's website without a signed-in user",
   internal: "Marked internal by Linear",
+  placeholder: "A placeholder field of Linear's schema without data",
 } as const;
 
 type Hidden = { hidden: keyof typeof reasons };
@@ -357,6 +358,7 @@ export const mutations = {
 } satisfies Record<string, Change | Hidden>;
 
 export const queries = {
+  _dummy: { hidden: "placeholder" },
   // Mutations with these names update an initiative or project; the queries read one of its updates.
   initiativeUpdate: { name: "initiativeUpdateById" },
   projectUpdate: { name: "projectUpdateById" },

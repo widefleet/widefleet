@@ -3078,7 +3078,6 @@ export const graph = {
     user: ["User"],
   },
   Query: {
-    _dummy: ["String", {}],
     administrableTeams: [
       "TeamConnection",
       {
