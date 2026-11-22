@@ -56,6 +56,9 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   let managementUserId: string;
   let agentToken: string;
   let organizationId: string;
+  // Every fixture uses the same organization, so its runtime container and
+  // network need their own names when several fixtures run at once.
+  let execution: string;
   let dockerHost: string;
   let proxy: ReturnType<typeof createServer>;
   const createdApps: string[] = [];
@@ -238,10 +241,11 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     });
     proxy.listen(proxyPort, "127.0.0.1");
     await once(proxy, "listening");
-    const [execution] = await environment.database.db.select().from(organizationRuntimes);
+    const [runtime] = await environment.database.db.select().from(organizationRuntimes);
 
-    if (!execution) throw new Error("Missing execution");
-    organizationId = execution.organizationId;
+    if (!runtime) throw new Error("Missing execution");
+    organizationId = runtime.organizationId;
+    execution = `platform-execution-${crypto.randomUUID()}`;
     identity = await runtimeIdentity("apps.localhost", ["finance"], ["engineering"]);
     await mkdir(join(state, organizationId), { recursive: true });
     await writeFile(
@@ -252,11 +256,11 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       join(environment.environment.PLATFORM_RUNTIME_DIRECTORY, "control-token"),
       runtimeControlToken,
     );
-    await execute("docker", ["network", "create", `platform-execution-${organizationId}`]);
+    await execute("docker", ["network", "create", execution]);
     await execute("docker", [
       "network",
       "connect",
-      `platform-execution-${organizationId}`,
+      execution,
       "internal-app-platform-test-rustfs-1",
     ]);
     await startRuntime();
@@ -345,16 +349,15 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       );
 
     // Remove only app IDs created by this isolated fixture, including partial failures.
-    if (organizationId) {
-      const name = `platform-execution-${organizationId}`;
-      await execute("docker", ["rm", "-f", name]).catch(() => undefined);
+    if (execution) {
+      await execute("docker", ["rm", "-f", execution]).catch(() => undefined);
       await execute("docker", [
         "network",
         "disconnect",
-        name,
+        execution,
         "internal-app-platform-test-rustfs-1",
       ]).catch(() => undefined);
-      await execute("docker", ["network", "rm", name]).catch(() => undefined);
+      await execute("docker", ["network", "rm", execution]).catch(() => undefined);
     }
 
     if (s3) {
@@ -391,10 +394,10 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "run",
       "-d",
       "--name",
-      `platform-execution-${organizationId}`,
+      execution,
       "--user=0",
       "--network",
-      `platform-execution-${organizationId}`,
+      execution,
       "--publish",
       "127.0.0.1::8080",
       "--volume",
@@ -413,7 +416,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "FLEET_S3_SECRET_ACCESS_KEY=local-tests-only",
       image,
     ]);
-    runtimeOrigin = `http://${(await execute("docker", ["port", `platform-execution-${organizationId}`, "8080/tcp"])).stdout.trim()}`;
+    runtimeOrigin = `http://${(await execute("docker", ["port", execution, "8080/tcp"])).stdout.trim()}`;
     await vi.waitFor(
       async () =>
         expect(
@@ -443,12 +446,12 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   };
 
   const agent = async (
-    runtimeContainer = `platform-execution-${organizationId}`,
+    runtimeContainer = execution,
     platformUrl = environment.configuration.PLATFORM_URL,
     celld = join(root, ".tools/celld"),
     edge?: { proxy: string; auth: string },
   ) => {
-    runtimeOrigin = `http://${(await execute("docker", ["port", `platform-execution-${organizationId}`, "8080/tcp"])).stdout.trim()}`;
+    runtimeOrigin = `http://${(await execute("docker", ["port", execution, "8080/tcp"])).stdout.trim()}`;
 
     const operation = execute(join(root, "target/debug/platform-agent"), ["--once"], {
       cwd: root,
@@ -483,12 +486,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     return operation.catch(async (cause: unknown) => {
       const logs = await Promise.allSettled(
         createdApps.map(async (id) => {
-          const result = await execute("docker", [
-            "logs",
-            "--tail",
-            "100",
-            `platform-execution-${organizationId}`,
-          ]);
+          const result = await execute("docker", ["logs", "--tail", "100", execution]);
 
           return `${id}:\n${result.stdout}\n${result.stderr}`;
         }),
@@ -606,7 +604,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   const appRequest = (appId: string, method = "GET", path = "/") =>
     execute("docker", [
       "exec",
-      `platform-execution-${organizationId}`,
+      execution,
       "curl",
       "--silent",
       "--show-error",
@@ -743,7 +741,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       state: "succeeded",
     });
     expect(createdApps).toHaveLength(0);
-    const container = `platform-execution-${organizationId}`;
+    const container = execution;
     const first = (await execute("docker", ["inspect", "--format", "{{.Id}}", container])).stdout;
 
     const replacement = z
@@ -829,7 +827,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect(await appState(healthy.id)).toMatchObject({ version: "healthy" });
     expect(await appState(app.id)).toMatchObject({ version: "before", count: 1 });
     await stopServer();
-    await execute("docker", ["restart", `platform-execution-${organizationId}`]);
+    await execute("docker", ["restart", execution]);
     await vi.waitFor(
       async () => expect(await appState(app.id)).toMatchObject({ version: "before", count: 1 }),
       { timeout: 45000 },
@@ -903,7 +901,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const curl = (...args: string[]) =>
       execute("docker", [
         "exec",
-        `platform-execution-${organizationId}`,
+        execution,
         "curl",
         "--silent",
         "--show-error",
@@ -1014,7 +1012,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     const previewPage = await execute("docker", [
       "exec",
-      `platform-execution-${organizationId}`,
+      execution,
       "curl",
       "--silent",
       "--show-error",
@@ -1208,7 +1206,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
           try {
             const info = await execute("docker", [
               "exec",
-              `platform-execution-${organizationId}`,
+              execution,
               "celld",
               "queue",
               "info",
@@ -1227,12 +1225,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         }),
       );
 
-      const logs = await execute("docker", [
-        "logs",
-        "--tail",
-        "150",
-        `platform-execution-${organizationId}`,
-      ]);
+      const logs = await execute("docker", ["logs", "--tail", "150", execution]);
 
       throw new Error(
         `Queue delivery state:\n${queues.join("\n")}\n${logs.stdout}\n${logs.stderr}`,
@@ -1402,7 +1395,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
       const info = await execute("docker", [
         "exec",
-        `platform-execution-${organizationId}`,
+        execution,
         "celld",
         "queue",
         "info",
@@ -1414,12 +1407,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         "--json",
       ]);
 
-      const logs = await execute("docker", [
-        "logs",
-        "--tail",
-        "100",
-        `platform-execution-${organizationId}`,
-      ]);
+      const logs = await execute("docker", ["logs", "--tail", "100", execution]);
 
       throw new Error(`Queue state: ${info.stdout}\n${logs.stdout}\n${logs.stderr}`, { cause });
     }
@@ -1510,7 +1498,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     // celld otherwise retries restoration until local storage fills up.
     const retired = await execute("docker", [
       "exec",
-      `platform-execution-${organizationId}`,
+      execution,
       "curl",
       "--silent",
       "--show-error",
@@ -1521,7 +1509,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "/dev/null",
       "--write-out",
       "%{http_code}",
-      `http://platform-execution-${organizationId}:8081/do/.cron:widefleet`,
+      `http://${execution}:8081/do/.cron:widefleet`,
     ]);
 
     expect(retired.stdout).toBe("204");
@@ -1628,7 +1616,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
             services: {
               "browser-fixture": {
                 loadBalancer: {
-                  servers: [{ url: `http://platform-execution-${organizationId}:8080` }],
+                  servers: [{ url: `http://${execution}:8080` }],
                 },
               },
             },
@@ -1651,7 +1639,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         "--name",
         edgeName,
         "--network",
-        `platform-execution-${organizationId}`,
+        execution,
         "--publish",
         "127.0.0.1::8443",
         "--volume",
@@ -1934,10 +1922,10 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       policy: { backend: ["https://api.example.test"] },
     });
     expect(await readFile(join(state, "routes", `platform-app-${app.id}.yaml`), "utf8")).toContain(
-      `http://platform-execution-${organizationId}:8080`,
+      `http://${execution}:8080`,
     );
     await stopServer();
-    await execute("docker", ["restart", `platform-execution-${organizationId}`]);
+    await execute("docker", ["restart", execution]);
     await expect
       .poll(
         async () => {
@@ -2354,7 +2342,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         "--name",
         edgeName,
         "--network",
-        `platform-execution-${organizationId}`,
+        execution,
         "--publish",
         "127.0.0.1::8443",
         "--volume",
@@ -2620,12 +2608,12 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       await browser.close();
     }
 
-    await execute("docker", ["restart", `platform-execution-${organizationId}`]);
+    await execute("docker", ["restart", execution]);
     await operation("pause", "example", "retained-instance");
     expect(await operation("status", "example", "retained-instance")).toMatchObject({
       status: "paused",
     });
-    await execute("docker", ["rm", "-f", `platform-execution-${organizationId}`]);
+    await execute("docker", ["rm", "-f", execution]);
     await startRuntime();
     await operation("resume", "example", "retained-instance");
     await writeFile(
@@ -2672,7 +2660,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect((await appRequest(app.id)).stdout).toBe("new code");
     expect((await s3.send(new ListObjectsV2Command(retainedVersions))).KeyCount).toBe(1);
     await cli("delete", app.id, "--yes");
-    await execute("docker", ["restart", `platform-execution-${organizationId}`]);
+    await execute("docker", ["restart", execution]);
     await agent();
     await expect(appRequest(app.id)).rejects.toThrow();
     expect((await s3.send(new ListObjectsV2Command(retainedVersions))).KeyCount).toBe(0);
@@ -2742,7 +2730,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await manageRuntime("/runtime", original);
     await agent();
     await cli("delete", app.id, "--yes");
-    await execute("docker", ["rm", "-f", `platform-execution-${organizationId}`]);
+    await execute("docker", ["rm", "-f", execution]);
     await startRuntime();
     await agent();
     await expect(appRequest(app.id)).rejects.toThrow();
