@@ -31,6 +31,9 @@ export const selections = async () => {
   await linear.issue({ id: "ENG-1" }, { id: true, notAField: true });
   // @ts-expect-error Nested selections are checked too.
   await linear.issue({ id: "ENG-1" }, { team: { name: true, nam: true } });
+  // @ts-expect-error A field's required arguments must be passed.
+  await linear.team({ id: "team-1" }, { membership: { id: true } });
+  await linear.team({ id: "team-1" }, { membership: { $args: { userId: "user-1" }, id: true } });
   // @ts-expect-error And the arguments of a field.
   await linear.issue({ id: "ENG-1" }, { labels: { $args: { frist: 5 }, nodes: { id: true } } });
   // @ts-expect-error A related object needs a nested selection.

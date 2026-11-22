@@ -18,11 +18,14 @@ export interface Variants<Types extends { __typename: string }> {
   readonly variants: Types;
 }
 
-// A field with arguments is a method of its type; a selection passes them as `$args`.
+// A field with arguments is a method of its type; a selection passes them as
+// `$args`, which it must when the field requires an argument.
 type FieldSelection<V> = V extends (args: infer A) => infer R
   ? NonNullable<R> extends Leaf
-    ? true | { $args: A }
-    : { $args?: A } & ValueSelection<R>
+    ? undefined extends A
+      ? true | { $args: NonNullable<A> }
+      : { $args: A }
+    : (undefined extends A ? { $args?: NonNullable<A> } : { $args: A }) & ValueSelection<R>
   : ValueSelection<V>;
 
 type ValueSelection<V> =

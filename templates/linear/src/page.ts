@@ -32,21 +32,31 @@ ${approvalLevels.map((option) => `<label><input type="radio" name="level" value=
 const form = document.getElementById("approval");
 const toast = document.querySelector(".toast");
 let saved = form.querySelector("input:checked").value;
-form.addEventListener("change", async (event) => {
-  const level = event.target.value;
-  const restore = () => {
-    form.querySelector(\`input[value="\${saved}"]\`).checked = true;
-    toast.textContent = "The approval level could not be saved. Try again.";
-    toast.hidden = false;
-    setTimeout(() => (toast.hidden = true), 4000);
-  };
-  try {
-    const response = await fetch("/approval-level", { method: "POST", body: new URLSearchParams({ level }) });
-    if (response.ok) saved = level;
-    else restore();
-  } catch {
+let latest = saved;
+let saving = Promise.resolve();
+const restore = () => {
+  latest = saved;
+  form.querySelector(\`input[value="\${saved}"]\`).checked = true;
+  toast.textContent = "The approval level could not be saved. Try again.";
+  toast.hidden = false;
+  setTimeout(() => (toast.hidden = true), 4000);
+};
+// Saves run one after another and each sends the latest choice, so the stored
+// level always ends as the one the page shows.
+form.addEventListener("change", (event) => {
+  latest = event.target.value;
+  saving = saving.then(async () => {
+    const level = latest;
+    if (level === saved) return;
+    try {
+      const response = await fetch("/approval-level", { method: "POST", body: new URLSearchParams({ level }) });
+      if (response.ok) {
+        saved = level;
+        return;
+      }
+    } catch {}
     restore();
-  }
+  });
 });
 </script>`;
 
