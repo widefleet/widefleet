@@ -64,6 +64,8 @@
   // override, so the previous role returns, and the toast explains why without moving the list.
   const changeRole = (person: { id: string; name: string }, value: string) => {
     const role = memberRoleInput.shape.role.parse(value);
+    // A queued save still belongs to the workspace it was chosen in.
+    const { organizationId } = workspace;
 
     const override = members.withOverride((current) => ({
       ...current,
@@ -75,7 +77,7 @@
     const save = (roleSaves.get(person.id) ?? Promise.resolve()).then(async () => {
       try {
         await setMemberRole({
-          organizationId: workspace.organizationId,
+          organizationId,
           memberId: person.id,
           role,
         }).updates(override);
