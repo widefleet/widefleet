@@ -4,8 +4,7 @@ import { availableSocialProviders } from "#server/social-sign-in";
 import { localDestination } from "#server/navigation";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
+export const load: PageServerLoad = async ({ locals, url }) => {
   const runtime = await getRuntime();
 
   const provider = availableSocialProviders(runtime.configuration).find(

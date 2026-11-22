@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { setServiceAccess } from "#lib/services.remote";
+  import { getServiceAvailability, setServiceAccess } from "#lib/services.remote";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
@@ -7,12 +7,19 @@
   import { Button } from "@platform/ui/button";
   import { Label } from "@platform/ui/label";
   import { NativeSelect } from "@platform/ui/native-select";
-  import type { PageData } from "./$types";
+  import type { PageProps } from "./$types";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data }: { data: PageData } = $props();
+  let { params }: PageProps = $props();
+
+  const data = $derived({
+    service: await getServiceAvailability({
+      organizationId: workspace.organizationId,
+      service: params.service,
+    }),
+  });
 </script>
 
 <svelte:head><title>{data.service.displayName} availability · Widefleet</title></svelte:head>
@@ -25,7 +32,7 @@
     title="API availability"
     description={`Choose who can connect ${data.service.displayName} to their apps.`}
   />
-  {#if data.saved}<Feedback>Availability saved.</Feedback>{/if}
+  {#if setServiceAccess.result?.saved}<Feedback>Availability saved.</Feedback>{/if}
   <form {...setServiceAccess} class="space-y-6">
     <OrganizationField field={setServiceAccess.fields.organizationId} />
     <input {...setServiceAccess.fields.appId.as("hidden", data.service.appId)} />

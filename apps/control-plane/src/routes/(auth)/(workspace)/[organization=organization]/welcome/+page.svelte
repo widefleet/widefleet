@@ -1,12 +1,12 @@
 <script lang="ts">
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import { Button } from "@platform/ui/button";
-  import type { PageData } from "./$types";
+  import { getWelcome } from "#lib/settings.remote";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data }: { data: PageData } = $props();
+  const data = $derived(await getWelcome({ organizationId: workspace.organizationId }));
 
   const login = $derived(`widefleet login --url ${JSON.stringify(data.platformUrl)}`);
 

@@ -4,8 +4,7 @@ import { getRuntime } from "#server/runtime";
 import { invitationIdentity } from "#server/page-auth";
 import { remoteOperation } from "#server/remote-support";
 
-export const load: PageServerLoad = async ({ params, setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
+export const load: PageServerLoad = async ({ params }) => {
   const runtime = await getRuntime();
   const { invitationId } = invitationPath.parse(params);
   const person = await invitationIdentity(invitationId);

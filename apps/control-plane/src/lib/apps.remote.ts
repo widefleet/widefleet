@@ -1,5 +1,5 @@
 import { form, getRequestEvent, query } from "$app/server";
-import { redirect } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
 import {
   appPath,
   createAgentInput,
@@ -22,6 +22,24 @@ export const getApps = query(organizationSelection, async (selection) => {
   return { principal, apps: queryValue(await runtime.apps.list(principal)) };
 });
 
+// The new app form needs creator permission. A preview link also needs its original app.
+export const getAppCreation = query(
+  organizationSelection.extend({ parentId: z.string().max(100).nullable() }),
+  async ({ organizationId, parentId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+
+    if (!principal.creator) error(403, "You do not have permission to create apps.");
+    const apps = queryValue(await runtime.apps.list(principal));
+    const originals = apps.filter((app) => app.state !== "deleting" && !app.parentId);
+    const parent = originals.find((app) => app.id === parentId);
+
+    if (parentId !== null && !parent)
+      error(404, "The original app is no longer available. This preview cannot be created.");
+
+    return { originals, parentId: parent?.id ?? "" };
+  },
+);
+
 export const getAppDetails = query(appQuery, async ({ appId, search, organizationId }) => {
   const { runtime, principal } = await remoteContext({ organizationId });
   const app = queryValue(await runtime.apps.get(principal, appId));
@@ -30,7 +48,9 @@ export const getAppDetails = query(appQuery, async ({ appId, search, organizatio
 
   const source = app.source;
 
-  return { app, history, access, source };
+  // The rollback form sends this key so a repeated submission starts only one deployment. It
+  // comes with the data so the server-rendered form and the hydrated page share it.
+  return { app, history, access, source, requestId: crypto.randomUUID() };
 });
 
 export const getAppSource = query(appTarget, async ({ appId, organizationId }) => {
@@ -76,15 +96,6 @@ const refreshAccess = async (
   search: string,
 ) => {
   await getAppDetails({ appId, search, organizationId: organization.id }).refresh();
-
-  if (!getRequestEvent().isRemoteRequest)
-    redirect(
-      303,
-      workspacePath(
-        organization.slug,
-        `/apps/${appId}/access/management?${new URLSearchParams({ q: search, saved: "1" })}#access`,
-      ),
-    );
 
   return { saved: true };
 };

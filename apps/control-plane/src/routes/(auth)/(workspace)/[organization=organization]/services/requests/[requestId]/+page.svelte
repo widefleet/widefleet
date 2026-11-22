@@ -1,12 +1,20 @@
 <script lang="ts">
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import { Button } from "@platform/ui/button";
-  import type { PageData } from "./$types";
+  import { getConnectionRequest } from "#lib/services.remote";
+  import type { PageProps } from "./$types";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data }: { data: PageData } = $props();
+  let { params }: PageProps = $props();
+
+  const data = $derived({
+    request: await getConnectionRequest({
+      organizationId: workspace.organizationId,
+      requestId: params.requestId,
+    }),
+  });
 
   const titles = {
     pending: "Request submitted",

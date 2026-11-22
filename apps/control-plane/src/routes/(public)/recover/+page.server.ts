@@ -6,8 +6,7 @@ import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 
 // Recovery signs in to the installation organization, whose company sign-in it restores.
-export const load: PageServerLoad = async ({ setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
+export const load: PageServerLoad = async () => {
   const runtime = await getRuntime();
 
   const [installation] = await runtime.database.db

@@ -12,12 +12,19 @@
   import TemplateList from "#shadcn/components/TemplateList.svelte";
   import AppIcon from "#shadcn/components/AppIcon.svelte";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
-  import type { PageData } from "./$types";
+  import { page } from "$app/state";
+  import { z } from "zod";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data: route }: { data: PageData } = $props();
+  const route = $derived({
+    search: (page.url.searchParams.get("q") ?? "").trim().slice(0, 200),
+    filter: z
+      .enum(["all", "active", "preview"])
+      .catch("all")
+      .parse(page.url.searchParams.get("filter")),
+  });
 
   const data = $derived(await getApps({ organizationId: workspace.organizationId }));
 

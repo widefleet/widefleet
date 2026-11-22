@@ -9,14 +9,19 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { onMount, type Snippet } from "svelte";
+  import { onMount } from "svelte";
   import { setAppContext } from "#lib/app-context";
-  import type { LayoutData } from "./$types";
+  import type { LayoutProps } from "./$types";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data: route, children }: { data: LayoutData; children: Snippet } = $props();
+  let { params, children }: LayoutProps = $props();
+
+  const route = $derived({
+    appId: params.appId,
+    search: (page.url.searchParams.get("q") ?? "").trim().slice(0, 200),
+  });
 
   const details = $derived(
     getAppDetails({
@@ -30,7 +35,7 @@
   const activeTab = $derived.by(() => {
     const segments = page.route.id?.split("/") ?? [];
 
-    return segments[segments.indexOf("[appId]") + 1] ?? "overview";
+    return segments[segments.indexOf("[appId=identifier]") + 1] ?? "overview";
   });
 
   let refreshing = $state(false);
@@ -40,8 +45,9 @@
   const workflowOperations = $state<Record<string, Awaited<ReturnType<typeof manageWorkflow>>>>({});
 
   const submitRollback = async ({ submit }: { submit: () => Promise<boolean> }) => {
+    // Keep the submitted key until the rollback succeeds, so a retry is recognized as the same request.
     rollbackRequests[route.appId] ??= {
-      requestId: route.requestId,
+      requestId: data.requestId,
       pending: false,
     };
 
@@ -100,7 +106,7 @@
       return route.search;
     },
     get requestId() {
-      return rollbackRequests[route.appId]?.requestId ?? route.requestId;
+      return rollbackRequests[route.appId]?.requestId ?? data.requestId;
     },
     get rollbackPending() {
       return rollbackRequests[route.appId]?.pending ?? false;

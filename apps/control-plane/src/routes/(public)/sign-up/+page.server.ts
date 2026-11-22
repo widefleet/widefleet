@@ -6,8 +6,7 @@ import { organizationPlaceholder, workspacePath } from "#lib/workspace-path";
 import type { PageServerLoad } from "./$types";
 import { availableSocialProviders } from "#server/social-sign-in";
 
-export const load: PageServerLoad = async ({ url, setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
+export const load: PageServerLoad = async ({ url }) => {
   const runtime = await getRuntime();
 
   if (!(await readInstallation(runtime.database.db)).ownerId) redirect(303, "/setup");

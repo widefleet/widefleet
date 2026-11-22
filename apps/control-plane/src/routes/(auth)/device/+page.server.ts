@@ -5,7 +5,7 @@ import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ url, setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store", "referrer-policy": "no-referrer" });
+  setHeaders({ "referrer-policy": "no-referrer" });
   const runtime = await getRuntime();
   const { session, user } = getUserSession();
 

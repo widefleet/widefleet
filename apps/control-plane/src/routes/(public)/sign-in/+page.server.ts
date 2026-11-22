@@ -11,8 +11,7 @@ import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
 import { availableSocialProviders } from "#server/social-sign-in";
 
-export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
+export const load: PageServerLoad = async ({ locals, url }) => {
   const runtime = await getRuntime();
 
   if (!(await readInstallation(runtime.database.db)).ownerId) redirect(303, "/setup");

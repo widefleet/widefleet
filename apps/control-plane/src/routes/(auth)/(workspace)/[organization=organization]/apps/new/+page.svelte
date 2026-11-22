@@ -3,21 +3,24 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import GitBranch from "@lucide/svelte/icons/git-branch";
-  import { createApp, getApps } from "#lib/apps.remote";
+  import { createApp, getAppCreation } from "#lib/apps.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import { Label } from "@platform/ui/label";
   import { NativeSelect } from "@platform/ui/native-select";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
-  import type { PageData } from "./$types";
+  import { page } from "$app/state";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data: route }: { data: PageData } = $props();
-
-  const data = $derived(await getApps({ organizationId: workspace.organizationId }));
+  const route = $derived(
+    await getAppCreation({
+      organizationId: workspace.organizationId,
+      parentId: page.url.searchParams.get("parent"),
+    }),
+  );
 </script>
 
 <svelte:head><title>Create app · Widefleet</title></svelte:head>
@@ -75,10 +78,9 @@
           id="parentId"
           {...createApp.fields.parentId.as("select", route.parentId)}
           class="w-full"
-          ><option value="">Standalone app</option
-          >{#each data.apps as app (app.id)}{#if app.state !== "deleting" && !app.parentId}<option
-                value={app.id}>{app.displayName}</option
-              >{/if}{/each}</NativeSelect
+          ><option value="">Standalone app</option>{#each route.originals as app (app.id)}<option
+              value={app.id}>{app.displayName}</option
+            >{/each}</NativeSelect
         >
         <p class="text-muted-foreground text-xs leading-5">
           A preview has its own URL and data. The original app stays unchanged.

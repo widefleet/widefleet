@@ -1,12 +1,23 @@
 <script lang="ts">
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import { Button } from "@platform/ui/button";
-  import type { PageData } from "./$types";
+  import { page } from "$app/state";
+  import { getConnectionResult } from "#lib/services.remote";
+  import type { PageProps } from "./$types";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data }: { data: PageData } = $props();
+  let { params }: PageProps = $props();
+
+  const data = $derived(
+    await getConnectionResult({
+      organizationId: workspace.organizationId,
+      service: params.service,
+      app: page.url.searchParams.get("app"),
+      binding: page.url.searchParams.get("binding"),
+    }),
+  );
 
   const state = $derived(data.connections.connections.state);
 

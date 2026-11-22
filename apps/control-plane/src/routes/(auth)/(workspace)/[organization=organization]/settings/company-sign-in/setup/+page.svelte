@@ -6,7 +6,12 @@
   import { page } from "$app/state";
   import { getWorkspaceContext } from "#lib/workspace-context";
   import { warnBeforeLeaving } from "#lib/unsaved-changes";
-  import { activateCompanySso, getSettings, verifyCompanyDomain } from "#lib/settings.remote";
+  import {
+    activateCompanySso,
+    checkSsoSetup,
+    getSettings,
+    verifyCompanyDomain,
+  } from "#lib/settings.remote";
   import {
     failureMessage,
     nextSetupStep,
@@ -29,20 +34,22 @@
   import Feedback from "#shadcn/components/Feedback.svelte";
   import RestartDialog from "#shadcn/components/sso/RestartDialog.svelte";
   import SsoConnectionFields from "#shadcn/components/sso/SsoConnectionFields.svelte";
-  import type { PageData } from "./$types";
 
   const workspace = getWorkspaceContext();
-
-  let { data: route }: { data: PageData } = $props();
 
   const settings = $derived(getSettings({ organizationId: workspace.organizationId }));
 
   const data = $derived(
-    await settings.catch((cause: unknown) => {
-      if (settings.error && settings.error.status >= 500 && settings.current)
-        return settings.current;
-      throw cause;
-    }),
+    (
+      await Promise.all([
+        settings.catch((cause: unknown) => {
+          if (settings.error && settings.error.status >= 500 && settings.current)
+            return settings.current;
+          throw cause;
+        }),
+        checkSsoSetup({ organizationId: workspace.organizationId }),
+      ])
+    )[0],
   );
 
   const view = $derived(data.view);
@@ -397,7 +404,7 @@
           Sign in with your company account. Widefleet confirms that the connection works and that
           your account keeps administrator access. Members are not affected.
         </p>
-        {#if route.loginFailed}
+        {#if page.url.searchParams.has("error")}
           <Feedback kind="error"
             >Company sign-in failed. Check your provider, redirect URIs and credentials.</Feedback
           >
