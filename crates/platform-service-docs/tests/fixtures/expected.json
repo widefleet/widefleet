@@ -22,7 +22,8 @@
               "returns": {
                 "description": "The greeting.",
                 "type": "Promise<string>"
-              }
+              },
+              "uses": []
             }
           ],
           "summary": "Greet a person.",
@@ -46,7 +47,8 @@
               "returns": {
                 "description": "",
                 "type": "Promise<{ matches: string[]; }>"
-              }
+              },
+              "uses": ["Query"]
             }
           ],
           "summary": "Find entries that match a query.",
@@ -58,14 +60,15 @@
       "summary": ""
     }
   ],
-  "format": 1,
+  "format": 2,
   "types": [
     {
       "definition": "{\n    text: string;\n    limit?: number | undefined;\n}\n/** text: Text to search for. */\n/** limit: Maximum number of matches. */",
       "examples": [],
       "name": "Query",
       "remarks": "",
-      "summary": "A search request."
+      "summary": "A search request.",
+      "uses": []
     }
   ]
 }

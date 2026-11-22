@@ -26,8 +26,10 @@ const indexedService = z.strictObject({
 
 const indexedServices = z.record(z.string(), indexedService);
 
+// The format changes with every change to which documentation the index accepts,
+// so indexes built from documentation that is no longer readable are rebuilt.
 const serviceIndex = z.strictObject({
-  format: z.literal(2),
+  format: z.literal(3),
   // Start of the last completed scan; 0 until a scan completes.
   builtAt: z.number().int().nonnegative(),
   services: indexedServices,
@@ -163,7 +165,7 @@ export const readServiceIndex = async (
   organizationId: string,
 ): Promise<{ services: IndexedServices; complete: boolean }> => {
   const current = await read(environment, organizationId);
-  const index = current?.index ?? { format: 2 as const, builtAt: 0, services: {} };
+  const index = current?.index ?? { format: 3 as const, builtAt: 0, services: {} };
 
   if (!index.scan && index.builtAt && Date.now() - index.builtAt < maximumAge)
     return { services: index.services, complete: true };
@@ -182,7 +184,7 @@ export const readServiceIndex = async (
   ).reduce((services, { hostname, state }) => withState(services, hostname, state), scan.services);
 
   const next: ServiceIndex = page.list_complete
-    ? { format: 2, builtAt: scan.startedAt, services: scanned }
+    ? { format: 3, builtAt: scan.startedAt, services: scanned }
     : {
         ...index,
         scan: { startedAt: scan.startedAt, cursor: page.cursor, services: scanned },
@@ -209,7 +211,7 @@ export const refreshServiceIndex = async (
     // Without an index, this creates an expired one, so the next search scans
     // the installation and a search that scanned before this refresh cannot
     // save its older result.
-    const index = current?.index ?? { format: 2 as const, builtAt: 0, services: {} };
+    const index = current?.index ?? { format: 3 as const, builtAt: 0, services: {} };
 
     const next: ServiceIndex = {
       ...index,

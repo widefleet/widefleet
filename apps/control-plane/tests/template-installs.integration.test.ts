@@ -27,7 +27,7 @@ const map = JSON.stringify({ version: 3, sources: ["src/app.ts"], names: [], map
 const mapName = `map-${"a".repeat(64)}.map`;
 
 const documentation = {
-  format: 1,
+  format: 2,
   entrypoints: [
     {
       name: "default",
@@ -252,7 +252,7 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
         ).unwrap(),
       ),
     ),
-  ).toEqual(documentation);
+  ).toEqual(contract.serviceDocumentation.parse(documentation));
   expect(metadata.assets.binding).toBe("ASSETS");
 
   // The template's static assets are part of the deployment, as with the CLI.

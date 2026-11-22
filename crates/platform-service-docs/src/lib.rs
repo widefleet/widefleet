@@ -35,7 +35,7 @@ impl From<serde_json::Error> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn empty() -> Value {
-    json!({"format": 1, "entrypoints": [], "types": []})
+    json!({"format": 2, "entrypoints": [], "types": []})
 }
 
 /// Documents the service entrypoints of a bundled Worker.
@@ -168,6 +168,7 @@ pub fn extract(
             let doc = documentation(member);
             let mut signatures = Vec::new();
             for &signature in callable.iter().take(16) {
+                types.start_signature();
                 let signature_doc = documentation(signature.declaration().unwrap_or(member));
                 let mut parameters = Vec::new();
                 for &parameter in
@@ -215,13 +216,22 @@ pub fn extract(
             entries.push(entry);
         }
     }
-    let Some(types) = types.definitions(&mut checker) else {
+    let Some(definitions) = types.definitions(&mut checker) else {
         eprintln!(
             "Warning: API documentation was omitted because it exceeds supported limits. Deployment continues."
         );
         return Ok(empty());
     };
-    let result = json!({"format": 1, "entrypoints": entries, "types": types});
+    // Signatures were started in this order, so their uses line up.
+    let mut uses = types.signature_uses().iter();
+    for entry in &mut entries {
+        for method in entry["methods"].as_array_mut().into_iter().flatten() {
+            for signature in method["signatures"].as_array_mut().into_iter().flatten() {
+                signature["uses"] = json!(uses.next().cloned().unwrap_or_default());
+            }
+        }
+    }
+    let result = json!({"format": 2, "entrypoints": entries, "types": definitions});
     if !within_limits("", &result) || serde_json::to_vec(&result)?.len() > MAX_BYTES {
         eprintln!(
             "Warning: API documentation was omitted because it exceeds supported limits. Deployment continues."
@@ -408,7 +418,7 @@ fn within_limits(key: &str, value: &Value) -> bool {
                 <= match key {
                     "entrypoints" | "parameters" | "typeParameters" => 32,
                     "methods" => 1024,
-                    "types" => MAX_TYPES,
+                    "types" | "uses" => MAX_TYPES,
                     _ => 16,
                 }
                 && values.iter().all(|value| within_limits("", value))

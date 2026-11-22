@@ -12,6 +12,11 @@ pub struct Types {
     external_imports: HashMap<String, String>,
     pending: VecDeque<P<Type>>,
     seen: HashSet<P<Type>>,
+    /// Types each rendered signature names, in the order signatures were rendered.
+    signatures: Vec<Vec<P<Type>>>,
+    /// Types the traversal reached from each visited type.
+    children: HashMap<P<Type>, Vec<P<Type>>>,
+    signature_uses: Vec<Vec<String>>,
 }
 
 impl Types {
@@ -21,11 +26,22 @@ impl Types {
             external_imports: HashMap::new(),
             pending: VecDeque::new(),
             seen: HashSet::new(),
+            signatures: Vec::new(),
+            children: HashMap::new(),
+            signature_uses: Vec::new(),
         }
+    }
+
+    /// Starts a signature; the types its texts name become its uses.
+    pub fn start_signature(&mut self) {
+        self.signatures.push(Vec::new());
     }
 
     pub fn text(&mut self, checker: &mut Checker, value: P<Type>) -> String {
         self.pending.push_back(value);
+        if let Some(roots) = self.signatures.last_mut() {
+            roots.push(value);
+        }
         self.render(checker, value, None)
     }
 
@@ -130,6 +146,7 @@ impl Types {
 
     pub fn definitions(&mut self, checker: &mut Checker) -> Option<Vec<Value>> {
         let mut definitions = Vec::new();
+        let mut documented = HashMap::new();
         while let Some(value) = self.pending.pop_front() {
             if !self.seen.insert(value) {
                 continue;
@@ -138,17 +155,17 @@ impl Types {
             if self.seen.len() > 16 * crate::MAX_TYPES || definitions.len() > crate::MAX_TYPES {
                 return None;
             }
+            let mut children = Vec::new();
             if value.flags().intersects(TypeFlags::UnionOrIntersection) {
-                self.pending.extend(value.types());
+                children.extend(value.types());
             }
             if value.flags().intersects(TypeFlags::Object)
                 && value.object_flags().intersects(ObjectFlags::Reference)
             {
-                self.pending
-                    .extend(checker.get_type_arguments_exported(value));
+                children.extend(checker.get_type_arguments_exported(value));
             }
             if let Some(alias) = value.alias() {
-                self.pending.extend(alias.type_arguments());
+                children.extend(alias.type_arguments());
             }
             let symbol = value
                 .alias()
@@ -159,6 +176,7 @@ impl Types {
                 .and_then(ast::get_source_file_of_node)
                 .is_some_and(|file| !tsrs_vfs::bundled::is_bundled(file.file_name()));
             if symbol.is_some() && !local {
+                self.follow(value, children);
                 continue;
             }
             let properties = if value
@@ -186,23 +204,31 @@ impl Types {
                 .intersects(TypeFlags::Object | TypeFlags::UnionOrIntersection)
             {
                 for &index in checker.get_index_infos_of_type_exported(value) {
-                    self.pending.push_back(index.value_type());
+                    children.push(index.value_type());
                 }
                 for kind in [SignatureKind::Call, SignatureKind::Construct] {
                     for &signature in checker.get_signatures_of_type_exported(value, kind) {
-                        self.pending
-                            .push_back(checker.get_return_type_of_signature_exported(signature));
+                        children.push(checker.get_return_type_of_signature_exported(signature));
                         for &parameter in signature.parameters() {
-                            self.pending
-                                .push_back(checker.get_type_of_symbol_exported(parameter));
+                            children.push(checker.get_type_of_symbol_exported(parameter));
+                        }
+                        // Constraints and defaults of the signature's own type parameters are
+                        // rendered with the definition, so the types they name are used too.
+                        for &parameter in signature.type_parameters() {
+                            children.extend(
+                                checker.get_constraint_of_type_parameter_exported(parameter),
+                            );
+                            children.extend(
+                                checker.get_default_from_type_parameter_exported(parameter),
+                            );
                         }
                     }
                 }
             }
             for &(property, node) in &properties {
-                self.pending
-                    .extend(checker.get_type_of_symbol_at_location(property, Some(node)));
+                children.extend(checker.get_type_of_symbol_at_location(property, Some(node)));
             }
+            self.follow(value, children);
             if let Some(node) = declaration.filter(|node| {
                 matches!(
                     node.kind(),
@@ -230,10 +256,58 @@ impl Types {
                 let mut entry = serde_json::to_value(documentation(node).comment).ok()?;
                 entry["name"] = json!(name);
                 entry["definition"] = json!(definition);
+                documented.insert(value, (definitions.len(), name));
                 definitions.push(entry);
             }
         }
+        // Record the documented types each definition and signature uses directly. Undocumented
+        // types in between, such as unions, arrays or library generics, pass their uses through.
+        for (&value, (index, name)) in &documented {
+            let mut uses = self.uses(&documented, self.children.get(&value).into_iter().flatten());
+            uses.retain(|used| used != name);
+            definitions[*index]["uses"] = json!(uses);
+        }
+        let signature_uses = self
+            .signatures
+            .iter()
+            .map(|roots| self.uses(&documented, roots.iter()))
+            .collect();
+        self.signature_uses = signature_uses;
         Some(definitions)
+    }
+
+    /// The uses of each signature, in the order `start_signature` began them.
+    pub fn signature_uses(&self) -> &[Vec<String>] {
+        &self.signature_uses
+    }
+
+    fn follow(&mut self, value: P<Type>, children: Vec<P<Type>>) {
+        self.pending.extend(children.iter().copied());
+        self.children.insert(value, children);
+    }
+
+    fn uses<'a>(
+        &self,
+        documented: &HashMap<P<Type>, (usize, String)>,
+        roots: impl Iterator<Item = &'a P<Type>>,
+    ) -> Vec<String> {
+        let mut uses = Vec::new();
+        let mut visited = HashSet::new();
+        let mut pending: Vec<P<Type>> = roots.copied().collect();
+        while let Some(value) = pending.pop() {
+            if !visited.insert(value) {
+                continue;
+            }
+            if let Some((_, name)) = documented.get(&value) {
+                if !uses.contains(name) {
+                    uses.push(name.clone());
+                }
+                continue;
+            }
+            pending.extend(self.children.get(&value).into_iter().flatten().copied());
+        }
+        uses.sort();
+        uses
     }
 }
 

@@ -33,6 +33,7 @@ const methods = (
               ]
             : [],
           returns: { type: "unknown", description: "" },
+          uses: [],
         },
       ],
     })),

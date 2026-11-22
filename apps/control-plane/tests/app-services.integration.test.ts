@@ -129,7 +129,7 @@ describe("App service connections", () => {
     });
 
     const documented = (...entrypoints: ReturnType<typeof entry>[]) => ({
-      format: 1 as const,
+      format: 2 as const,
       entrypoints,
       types: [],
     });
@@ -168,7 +168,7 @@ describe("App service connections", () => {
 
   it("describes deployed apps that the catalog omits by slug or ID", async () => {
     const target = await app(["default"], principal, {
-      format: 1,
+      format: 2,
       entrypoints: [
         { name: "default", summary: "", remarks: "", examples: [], http: true, methods: [] },
       ],
@@ -478,7 +478,7 @@ describe("App service connections", () => {
 
     const documentation = (summary: string) =>
       contract.serviceDocumentation.parse({
-        format: 1,
+        format: 2,
         entrypoints: [
           { name: "Reader", summary, remarks: "", examples: [], methods: [], http: false },
         ],
@@ -539,32 +539,40 @@ describe("App service connections", () => {
   });
 
   it("lists an API's methods and describes selected methods with the types they use", async () => {
-    const signature = (parameter: string, returns: string) => ({
-      parameters: [
-        { name: "input", type: parameter, description: "", optional: false, rest: false },
-      ],
-      returns: { type: returns, description: "" },
-    });
-
-    const method = (name: string, summary: string, parameter: string, returns: string) => ({
+    const method = (
+      name: string,
+      summary: string,
+      parameter: string,
+      returns: string,
+      uses: string[],
+    ) => ({
       name,
       summary,
       remarks: "",
       examples: [],
       throws: [],
-      signatures: [signature(parameter, returns)],
+      signatures: [
+        {
+          parameters: [
+            { name: "input", type: parameter, description: "", optional: false, rest: false },
+          ],
+          returns: { type: returns, description: "" },
+          uses,
+        },
+      ],
     });
 
-    const type = (name: string, definition: string) => ({
+    const type = (name: string, definition: string, uses: string[] = []) => ({
       name,
       definition,
       summary: "",
       remarks: "",
       examples: [],
+      uses,
     });
 
     const target = await app(["Reader"], principal, {
-      format: 1,
+      format: 2,
       entrypoints: [
         {
           name: "Reader",
@@ -573,14 +581,17 @@ describe("App service connections", () => {
           examples: [],
           http: false,
           methods: [
-            method("findItems", "Find items.\nMatches names.", "Query", "Promise<Page>"),
-            method("countItems", "Count items.", "string", "Promise<number>"),
+            method("findItems", "Find items.\nMatches names.", "Query", "Promise<Page>", [
+              "Page",
+              "Query",
+            ]),
+            method("countItems", "Count items.", "string", "Promise<number>", []),
           ],
         },
       ],
       types: [
         type("Query", "type Query = { text: string };"),
-        type("Page", "type Page = { items: Item[] };"),
+        type("Page", "type Page = { items: Item[] };", ["Item"]),
         type("Item", "type Item = { id: string };"),
         type("Unused", "type Unused = { id: string };"),
       ],

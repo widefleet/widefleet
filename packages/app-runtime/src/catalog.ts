@@ -33,5 +33,9 @@ export const readServiceDocumentation = async (
     `apps/${app.appId}/service-documentation/${app.id}.json`,
   );
 
-  return object ? serviceDocumentation.parse(await object.json()) : null;
+  if (!object) return null;
+  // Documentation of an earlier format counts as none until the app is deployed again.
+  const documentation = serviceDocumentation.safeParse(await object.json());
+
+  return documentation.success ? documentation.data : null;
 };

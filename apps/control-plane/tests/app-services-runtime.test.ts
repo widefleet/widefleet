@@ -669,7 +669,7 @@ export default { async fetch(request, env, ctx) {
       };
 
       const docs = serviceDocumentation.parse({
-        format: 1,
+        format: 2,
         entrypoints: [
           {
             name: "Reader",
@@ -696,6 +696,7 @@ export default { async fetch(request, env, ctx) {
                       },
                     ],
                     returns: { type: "InventoryRecord", description: "The record" },
+                    uses: ["InventoryRecord"],
                   },
                 ],
               },
@@ -1021,7 +1022,7 @@ export default { async fetch(request, env, ctx) {
       const entrypoints = Array.from({ length: 32 }, (_, index) => `Service${index}`);
 
       const largeDocs = serviceDocumentation.parse({
-        format: 1,
+        format: 2,
         entrypoints: entrypoints.map((name) => ({
           name,
           summary: "",

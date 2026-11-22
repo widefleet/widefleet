@@ -2832,7 +2832,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       // Search creates the index; publishers only refresh an existing one.
       await worker.fetch(`http://fixture/service-index?organization=${organization}`, {
         method: "PUT",
-        body: JSON.stringify({ format: 1, builtAt: Date.now(), services: {} }),
+        body: JSON.stringify({ format: 3, builtAt: Date.now(), services: {} }),
       });
       await seed(target);
       await dispatch(target);
