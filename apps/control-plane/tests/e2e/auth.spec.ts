@@ -1742,10 +1742,15 @@ test("manages organization roles and app access by name while members create the
     await page.getByRole("link", { name: "Members", exact: true }).click();
     await page.getByLabel("Search by name or email").fill("member-ui@");
     await page.getByRole("button", { name: "Search", exact: true }).click();
-    const roleForm = page.getByRole("form", { name: "Role for Member Example" });
-    await roleForm.getByLabel("Role", { exact: true }).selectOption("admin");
-    await roleForm.getByRole("button", { name: "Save role" }).click();
-    await expect(page.getByRole("status")).toContainText("Role saved");
+    await page.getByRole("button", { name: "Role for Member Example" }).click();
+
+    const promoted = page.waitForResponse(
+      (response) =>
+        response.url().includes("/_app/remote/") && response.request().method() === "POST",
+    );
+
+    await page.getByRole("option", { name: "Admin", exact: true }).click();
+    expect((await promoted).ok()).toBe(true);
     await memberPage
       .getByRole("navigation", { name: "Main navigation" })
       .getByRole("link", { name: "My apps", exact: true })
@@ -1760,15 +1765,15 @@ test("manages organization roles and app access by name while members create the
         .getByText("Administrator", { exact: true }),
     ).toBeVisible();
 
-    await page
-      .getByRole("form", { name: "Role for Member Example" })
-      .getByLabel("Role", { exact: true })
-      .selectOption("member");
-    await page
-      .getByRole("form", { name: "Role for Member Example" })
-      .getByRole("button", { name: "Save role" })
-      .click();
-    await expect(page.getByRole("status")).toContainText("Role saved");
+    await page.getByRole("button", { name: "Role for Member Example" }).click();
+
+    const demoted = page.waitForResponse(
+      (response) =>
+        response.url().includes("/_app/remote/") && response.request().method() === "POST",
+    );
+
+    await page.getByRole("option", { name: "Member", exact: true }).click();
+    expect((await demoted).ok()).toBe(true);
     expect((await memberContext.request.get("/widefleet/settings/members")).status()).toBe(403);
 
     await memberPage.getByRole("link", { name: "Create app", exact: true }).click();
@@ -1811,6 +1816,90 @@ test("manages organization roles and app access by name while members create the
   } finally {
     await memberContext.close();
   }
+});
+
+test("saves a role on selection and restores it when saving fails", async ({ page, context }) => {
+  const [owner] = await environment.database.db
+    .select()
+    .from(member)
+    .where(eq(member.role, "owner"));
+
+  if (!owner) throw new Error("Expected initial owner");
+
+  const ownerSession = await environment.users.login({ userId: owner.userId });
+  await context.addCookies(
+    ownerSession.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+
+  for (let index = 0; index < 50; index += 1) {
+    const person = environment.users.createUser({
+      name: `Role Page ${String(index).padStart(2, "0")}`,
+      email: `role-page-${index}@example.test`,
+    });
+
+    await environment.users.saveUser(person);
+    await environment.linkMicrosoftUser(person.id);
+  }
+
+  const target = environment.users.createUser({
+    name: "Role Page Target",
+    email: "role-page-target@example.test",
+  });
+
+  await environment.users.saveUser(target);
+  await environment.linkMicrosoftUser(target.id);
+  // Hold each role change at the network to see what the page shows before the server answers.
+  const held: (() => void)[] = [];
+
+  const release = async () => {
+    await expect.poll(() => held.length).toBe(1);
+    held.shift()?.();
+  };
+
+  await page.route("**/_app/remote/**", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+
+    await new Promise<void>((resolve) => held.push(resolve));
+
+    return route.continue();
+  });
+  await page.goto("/widefleet/settings/members?q=Role+Page&page=2");
+  const role = page.getByRole("button", { name: "Role for Role Page Target" });
+  const row = page.getByRole("listitem").filter({ hasText: "role-page-target@example.test" });
+  const height = (await row.boundingBox())?.height;
+  await role.click();
+  await page.getByRole("option", { name: "Admin", exact: true }).click();
+  // The new role is its own confirmation; the picker stays usable while the server saves it.
+  await expect(role).toHaveText("Admin");
+  await expect(role).toBeEnabled();
+  await release();
+  await expect
+    .poll(async () =>
+      environment.database.db
+        .select({ role: member.role })
+        .from(member)
+        .where(eq(member.userId, target.id)),
+    )
+    .toEqual([{ role: "admin" }]);
+  await expect(role).toHaveText("Admin");
+  await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("page")).toBe("2");
+
+  // The membership ends while the page is open, so the server rejects the change.
+  await environment.database.db.delete(member).where(eq(member.userId, target.id));
+  await role.click();
+  await page.getByRole("option", { name: "Member", exact: true }).click();
+  await expect(role).toHaveText("Member");
+  await release();
+  await expect(page.getByText("Could not change the role of Role Page Target.")).toBeVisible();
+  await expect(role).toHaveText("Admin");
+  // The explanation arrives as a toast, so the row keeps its size.
+  expect((await row.boundingBox())?.height).toBe(height);
 });
 
 test("submits a selective Workflow restart and waits for the agent's confirmation", async ({

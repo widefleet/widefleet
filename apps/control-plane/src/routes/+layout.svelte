@@ -6,6 +6,7 @@
   import { onMount } from "svelte";
   import { startBrowserReporting } from "#lib/reporting-client";
   import { ModeWatcher } from "mode-watcher";
+  import { Toaster } from "@platform/ui/sonner";
 
   onMount(startBrowserReporting);
 
@@ -23,4 +24,5 @@
 </script>
 
 <ModeWatcher defaultMode="system" />
+<Toaster />
 {@render children()}
