@@ -1,4 +1,4 @@
-import { form, getRequestEvent, query } from "$app/server";
+import { form, query } from "$app/server";
 import { redirect } from "@sveltejs/kit";
 import {
   organizationSelection,
@@ -57,15 +57,6 @@ export const setMemberRole = form(
     // A changed own role changes the workspace navigation.
     await getWorkspace({ organization: organization.slug }).refresh();
 
-    if (!getRequestEvent().isRemoteRequest)
-      redirect(
-        303,
-        workspacePath(
-          organization.slug,
-          `/settings/members?${new URLSearchParams({ q: search, page: String(page), saved: "1" })}`,
-        ),
-      );
-
     return { saved: true };
   },
 );
@@ -79,14 +70,15 @@ export const inviteMember = form(
       .transform((value) => value === "true"),
   }),
   async ({ organizationId, ...input }) => {
-    const { runtime, principal, organization, request } = await remoteContext({ organizationId });
+    const { runtime, principal, request } = await remoteContext({ organizationId });
     await remoteOperation(() =>
       runtime.invitations.invite(principal, input, {
         auth: runtime.auth,
         headers: request.headers,
       }),
     );
-    redirect(303, workspacePath(organization.slug, "/settings/members?invited=1"));
+
+    return { invited: true };
   },
 );
 

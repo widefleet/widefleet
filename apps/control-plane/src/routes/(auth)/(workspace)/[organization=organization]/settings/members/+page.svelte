@@ -20,12 +20,22 @@
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import type { PageData } from "./$types";
+  import { page } from "$app/state";
+  import { z } from "zod";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data: route }: { data: PageData } = $props();
+  const route = $derived({
+    search: (page.url.searchParams.get("q") ?? "").trim().slice(0, 200),
+    page: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100_000)
+      .catch(1)
+      .parse(page.url.searchParams.get("page") ?? 1),
+  });
 
   const data = $derived(
     await getMembers({
@@ -35,7 +45,15 @@
     }),
   );
 
-  let saved = $derived(route.saved);
+  // A form without JavaScript renders this page with its result instead of redirecting.
+  let saved = $derived(
+    data.members.some((person) => setMemberRole.for(person.id).result?.saved === true),
+  );
+
+  const invited = $derived(
+    inviteMember.result?.invited === true ||
+      data.invitations.some((entry) => inviteMember.for(entry.id).result?.invited === true),
+  );
 
   const pageLink = (page: number) =>
     workspace.path(
@@ -45,7 +63,7 @@
 
 <svelte:head><title>Members · Widefleet</title></svelte:head>
 <PageHeading title="Members" description="The people in your workspace and their permissions." />
-{#if route.invited}<div class="mt-5">
+{#if invited}<div class="mt-5">
     <Feedback kind="success"
       >Invitation saved. If the email hasn't arrived, use Resend invitation.</Feedback
     >

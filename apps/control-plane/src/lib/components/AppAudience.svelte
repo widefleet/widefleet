@@ -17,7 +17,7 @@
 
   const workspace = getWorkspaceContext();
 
-  let { appId, initialSaved = false }: { appId: string; initialSaved?: boolean } = $props();
+  let { appId }: { appId: string } = $props();
 
   const access = $derived(getAppAccess({ organizationId: workspace.organizationId, appId }));
 
@@ -142,9 +142,6 @@
   {#if data.error}<Feedback kind="error">{data.error}</Feedback>{/if}
   {#if data.state === "pending" || data.state === "failed"}<Feedback
       >Activation has not been confirmed yet. Saved changes may already be in effect.</Feedback
-    >{/if}
-  {#if initialSaved}<Feedback kind="success"
-      >Access rules saved. Check the status for activation progress.</Feedback
     >{/if}
 
   {#if data.inheritedFrom}

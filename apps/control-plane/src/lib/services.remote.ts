@@ -1,5 +1,5 @@
 import { form, query } from "$app/server";
-import { redirect } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
 import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { remoteContext, queryValue, formValue } from "#server/remote-support";
@@ -31,6 +31,103 @@ export const getServiceDescription = query(
   },
 );
 
+// API pages name the API by its app identifier or its slug.
+const findService = <T extends { appId: string; slug: string }>(entries: T[], service: string) =>
+  entries.find((entry) => entry.appId === service) ??
+  entries.find((entry) => entry.slug === service);
+
+const optionalText = z.string().max(200).nullable();
+
+// The API list can be opened for one app, which the page then names.
+export const getServiceListApp = query(
+  contract.organizationSelection.extend({ app: optionalText }),
+  async ({ organizationId, app }) => {
+    if (app === null) return null;
+    const appId = contract.identifier.safeParse(app);
+
+    if (!appId.success) error(400, "Invalid app identifier");
+    const { runtime, principal } = await remoteContext({ organizationId });
+
+    return queryValue(await runtime.apps.get(principal, appId.data));
+  },
+);
+
+export const getServiceAvailability = query(
+  contract.servicePath.extend(contract.organizationSelection.shape),
+  async ({ organizationId, service }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+
+    if (!principal.application.admin)
+      error(403, "Organization administrator permission is required");
+    const entry = findService(queryValue(await runtime.connections.services(principal)), service);
+
+    if (!entry) error(404, "API not found");
+
+    return entry;
+  },
+);
+
+export const getServiceConnection = query(
+  contract.servicePath.extend({ ...contract.organizationSelection.shape, app: optionalText }),
+  async ({ organizationId, service, app }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    const entry = findService(queryValue(await runtime.connections.services(principal)), service);
+
+    if (!entry) error(404, "API not found");
+
+    const applications = queryValue(await runtime.apps.list(principal)).filter(
+      (candidate) => candidate.id !== entry.appId,
+    );
+
+    if (app !== null && !contract.identifier.safeParse(app).success)
+      error(400, "Invalid app identifier");
+    const selected = app === null ? null : applications.find((candidate) => candidate.id === app);
+
+    if (selected === undefined) error(404, "App not found");
+
+    return {
+      service: entry,
+      applications,
+      app: selected,
+      approval: !principal.application.admin && entry.accessMode === "approval_required",
+    };
+  },
+);
+
+export const getConnectionResult = query(
+  contract.servicePath.extend({
+    ...contract.organizationSelection.shape,
+    app: optionalText,
+    binding: optionalText,
+  }),
+  async ({ organizationId, service, app, binding }) => {
+    const appId = contract.identifier.safeParse(app);
+    const name = contract.bindingName.safeParse(binding);
+
+    if (!appId.success || !name.success) error(400, "Invalid connection");
+    const { runtime, principal } = await remoteContext({ organizationId });
+    const connections = queryValue(await runtime.connections.connections(principal, appId.data));
+    const grant = connections.connections.grants[name.data];
+
+    if (!grant || grant.app !== service) error(404, "Connection not found");
+
+    const entry = queryValue(await runtime.apps.list(principal)).find(
+      (candidate) => candidate.id === appId.data,
+    );
+
+    if (!entry) error(404, "App not found");
+    const services = queryValue(await runtime.connections.services(principal));
+
+    return {
+      app: entry,
+      binding: name.data,
+      serviceName:
+        services.find((candidate) => candidate.appId === grant.app)?.displayName ?? "API",
+      connections,
+    };
+  },
+);
+
 export const getConnectionRequests = query(contract.organizationSelection, async (selection) => {
   const { runtime, principal } = await remoteContext(selection);
 
@@ -40,6 +137,19 @@ export const getConnectionRequests = query(contract.organizationSelection, async
   };
 });
 
+export const getConnectionRequest = query(
+  contract.organizationSelection.extend({ requestId: z.string().max(128) }),
+  async ({ organizationId, requestId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    const requests = queryValue(await runtime.connections.requests(principal));
+    const request = requests.find((entry) => entry.id === requestId);
+
+    if (!request) error(404, "Connection request not found");
+
+    return request;
+  },
+);
+
 export const setServiceAccess = form(
   contract.appPath.extend({
     ...contract.organizationSelection.shape,
@@ -47,10 +157,11 @@ export const setServiceAccess = form(
     id: z.string().max(160).optional(),
   }),
   async ({ organizationId, appId, accessMode }) => {
-    const { runtime, principal, organization } = await remoteContext({ organizationId });
+    const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.connections.setAccess(principal, appId, accessMode));
-    await getAppServices({ organizationId }).refresh();
-    redirect(303, workspacePath(organization.slug, `/services/${appId}/availability?saved=1`));
+
+    // The page names the API by identifier or slug, so every query on it refreshes.
+    return { saved: true };
   },
 );
 

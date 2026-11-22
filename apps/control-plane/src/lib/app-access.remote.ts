@@ -1,5 +1,5 @@
-import { form, getRequestEvent, query } from "$app/server";
-import { error, invalid, redirect } from "@sveltejs/kit";
+import { form, query } from "$app/server";
+import { error, invalid } from "@sveltejs/kit";
 import {
   appAccessChange,
   appAccessGroups,
@@ -9,7 +9,6 @@ import {
 } from "@platform/contracts";
 import { z } from "zod";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
-import { workspacePath } from "#lib/workspace-path";
 
 const appTarget = appPath.extend(organizationSelection.shape);
 
@@ -35,15 +34,9 @@ export const changeAppAccess = form(
       .pipe(appAccessGroups),
   }),
   async ({ appId, revision, groups, organizationId }) => {
-    const { runtime, principal, organization } = await remoteContext({ organizationId });
+    const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.appAccess.change(principal, appId, { revision, groups }));
     await getAppAccess({ appId, organizationId }).refresh();
-
-    if (!getRequestEvent().isRemoteRequest)
-      redirect(
-        303,
-        workspacePath(organization.slug, `/apps/${appId}/access?accessSaved=1#app-access`),
-      );
 
     return { saved: true };
   },

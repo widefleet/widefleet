@@ -3,9 +3,7 @@ import { getRuntime } from "#server/runtime";
 import { readInstallation } from "#server/installation-store";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
-
+export const load: PageServerLoad = async () => {
   const runtime = await getRuntime();
 
   if (runtime.configuration.ARTIFACT_STORAGE_PROVIDER === "r2")

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { connectApp, requestAppConnection } from "#lib/services.remote";
+  import { connectApp, getServiceConnection, requestAppConnection } from "#lib/services.remote";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
@@ -7,12 +7,21 @@
   import { Input } from "@platform/ui/input";
   import { Label } from "@platform/ui/label";
   import { NativeSelect } from "@platform/ui/native-select";
-  import type { PageData } from "./$types";
+  import { page } from "$app/state";
+  import type { PageProps } from "./$types";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data }: { data: PageData } = $props();
+  let { params }: PageProps = $props();
+
+  const data = $derived(
+    await getServiceConnection({
+      organizationId: workspace.organizationId,
+      service: params.service,
+      app: page.url.searchParams.get("app"),
+    }),
+  );
 
   const path = $derived(workspace.path(`/services/${data.service.appId}/connect`));
 

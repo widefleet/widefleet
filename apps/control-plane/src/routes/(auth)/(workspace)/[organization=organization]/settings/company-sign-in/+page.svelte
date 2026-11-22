@@ -11,11 +11,9 @@
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import CompanySsoConnection from "#shadcn/components/sso/CompanySsoConnection.svelte";
   import RestartDialog from "#shadcn/components/sso/RestartDialog.svelte";
-  import type { PageData } from "./$types";
+  import { page } from "$app/state";
 
   const workspace = getWorkspaceContext();
-
-  let { data: route }: { data: PageData } = $props();
 
   const settings = $derived(getSettings({ organizationId: workspace.organizationId }));
 
@@ -82,7 +80,7 @@
       linked={data.linked}
       tested={data.tested}
       emailSignIn={data.emailSignIn}
-      loginFailed={route.loginFailed}
+      loginFailed={page.url.searchParams.has("error")}
     />
   {:else}
     <section class="rounded-xl border" aria-label="Company SSO">

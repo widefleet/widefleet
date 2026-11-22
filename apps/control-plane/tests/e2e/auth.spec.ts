@@ -1001,6 +1001,92 @@ test("returns 503 from the session hook when the session store is unavailable", 
   expect((await context.request.get("/organizations")).status()).toBe(200);
 });
 
+test("shows deployment agents only to administrators", async ({ browser }) => {
+  const creator = environment.users.createUser({
+    name: "Agent viewer",
+    email: "agent-viewer@example.test",
+  });
+
+  await environment.users.saveUser(creator);
+  await environment.linkMicrosoftUser(creator.id);
+
+  const context = await browser.newContext({
+    baseURL: environment.configuration.PLATFORM_URL,
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  const login = await environment.users.login({ userId: creator.id });
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax" as const,
+      secure: false,
+    })),
+  );
+
+  try {
+    const page = await context.newPage();
+    const denied = page.getByRole("heading", { name: "You don't have access to this page." });
+    const response = await page.goto("/widefleet/settings/agents");
+    expect(response?.status()).toBe(403);
+    await expect(denied).toBeVisible();
+
+    await page.goto("/widefleet");
+    await page.evaluate(() => {
+      const link = document.createElement("a");
+      link.href = "/widefleet/settings/agents";
+      document.body.append(link);
+      link.click();
+    });
+    await expect(page).toHaveURL(/\/widefleet\/settings\/agents$/);
+    await expect(denied).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Deployment agents" })).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("does not show a private page again with Back after sign-out", async ({ browser }) => {
+  const context = await browser.newContext({
+    baseURL: environment.configuration.PLATFORM_URL,
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  const login = await environment.users.login({ userId: environment.owner.id });
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax" as const,
+      secure: false,
+    })),
+  );
+
+  try {
+    const created = await context.request.post("/api/v1/apps", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+      data: { slug: "back-after-sign-out", displayName: "Private Back App" },
+    });
+
+    expect(created.ok()).toBe(true);
+    const page = await context.newPage();
+    const response = await page.goto("/widefleet/apps");
+    expect(response?.headers()["cache-control"]).toBe("private, no-store");
+    await expect(page.getByText("Private Back App")).toBeVisible();
+    await page.getByRole("button", { name: /^Account:/ }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+    await expect(page).toHaveURL(/\/sign-in$/);
+
+    // Without no-store, the browser shows the stored page instead of asking the server.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/sign-in\?next=%2Fwidefleet%2Fapps$/);
+    await expect(page.getByText("Private Back App")).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
 test("protects auth-group documents and data requests even when every layout is reused", async ({
   request,
 }) => {
@@ -1010,7 +1096,7 @@ test("protects auth-group documents and data requests even when every layout is 
     "/widefleet/settings/agents",
     "/widefleet/apps",
     "/widefleet/apps/new",
-    "/widefleet/apps/fixture/connections",
+    "/widefleet/apps/00000000-0000-4000-8000-000000000000/connections",
     "/widefleet/catalog/templates?q=mail",
     "/widefleet/catalog/templates/gmail",
     "/widefleet/settings/members?q=reader&page=2",

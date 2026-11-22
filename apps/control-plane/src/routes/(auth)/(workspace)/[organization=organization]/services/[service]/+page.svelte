@@ -4,19 +4,19 @@
   import { Button } from "@platform/ui/button";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import type { PageData } from "./$types";
+  import type { PageProps } from "./$types";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data }: { data: PageData } = $props();
+  let { params }: PageProps = $props();
 
   const catalog = $derived(await getAppServices({ organizationId: workspace.organizationId }));
 
   const service = $derived(
     await getServiceDescription({
       organizationId: workspace.organizationId,
-      service: data.service,
+      service: params.service,
     }),
   );
 

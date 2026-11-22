@@ -4,8 +4,7 @@ import { chosenDestination } from "#lib/workspace-path";
 import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ url, setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
+export const load: PageServerLoad = async ({ url }) => {
   const runtime = await getRuntime();
   const { user, session } = getUserSession();
   const next = localDestination(url.searchParams.get("next"));

@@ -4,7 +4,7 @@ import { remoteOperation } from "#server/remote-support";
 import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ url, setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store", "referrer-policy": "no-referrer" });
+  setHeaders({ "referrer-policy": "no-referrer" });
   const request = url.searchParams.get("request");
   const ticket = url.searchParams.get("ticket");
 

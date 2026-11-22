@@ -1,27 +1,30 @@
 <script lang="ts">
-  import { getAppServices, getConnectionRequests } from "#lib/services.remote";
+  import { getAppServices, getConnectionRequests, getServiceListApp } from "#lib/services.remote";
   import AppApisHeader from "#shadcn/components/AppApisHeader.svelte";
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import Plug from "@lucide/svelte/icons/plug";
   import Search from "@lucide/svelte/icons/search";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
-  import type { PageData } from "./$types";
+  import { page } from "$app/state";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
 
-  let { data }: { data: PageData } = $props();
+  const selection = $derived({ organizationId: workspace.organizationId });
 
-  const catalog = $derived(await getAppServices({ organizationId: workspace.organizationId }));
-
-  const requests = $derived(
-    await getConnectionRequests({ organizationId: workspace.organizationId }),
+  // Start the queries together; consecutive awaits would request them one after another.
+  const [catalog, requests, app] = $derived(
+    await Promise.all([
+      getAppServices(selection),
+      getConnectionRequests(selection),
+      getServiceListApp({ ...selection, app: page.url.searchParams.get("app") }),
+    ]),
   );
 
   let search = $state("");
 
-  const available = $derived(catalog.entries.filter((entry) => entry.appId !== data.app?.id));
+  const available = $derived(catalog.entries.filter((entry) => entry.appId !== app?.id));
 
   const entries = $derived(
     available.filter((entry) =>
@@ -42,21 +45,21 @@
     }),
   );
 
-  const context = $derived(data.app ? `?app=${data.app.id}` : "");
+  const context = $derived(app ? `?app=${app.id}` : "");
 </script>
 
 <svelte:head><title>App APIs · Widefleet</title></svelte:head>
-{#if data.app}<a
-    href={workspace.path(`/apps/${data.app.id}/connections`)}
+{#if app}<a
+    href={workspace.path(`/apps/${app.id}/connections`)}
     class="text-muted-foreground hover:text-foreground mb-6 inline-flex items-center gap-2 text-xs"
-    ><ArrowLeft class="size-3.5" />Back to {data.app.displayName}</a
+    ><ArrowLeft class="size-3.5" />Back to {app.displayName}</a
   >{/if}
 <AppApisHeader
   active="catalog"
   apis={available.length}
   pending={requests.entries.filter((entry) => entry.status === "pending").length}
   query={context}
-  {...data.app ? { description: `Choose an API for ${data.app.displayName}.` } : {}}
+  {...app ? { description: `Choose an API for ${app.displayName}.` } : {}}
 >
   <div class="relative w-full sm:w-60">
     <Search class="text-muted-foreground pointer-events-none absolute top-2.5 left-2.5 size-3.5" />

@@ -14,14 +14,19 @@
 
   const workspace = getWorkspaceContext();
 
-  let {
-    data,
-    search,
-    initialSaved,
-  }: { data: Awaited<ReturnType<typeof getAppDetails>>; search: string; initialSaved: boolean } =
+  let { data, search }: { data: Awaited<ReturnType<typeof getAppDetails>>; search: string } =
     $props();
 
-  let saved = $derived(initialSaved);
+  // A form without JavaScript renders this page with its result instead of redirecting.
+  let saved = $derived(
+    [...data.access.grants, ...data.access.candidates].some((person) => {
+      const key = `${data.app.id}:${person.userId}`;
+
+      return (
+        grantAccess.for(key).result?.saved === true || revokeAccess.for(key).result?.saved === true
+      );
+    }),
+  );
 </script>
 
 <section id="access" aria-labelledby="access-heading" class="space-y-6">
