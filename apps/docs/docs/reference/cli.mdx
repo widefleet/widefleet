@@ -85,6 +85,8 @@ IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet hi
 | `widefleet secret list` / `put NAME` / `delete NAME` | Manage the selected app's private secrets.                             |
 | `widefleet connections`                              | Inspect desired and active app connections and deployed app resources. |
 | `widefleet catalog list`                             | List published app launch URLs.                                        |
+| `widefleet catalog show APP_UUID`                    | Read an app's page as JSON: text, owner and the apps it calls.         |
+| `widefleet catalog about APP_UUID TEXT`              | Set the longer Markdown text on an app's page.                         |
 | `widefleet catalog templates list [--search TEXT]`   | Find available app templates and a prompt for creating your own app.   |
 | `widefleet catalog templates show ID`                | Read a template's source, Markdown instructions and setup prompt.      |
 | `widefleet delete APP_UUID --yes`                    | Request removal of an app and all its previews.                        |

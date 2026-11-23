@@ -77,6 +77,26 @@ find them in **App catalog** and follow their launch URLs, subject to the app's
 SSO and group rules. Management permissions remain separate. Use
 `widefleet catalog unpublish APP_UUID` to withdraw the listing without deleting the app.
 
+### The app's page
+
+A published app has a page that colleagues reach from its tile on **Home**. It shows
+the app's name, a longer text, the reader's own accounts with the app and with the
+apps it calls, and the owner's name. People who manage the app see the same page as
+the app's **Overview** and write the text there: choose the pencil beside the text,
+edit it and save. The text is Markdown of up to 2,000 characters, so it can hold a
+few sentences and a list. Images and raw HTML are not shown.
+
+```sh
+widefleet catalog about APP_UUID "Counts the stock per shelf.
+
+- Flags what runs low"
+widefleet catalog show APP_UUID
+```
+
+`catalog show` prints the page as JSON. An empty text removes the longer text. The
+latest deployment, the app's address and **Create preview** are in the app's
+**Status** section. The app's page requires platform and CLI **0.7.21 or newer**.
+
 ## Verify access
 
 Open the launch URL in a separate browser profile with an intended user's
