@@ -96,6 +96,38 @@ export const createConnectionService = (
 
       return Result.ok(contract.serviceReference.parse(active));
     }),
+  /** TypeScript declarations for a caller's binding to an app API's entrypoint. */
+  types: (
+    principal: Principal,
+    service: string,
+    binding: { entrypoint: string; binding: string },
+  ) =>
+    Result.gen(async function* () {
+      const { documentation, ...description } = yield* Result.await(
+        activeService(database, storage, principal, service),
+      );
+
+      if (!documentation)
+        return yield* new InvalidOperation({
+          code: "NOT_FOUND",
+          message: `${description.slug} has no API documentation; redeploy it to publish its types`,
+        });
+
+      const { declarations, failure } = contract.serviceBindingTypes(documentation, {
+        app: description.slug,
+        ...binding,
+      });
+
+      if (failure)
+        return yield* new InvalidOperation({
+          code: failure.reason === "entrypoint" ? "NOT_FOUND" : "BAD_REQUEST",
+          message: failure.message,
+        });
+
+      return Result.ok(
+        contract.serviceBindingTypesResult.parse({ ...description, ...binding, declarations }),
+      );
+    }),
   /** An app API's methods, with the documentation of the selected methods and types. */
   describe: (
     principal: Principal,

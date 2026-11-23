@@ -6,6 +6,8 @@ export * from "./source.ts";
 
 export { shortenTypeNames } from "./service-type-names.ts";
 
+export { serviceBindingTypes } from "./service-binding-types.ts";
+
 import { z } from "zod";
 import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
 
@@ -471,6 +473,20 @@ export const serviceDescriptionQuery = servicePath.extend({
   // Repeated as `methods[]=` and `types[]=`; type names can contain commas.
   methods: z.array(appRpcMethod).max(serviceDescriptionMaxMethods).default([]),
   types: z.array(serviceTypeName).max(serviceDescriptionMaxTypes).default([]),
+});
+
+export const serviceBindingTypesQuery = servicePath.extend({
+  entrypoint: bindingName.default("default"),
+  // The binding's name in the caller's environment, which names the generated interface.
+  binding: bindingName,
+});
+
+/** TypeScript declarations for a caller's binding, generated from an app API's documentation. */
+export const serviceBindingTypesResult = serviceCatalogEntry.extend({
+  deploymentId: identifier,
+  entrypoint: bindingName,
+  binding: bindingName,
+  declarations: z.string(),
 });
 
 export const capabilityGrant = z.strictObject({

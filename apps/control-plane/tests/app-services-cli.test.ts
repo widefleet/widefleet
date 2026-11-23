@@ -2,7 +2,7 @@ import { esbuildBinary } from "../../../tools/cli-tools.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,6 +69,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
   let superseded = false;
   let secretDeployment: z.infer<typeof contract.deployment> | null = null;
   let secretHistory: z.infer<typeof contract.deployment>[] = [];
+  let declarations = "export interface INVENTORY {}";
 
   const server = createServer((request, response) => {
     let body = "";
@@ -87,7 +88,18 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       response.setHeader("content-type", "application/json");
 
       if (request.url === "/api/v1/apps/by-name/inventory") response.end(JSON.stringify(app));
-      else if (request.url === "/api/v1/app-services") {
+      else if (request.url?.startsWith("/api/v1/app-services/erp-app/types?")) {
+        const query = new URL(request.url, "http://cli.test").searchParams;
+        response.end(
+          JSON.stringify({
+            ...service,
+            deploymentId: app.activeDeploymentId,
+            entrypoint: query.get("entrypoint"),
+            binding: query.get("binding"),
+            declarations,
+          }),
+        );
+      } else if (request.url === "/api/v1/app-services") {
         response.end(JSON.stringify(catalog));
       } else if (request.method === "GET" && request.url?.startsWith("/api/v1/app-services/")) {
         // Mirror the service description lookup: an app ID wins over a UUID-shaped slug.
@@ -581,6 +593,53 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     expect(query.getAll("methods[]")).toEqual(["read", "count"]);
     // Type names can contain commas, so each is its own parameter.
     expect(query.getAll("types[]")).toEqual(["Page<T, U>"]);
+  });
+
+  it("writes binding types and checks them against the active deployment", async () => {
+    declarations = "export interface INVENTORY {}";
+    const printed = await command("services", "types", "erp-app", "--as", "INVENTORY");
+    expect(printed.stdout).toBe(`${declarations}\n`);
+    const query = new URL(requests[0]?.path ?? "", "http://cli.test");
+    expect(query.pathname).toBe("/api/v1/app-services/erp-app/types");
+    expect(query.searchParams.get("binding")).toBe("INVENTORY");
+    expect(query.searchParams.get("entrypoint")).toBe("default");
+
+    const file = join(directory, "inventory.d.ts");
+
+    const types = (...args: string[]) =>
+      command(
+        "services",
+        "types",
+        "erp-app",
+        "--entrypoint",
+        "Reader",
+        "--as",
+        "INVENTORY",
+        ...args,
+      );
+
+    await rm(file, { force: true });
+    await expect(types("--output", file, "--check")).rejects.toHaveProperty(
+      "stderr",
+      expect.stringContaining("does not match the API of erp-app's active deployment"),
+    );
+    await types("--output", file);
+    expect(await readFile(file, "utf8")).toBe(`${declarations}\n`);
+    await types("--output", file, "--check");
+    // A checkout that converts line endings still matches.
+    await writeFile(file, `${declarations}\r\n`);
+    await types("--output", file, "--check");
+
+    // A provider change, such as a renamed type, makes the file stale.
+    declarations = "export interface INVENTORY { read(): Promise<string>; }";
+    await expect(types("--output", file, "--check")).rejects.toHaveProperty(
+      "stderr",
+      expect.stringContaining("run the command without --check to update it"),
+    );
+    expect(await readFile(file, "utf8")).toBe("export interface INVENTORY {}\r\n");
+    await expect(
+      command("services", "types", "erp-app", "--as", "INVENTORY", "--check"),
+    ).rejects.toHaveProperty("stderr", expect.stringContaining("--output"));
   });
 
   it("rejects the nonstandard widefleet Wrangler property", async () => {
