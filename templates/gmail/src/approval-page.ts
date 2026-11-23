@@ -29,6 +29,8 @@ const restore = async (attempted) => {
     const { level } = response.ok ? await response.json() : {};
     if (levels.includes(level)) saved = level;
   } catch {}
+  // A newer choice stays: the next save sends it.
+  if (latest !== attempted) return;
   latest = saved;
   form.querySelector(\`input[value="\${saved}"]\`).checked = true;
   if (saved === attempted) return;
