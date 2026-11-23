@@ -695,6 +695,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       sourceTarget.supported = true;
       const withoutGit = join(state, "path without git");
       await mkdir(withoutGit, { recursive: true });
+
       // Windows names the variable Path; drop every spelling so only the empty directory remains.
       const environment = Object.fromEntries(
         Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PATH"),
@@ -714,6 +715,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           },
         }),
       );
+
       expect(result.stdout).toBe("");
       expect(result.stderr).toContain("Could not run Git");
       expect(result.stderr).toContain("--no-source");
