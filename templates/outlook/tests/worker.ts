@@ -190,19 +190,8 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
         await app.listMessages({ top: 5 }),
       );
 
-    if (path === "/rpc/content") {
-      const result = await app.getMessageMime({ messageId: "message-1" });
-
-      // RPC carries the bytes; the test reads them as text.
-      return Response.json(
-        result.status === "connected" && "data" in result.data
-          ? {
-              contentType: result.data.contentType,
-              text: new TextDecoder().decode(result.data.data),
-            }
-          : result,
-      );
-    }
+    if (path === "/rpc/content")
+      return Response.json(await app.getMessageMime({ messageId: "message-1" }));
 
     if (path === "/rpc/create")
       return Response.json(

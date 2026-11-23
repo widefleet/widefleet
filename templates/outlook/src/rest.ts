@@ -29,11 +29,10 @@ export type RestOperation = {
 
 /**
  * File content: where to download it, when the API answers with a temporary
- * download address, or the content itself.
+ * download address, or the content itself as base64. Results reach apps and
+ * MCP clients as JSON, which carries no bytes.
  */
-export type BinaryContent =
-  | { downloadUrl: string }
-  | { contentType: string; data: Uint8Array<ArrayBuffer> };
+export type BinaryContent = { downloadUrl: string } | { contentType: string; base64: string };
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
 
@@ -170,6 +169,18 @@ export const restRequest = (
   return { url: url.href, init };
 };
 
+// Spreading a whole file into fromCharCode would exceed the argument limit.
+const chunkBytes = 0x8000;
+
+const base64Of = (bytes: Uint8Array) => {
+  let binary = "";
+
+  for (let start = 0; start < bytes.length; start += chunkBytes)
+    binary += String.fromCharCode(...bytes.subarray(start, start + chunkBytes));
+
+  return btoa(binary);
+};
+
 /**
  * The content of a binary response: the download address an API redirects to,
  * the content itself, or null when it is larger than `maximumResponseBytes`.
@@ -189,6 +200,6 @@ export const binaryContent = async (response: Response): Promise<BinaryContent |
 
   return {
     contentType: response.headers.get("content-type") ?? "application/octet-stream",
-    data,
+    base64: base64Of(data),
   };
 };
