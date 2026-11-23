@@ -63,14 +63,17 @@ const published = (principal: Pick<Principal, "application">) =>
   );
 
 // Whether the caller manages the app of a row, which shows it to them whatever its rules say.
-const managedBy = (
+export const managedBy = (
   database: Database | Transaction,
   principal: Pick<Principal, "id" | "application">,
 ) => sql<boolean>`coalesce(${appVisibility(database, principal)}, false)`;
 
 // A published app is shown to the people who can open it. Groups are known from a member's
 // last company sign-in; while they are unknown, the app is shown, as it was before.
-const opens = (record: { accessGroups: unknown; managed: boolean }, groups: string[] | null) =>
+export const opens = (
+  record: { accessGroups: unknown; managed: boolean },
+  groups: string[] | null,
+) =>
   record.managed ||
   groups === null ||
   contract.hasAppAccess(contract.appAccessGroups.parse(record.accessGroups), groups);

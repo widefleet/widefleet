@@ -1,4 +1,4 @@
-import { appAccessGroups, googleGroupsScope } from "@platform/contracts";
+import { googleGroupsScope } from "@platform/contracts";
 import { providerIdentity } from "@platform/auth-proxy/identity";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -86,7 +86,8 @@ export const readMemberGroups = async (
       ),
     );
 
-  return record ? appAccessGroups.parse(record.groups) : null;
+  // A person can be in more groups than an app's rules may name.
+  return record ? z.array(z.string()).parse(record.groups) : null;
 };
 
 /**

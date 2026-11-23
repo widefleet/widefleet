@@ -197,7 +197,11 @@ describe("App catalog", () => {
         error: { code: "NOT_FOUND" },
       });
 
-      await signedIn(colleague.id, ["sales", "finance"]);
+      // A member of many groups, more than an app's rules may name.
+      await signedIn(colleague.id, [
+        ...Array.from({ length: 150 }, (_, index) => `team-${index}`),
+        "finance",
+      ]);
       expect(await listed(colleague)).toEqual([app.id]);
       expect((await service.listing(colleague, app.id)).isOk()).toBe(true);
 
