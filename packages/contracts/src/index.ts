@@ -231,6 +231,19 @@ export const uploadSession = z.strictObject({
 
 export const bindingName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
 
+export const appEnvironmentMaxBindings = 128;
+
+export const appSecretName = bindingName.refine(
+  (name) => !name.startsWith("WIDEFLEET_") && name !== "__proto__",
+  "Reserved app secret name",
+);
+
+/** The secrets a deployment needs, from Wrangler's `secrets.required`. */
+export const requiredSecrets = z
+  .array(appSecretName)
+  .max(appEnvironmentMaxBindings)
+  .refine((names) => new Set(names).size === names.length, "Required secrets must be unique");
+
 export const workerBinding = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("workflow"),
@@ -340,6 +353,7 @@ export const workerMetadata = workerConfiguration
       .optional(),
     crons: z.array(z.string().min(1)).default([]),
     queue_consumers: z.array(queueConsumer).default([]),
+    required_secrets: requiredSecrets.optional(),
     assets: z.strictObject({ upload_session: identifier, binding: bindingName.default("ASSETS") }),
   })
   .superRefine((metadata, context) => {
@@ -354,6 +368,12 @@ export const workerMetadata = workerConfiguration
     if (new Set(names).size !== names.length) {
       context.addIssue({ code: "custom", message: "Binding names must be unique" });
     }
+
+    if (metadata.required_secrets?.some((name) => names.includes(name)))
+      context.addIssue({
+        code: "custom",
+        message: "Required secrets cannot use the name of a binding or variable",
+      });
 
     if (names.some((name) => name.startsWith("WIDEFLEET_"))) {
       context.addIssue({
@@ -371,6 +391,8 @@ export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
   // Declared origins are a control-plane request; runtimes enforce the granted
   // policy and reject metadata fields they do not know.
   delete metadata.network;
+  // The control plane checks required secrets before it accepts a deployment.
+  delete metadata.required_secrets;
 
   return metadata;
 }
@@ -425,13 +447,6 @@ export const runtimeRelease = z.strictObject({
 export { appCaller } from "./app-caller.ts";
 
 const appSecretMaxBytes = 5_000;
-
-export const appEnvironmentMaxBindings = 128;
-
-export const appSecretName = bindingName.refine(
-  (name) => !name.startsWith("WIDEFLEET_") && name !== "__proto__",
-  "Reserved app secret name",
-);
 
 const appSecretSizeMessage = "Secret value must contain at most 5 KB (5000 UTF-8 bytes)";
 

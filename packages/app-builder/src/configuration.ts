@@ -1,7 +1,7 @@
 // Wrangler configuration as `widefleet deploy` reads it
 // (crates/platform-cli/src/deploy.rs and worker.rs), and the Worker metadata
 // it produces.
-import { appDeclaration } from "@platform/contracts";
+import { appDeclaration, requiredSecrets } from "@platform/contracts";
 import { stripJsonc } from "@platform/contracts/jsonc";
 import { builtWorker } from "@platform/contracts/builds";
 import { z } from "zod";
@@ -55,6 +55,7 @@ export const wranglerConfiguration = z.strictObject({
     .array(z.strictObject({ binding: z.string(), name: z.string(), class_name: z.string() }))
     .default([]),
   no_bundle: z.boolean().optional(),
+  secrets: z.strictObject({ required: requiredSecrets.default([]) }).optional(),
 });
 
 export type WranglerConfiguration = z.infer<typeof wranglerConfiguration>;
@@ -69,8 +70,28 @@ export const readConfiguration = (files: Readonly<Record<string, string>>) => {
 
   if (!parsed.success)
     throw new BuildError(`Invalid Wrangler configuration: ${z.prettifyError(parsed.error)}`);
+  const configuration = parsed.data;
 
-  return parsed.data;
+  const bindings = new Set([
+    ...Object.keys(configuration.vars),
+    ...[
+      ...configuration.d1_databases,
+      ...configuration.r2_buckets,
+      ...configuration.kv_namespaces,
+      ...configuration.queues.producers,
+      ...configuration.workflows,
+    ].map((entry) => entry.binding),
+    ...(configuration.assets ? [configuration.assets.binding] : []),
+  ]);
+
+  const taken = configuration.secrets?.required.filter((name) => bindings.has(name)) ?? [];
+
+  if (taken.length > 0)
+    throw new BuildError(
+      `Required secrets cannot use the name of a binding or variable: ${taken.join(", ")}`,
+    );
+
+  return configuration;
 };
 
 export class BuildError extends Error {}
@@ -155,4 +176,5 @@ export const workerMetadata = (
     crons: configuration.triggers.crons,
     queue_consumers: configuration.queues.consumers,
     network: declaration.network,
+    required_secrets: configuration.secrets?.required,
   });

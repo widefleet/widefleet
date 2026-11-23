@@ -578,6 +578,43 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
     expect(await failure(invalid)).toContain("Invalid widefleet.jsonc");
   });
 
+  it("carries the secrets Wrangler's secrets.required lists, as widefleet deploy does", async () => {
+    const configuration = (secrets: Readonly<Record<string, readonly string[]>>) =>
+      post("/bundle", {
+        files: {
+          ...project,
+          "wrangler.jsonc": JSON.stringify({
+            main: "src/app.ts",
+            compatibility_date: "2026-10-01",
+            vars: { GREETING: "hi" },
+            d1_databases: [{ binding: "DB", database_name: "accounts" }],
+            secrets,
+          }),
+        },
+      });
+
+    const declared = await configuration({ required: ["API_KEY", "API_SECRET"] });
+
+    expect(declared.status, await declared.clone().text()).toBe(200);
+    expect(bundleResult.parse(await declared.json()).metadata.required_secrets).toEqual([
+      "API_KEY",
+      "API_SECRET",
+    ]);
+
+    for (const [secrets, message] of [
+      [{ required: ["API_KEY", "API_KEY"] }, "Required secrets must be unique"],
+      [{ required: ["GREETING", "DB"] }, "binding or variable: GREETING, DB"],
+      [{ required: ["WIDEFLEET_TOKEN"] }, "Reserved app secret name"],
+      [{ required: ["api-key"] }, "secrets.required"],
+      [{ optional: ["API_KEY"] }, "optional"],
+    ] as const) {
+      const invalid = await configuration(secrets);
+
+      expect(invalid.status).toBe(422);
+      expect(await failure(invalid)).toContain(message);
+    }
+  });
+
   // As pnpm-workspace.yaml declares them for `pnpm install`.
   const patched = (patches: Record<string, string>, files: Record<string, string> = {}) => ({
     ...project,
