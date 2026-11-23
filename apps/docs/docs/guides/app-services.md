@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-18
+lastModified: 2026-11-23
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -190,7 +190,9 @@ Apps with a browser UI can manage provider OAuth on their own HTTPS URL.
 `env.WIDEFLEET_ORIGIN` contains that canonical origin. App cookies are forwarded,
 but company sign-in cookies are filtered. App responses can set only host-scoped
 cookies and cannot overwrite company sign-in cookies. Keep OAuth state, callback
-user checks and CSRF protection in the app.
+user checks and CSRF protection in the app. A `fetch()` call from another app
+arrives without `Origin` and `Sec-Fetch-*` headers, so a check that a form's
+`Origin` is the app's own accepts only forms the user sent from the app's pages.
 
 Find ready-made integrations in [App templates](/guides/app-templates), then
 connect the deployed app using the same flow.

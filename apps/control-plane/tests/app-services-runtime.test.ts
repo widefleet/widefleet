@@ -57,7 +57,7 @@ async function handle(request, env, ctx) {
   if(path==='/proof') return new Response(ctx.props.appCaller);
   if(path==='/forge') return Response.json(await env.WIDEFLEET_SERVICE_RELAY.invoke('who',[],request.headers.get('test-proof') ?? 'forged'));
   if(path==='/fake-caller') ctx.props.caller={issuer:'https://forged.invalid',subject:'bob',name:'Forged'};
-  if(path==='/fetch') return env.RELAY.fetch(new Request('https://relay.invalid/',{headers:{'x-auth-request-user':'forged','x-widefleet-app-caller':'forged'}}));
+  if(path==='/fetch') return env.RELAY.fetch(new Request('https://relay.invalid/',{headers:{'x-auth-request-user':'forged','x-widefleet-app-caller':'forged',origin:'https://target.apps.example.test','sec-fetch-site':'same-origin'}}));
   return Response.json(await env.RELAY.who());
 }
 ${handler === "object" ? "export default {fetch:handle};" : "export default class Source extends WorkerEntrypoint {fetch(request){return handle(request,this.env,this.ctx);}}"}`;
@@ -73,7 +73,7 @@ const identityTarget = `import {WorkerEntrypoint} from 'cloudflare:workers';
 export class Identity extends WorkerEntrypoint {
   #marker='private-field';
   async who() { await new Promise(resolve=>setTimeout(resolve,10)); return {caller:this.ctx.props.caller,marker:this.#marker}; }
-  fetch(request) { return Response.json({caller:this.ctx.props.caller,claimed:request.headers.get('x-auth-request-user'),transported:request.headers.get('x-widefleet-app-caller')}); }
+  fetch(request) { return Response.json({caller:this.ctx.props.caller,claimed:request.headers.get('x-auth-request-user'),transported:request.headers.get('x-widefleet-app-caller'),origin:request.headers.get('origin'),site:request.headers.get('sec-fetch-site')}); }
 }`;
 
 const token = "app-service-test-management-token-never-deploy";
@@ -1625,7 +1625,8 @@ export default { async fetch(request, env, ctx) {
           });
         expect(await (await request("/identity/fetch")).json()).toEqual({
           relay: alice,
-          final: { caller: alice, claimed: null, transported: null },
+          // A consuming app cannot present its call as the user's form.
+          final: { caller: alice, claimed: null, transported: null, origin: null, site: null },
         });
         expect(await (await request("/identity/fake-caller")).json()).toEqual({
           relay: alice,

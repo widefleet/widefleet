@@ -91,8 +91,11 @@ export class AppService extends WorkerEntrypoint<
 
     // HTTP caller headers from a consumer are not an authentication mechanism.
     // Services read the verified principal from ctx.props.caller, just like RPC.
+    // Origin and Fetch Metadata describe a browser's request: a consuming app
+    // must not present its call as a form the user sent from the service's page.
     for (const name of request.headers.keys())
-      if (name.startsWith("x-auth-request-")) headers.delete(name);
+      if (name.startsWith("x-auth-request-") || name === "origin" || name.startsWith("sec-fetch-"))
+        headers.delete(name);
 
     return (await this.#target(await this.#assertion(proof))).fetch(
       new Request(request, { headers }),
