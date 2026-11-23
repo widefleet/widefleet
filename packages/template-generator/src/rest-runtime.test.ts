@@ -58,10 +58,17 @@ describe("REST requests", () => {
     expect(() => restRequest(base, "search", list, { nextLink: "https://other.test/" })).toThrow(
       InvalidRequest,
     );
+    // Graph's links may name the function's argument `query`.
+    const renamed = `${base}drives/d/search(query='report')?$skiptoken=2`;
+
+    expect(restRequest(base, "search", list, { nextLink: renamed }).url).toBe(renamed);
     // A link must lead to a page of the same operation.
     expect(() => restRequest(base, "search", list, { nextLink: `${base}me` })).toThrow(
       InvalidRequest,
     );
+    expect(() =>
+      restRequest(base, "search", list, { nextLink: `${base}drives/d/other(q='report')` }),
+    ).toThrow(InvalidRequest);
 
     const delta = { ...list, path: "/drives/{drive-id}/items/{item-id}/delta()" };
 

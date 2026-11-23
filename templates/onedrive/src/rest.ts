@@ -43,12 +43,16 @@ const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // An operation's path as a pattern of its pages' addresses: a parameter matches
 // one segment, and a function such as `delta()` may carry arguments, as Graph's
-// `delta(token='...')` links do. The address may be percent-encoded.
+// `delta(token='...')` links do. A function's argument may have another name in
+// its links, as Graph writes `search(query='...')` for `search(q='...')`. The
+// address may be percent-encoded.
 const pathPattern = (path: string) => {
   const pattern = path
     .replace(/^\//, "")
     .split(/(\{[^}]+\})/)
-    .map((part) => (/^\{[^}]+\}$/.test(part) ? "[^/]+" : literal(part)))
+    .map((part) =>
+      /^\{[^}]+\}$/.test(part) ? "[^/]+" : literal(part).replace(/\\\(\w+=/g, "\\(\\w+="),
+    )
     .join("")
     .replace(/\\\(\\\)$/, "(?:\\([^/]*\\))?");
 
