@@ -175,9 +175,10 @@ export const provider = () => {
           score: { recovery_score: 44, resting_heart_rate: 64, hrv_rmssd_milli: 31.8 },
         });
 
-      // Revoking ends every token of the member's grant.
+      // Revoking ends every token of the member's grant, refresh tokens included.
       if (path === `${api}/v2/user/access` && request.method === "DELETE") {
-        for (const [key, owner] of access) if (owner === user) access.delete(key);
+        for (const tokens of [access, refresh])
+          for (const [key, owner] of tokens) if (owner === user) tokens.delete(key);
 
         return new Response(null, { status: 204 });
       }

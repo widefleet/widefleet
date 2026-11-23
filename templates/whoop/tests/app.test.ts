@@ -195,6 +195,18 @@ describe("WHOOP personal account app", () => {
     expect(await (await alice.request("/rpc/profile")).json()).toMatchObject({
       status: "reconnect_required",
     });
+    // The saved refresh token no longer yields credentials either.
+    const db = await runtime.getD1Database("DB");
+    await db
+      .prepare("UPDATE account SET accessTokenExpiresAt = ?")
+      .bind(Date.now() - 60000)
+      .run();
+    upstream.calls.length = 0;
+    expect(await (await alice.request("/rpc/profile")).json()).toEqual({
+      status: "refresh_failed",
+    });
+    expect(upstream.state.refreshes).toBe(1);
+    expect(upstream.calls).toEqual([]);
 
     // With approvals off, nothing asks.
     const bob = browser("bob");
