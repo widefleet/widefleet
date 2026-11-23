@@ -1,10 +1,22 @@
-// How the generator offers each operation of Linear's GraphQL API. Review this
-// file when `pnpm generate` reports a new or removed operation.
+// How the template generator offers each operation of Linear's GraphQL API.
+// Review this file when the generator reports a new or removed operation.
 //
 // Every mutation is listed with the kind of change it makes, which decides when
 // it asks the user first (see src/approval.ts), or with the reason it is not
 // offered. A mutation that creates data but can also change existing data counts
 // as an update. Queries are offered unless listed.
+
+/** Where the generator reads the API, and the names of the generated code. */
+export const generator = {
+  kind: "graphql",
+  source: "https://raw.githubusercontent.com/linear/linear/master/packages/sdk/src/schema.graphql",
+  service: {
+    name: "Linear",
+    className: "LinearApi",
+    result: "LinearResult",
+    properties: "LinearProperties",
+  },
+} as const;
 
 /** Why an operation is not offered as a method. */
 export const reasons = {

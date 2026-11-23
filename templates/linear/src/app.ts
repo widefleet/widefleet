@@ -3,6 +3,7 @@ import { z } from "zod";
 import { LinearApi } from "./api.ts";
 import {
   approvalAnswer,
+  type ApprovalQuestion,
   type ApprovalLevel,
   approvalLevel,
   approvals,
@@ -13,7 +14,7 @@ import {
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
-import type { Answered, ApprovalQuestion } from "./results.ts";
+import type { Answered } from "./results.ts";
 
 const signedIn = async (environment: Environment, properties: Properties) => {
   const identity = caller.safeParse(properties.caller);

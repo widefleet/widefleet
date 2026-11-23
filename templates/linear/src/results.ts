@@ -1,3 +1,5 @@
+import type { ApprovalQuestion } from "./approval.ts";
+
 /** Why a call could not use the user's Linear account. `connectUrl` lets the user fix it. */
 export type ConnectionProblem =
   | { status: "authentication_required" }
@@ -15,16 +17,6 @@ export interface LinearError {
   type: string | null;
   /** The fields of the request the error belongs to. */
   path: (string | number)[] | null;
-}
-
-/** A question for the user before a change runs. Widefleet shows it and calls again with the answer. */
-export interface ApprovalQuestion {
-  resultType: "input_required";
-  /** Absent: a question has no status, so callers can check either field. */
-  status?: undefined;
-  inputRequests: {
-    approve: { message: string; requestedSchema: { type: "object"; properties: {} } };
-  };
 }
 
 /** A result other than a question, which has no `resultType`. */

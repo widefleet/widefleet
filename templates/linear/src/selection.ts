@@ -1,3 +1,6 @@
+// Shared by the generated templates: the template generator copies this file into
+// each template's src. Edit it in packages/template-generator/src/runtime.
+
 /** Any JSON value. */
 export type JsonValue =
   | string
