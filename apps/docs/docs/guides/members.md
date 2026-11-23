@@ -33,7 +33,8 @@ You can now [deploy an app](/guides/deployments) or open a shared app from the c
 
 ## Opening published apps
 
-Open an app from **App catalog** or follow the link a colleague shared with you.
+Open an app from **Home**: choose its tile to read what the app is for, or **Open app**
+to start it. A link to an app that a colleague shared with you leads to the same page.
 Sign in with your company account when prompted. If your organization does not
 use company SSO, use your Widefleet login.
 
