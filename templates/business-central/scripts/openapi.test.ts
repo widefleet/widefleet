@@ -228,6 +228,66 @@ describe("Business Central's API description", () => {
     expect(parsePage(automation)).toBeNull();
   });
 
+  it("reads code around comments and strings that hold braces, quotes and declarations", () => {
+    const page = parsePage(`page 30099 "APIV2 - Notes"
+{
+    APIVersion = 'v2.0';
+    EntityName = 'note';
+    EntitySetName = 'notes';
+    PageType = API;
+    // A brace in a line comment: {
+    DeleteAllowed = false;
+    /* A block comment with braces { and a property:
+       InsertAllowed = false;
+    */
+    EntityCaption = 'Note; with a semicolon, a // and a {';
+    AboutText = 'It''s a note. Editable = false;';
+
+    layout
+    {
+        area(content)
+        {
+            repeater(Group)
+            {
+                /* field(hidden; Rec.Hidden) { } */
+                field(text; Rec.Text)
+                {
+                    Caption = 'Text } with a brace';
+                    // Editable = false;
+                }
+                field(id; Rec.Id)
+                {
+                    /* } */ Editable = false;
+                }
+            }
+        }
+    }
+
+    // [ServiceEnabled]
+    // procedure Hidden(var ActionContext: WebServiceActionContext)
+
+    [ServiceEnabled]
+    [Caption('Archives the note; it''s kept')]
+    procedure Archive(var ActionContext: WebServiceActionContext)
+    begin
+    end;
+}
+`);
+
+    expect(page).toMatchObject({
+      entityCaption: "Note; with a semicolon, a // and a {",
+      about: "It's a note. Editable = false;",
+      insert: true,
+      modify: true,
+      delete: false,
+      fields: [
+        { name: "text", editable: true },
+        { name: "id", editable: false },
+      ],
+      actions: [{ name: "Archive", caption: "Archives the note; it's kept" }],
+    });
+  });
+
   it("types properties as the reference does and marks fields Business Central fills", () => {
     const { components } = describeApi();
 

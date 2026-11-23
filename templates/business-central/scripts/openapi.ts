@@ -103,60 +103,122 @@ export type Reference = {
 // AL strings double their quotes.
 const alString = (value: string) => value.slice(1, -1).replaceAll("''", "'");
 
-// The text from the brace after `start` to its matching brace, skipping AL
-// strings and comments.
-const block = (text: string, start: number) => {
-  const open = text.indexOf("{", start);
+/**
+ * AL source with its comments and the contents of its strings blanked, at the
+ * same offsets. Declarations, braces and properties are found in it, so text in
+ * a comment or a string never counts as code; values are read from the source.
+ */
+const structure = (source: string) => {
+  let masked = "";
+  let index = 0;
 
-  if (open < 0) throw new Error("An AL declaration has no body");
+  const blank = (end: number) => {
+    masked += source.slice(index, end).replace(/[^\n]/g, " ");
+    index = end;
+  };
+
+  while (index < source.length) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (character === "'") {
+      // A string ends at a quote that is not doubled.
+      let end = index + 1;
+
+      while (end < source.length && (source[end] !== "'" || source[end + 1] === "'"))
+        end += source[end] === "'" ? 2 : 1;
+
+      masked += "'";
+      index++;
+      blank(end);
+      masked += source.slice(index, end + 1);
+      index = end + 1;
+    } else if (character === '"') {
+      // Quoted identifiers, such as page and field names, stay as they are.
+      const end = source.indexOf('"', index + 1);
+      const stop = end < 0 ? source.length : end + 1;
+
+      masked += source.slice(index, stop);
+      index = stop;
+    } else if (character === "/" && next === "/") {
+      const end = source.indexOf("\n", index);
+
+      blank(end < 0 ? source.length : end);
+    } else if (character === "/" && next === "*") {
+      const end = source.indexOf("*/", index + 2);
+
+      blank(end < 0 ? source.length : end + 2);
+    } else {
+      masked += character;
+      index++;
+    }
+  }
+
+  return masked;
+};
+
+/** A declaration's body: its offsets in an AL file and the file with its masked form. */
+type Body = { source: string; masked: string; start: number; end: number };
+
+// The body from the brace after `from` to its matching brace.
+const block = (outer: Body, from: number): Body => {
+  const open = outer.masked.indexOf("{", from);
+
+  if (open < 0 || open >= outer.end) throw new Error("An AL declaration has no body");
   let depth = 0;
 
-  for (let index = open; index < text.length; index++) {
-    const character = text[index];
-
-    if (character === "'") index = text.indexOf("'", index + 1);
-    else if (character === "/" && text[index + 1] === "/") index = text.indexOf("\n", index);
-    else if (character === "{") depth++;
-    else if (character === "}" && --depth === 0) return text.slice(open + 1, index);
-
-    if (index < 0) break;
-  }
+  for (let index = open; index < outer.end; index++)
+    if (outer.masked[index] === "{") depth++;
+    else if (outer.masked[index] === "}" && --depth === 0)
+      return { ...outer, start: open + 1, end: index };
 
   throw new Error("An AL declaration does not end");
 };
 
 // A property of a declaration's own body, outside the bodies nested in it.
-const property = (body: string, name: string) => {
+const property = (body: Body, name: string) => {
   let depth = 0;
   let own = "";
 
-  for (const line of body.split("\n")) {
-    if (depth === 0) own += `${line}\n`;
-    depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
+  for (const character of body.masked.slice(body.start, body.end)) {
+    if (character === "}") depth--;
+    own += depth > 0 && character !== "\n" ? " " : character;
+
+    if (character === "{") depth++;
   }
 
-  return new RegExp(`^\\s*${name}\\s*=\\s*('(?:[^']|'')*'|[^;]+);`, "m").exec(own)?.[1]?.trim();
+  const found = new RegExp(`^\\s*${name}\\s*=\\s*([^;]+);`, "md").exec(own)?.indices?.[1];
+
+  return found && body.source.slice(body.start + found[0], body.start + found[1]).trim();
 };
 
-const allowed = (body: string, name: string) =>
+const allowed = (body: Body, name: string) =>
   property(body, name)?.toLowerCase() !== "false" &&
   property(body, "Editable")?.toLowerCase() !== "false";
 
-const caption = (body: string, name: string) => {
+const caption = (body: Body, name: string) => {
   const value = property(body, name);
 
   return value?.startsWith("'") ? alString(value) : "";
 };
+
+// The matches of a pattern in a body, outside comments and strings.
+const matches = (body: Body, pattern: RegExp) =>
+  [...body.masked.slice(body.start, body.end).matchAll(pattern)].map((match) => ({
+    match,
+    at: body.start + match.index,
+  }));
 
 /**
  * The standard API v2.0 page an AL file declares, or null for another object,
  * such as a query, or an API page of another group, such as automation.
  */
 export const parsePage = (source: string): Page | null => {
-  const declaration = /^page\s+\d+\s+"([^"]+)"/m.exec(source);
+  const file = { source, masked: structure(source), start: 0, end: source.length };
+  const declaration = /^page\s+\d+\s+"([^"]+)"/m.exec(file.masked);
 
   if (!declaration) return null;
-  const body = block(source, declaration.index);
+  const body = block(file, declaration.index);
 
   if (
     property(body, "PageType")?.toLowerCase() !== "api" ||
@@ -165,32 +227,34 @@ export const parsePage = (source: string): Page | null => {
   )
     return null;
 
-  const layout = body.indexOf("layout");
-  const content = layout < 0 ? "" : block(body, layout);
+  const layout = matches(body, /\blayout\b/g)[0];
+  const content = layout ? block(body, layout.at) : { ...body, end: body.start };
 
-  const fields = [...content.matchAll(/\bfield\(\s*("?)(\w+)\1\s*;/g)].map((match) => ({
+  const fields = matches(content, /\bfield\(\s*("?)(\w+)\1\s*;/g).map(({ match, at }) => ({
     name: match[2] ?? "",
-    editable: property(block(content, match.index), "Editable")?.toLowerCase() !== "false",
+    editable: property(block(content, at), "Editable")?.toLowerCase() !== "false",
   }));
 
-  const parts = [...content.matchAll(/\bpart\(\s*("?)(\w+)\1\s*;\s*"([^"]+)"\s*\)/g)].map(
-    (match) => {
-      const part = block(content, match.index);
-
-      return {
-        name: match[2] ?? "",
-        page: match[3] ?? "",
-        many: property(part, "Multiplicity")?.toLowerCase() !== "zeroorone",
-      };
-    },
+  const parts = matches(content, /\bpart\(\s*("?)(\w+)\1\s*;\s*"([^"]+)"\s*\)/g).map(
+    ({ match, at }) => ({
+      name: match[2] ?? "",
+      page: match[3] ?? "",
+      many: property(block(content, at), "Multiplicity")?.toLowerCase() !== "zeroorone",
+    }),
   );
 
-  const actions = [
-    ...body.matchAll(/\[ServiceEnabled\]((?:\s*\[[^\]]*\])*)\s*procedure\s+(\w+)\s*\(/g),
-  ].map((match) => ({
-    name: match[2] ?? "",
-    caption: alString(/\[Caption\(('(?:[^']|'')*')/.exec(match[1] ?? "")?.[1] ?? "''"),
-  }));
+  const actions = matches(
+    body,
+    /\[ServiceEnabled\]((?:\s*\[[^\]]*\])*)\s*procedure\s+(\w+)\s*\(/dg,
+  ).map(({ match, at }) => {
+    const attributes = match.indices?.[1] ?? [0, 0];
+    const offset = at - match.index;
+
+    const text = source.slice(offset + attributes[0], offset + attributes[1]);
+    const value = /\[Caption\(('(?:[^']|'')*')/.exec(text)?.[1];
+
+    return { name: match[2] ?? "", caption: value ? alString(value) : "" };
+  });
 
   return {
     page: declaration[1] ?? "",
