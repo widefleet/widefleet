@@ -96,7 +96,7 @@ it("lets members discover templates without creating apps or granting management
     expect(template.prompt).toContain(
       `--url '${environment.configuration.PLATFORM_URL}' --organization '${principal.application.organizationId}' catalog templates show ${id}`,
     );
-    expect(template.markdown).toContain("_CLIENT_SECRET");
+    expect(template.markdown).toContain("## Deploy");
     expect(template.markdown).toContain("widefleet deploy");
     expect(template.markdown).toContain("## Use from another app");
     expect(template).not.toHaveProperty("instructions");
