@@ -135,8 +135,9 @@ example `itemNotFound` or `nameAlreadyExists`. A `setup_required` result lists
 missing secrets. `connection_required`, `reconnect_required` and
 `permission_required` provide a `connectUrl` for the user. `authentication_required`
 means the call has no signed-in user. Retry `refresh_failed` after a provider
-outage; respect `retryAfter` for `rate_limited`. An input that does not match the
-operation fails before anything is sent.
+outage; respect `retryAfter` for `rate_limited`. `too_large` means the response is
+larger than `maximumBytes` (8 MiB): select fewer properties or fewer items. An input
+that does not match the operation fails before anything is sent.
 
 After connecting, verify a file listing through the consuming app. Users can
 disconnect their account on the OneDrive app's page.

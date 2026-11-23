@@ -83,8 +83,10 @@ describe("REST requests", () => {
     expect(
       await binaryContent(new Response("text", { headers: { "content-type": "text/plain" } })),
     ).toEqual({ contentType: "text/plain", data: new TextEncoder().encode("text") });
-    await expect(
-      binaryContent(new Response("x", { headers: { "content-length": String(9 * 1024 * 1024) } })),
-    ).rejects.toThrow("larger than 8 MiB");
+    // Larger content is not read.
+    expect(await binaryContent(new Response(new Uint8Array(9 * 1024 * 1024)))).toBeNull();
+    expect(
+      restRequest(base, "upload", upload, { itemId: "1", body: "x", contentType: undefined }).init,
+    ).toMatchObject({ headers: { "content-type": "application/octet-stream" } });
   });
 });

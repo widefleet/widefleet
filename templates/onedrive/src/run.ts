@@ -2,7 +2,7 @@ import { z } from "zod";
 import { approvalAnswer, approvals, asks, changeQuestion } from "./approval.ts";
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
-import { type Arguments, definedJson } from "./input.ts";
+import { type Arguments, boundedJson, definedJson, maximumResponseBytes } from "./input.ts";
 import { binaryContent, restRequest } from "./rest.ts";
 import type { OneDriveResult } from "./results.ts";
 import { base, operations } from "./schema.ts";
@@ -58,14 +58,20 @@ export const run = async <T>(
   if (response.status === 429 || (response.status === 503 && response.headers.has("retry-after")))
     return { status: "rate_limited", retryAfter: response.headers.get("retry-after") };
 
-  // File content redirects to a temporary download address.
-  if (operation.response === "binary" && (response.ok || response.status === 302))
-    // SAFETY: the generated signature types binary results as BinaryContent.
-    return { status: "connected", data: (await binaryContent(response)) as T };
+  const tooLarge = { status: "too_large", maximumBytes: maximumResponseBytes } as const;
 
-  const body = response.headers.get("content-type")?.startsWith("application/json")
-    ? definedJson.parse(await response.json())
-    : null;
+  // File content redirects to a temporary download address.
+  if (operation.response === "binary" && (response.ok || response.status === 302)) {
+    const content = await binaryContent(response);
+
+    // SAFETY: the generated signature types binary results as BinaryContent.
+    return content ? { status: "connected", data: content as T } : tooLarge;
+  }
+
+  const read = await boundedJson(response);
+
+  if (read.status === "too_large") return tooLarge;
+  const { body } = read;
 
   if (response.ok)
     // SAFETY: Graph answered with the result this operation describes, which its

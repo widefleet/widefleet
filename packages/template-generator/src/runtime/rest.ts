@@ -2,7 +2,13 @@
 // generator copies this file into each template's src. Edit it in
 // packages/template-generator/src/runtime.
 import { z } from "zod";
-import { type Arguments, definedJson, InvalidRequest } from "./input.ts";
+import {
+  type Arguments,
+  boundedBody,
+  definedJson,
+  InvalidRequest,
+  maximumResponseBytes,
+} from "./input.ts";
 
 /** How a method of a REST API is called, as src/schema.ts describes it. */
 export type RestOperation = {
@@ -41,7 +47,8 @@ export const restRequest = (
   operation: RestOperation,
   input: Arguments,
 ) => {
-  const values = z.record(z.string(), definedJson).parse(input);
+  // Optional arguments may be passed as undefined, which leaves them out.
+  const values = z.record(z.string(), definedJson.optional()).parse(input);
   const pathNames = Object.values(operation.pathParameters);
 
   const known = new Set([
@@ -52,8 +59,9 @@ export const restRequest = (
     ...(operation.pageable ? ["nextLink"] : []),
   ]);
 
-  for (const key of Object.keys(values))
-    if (!known.has(key)) throw new InvalidRequest(`${method} has no argument ${key}`);
+  for (const [key, value] of Object.entries(values))
+    if (value !== undefined && !known.has(key))
+      throw new InvalidRequest(`${method} has no argument ${key}`);
 
   const init: RequestInit = { method: operation.httpMethod };
   const body = own(values, "body");
@@ -119,14 +127,11 @@ export const restRequest = (
   return { url: url.href, init };
 };
 
-// Content up to this size is returned; larger files need their download address.
-const contentLimit = 8 * 1024 * 1024;
-
 /**
  * The content of a binary response: the download address an API redirects to,
- * or the content itself up to 8 MiB.
+ * the content itself, or null when it is larger than `maximumResponseBytes`.
  */
-export const binaryContent = async (response: Response): Promise<BinaryContent> => {
+export const binaryContent = async (response: Response): Promise<BinaryContent | null> => {
   const location = response.headers.get("location");
 
   if (response.status >= 300 && response.status < 400 && location) {
@@ -135,16 +140,9 @@ export const binaryContent = async (response: Response): Promise<BinaryContent> 
     return { downloadUrl: location };
   }
 
-  const size = Number(response.headers.get("content-length"));
+  const data = await boundedBody(response, maximumResponseBytes);
 
-  if (Number.isFinite(size) && size > contentLimit) {
-    await response.body?.cancel();
-    throw new InvalidRequest("The content is larger than 8 MiB");
-  }
-
-  const data = new Uint8Array(await response.arrayBuffer());
-
-  if (data.byteLength > contentLimit) throw new InvalidRequest("The content is larger than 8 MiB");
+  if (!data) return null;
 
   return {
     contentType: response.headers.get("content-type") ?? "application/octet-stream",

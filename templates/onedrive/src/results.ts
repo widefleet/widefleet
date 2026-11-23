@@ -29,5 +29,6 @@ export type OneDriveResult<T> =
       | { status: "connected"; data: T }
       | { status: "graph_error"; error: GraphError }
       | { status: "declined" }
+      | { status: "too_large"; maximumBytes: number }
       | ConnectionProblem
     >;

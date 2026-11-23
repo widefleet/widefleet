@@ -394,6 +394,16 @@ describe("OneDrive personal account app", () => {
       status: "rate_limited",
       retryAfter: "5",
     });
+    // Larger responses are not read.
+    upstream.state.answer = {
+      status: 200,
+      body: { value: [{ name: "x".repeat(9 * 1024 * 1024) }] },
+      headers: {},
+    };
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "too_large",
+      maximumBytes: 8 * 1024 * 1024,
+    });
     upstream.state.answer = { status: 502, body: null, headers: {} };
     expect((await alice.request("/rpc/list")).status).toBe(500);
     // Requests that do not match the operation never reach Graph.
