@@ -12,7 +12,9 @@ export type Operation = {
   queryParameters: string[];
   requiredParameters: string[];
   body: boolean;
-  response: boolean;
+  response: "json" | "content" | null;
+  altMedia: boolean;
+  upload: string | null;
   change: "create" | "update" | "delete" | "send" | null;
 };
 
@@ -27,7 +29,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   settingsList: {
@@ -37,7 +41,9 @@ export const operations = {
     queryParameters: ["pageToken", "syncToken", "maxResults"],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   settingsGet: {
@@ -47,7 +53,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   settingsWatch: {
@@ -57,7 +65,9 @@ export const operations = {
     queryParameters: ["pageToken", "syncToken", "maxResults"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   eventsGet: {
@@ -67,7 +77,9 @@ export const operations = {
     queryParameters: ["maxAttendees", "alwaysIncludeEmail", "timeZone"],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   eventsMove: {
@@ -77,7 +89,9 @@ export const operations = {
     queryParameters: ["sendNotifications", "sendUpdates", "destination"],
     requiredParameters: ["destination"],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   eventsQuickAdd: {
@@ -87,7 +101,9 @@ export const operations = {
     queryParameters: ["text", "sendNotifications", "sendUpdates"],
     requiredParameters: ["text"],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "create",
   },
   eventsList: {
@@ -116,7 +132,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   eventsImport: {
@@ -126,7 +144,9 @@ export const operations = {
     queryParameters: ["supportsAttachments", "eventLabelVersion", "conferenceDataVersion"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "create",
   },
   eventsPatch: {
@@ -144,7 +164,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   eventsWatch: {
@@ -173,7 +195,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   eventsDelete: {
@@ -183,7 +207,9 @@ export const operations = {
     queryParameters: ["sendUpdates", "sendNotifications"],
     requiredParameters: [],
     body: false,
-    response: false,
+    response: null,
+    altMedia: false,
+    upload: null,
     change: "delete",
   },
   eventsUpdate: {
@@ -201,7 +227,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   eventsInsert: {
@@ -218,7 +246,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "send",
   },
   eventsInstances: {
@@ -238,7 +268,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   aclList: {
@@ -248,7 +280,9 @@ export const operations = {
     queryParameters: ["maxResults", "syncToken", "showDeleted", "pageToken"],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   aclDelete: {
@@ -258,7 +292,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: false,
+    response: null,
+    altMedia: false,
+    upload: null,
     change: "delete",
   },
   aclUpdate: {
@@ -268,7 +304,9 @@ export const operations = {
     queryParameters: ["sendNotifications"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   aclGet: {
@@ -278,7 +316,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   aclInsert: {
@@ -288,7 +328,9 @@ export const operations = {
     queryParameters: ["sendNotifications"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   aclPatch: {
@@ -298,7 +340,9 @@ export const operations = {
     queryParameters: ["sendNotifications"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   aclWatch: {
@@ -308,7 +352,9 @@ export const operations = {
     queryParameters: ["maxResults", "showDeleted", "pageToken", "syncToken"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   calendarListGet: {
@@ -318,7 +364,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   calendarListInsert: {
@@ -328,7 +376,9 @@ export const operations = {
     queryParameters: ["colorRgbFormat"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "create",
   },
   calendarListPatch: {
@@ -338,7 +388,9 @@ export const operations = {
     queryParameters: ["colorRgbFormat"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   calendarListWatch: {
@@ -356,7 +408,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   calendarListList: {
@@ -374,7 +428,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   calendarListDelete: {
@@ -384,7 +440,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: false,
+    response: null,
+    altMedia: false,
+    upload: null,
     change: "delete",
   },
   calendarListUpdate: {
@@ -394,7 +452,9 @@ export const operations = {
     queryParameters: ["colorRgbFormat"],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   freebusyQuery: {
@@ -404,7 +464,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   channelsStop: {
@@ -414,7 +476,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: false,
+    response: null,
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   calendarsTransferOwnership: {
@@ -424,7 +488,9 @@ export const operations = {
     queryParameters: ["newDataOwner", "useAdminAccess"],
     requiredParameters: ["newDataOwner", "useAdminAccess"],
     body: false,
-    response: false,
+    response: null,
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   calendarsPatch: {
@@ -434,7 +500,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   calendarsDelete: {
@@ -444,7 +512,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: false,
+    response: null,
+    altMedia: false,
+    upload: null,
     change: "delete",
   },
   calendarsUpdate: {
@@ -454,7 +524,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   calendarsGet: {
@@ -464,7 +536,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   calendarsClear: {
@@ -474,7 +548,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: false,
+    response: null,
+    altMedia: false,
+    upload: null,
     change: "delete",
   },
   calendarsInsert: {
@@ -484,7 +560,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "create",
   },
 } satisfies Record<string, Operation>;

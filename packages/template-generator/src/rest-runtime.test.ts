@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { InvalidRequest } from "./runtime/input.ts";
-import { binaryContent, type RestOperation, restRequest } from "./runtime/rest.ts";
+import { binaryContent } from "./runtime/content.ts";
+import { type RestOperation, restRequest } from "./runtime/rest.ts";
 
 const base = "https://graph.example.test/v1.0/";
 

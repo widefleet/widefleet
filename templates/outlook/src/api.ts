@@ -4,7 +4,7 @@
 //   pnpm --filter @platform/template-generator generate outlook
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Environment as TemplateEnvironment } from "./context.ts";
-import type { BinaryContent } from "./rest.ts";
+import type { BinaryContent } from "./content.ts";
 import type { OutlookResult } from "./results.ts";
 import { type OutlookProperties, run } from "./run.ts";
 

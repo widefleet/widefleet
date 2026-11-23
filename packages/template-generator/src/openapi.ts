@@ -715,7 +715,7 @@ export const generateOpenapi = (
     files: {
       "src/api.ts": `${header}import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Environment as TemplateEnvironment } from "./context.ts";
-${usesBinary ? 'import type { BinaryContent } from "./rest.ts";\n' : ""}import type { ${service.result} } from "./results.ts";
+${usesBinary ? 'import type { BinaryContent } from "./content.ts";\n' : ""}import type { ${service.result} } from "./results.ts";
 import { type ${service.properties}, run } from "./run.ts";
 ${["JsonObject", "JsonValue"].some(used) ? `import type { ${["JsonObject", "JsonValue"].filter(used).join(", ")} } from "./selection.ts";\n` : ""}
 ${typeText}

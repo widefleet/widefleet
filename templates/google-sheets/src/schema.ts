@@ -12,7 +12,9 @@ export type Operation = {
   queryParameters: string[];
   requiredParameters: string[];
   body: boolean;
-  response: boolean;
+  response: "json" | "content" | null;
+  altMedia: boolean;
+  upload: string | null;
   change: "create" | "update" | "delete" | "send" | null;
 };
 
@@ -27,7 +29,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "create",
   },
   batchUpdate: {
@@ -37,7 +41,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   get: {
@@ -52,7 +58,9 @@ export const operations = {
     ],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   getByDataFilter: {
@@ -62,7 +70,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   sheetsCopyTo: {
@@ -72,7 +82,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "create",
   },
   developerMetadataSearch: {
@@ -82,7 +94,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   developerMetadataGet: {
@@ -92,7 +106,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   valuesUpdate: {
@@ -107,7 +123,9 @@ export const operations = {
     ],
     requiredParameters: ["valueInputOption"],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   valuesBatchUpdate: {
@@ -117,7 +135,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   valuesBatchClear: {
@@ -127,7 +147,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "delete",
   },
   valuesBatchUpdateByDataFilter: {
@@ -137,7 +159,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
   valuesBatchGet: {
@@ -147,7 +171,9 @@ export const operations = {
     queryParameters: ["dateTimeRenderOption", "majorDimension", "valueRenderOption", "ranges"],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   valuesGet: {
@@ -157,7 +183,9 @@ export const operations = {
     queryParameters: ["dateTimeRenderOption", "majorDimension", "valueRenderOption"],
     requiredParameters: [],
     body: false,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   valuesClear: {
@@ -167,7 +195,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "delete",
   },
   valuesBatchClearByDataFilter: {
@@ -177,7 +207,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "delete",
   },
   valuesBatchGetByDataFilter: {
@@ -187,7 +219,9 @@ export const operations = {
     queryParameters: [],
     requiredParameters: [],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: null,
   },
   valuesAppend: {
@@ -203,7 +237,9 @@ export const operations = {
     ],
     requiredParameters: ["valueInputOption"],
     body: true,
-    response: true,
+    response: "json",
+    altMedia: false,
+    upload: null,
     change: "update",
   },
 } satisfies Record<string, Operation>;

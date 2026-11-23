@@ -9,7 +9,9 @@ const get: GoogleOperation = {
   queryParameters: ["format", "metadataHeaders"],
   requiredParameters: [],
   body: false,
-  response: true,
+  response: "json",
+  altMedia: false,
+  upload: null,
 };
 
 const send: GoogleOperation = {
@@ -19,7 +21,9 @@ const send: GoogleOperation = {
   queryParameters: [],
   requiredParameters: [],
   body: true,
-  response: true,
+  response: "json",
+  altMedia: false,
+  upload: null,
 };
 
 const base = "https://gmail.googleapis.com/";
@@ -96,5 +100,72 @@ describe("Google API requests", () => {
     expect(() => googleRequest(base, "messagesSend", send, {}, { id: true })).toThrow(
       "messagesSend needs a body",
     );
+  });
+
+  it("reads content with alt=media and uploads metadata and content in one multipart request", () => {
+    const content = googleRequest(
+      base,
+      "filesGetContent",
+      {
+        ...get,
+        path: "drive/v3/files/{fileId}",
+        pathParameters: { fileId: null },
+        queryParameters: [],
+        response: "content",
+        altMedia: true,
+      },
+      { fileId: "f" },
+    );
+
+    expect(content.url).toBe("https://gmail.googleapis.com/drive/v3/files/f?alt=media");
+
+    const upload = {
+      ...send,
+      path: "drive/v3/files",
+      pathParameters: {},
+      upload: "/upload/drive/v3/files",
+    };
+
+    const created = googleRequest(
+      "https://www.googleapis.com/drive/v3/",
+      "filesCreateWithContent",
+      upload,
+      { body: { name: "a.txt" }, content: { mimeType: "text/plain", base64: "AAEC" } },
+      { id: true },
+    );
+
+    expect(created.url).toBe(
+      "https://www.googleapis.com/upload/drive/v3/files?fields=id&uploadType=multipart",
+    );
+
+    const boundary = /boundary=(\S+)/.exec(
+      new Headers(created.init.headers).get("content-type") ?? "",
+    )?.[1];
+
+    expect(created.init.body).toBe(
+      [
+        `--${boundary}`,
+        "Content-Type: application/json; charset=UTF-8",
+        "",
+        '{"name":"a.txt"}',
+        `--${boundary}`,
+        "Content-Type: text/plain",
+        "Content-Transfer-Encoding: base64",
+        "",
+        "AAEC",
+        `--${boundary}--`,
+        "",
+      ].join("\r\n"),
+    );
+
+    // Content needs text or base64, and a media type without line breaks.
+    for (const content of [
+      { mimeType: "text/plain" },
+      { mimeType: "text/plain\r\nX: y", text: "a" },
+      { mimeType: "text/plain", base64: "not base64!" },
+    ])
+      expect(() =>
+        googleRequest(base, "filesCreateWithContent", upload, { content }, { id: true }),
+      ).toThrow(InvalidRequest);
   });
 });

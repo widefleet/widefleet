@@ -123,7 +123,11 @@ const runtime = [
   "approval-page.ts",
   "approval-methods.ts",
   "input.ts",
-  { graphql: "graphql.ts", discovery: "google.ts", openapi: "rest.ts" }[rules.kind],
+  ...{
+    graphql: ["graphql.ts"],
+    discovery: ["google.ts", "content.ts"],
+    openapi: ["rest.ts", "content.ts"],
+  }[rules.kind],
 ];
 
 for (const file of runtime) copyFileSync(join(here, "runtime", file), join(directory, "src", file));
