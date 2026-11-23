@@ -169,19 +169,29 @@ const evaluate = async (runs: number) => {
       return firstMcpServer(stdout) === server;
     };
 
-    let index = 0;
-
-    const results = await Promise.all(
-      cases.map(async (entry) => {
-        const used = await Promise.all(
-          Array.from({ length: runs }, () => attempt(entry.prompt, index++)),
-        );
-
-        const passed = used.filter((value) => value === (entry.expected === "uses")).length;
-
-        return { ...entry, passed };
-      }),
+    const attempts = cases.flatMap((entry, caseIndex) =>
+      Array.from({ length: runs }, (_, run) => ({ entry, index: caseIndex * runs + run })),
     );
+
+    // Every run must finish before the shared directory is removed, even when one fails.
+    const settled = await Promise.allSettled(
+      attempts.map(({ entry, index }) => attempt(entry.prompt, index)),
+    );
+
+    const failure = settled.find((result) => result.status === "rejected");
+
+    if (failure) throw failure.reason;
+
+    const results = cases.map((entry) => {
+      const passed = settled.filter(
+        (result, position) =>
+          attempts[position]?.entry === entry &&
+          result.status === "fulfilled" &&
+          result.value === (entry.expected === "uses"),
+      ).length;
+
+      return { ...entry, passed };
+    });
 
     for (const { prompt, expected, passed } of results)
       console.log(`${passed}/${runs}  ${expected.padEnd(7)}  ${prompt}`);
