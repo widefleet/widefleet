@@ -79,6 +79,7 @@ const configuration = z.discriminatedUnion("kind", [
       }),
     ),
     navigation: z.record(z.string(), z.record(z.string(), z.array(z.string()))).optional(),
+    bindings: z.record(z.string(), z.array(z.string())).optional(),
     undescribed: z
       .record(
         z.string(),

@@ -516,6 +516,31 @@ paths:
     expect(typed).toContain("} | Parent | (Item | Parent)[];");
   });
 
+  it("binds the navigation properties the rules name by address", () => {
+    const parent = edited(
+      '"parent":{"anyOf":[{"$ref":"#/components/schemas/example.parent"},{"type":"object","nullable":true}]}',
+      '"parent":{"anyOf":[{"$ref":"#/components/schemas/example.parent"},{"type":"object","nullable":true}],"x-ms-navigationProperty":true}',
+    );
+
+    const generated = generateOpenapi(
+      parent,
+      { ...rules, bindings: { "example.item": ["parent", "children"] } },
+      service,
+      "",
+    ).files["src/api.ts"];
+
+    expect(generated).toContain(
+      '  /**\n   * Binds parent to the existing entity at this address.\n   */\n  "parent@odata.bind"?: string;',
+    );
+    expect(generated).toContain('"children@odata.bind"?: string[];');
+    // Bound navigation properties themselves stay out.
+    expect(generated).not.toContain("children?:");
+
+    expect(() =>
+      generateOpenapi(parent, { ...rules, bindings: { "example.item": ["name"] } }, service, ""),
+    ).toThrow("The bindings name example.item.name, which is not a navigation property");
+  });
+
   it("takes any JSON where a JSON body or result has no schema", () => {
     const item = '{"schema":{"$ref":"#/components/schemas/example.item"}}';
 
