@@ -3,7 +3,8 @@
 // Microsoft Graph, describe far more than one template offers, so the
 // template's rules list the operations it offers by operation ID, each with
 // its method name and, for operations that are not GET, the change it makes.
-// Rules can add operations the API serves but its description leaves out.
+// Operations without an ID are listed by method and path. Rules can add
+// operations the API serves but its description leaves out.
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
@@ -16,12 +17,14 @@ type HeaderRules = Readonly<Record<string, { name: string; description: string }
 /** How an OpenAPI template offers operations. */
 export interface OpenapiRules {
   /**
-   * Offered operations by operation ID, such as `drives.items.ListChildren`, with
-   * the method name and, for every operation that is not a GET, its change, or
-   * `read` when it only reads. `description` replaces the API's own text where it
-   * describes another operation, as Microsoft Graph's does for some. `body` and
-   * `result` name the schemas a body or result can be where the description only
-   * names their common base, such as Graph's attachment types. `headers` are
+   * Offered operations by operation ID, such as `drives.items.ListChildren`, or
+   * by method and path where the description gives no ID, such as
+   * `GET /activity-service/activity/{activityId}`, with the method name and,
+   * for every operation that is not a GET, its change, or `read` when it only
+   * reads. `description` replaces the API's own text where it describes another
+   * operation, as Microsoft Graph's does for some. `body` and `result` name the
+   * schemas a body or result can be where the description only names their
+   * common base, such as Graph's attachment types. `headers` are
    * inputs the method sends as headers the description does not declare, such
    * as Graph's `workbook-session-id`.
    */
@@ -507,7 +510,17 @@ export const generateOpenapi = (
     methods.flatMap((method) => {
       const entry = operation.optional().parse(item[method]);
 
-      return entry?.operationId ? [{ path, item, method, entry, id: entry.operationId }] : [];
+      return entry
+        ? [
+            {
+              path,
+              item,
+              method,
+              entry,
+              id: entry.operationId ?? `${method.toUpperCase()} ${path}`,
+            },
+          ]
+        : [];
     }),
   );
 
