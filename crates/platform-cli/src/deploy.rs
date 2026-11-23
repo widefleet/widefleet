@@ -588,9 +588,15 @@ async fn publish(
 // mistake before the build.
 fn check_required_secrets(configuration: &Configuration) -> Result<()> {
     let required = &configuration.secrets.required;
+    // The contract's requiredSecrets in packages/contracts: app secret names
+    // and at most appEnvironmentMaxBindings of them.
+    if required.len() > 128 {
+        return Err(Error::invalid("List at most 128 required secrets".into()));
+    }
     if let Some(name) = required.iter().find(|name| {
         name.len() > 64
             || name.starts_with("WIDEFLEET_")
+            || name.as_str() == "__proto__"
             || !name
                 .starts_with(|character: char| character.is_ascii_alphabetic() || character == '_')
             || !name
@@ -598,7 +604,7 @@ fn check_required_secrets(configuration: &Configuration) -> Result<()> {
                 .all(|character| character.is_ascii_alphanumeric() || character == '_')
     }) {
         return Err(Error::invalid(format!(
-            "Invalid required secret {name:?}: use up to 64 letters, digits and underscores, starting with a letter or underscore and without the reserved WIDEFLEET_ prefix"
+            "Invalid required secret {name:?}: use up to 64 letters, digits and underscores, starting with a letter or underscore; WIDEFLEET_ names and __proto__ are reserved"
         )));
     }
     if required.iter().collect::<BTreeSet<_>>().len() != required.len() {
@@ -623,12 +629,13 @@ fn check_required_secrets(configuration: &Configuration) -> Result<()> {
                 .iter()
                 .map(|workflow| workflow.binding.as_str()),
         )
-        .chain(
+        // Every deployment has an assets binding, ASSETS by default.
+        .chain(std::iter::once(
             configuration
                 .assets
-                .iter()
-                .map(|assets| assets.binding.as_str()),
-        )
+                .as_ref()
+                .map_or("ASSETS", |assets| assets.binding.as_str()),
+        ))
         .collect();
     let taken: Vec<&str> = required
         .iter()
@@ -987,12 +994,24 @@ mod tests {
         check_required_secrets(&empty)?;
         assert!(empty.secrets.required.is_empty());
         assert!(configuration(value!({ "optional": ["API_KEY"] })).is_err());
+        let too_many: Vec<String> = (0..129).map(|index| format!("SECRET_{index}")).collect();
+        let at_limit = configuration(value!({ "required": too_many[..128] }))?;
+        check_required_secrets(&at_limit)?;
+        // Without an assets key, deployments still bind ASSETS.
+        let without_assets: Configuration = serde_json::from_value(value!({
+            "main": "src/app.ts",
+            "compatibility_date": "2026-10-01",
+            "secrets": { "required": ["ASSETS"] },
+        }))?;
+        assert!(check_required_secrets(&without_assets).is_err());
         for (required, message) in [
             (value!(["API_KEY", "API_KEY"]), "unique"),
             (value!(["GREETING", "ASSETS", "DB"]), "GREETING, ASSETS, DB"),
             (value!(["WIDEFLEET_TOKEN"]), "Invalid required secret"),
             (value!(["api-key"]), "Invalid required secret"),
             (value!(["1KEY"]), "Invalid required secret"),
+            (value!(["__proto__"]), "Invalid required secret"),
+            (value!(too_many), "at most 128"),
         ] {
             let invalid = configuration(value!({ "required": required }))?;
             let error = check_required_secrets(&invalid)

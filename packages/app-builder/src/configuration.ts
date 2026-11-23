@@ -81,7 +81,8 @@ export const readConfiguration = (files: Readonly<Record<string, string>>) => {
       ...configuration.queues.producers,
       ...configuration.workflows,
     ].map((entry) => entry.binding),
-    ...(configuration.assets ? [configuration.assets.binding] : []),
+    // Every deployment has an assets binding, ASSETS by default.
+    configuration.assets?.binding ?? "ASSETS",
   ]);
 
   const taken = configuration.secrets?.required.filter((name) => bindings.has(name)) ?? [];

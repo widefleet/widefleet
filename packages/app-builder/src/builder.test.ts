@@ -605,6 +605,13 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
       [{ required: ["API_KEY", "API_KEY"] }, "Required secrets must be unique"],
       [{ required: ["GREETING", "DB"] }, "binding or variable: GREETING, DB"],
       [{ required: ["WIDEFLEET_TOKEN"] }, "Reserved app secret name"],
+      [{ required: ["__proto__"] }, "Reserved app secret name"],
+      [
+        { required: Array.from({ length: 129 }, (_, index) => `SECRET_${index}`) },
+        "secrets.required",
+      ],
+      // The configuration has no assets key; deployments still bind ASSETS.
+      [{ required: ["ASSETS"] }, "binding or variable: ASSETS"],
       [{ required: ["api-key"] }, "secrets.required"],
       [{ optional: ["API_KEY"] }, "optional"],
     ] as const) {
