@@ -3671,6 +3671,7 @@ test(`personal connections account controls and workspace entry`, async ({ brows
         organizationId: "widefleet",
         state: "active",
         catalogListed: true,
+        description: slug === "personal-github" ? "Tracks your repositories." : null,
       });
       await environment.database.db.insert(artifacts).values({
         id: artifactId,
@@ -3772,6 +3773,14 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await expect(page.getByText("taylor@example.test", { exact: false })).toBeVisible();
 
     await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
+    // The connectors sort into those with an account and those without one.
+    const connectedGroup = page.getByRole("region", { name: "Connected", exact: true });
+    const openGroup = page.getByRole("region", { name: "Not connected yet", exact: true });
+    await expect(connectedGroup.getByRole("listitem")).toHaveCount(1);
+    await expect(connectedGroup.getByText("taylor@example.test", { exact: false })).toBeVisible();
+    await expect(openGroup.getByRole("listitem")).toHaveCount(2);
+    await expect(openGroup.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+    await expect(openGroup.getByText("Tracks your repositories.", { exact: true })).toBeVisible();
 
     // An app's page shows the reader's accounts with the app itself and with the apps it calls.
     await environment.database.db

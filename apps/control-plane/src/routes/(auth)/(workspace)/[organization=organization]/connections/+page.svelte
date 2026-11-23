@@ -27,6 +27,25 @@
   // A connector whose status check finds no personal connection drops out of the list.
   const visible = $derived(connections.filter((_, index) => statuses[index]?.current !== null));
 
+  // Once every status is known, the connectors sort into those with an account and those
+  // without one. Until then they stay in one list, so no row changes its place twice.
+  const entries = $derived(statuses.flatMap((status) => (status.current ? [status.current] : [])));
+
+  const groups = $derived(
+    [
+      {
+        id: "connected",
+        title: "Connected",
+        entries: entries.filter((entry) => entry.status?.connection === "connected"),
+      },
+      {
+        id: "open",
+        title: "Not connected yet",
+        entries: entries.filter((entry) => entry.status?.connection !== "connected"),
+      },
+    ].filter((group) => group.entries.length),
+  );
+
   let refreshing = $state(false);
 
   let refreshFailed = $state(false);
@@ -72,6 +91,24 @@
       description="Connectors will appear here after your administrator makes them available to you."
       >{#snippet icon()}<Link2 />{/snippet}</EmptyState
     >
+  {:else if entries.length === visible.length}
+    {#each groups as group (group.id)}
+      <section aria-labelledby={`connections-${group.id}`}>
+        <h2 id={`connections-${group.id}`} class="text-sm font-semibold">{group.title}</h2>
+        <ul class="divide-border/60 divide-y">
+          {#each group.entries as connection (connection.appId)}
+            <UserConnectionRow
+              {connection}
+              showHostname={visible.some(
+                (other) =>
+                  other.appId !== connection.appId && other.displayName === connection.displayName,
+              )}
+              confirmDisconnect={page.url.searchParams.get("disconnect") === connection.appId}
+            />
+          {/each}
+        </ul>
+      </section>
+    {/each}
   {:else}
     <ul class="divide-border/60 divide-y">
       {#each visible as connection (connection.appId)}

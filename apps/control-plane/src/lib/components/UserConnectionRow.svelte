@@ -63,9 +63,12 @@
     <div class="flex min-w-0 items-start gap-3">
       <AppIcon appId={connection.appId} deploymentId={connection.activeDeploymentId} />
       <div class="min-w-0">
-        <h2 id={`connection-${connection.appId}`} class="text-sm font-medium wrap-anywhere">
+        <h3 id={`connection-${connection.appId}`} class="text-sm font-medium wrap-anywhere">
           {connection.displayName}
-        </h2>
+        </h3>
+        {#if connection.description}
+          <p class="text-muted-foreground mt-0.5 text-xs wrap-anywhere">{connection.description}</p>
+        {/if}
         {#if showHostname}
           <p class="text-muted-foreground mt-1 text-xs wrap-anywhere">{connection.hostname}</p>
         {/if}

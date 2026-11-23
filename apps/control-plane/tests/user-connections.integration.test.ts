@@ -126,10 +126,16 @@ describe("Personal connector accounts", () => {
     const ordinary = await deploy("ordinary", ["default"]);
     // Access rules decide who sees a connector; a catalog listing is not required.
     const unlisted = await deploy("unlisted", ["UserConnection"], false);
+    await environment.database.db
+      .update(apps)
+      .set({ description: "Reads the shared mailbox." })
+      .where(eq(apps.id, visible.id));
     expect(await service().list(principal())).toEqual(
       [unlisted, visible].map((app) => ({
         appId: app.id,
         displayName: app.slug,
+        // A connector's description comes with it, so the list can say what it is for.
+        description: app.id === visible.id ? "Reads the shared mailbox." : null,
         hostname: app.hostname,
         activeDeploymentId: app.activeDeploymentId,
         status: disconnected,
@@ -204,6 +210,7 @@ describe("Personal connector accounts", () => {
       {
         appId: app.id,
         displayName: "visible",
+        description: null,
         hostname: app.hostname,
         activeDeploymentId: app.activeDeploymentId,
         status: null,

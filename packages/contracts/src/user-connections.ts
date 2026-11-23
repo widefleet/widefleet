@@ -32,6 +32,8 @@ export const userConnectionInvocation = z.strictObject({
 export const userConnectionEntry = z.strictObject({
   appId: z.uuid(),
   displayName: z.string(),
+  /** The connector's sentence about what it is for. */
+  description: z.string().nullable().default(null),
   hostname: z.string(),
   /** Selects the app icon, as in the app list. */
   activeDeploymentId: z.uuid(),
