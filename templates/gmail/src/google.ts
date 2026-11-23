@@ -69,6 +69,10 @@ export const googleRequest = (
 
     if (!value.success) throw new InvalidRequest(`${method} needs ${key}`);
 
+    // `.` and `..` would move the request to another path.
+    if (value.data === "." || value.data === "..")
+      throw new InvalidRequest(`${method}'s ${key} is not an ID`);
+
     return encodeURIComponent(String(value.data));
   });
 

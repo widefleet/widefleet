@@ -10,6 +10,7 @@ const list: RestOperation = {
   pathParameters: { "drive-id": "driveId", q: "q" },
   queryParameters: { $top: ["$top", true], $select: ["$select", false], tag: ["tag", true] },
   body: null,
+  bodyRequired: false,
   response: "json",
   pageable: true,
 };
@@ -20,6 +21,7 @@ const upload: RestOperation = {
   pathParameters: { "item-id": "itemId" },
   queryParameters: {},
   body: "text",
+  bodyRequired: true,
   response: "json",
   pageable: false,
 };
@@ -72,6 +74,13 @@ describe("REST requests", () => {
       new InvalidRequest("search has no argument top"),
     );
     expect(() => restRequest(base, "search", list, { q: "x" })).toThrow("search needs driveId");
+    // `..` would move a request to the parent path.
+    expect(() => restRequest(base, "search", list, { driveId: "..", q: "x" })).toThrow(
+      "search's driveId is not an ID",
+    );
+    expect(() => restRequest(base, "upload", upload, { itemId: "1" })).toThrow(
+      "upload needs a body",
+    );
   });
 
   it("returns download addresses and small content", async () => {

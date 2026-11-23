@@ -861,7 +861,7 @@ export type Quota = {
   "@odata.type"?: string;
 };
 
-export type ReferenceNumeric = "-INF" | "INF" | "NaN";
+export type ReferenceNumeric = "-INF" | "INF" | "NaN" | null;
 
 /**
  * remoteItem
@@ -1428,7 +1428,7 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
     /**
      * Usage: q='{q}'
      */
-    q: string | null;
+    q: string;
     /**
      * Show only the first n items
      */
@@ -1782,7 +1782,7 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
     /**
      * Usage: q='{q}'
      */
-    q: string | null;
+    q: string;
     /**
      * Show only the first n items
      */

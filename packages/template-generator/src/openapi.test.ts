@@ -11,6 +11,14 @@ const api = {
         operationId: "folders.ListItems",
         summary: "List items",
         parameters: [
+          // Replaces the path's parameter of the same name.
+          {
+            name: "folder-id",
+            in: "path",
+            required: true,
+            description: "The folder",
+            schema: { type: "string", nullable: true },
+          },
           { $ref: "#/components/parameters/top" },
           {
             name: "$select",
@@ -115,7 +123,7 @@ const api = {
           },
         ],
       },
-      "example.parent": { type: "object", properties: { id: { type: "string" } } },
+      "example.parent": { type: "object", properties: { id: { type: "string" } }, nullable: true },
       "example.unused": { type: "object", properties: { id: { type: "string" } } },
     },
   },
@@ -156,6 +164,11 @@ describe("OpenAPI template generator", () => {
     expect(generated).toContain('kind?: "file" | "folder";');
     expect(generated).toContain("parent?: Parent | null;");
     expect(generated).toContain("folderId: string;");
+    expect(generated.match(/folderId: string;/g)).toHaveLength(2);
+    // A path parameter is never null, and a nullable component stays nullable.
+    expect(generated).not.toContain("folderId: string | null;");
+    expect(generated).toContain("export type Parent = {");
+    expect(generated).toMatch(/export type Parent = \{\n  id\?: string;\n\} \| null;/);
     expect(generated).toContain("$top?: number;");
     expect(generated).toContain("nextLink?: string;");
     expect(generated).not.toContain("ConsistencyLevel");
@@ -169,9 +182,9 @@ describe("OpenAPI template generator", () => {
 
     expect(files["src/schema.ts"]).toContain('export const base = "https://api.example.test/v1/";');
     expect(files["src/schema.ts"]).toContain(
-      '"listItems":{"httpMethod":"GET","path":"/folders/{folder-id}/items","pathParameters":{"folder-id":"folderId"},"queryParameters":{"$top":["$top",true],"$select":["$select",false]},"body":null,"response":"json","pageable":true,"change":null}',
+      '"listItems":{"httpMethod":"GET","path":"/folders/{folder-id}/items","pathParameters":{"folder-id":"folderId"},"queryParameters":{"$top":["$top",true],"$select":["$select",false]},"body":null,"bodyRequired":false,"response":"json","pageable":true,"change":null}',
     );
-    expect(files["src/schema.ts"]).toContain('"body":"text","response":null');
+    expect(files["src/schema.ts"]).toContain('"body":"text","bodyRequired":true,"response":null');
   });
 
   it("reads YAML descriptions", () => {

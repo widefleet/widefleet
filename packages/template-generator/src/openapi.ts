@@ -138,6 +138,7 @@ export type OpenapiOperation = {
   /** Query parameters by input name: the API's name, and whether a list repeats it. */
   queryParameters: Record<string, [string, boolean]>;
   body: "json" | "text" | null;
+  bodyRequired: boolean;
   response: "json" | "binary" | null;
   /** Whether the method continues at an earlier result's `@odata.nextLink`. */
   pageable: boolean;
@@ -393,14 +394,17 @@ export const generateOpenapi = (
     const change = rule.change ? changes.parse(rule.change) : null;
 
     // Header parameters, such as Graph's ConsistencyLevel, are not offered.
-    const parameters = [...(item.parameters ?? []), ...(entry.parameters ?? [])].flatMap(
-      (value) => {
+    // An operation's parameter replaces the path's parameter of the same name and place.
+    const declared = new Map(
+      [...(item.parameters ?? []), ...(entry.parameters ?? [])].map((value) => {
         const resolved = resolve(value, "parameters", parameter);
 
-        return (resolved.in === "path" || resolved.in === "query") && !resolved.deprecated
-          ? [resolved]
-          : [];
-      },
+        return [`${resolved.in}:${resolved.name}`, resolved] as const;
+      }),
+    );
+
+    const parameters = [...declared.values()].filter(
+      (value) => (value.in === "path" || value.in === "query") && !value.deprecated,
     );
 
     const body = entry.requestBody
@@ -437,15 +441,23 @@ export const generateOpenapi = (
         ),
       ),
       body: bodyKind,
+      bodyRequired: body?.required === true,
       response: responseKind,
       pageable,
       change,
     };
 
-    const fields = parameters.map(
-      (value) =>
-        `${comment(single(value.description), "    ")}    ${propertyName(inputName(value.name))}${value.in === "path" || value.required ? "" : "?"}: ${typeOf(value.schema ?? { type: "string" }, "    ")};`,
-    );
+    const fields = parameters.map((value) => {
+      const declaredType = value.schema ?? { type: "string" };
+
+      // A path needs a value: path parameters are never null.
+      const type = typeOf(
+        value.in === "path" ? { ...declaredType, nullable: false } : declaredType,
+        "    ",
+      );
+
+      return `${comment(single(value.description), "    ")}    ${propertyName(inputName(value.name))}${value.in === "path" || value.required ? "" : "?"}: ${type};`;
+    });
 
     if (bodyKind)
       fields.push(
@@ -502,7 +514,7 @@ export const generateOpenapi = (
     const value = schemas[key];
 
     if (!value) continue;
-    const body = typeOf({ ...value, nullable: false }, "");
+    const body = typeOf(value, "");
     models.push(
       `${comment(describe(value) || value.title)}export type ${typeNames.get(key)} = ${body};\n`,
     );
@@ -549,6 +561,7 @@ export type Operation = {
   /** Query parameters by input name: the API's name, and whether a list repeats it. */
   queryParameters: Record<string, [string, boolean]>;
   body: "json" | "text" | null;
+  bodyRequired: boolean;
   response: "json" | "binary" | null;
   pageable: boolean;
   change: "create" | "update" | "delete" | "send" | null;

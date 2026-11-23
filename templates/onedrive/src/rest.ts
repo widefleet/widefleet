@@ -19,6 +19,7 @@ export type RestOperation = {
   /** Query parameters by input name: the API's name, and whether a list repeats it. */
   queryParameters: Record<string, [string, boolean]>;
   body: "json" | "text" | null;
+  bodyRequired: boolean;
   response: "json" | "binary" | null;
   pageable: boolean;
 };
@@ -66,12 +67,15 @@ export const restRequest = (
   const init: RequestInit = { method: operation.httpMethod };
   const body = own(values, "body");
 
+  if (operation.bodyRequired && body === undefined)
+    throw new InvalidRequest(`${method} needs a body`);
+
   if (operation.body === "json" && body !== undefined) {
     init.body = JSON.stringify(body);
     init.headers = { "content-type": "application/json" };
   }
 
-  if (operation.body === "text") {
+  if (operation.body === "text" && body !== undefined) {
     const text = z.string().safeParse(body);
     const contentType = z.string().optional().safeParse(own(values, "contentType"));
 
@@ -100,6 +104,9 @@ export const restRequest = (
 
     if (!value.success) throw new InvalidRequest(`${method} needs ${key ?? name}`);
     const text = String(value.data);
+
+    // `.` and `..` would move the request to another path.
+    if (text === "." || text === "..") throw new InvalidRequest(`${method}'s ${key} is not an ID`);
 
     return `${quote}${encodeURIComponent(quote ? text.replaceAll("'", "''") : text)}`;
   });
