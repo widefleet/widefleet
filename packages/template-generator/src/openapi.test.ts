@@ -229,6 +229,30 @@ describe("OpenAPI template generator", () => {
     expect(files["src/schema.ts"]).toContain('"body":"text","bodyRequired":true,"response":null');
   });
 
+  it("offers operations that only read through a POST without asking", () => {
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      { operations: { "folders.CreateItem": { name: "findItems", change: "read" } } },
+      service,
+      "",
+    );
+
+    expect(files["src/schema.ts"]).toContain('"httpMethod":"POST"');
+    expect(files["src/schema.ts"]).toContain('"change":null');
+  });
+
+  it("describes operations with the rules' text where it replaces the API's", () => {
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      { operations: { "folders.ListItems": { name: "listItems", description: "Lists items." } } },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain("   * Lists items.\n   */\n  async listItems");
+    expect(files["src/api.ts"]).not.toContain("List items\n");
+  });
+
   it("reads YAML descriptions", () => {
     const yaml = `openapi: 3.0.4
 servers:
@@ -316,6 +340,59 @@ paths:
     expect(() => generateOpenapi(labelled, rules, service, "")).toThrow(
       "items.GetContent's path parameter item-id has the unsupported style label",
     );
+  });
+
+  it("types bodies and results with the schemas the rules name", () => {
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      {
+        operations: {
+          "folders.CreateItem": {
+            name: "createItem",
+            change: "create",
+            body: ["example.item", "example.parent"],
+            result: ["example.parent"],
+          },
+        },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain("body: Item | Parent;");
+    expect(files["src/api.ts"]).toContain("Promise<ExampleResult<Parent>>");
+  });
+
+  it("keeps the navigation properties the rules name, typed with their schemas", () => {
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      {
+        ...rules,
+        navigation: { "example.item": { children: ["example.item", "example.parent"] } },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain("children?: (Item | Parent)[];");
+
+    // A kept navigation field must also fit the type of the other keys.
+    const open = edited(
+      '"properties":{"name":{"type":"string"',
+      '"additionalProperties":{"type":"string"},"properties":{"name":{"type":"string"',
+    );
+
+    const typed = generateOpenapi(
+      open,
+      {
+        ...rules,
+        navigation: { "example.item": { children: ["example.item", "example.parent"] } },
+      },
+      service,
+      "",
+    ).files["src/api.ts"];
+
+    expect(typed).toContain("} | Parent | (Item | Parent)[];");
   });
 
   it("takes any JSON where a JSON body or result has no schema", () => {

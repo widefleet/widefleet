@@ -13,9 +13,28 @@ import type { Change, GeneratedFiles } from "./rules.ts";
 export interface OpenapiRules {
   /**
    * Offered operations by operation ID, such as `drives.items.ListChildren`, with
-   * the method name and, for every operation that is not a GET, its change.
+   * the method name and, for every operation that is not a GET, its change, or
+   * `read` when it only reads. `description` replaces the API's own text where it
+   * describes another operation, as Microsoft Graph's does for some. `body` and
+   * `result` name the schemas a body or result can be where the description only
+   * names their common base, such as Graph's attachment types.
    */
-  operations: Record<string, { name: string; change?: Change | undefined }>;
+  operations: Record<
+    string,
+    {
+      name: string;
+      change?: Change | "read" | undefined;
+      description?: string | undefined;
+      body?: readonly string[] | undefined;
+      result?: readonly string[] | undefined;
+    }
+  >;
+  /**
+   * Navigation properties the types keep, by schema and property, with the
+   * schemas their values can be. Graph accepts some of them inline, such as a
+   * message's attachments when sending it.
+   */
+  navigation?: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> | undefined;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -206,7 +225,7 @@ const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? 
 
 export const generateOpenapi = (
   source: string,
-  { operations }: OpenapiRules,
+  { operations, navigation = {} }: OpenapiRules,
   service: OpenapiService,
   header: string,
 ): GeneratedFiles => {
@@ -262,6 +281,9 @@ export const generateOpenapi = (
   const referenced = new Set<string>();
   const pending: string[] = [];
 
+  // The schema whose type is being written, which navigation rules name.
+  let owner: string | undefined;
+
   const typeName = (ref: string) => {
     const key = ref.replace("#/components/schemas/", "");
     const name = typeNames.get(key);
@@ -281,6 +303,10 @@ export const generateOpenapi = (
   };
 
   const literal = (value: string | number | boolean | null) => JSON.stringify(value);
+
+  // A union of the named schemas, which rules give for a body or result.
+  const schemaUnion = (keys: readonly string[]) =>
+    keys.map((key) => typeName(`#/components/schemas/${key}`)).join(" | ");
 
   // The members of a union, outside nested types and quoted values.
   const members = (type: string) => {
@@ -384,13 +410,30 @@ export const generateOpenapi = (
   // Annotations such as OData's `@odata.type` are the server's to add.
   const objectType = (value: Schema, indent: string): string => {
     const required = new Set(value.required?.filter((name) => !name.startsWith("@")));
+    const kept = owner === undefined ? {} : (navigation[owner] ?? {});
 
-    const fields = Object.entries(value.properties ?? {})
-      .filter(([, field]) => !field.deprecated && !field["x-ms-navigationProperty"])
-      .map(
+    // Navigation fields appear only when a rule keeps them, typed as it says.
+    const typed = Object.entries(value.properties ?? {})
+      .filter(
         ([name, field]) =>
-          `${comment(describe(field), `${indent}  `)}${indent}  ${propertyName(name)}${required.has(name) ? "" : "?"}: ${typeOf(field, `${indent}  `)};`,
-      );
+          !field.deprecated && (!field["x-ms-navigationProperty"] || Object.hasOwn(kept, name)),
+      )
+      .map(([name, field]) => {
+        const values = field["x-ms-navigationProperty"] ? kept[name] : undefined;
+
+        const type = values
+          ? field.type === "array"
+            ? `(${schemaUnion(values)})[]`
+            : schemaUnion(values)
+          : typeOf(field, `${indent}  `);
+
+        return { name, field, type };
+      });
+
+    const fields = typed.map(
+      ({ name, field, type }) =>
+        `${comment(describe(field), `${indent}  `)}${indent}  ${propertyName(name)}${required.has(name) ? "" : "?"}: ${type};`,
+    );
 
     // Every named field must also fit the type of the other keys.
     if (value.additionalProperties) {
@@ -399,9 +442,7 @@ export const generateOpenapi = (
           ? "JsonValue"
           : typeOf(value.additionalProperties, `${indent}  `);
 
-      const named = Object.values(value.properties ?? {}).flatMap((field) =>
-        field.deprecated || field["x-ms-navigationProperty"] ? [] : [typeOf(field, `${indent}  `)],
-      );
+      const named = typed.map(({ type }) => type);
 
       const keys =
         others === "JsonValue"
@@ -452,7 +493,7 @@ export const generateOpenapi = (
 
     if (!found) throw new Error(`The rules list ${id}, which the API no longer offers`);
     const { path, item, method, entry } = found;
-    const change = rule.change ? changes.parse(rule.change) : null;
+    const change = rule.change && rule.change !== "read" ? changes.parse(rule.change) : null;
 
     // Header parameters, such as Graph's ConsistencyLevel, are not offered.
     // An operation's parameter replaces the path's parameter of the same name and place.
@@ -578,7 +619,7 @@ export const generateOpenapi = (
 
     if (bodyKind)
       fields.push(
-        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${jsonBody ? (jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue") : "string"};`,
+        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${rule.body ? schemaUnion(rule.body) : jsonBody ? (jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue") : "string"};`,
       );
 
     if (bodyKind === "text")
@@ -587,14 +628,17 @@ export const generateOpenapi = (
       );
 
     // An empty success answers null; binary content always arrives as BinaryContent.
+    // A rule can name the schemas a JSON result can be, where the API names their base.
     const result =
       responseKind === "binary"
         ? "BinaryContent"
         : [
             ...new Set([
-              ...jsonResponses.map((json) =>
-                json.schema ? typeOf(json.schema, "  ") : "JsonValue",
-              ),
+              ...(rule.result && jsonResponses.length
+                ? [schemaUnion(rule.result)]
+                : jsonResponses.map((json) =>
+                    json.schema ? typeOf(json.schema, "  ") : "JsonValue",
+                  )),
               ...(empty || !responseKind ? ["null"] : []),
             ]),
           ].join(" | ");
@@ -619,7 +663,12 @@ export const generateOpenapi = (
           : "Asks the user first unless their approval level is `none`.";
 
     const description = comment(
-      [entry.summary, entry.description !== entry.summary ? entry.description : "", approval]
+      [
+        ...(rule.description
+          ? [rule.description]
+          : [entry.summary, entry.description !== entry.summary ? entry.description : ""]),
+        approval,
+      ]
         .filter(Boolean)
         .join("\n\n"),
       "  ",
@@ -638,7 +687,9 @@ export const generateOpenapi = (
     const value = schemas[key];
 
     if (!value) continue;
+    owner = key;
     const body = typeOf(value, "");
+    owner = undefined;
     models.push(
       `${comment(describe(value) || value.title)}export type ${typeNames.get(key)} = ${body};\n`,
     );

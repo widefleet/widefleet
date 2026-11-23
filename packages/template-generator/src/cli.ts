@@ -64,7 +64,17 @@ const configuration = z.discriminatedUnion("kind", [
       source: z.url(),
       service: service.extend({ typePrefix: z.string().optional() }),
     }),
-    operations: z.record(z.string(), z.object({ name: z.string(), change: change.optional() })),
+    operations: z.record(
+      z.string(),
+      z.object({
+        name: z.string(),
+        change: z.union([change, z.literal("read")]).optional(),
+        description: z.string().optional(),
+        body: z.array(z.string()).optional(),
+        result: z.array(z.string()).optional(),
+      }),
+    ),
+    navigation: z.record(z.string(), z.record(z.string(), z.array(z.string()))).optional(),
   }),
 ]);
 

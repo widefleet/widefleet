@@ -35,7 +35,19 @@ const clients = {
   },
   microsoft: {
     provider: "microsoft",
-    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.ReadWrite.All"],
+    scopes: [
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      "User.Read",
+      "Files.ReadWrite.All",
+      "Mail.ReadWrite",
+      "Mail.Send",
+      "Calendars.ReadWrite",
+      "Contacts.ReadWrite",
+      "MailboxSettings.ReadWrite",
+    ],
     hosts: ["https://graph.microsoft.com"],
     issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
   },
@@ -59,6 +71,7 @@ const origins = [
 for (const [template, kind, prefix] of [
   ["github", "github", "GITHUB"],
   ["onedrive", "microsoft", "MICROSOFT"],
+  ["outlook", "microsoft", "MICROSOFT"],
   ["linear", "linear", "LINEAR"],
 ] as const)
   describe(`${template} managed OAuth`, () => {
