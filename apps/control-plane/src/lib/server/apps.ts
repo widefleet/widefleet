@@ -525,7 +525,15 @@ export const createAppService = (
         .from(apps)
         .leftJoin(user, eq(user.id, apps.ownerId))
         .leftJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
-        .leftJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+        // Screenshots are served for the apps whose icon is, so the page names no others.
+        .leftJoin(
+          artifacts,
+          and(
+            eq(artifacts.id, deployments.artifactId),
+            eq(apps.webEnabled, true),
+            eq(apps.state, "active"),
+          ),
+        )
         .where(
           and(eq(apps.id, appId), or(published(principal), appVisibility(transaction, principal))),
         );

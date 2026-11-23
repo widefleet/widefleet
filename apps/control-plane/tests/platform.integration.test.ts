@@ -2576,6 +2576,17 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       contract.catalogApp.parse(await (await json(`/catalog/apps/${app.id}`, "GET")).json())
         .screenshots,
     ).toEqual([2]);
+    // An app without a browser address serves no pictures, so its page names none.
+    await environment.database.db
+      .update(apps)
+      .set({ webEnabled: false })
+      .where(eq(apps.id, app.id));
+    expect((await json(`${screenshots}/2`, "GET")).status).toBe(404);
+    expect(
+      contract.catalogApp.parse(await (await json(`/catalog/apps/${app.id}`, "GET")).json())
+        .screenshots,
+    ).toEqual([]);
+    await environment.database.db.update(apps).set({ webEnabled: true }).where(eq(apps.id, app.id));
 
     // Members see the icons of apps the catalog and My connections list for them.
     await environment.database.db
