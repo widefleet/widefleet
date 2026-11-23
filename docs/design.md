@@ -30,7 +30,9 @@ Prefer inline editing for small, independent, reversible changes when the surrou
 
 Group dependent fields into a form with a shared save action. Use dialogs for short, self-contained tasks or consequential confirmations. Use a dedicated page for complex workflows or decisions that require consulting other information.
 
-Make save and cancel behavior explicit with visible controls and appropriate keyboard support. Keep validation errors beside the field and preserve the draft when saving fails. Avoid implicitly saving or discarding unfinished text when focus leaves the editor. Changes to permissions or running services need a clear commit action that communicates their consequences.
+Apply a single explicit choice, such as a member's role, as soon as it is selected; choosing the option is the commit action. Show the new value at once and treat it as the confirmation, without pending or saved indicators. When saving fails, restore the previous value and explain why in a toast, so the page does not move. Explain nearby what each option permits.
+
+Text and multi-field edits need visible save and cancel controls with appropriate keyboard support. Keep validation errors beside the field, preserve the draft when saving fails, and avoid implicitly saving or discarding unfinished text when focus leaves the editor. Actions on running services, such as deploying or stopping an app, need a button that names the action and its consequence.
 
 ## Review the rendered result
 

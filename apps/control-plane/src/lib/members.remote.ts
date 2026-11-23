@@ -1,4 +1,4 @@
-import { form, query } from "$app/server";
+import { command, form, query, requested } from "$app/server";
 import { redirect } from "@sveltejs/kit";
 import {
   organizationSelection,
@@ -9,7 +9,13 @@ import {
 } from "@platform/contracts";
 import { z } from "zod";
 import { changeMemberRole, listMembers, memberRoleInput, removeMember } from "#server/members";
-import { formValue, queryValue, remoteContext, remoteOperation } from "#server/remote-support";
+import {
+  commandContext,
+  formValue,
+  queryValue,
+  remoteContext,
+  remoteOperation,
+} from "#server/remote-support";
 import { getWorkspace } from "#lib/workspace.remote";
 import { workspacePath } from "#lib/workspace-path";
 
@@ -31,20 +37,11 @@ export const getMembers = query(
   },
 );
 
-export const setMemberRole = form(
-  memberRoleInput.extend({
-    ...organizationSelection.shape,
-    search: memberQuery.shape.search.default(""),
-    page: z
-      .string()
-      .regex(/^[0-9]+$/)
-      .default("1")
-      .transform(Number)
-      .pipe(memberQuery.shape.page.removeDefault()),
-  }),
-  async ({ memberId, role, search, page, organizationId }) => {
-    const { runtime, principal, organization, request } = await remoteContext({ organizationId });
-    formValue(
+export const setMemberRole = command(
+  memberRoleInput.extend(organizationSelection.shape),
+  async ({ memberId, role, organizationId }) => {
+    const { runtime, principal, organization, request } = await commandContext({ organizationId });
+    queryValue(
       await remoteOperation(() =>
         changeMemberRole(
           principal,
@@ -53,11 +50,10 @@ export const setMemberRole = form(
         ),
       ),
     );
-    await getMembers({ search, page, organizationId }).refresh();
+    // The page requests its own search and page, which carry the optimistic role.
+    await requested(getMembers, 1).refreshAll();
     // A changed own role changes the workspace navigation.
     await getWorkspace({ organization: organization.slug }).refresh();
-
-    return { saved: true };
   },
 );
 

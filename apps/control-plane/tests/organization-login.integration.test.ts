@@ -693,6 +693,18 @@ describe("Invited organization members with Widefleet OIDC", () => {
         )
       ).isOk(),
     ).toBe(true);
+
+    // An admin cannot appoint owners, including through a request the UI would not offer.
+    const promotion = await changeMemberRole(
+      inviter.principal,
+      { memberId: z.string().parse(membership?.id), role: "owner" },
+      credential(inviter.cookie),
+    );
+
+    expect(promotion.isErr() && promotion.error.message).toBe(
+      "You are not allowed to update this member",
+    );
+
     const pending = await runtime.invitations.list({ ...inviter.principal, role: "admin" });
     expect(pending.find((entry) => entry.id === ownerInvite.id)?.status).toBe("pending");
     expect(pending.find((entry) => entry.id === memberInvite.id)?.status).toBe("pending");

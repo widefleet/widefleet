@@ -11,6 +11,7 @@
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import { NativeSelect } from "@platform/ui/native-select";
+  import * as Select from "@platform/ui/select";
   import { Badge } from "@platform/ui/badge";
   import { Label } from "@platform/ui/label";
   import Search from "@lucide/svelte/icons/search";
@@ -22,7 +23,10 @@
   import Feedback from "#shadcn/components/Feedback.svelte";
   import DomainAccess from "#shadcn/components/DomainAccess.svelte";
   import { page } from "$app/state";
+  import { toast } from "@platform/ui/sonner";
   import { z } from "zod";
+  import { memberRoleInput } from "@platform/contracts";
+  import { failureMessage } from "#lib/sso-setup.svelte";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
@@ -38,18 +42,55 @@
       .parse(page.url.searchParams.get("page") ?? 1),
   });
 
-  const data = $derived(
-    await getMembers({
+  const members = $derived(
+    getMembers({
       organizationId: workspace.organizationId,
       search: route.search,
       page: route.page,
     }),
   );
 
-  // A form without JavaScript renders this page with its result instead of redirecting.
-  let saved = $derived(
-    data.members.some((person) => setMemberRole.for(person.id).result?.saved === true),
-  );
+  const data = $derived(await members);
+
+  const roles = $derived([
+    { value: "member", label: "Member" },
+    { value: "admin", label: "Admin" },
+    ...(data.principal.role === "owner" ? [{ value: "owner", label: "Owner" }] : []),
+  ]);
+
+  // Saves for one member run in the order they were chosen, so the last choice is the one kept.
+  const roleSaves = new Map<string, Promise<void>>();
+
+  // The chosen role shows at once and is its own confirmation. A rejected change drops its
+  // override, so the previous role returns, and the toast explains why without moving the list.
+  const changeRole = (person: { id: string; name: string }, value: string) => {
+    const role = memberRoleInput.shape.role.parse(value);
+    // A queued save still belongs to the workspace it was chosen in.
+    const { organizationId } = workspace;
+
+    const override = members.withOverride((current) => ({
+      ...current,
+      members: current.members.map((entry) =>
+        entry.id === person.id ? { ...entry, role } : entry,
+      ),
+    }));
+
+    const save = (roleSaves.get(person.id) ?? Promise.resolve()).then(async () => {
+      try {
+        await setMemberRole({
+          organizationId,
+          memberId: person.id,
+          role,
+        }).updates(override);
+      } catch (cause) {
+        toast.error(`Could not change the role of ${person.name}.`, {
+          description: failureMessage(cause, "Try again."),
+        });
+      }
+    });
+
+    roleSaves.set(person.id, save);
+  };
 
   const invited = $derived(
     inviteMember.result?.invited === true ||
@@ -118,11 +159,6 @@
       >{/if}
   </form>
 </div>
-{#if saved}<div class="mt-5">
-    <Feedback kind="success"
-      >Role saved. The change also applies to CLI users who are already signed in.</Feedback
-    >
-  </div>{/if}
 {#if data.members.length === 0}<EmptyState
     title="No members found"
     description="Try another name or email address."
@@ -134,7 +170,6 @@
 {:else}
   <ul class="divide-y" aria-label="Members">
     {#each data.members as person (person.id)}
-      {@const roleForm = setMemberRole.for(person.id)}
       {@const removeForm = deleteMember.for(person.id)}
       <li class="flex flex-wrap items-center justify-between gap-4 py-5">
         <div class="flex min-w-0 items-center gap-3">
@@ -154,50 +189,38 @@
           </div>
         </div>
         {#if person.role !== "owner" || data.principal.role === "owner"}
-          <form
-            {...roleForm.enhance(async ({ submit }) => {
-              saved = false;
-              const submitted = await submit();
-              saved = submitted;
-            })}
-            aria-label={`Role for ${person.name}`}
-            class="space-y-2"
-          >
-            <OrganizationField field={roleForm.fields.organizationId} />
-            <input {...roleForm.fields.memberId.as("hidden", person.id)} /><input
-              {...roleForm.fields.search.as("hidden", route.search)}
-            /><input {...roleForm.fields.page.as("hidden", String(route.page))} /><FormIssues
-              issues={roleForm.fields.allIssues()}
-            />
-            <div class="flex items-center gap-2">
-              <label class="sr-only" for={`role-${person.id}`}>Role</label><NativeSelect
-                id={`role-${person.id}`}
-                {...roleForm.fields.role.as("select", person.role)}
-                disabled={roleForm.pending > 0}
-                class="w-32"
-                ><option value="member">Member</option><option value="admin">Admin</option
-                >{#if data.principal.role === "owner"}<option value="owner">Owner</option
-                  >{/if}</NativeSelect
-              ><Button type="submit" variant="outline" size="sm" disabled={roleForm.pending > 0}
-                >{roleForm.pending ? "Saving …" : "Save role"}</Button
+          <div class="flex items-start gap-6">
+            <Select.Root
+              type="single"
+              value={person.role}
+              items={roles}
+              onValueChange={(role) => changeRole(person, role)}
+            >
+              <Select.Trigger aria-label={`Role for ${person.name}`} class="w-32"
+                ><Select.Value /></Select.Trigger
               >
-            </div>
-          </form>
-          <details class="text-xs">
-            <summary class="text-muted-foreground cursor-pointer">Remove member</summary>
-            <form {...removeForm} class="mt-3 space-y-3">
-              <OrganizationField field={removeForm.fields.organizationId} />
-              <input {...removeForm.fields.memberId.as("hidden", person.id)} />
-              <p>Remove {person.name} from this organization?</p>
-              <FormIssues issues={removeForm.fields.allIssues()} />
-              <Button
-                type="submit"
-                variant="destructive"
-                size="sm"
-                disabled={removeForm.pending > 0}>Confirm removal</Button
-              >
-            </form>
-          </details>
+              <Select.Content>
+                {#each roles as role (role.value)}
+                  <Select.Item value={role.value} label={role.label} />
+                {/each}
+              </Select.Content>
+            </Select.Root>
+            <details class="pt-2 text-xs">
+              <summary class="text-muted-foreground cursor-pointer">Remove member</summary>
+              <form {...removeForm} class="mt-3 space-y-3">
+                <OrganizationField field={removeForm.fields.organizationId} />
+                <input {...removeForm.fields.memberId.as("hidden", person.id)} />
+                <p>Remove {person.name} from this organization?</p>
+                <FormIssues issues={removeForm.fields.allIssues()} />
+                <Button
+                  type="submit"
+                  variant="destructive"
+                  size="sm"
+                  disabled={removeForm.pending > 0}>Confirm removal</Button
+                >
+              </form>
+            </details>
+          </div>
         {:else}<Badge variant="outline">Owner</Badge>{/if}
       </li>
     {/each}
@@ -268,6 +291,7 @@
         account.{/if}
       Signing in to a published app alone does not create a workspace membership.
     </p>
+    <p>A role change also applies to CLI users who are already signed in.</p>
     <dl class="grid gap-x-5 gap-y-2 sm:grid-cols-[80px_1fr]">
       <dt class="text-foreground font-medium">Member</dt>
       <dd>Create apps and manage apps they own or have access to.</dd>
