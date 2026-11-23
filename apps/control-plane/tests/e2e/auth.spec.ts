@@ -3458,7 +3458,9 @@ test.describe(`app templates`, () => {
     await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
     const response = await context.request.get("/api/v1/catalog/templates/gmail");
     const detail = z.object({ prompt: z.string() }).parse(await response.json());
-    await expect(page.locator("code").first()).toHaveText(detail.prompt);
+    await expect(
+      page.getByRole("region", { name: "Set up with your agent" }).locator("code"),
+    ).toHaveText(detail.prompt);
     expect(detail.prompt).toContain("--organization 'widefleet'");
     expect(detail.prompt).toContain(`--url '${environment.configuration.PLATFORM_URL}'`);
 
