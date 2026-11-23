@@ -718,6 +718,34 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
 
+  templates/garmin-connect:
+    dependencies:
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 5.20261003.1
+        version: 5.20261003.1
+      '@tsconfig/strictest':
+        specifier: 2.0.8
+        version: 2.0.8
+      '@types/node':
+        specifier: 26.6.4
+        version: 26.6.4
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      miniflare:
+        specifier: 5.20261001.0-alpha
+        version: 5.20261001.0-alpha(patch_hash=14a20cb93d5b33de95aab0b33f8ba5c91a75a9c1eb4438753b017be53fb04f73)(@types/node@26.6.4)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
   templates/github:
     dependencies:
       better-auth:

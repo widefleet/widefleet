@@ -1,0 +1,4 @@
+# The tests run Workers locally with workerd, bundled by esbuild.
+allowBuilds:
+  esbuild: true
+  workerd: true
