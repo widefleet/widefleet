@@ -791,6 +791,13 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.apps.setCatalogListing(context.principal, input.appId, input.listed)),
       ),
+    renameApp: write
+      .route({ method: "PUT", path: "/apps/{appId}/name" })
+      .input(contract.appNameInput)
+      .output(contract.appNameChange)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.apps.rename(context.principal, input.appId, input.displayName)),
+      ),
     setAppDescription: write
       .route({ method: "PUT", path: "/apps/{appId}/description" })
       .input(contract.appDescriptionInput)

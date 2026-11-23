@@ -7,7 +7,9 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import AppDescription from "#shadcn/components/AppDescription.svelte";
+  import InlineText from "#shadcn/components/InlineText.svelte";
+  import { renameApp, setAppDescription } from "#lib/catalog.remote";
+  import { appDescriptionLength, appNameLength } from "@platform/contracts";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { onMount } from "svelte";
@@ -145,14 +147,11 @@
   class="text-muted-foreground hover:text-foreground mb-6 inline-flex items-center gap-2 text-xs"
   ><ArrowLeft class="size-3.5" />My apps</a
 >
-<div class="flex flex-wrap items-start justify-between gap-4">
-  <div class="min-w-0">
-    <div class="mb-2 flex items-center gap-2">
-      <span class="text-muted-foreground text-[11px] font-medium tracking-wider uppercase"
-        >{data.app.parentId ? "Preview" : "App"}</span
-      ><AppStatus state={data.app.state} />
-    </div>
-    <h1 class="text-2xl font-semibold tracking-tight wrap-anywhere">{data.app.displayName}</h1>
+<div class="flex flex-wrap items-center justify-between gap-4">
+  <div class="flex items-center gap-2">
+    <span class="text-muted-foreground text-[11px] font-medium tracking-wider uppercase"
+      >{data.app.parentId ? "Preview" : "App"}</span
+    ><AppStatus state={data.app.state} />
   </div>
   <div class="flex items-center gap-2">
     <Button
@@ -170,11 +169,26 @@
       >{/if}
   </div>
 </div>
-<!-- Below the heading row, so editing the description does not move the actions beside it. -->
-{#if !data.app.parentId}<AppDescription
+<!-- Below the actions, so editing the name or the description does not move them. -->
+<div class="mt-1">
+  <InlineText
+    form={renameApp}
     appId={data.app.id}
-    description={data.app.description}
     search={route.search}
+    value={data.app.displayName}
+    label="Name"
+    maxlength={appNameLength}
+    heading
+  />
+</div>
+{#if !data.app.parentId}<InlineText
+    form={setAppDescription}
+    appId={data.app.id}
+    search={route.search}
+    value={data.app.description ?? ""}
+    label="Description"
+    maxlength={appDescriptionLength}
+    empty="Add a description"
   />{/if}
 <p class="text-muted-foreground mt-2 text-sm wrap-anywhere">{data.app.hostname}</p>
 <nav class="mt-7 mb-8 flex gap-5 overflow-x-auto border-b sm:gap-7" aria-label="App sections">
