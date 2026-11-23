@@ -102,6 +102,7 @@ export class Reader extends WorkerEntrypoint {
     if(!input) return {resultType:'input_required',inputRequests:{confirm:{message:'Send '+offerId+'?',requestedSchema:{type:'object',properties:{note:{type:'string'}},required:['note']}}},requestState:{seen:'private-offer-text'}};
     return {offerId,input,caller:this.ctx.props.caller?.subject ?? null};
   }
+  picture() { return {contentType:'image/png', base64:'A'.repeat(2 * 1024 * 1024)}; }
   async slow() { await this.env.KV.put('started','yes'); while (!await this.env.KV.get('release')) await new Promise(resolve=>setTimeout(resolve,10)); return this.read(); }
   fetch() { return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(${JSON.stringify(version)}));controller.close();}})); }
 }
@@ -1009,9 +1010,9 @@ export default { async fetch(request, env, ctx) {
         credentials: "undefined",
       });
 
-      // Media in a result reaches the client as MCP blocks, past the 1 MiB JSON limit.
+      // A service's file reaches the client as an MCP block, past the 1 MiB JSON limit.
       const picture = await rpc("execute", {
-        code: `const first = await tools.call(${JSON.stringify(service)}); return {version:first.version, image:{type:"image", mimeType:"image/png", data:"A".repeat(2 * 1024 * 1024)}};`,
+        code: `const first = await tools.call(${JSON.stringify(service)}); const file = await tools.call(${JSON.stringify({ ...service, method: "picture" })}); return {version:first.version, image:{type:"image", mimeType:file.contentType, data:file.base64}};`,
       });
 
       expect(picture.isError, picture.content[0]?.text).not.toBe(true);

@@ -51,6 +51,50 @@ describe("mcpResult", () => {
     ]);
   });
 
+  it("keeps other fields in the JSON and MCP metadata on the block", () => {
+    const result = mcpResult({
+      type: "image",
+      mimeType: "image/png",
+      data: png,
+      caption: "Floor plan",
+      annotations: { audience: ["user"], priority: 0.5 },
+      _meta: { source: "drive" },
+    });
+
+    expect(JSON.parse(result.content[0]?.text ?? "null")).toEqual({
+      type: "image",
+      mimeType: "image/png",
+      caption: "Floor plan",
+      annotations: { audience: ["user"], priority: 0.5 },
+      _meta: { source: "drive" },
+      contentIndex: 1,
+    });
+    expect(result.content[1]).toEqual({
+      type: "image",
+      mimeType: "image/png",
+      data: png,
+      annotations: { audience: ["user"], priority: 0.5 },
+      _meta: { source: "drive" },
+    });
+
+    const file = mcpResult({
+      id: "f1",
+      type: "resource",
+      resource: { uri: "file:///a.pdf", blob: pdf, name: "a.pdf" },
+    });
+
+    expect(JSON.parse(file.content[0]?.text ?? "null")).toEqual({
+      id: "f1",
+      type: "resource",
+      resource: { uri: "file:///a.pdf", name: "a.pdf" },
+      contentIndex: 1,
+    });
+    expect(file.content[1]).toEqual({
+      type: "resource",
+      resource: { uri: "file:///a.pdf", blob: pdf },
+    });
+  });
+
   it("sends repeated media once", () => {
     const image = { type: "image", mimeType: "image/png", data: png };
     const result = mcpResult([image, { again: image }]);

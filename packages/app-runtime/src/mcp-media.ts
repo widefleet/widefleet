@@ -21,11 +21,29 @@ const base64 = z
 
 const mimeType = z.string().regex(/^[\w.+-]+\/[\w.+-]+(?:\s*;.*)?$/);
 
+// MCP metadata a content block may carry; other fields stay in the JSON only.
+const annotations = z
+  .object({
+    audience: z.array(z.enum(["user", "assistant"])).optional(),
+    priority: z.number().min(0).max(1).optional(),
+    lastModified: z.iso.datetime({ offset: true }).optional(),
+  })
+  .optional();
+
+const meta = z.record(z.string(), z.json()).optional();
+
 const media = z.discriminatedUnion("type", [
-  z.object({ type: z.enum(["image", "audio"]), mimeType, data: base64 }),
+  z.object({ type: z.enum(["image", "audio"]), mimeType, data: base64, annotations, _meta: meta }),
   z.object({
     type: z.literal("resource"),
-    resource: z.object({ uri: z.string().min(1), mimeType: mimeType.optional(), blob: base64 }),
+    resource: z.object({
+      uri: z.string().min(1),
+      mimeType: mimeType.optional(),
+      blob: base64,
+      _meta: meta,
+    }),
+    annotations,
+    _meta: meta,
   }),
 ]);
 
@@ -39,27 +57,28 @@ const keyOf = (block: Media) =>
     ? `resource\0${block.resource.uri}\0${block.resource.mimeType ?? ""}\0${block.resource.blob}`
     : `${block.type}\0${block.mimeType}\0${block.data}`;
 
-const placeholderOf = (block: Media, contentIndex: number): Json => {
-  if (block.type !== "resource")
-    return { type: block.type, mimeType: block.mimeType, contentIndex };
-  const { uri, mimeType } = block.resource;
-
-  return {
-    type: block.type,
-    resource: mimeType === undefined ? { uri } : { uri, mimeType },
-    contentIndex,
-  };
-};
-
 // Shallow: the walk below visits each field itself.
 const record = z.record(z.string(), z.custom<Json>());
+
+const without = (value: Record<string, Json>, field: string) =>
+  Object.fromEntries(Object.entries(value).filter(([key]) => key !== field));
+
+/** The block as the JSON keeps it: every field except its bytes, plus `contentIndex`. */
+const placeholderOf = (value: Record<string, Json>, contentIndex: number): Json => {
+  const resource = record.safeParse(value["resource"]);
+
+  if (value["type"] === "resource" && resource.success)
+    return { ...value, resource: without(resource.data, "blob"), contentIndex };
+
+  return { ...without(value, "data"), contentIndex };
+};
 
 /** A tool result: JSON text, then each media block the JSON refers to by `contentIndex`. */
 export type McpResult = { content: [{ type: "text"; text: string }, ...Media[]] };
 
 /**
  * A tool result as JSON text plus each MCP image, audio or blob resource block it holds, at any
- * depth, as its own content block. The JSON keeps the block without its bytes and with
+ * depth, as its own content block. The JSON keeps the block's other fields and
  * `contentIndex`, the block's index in `content`, so images and files reach the client as media
  * instead of base64 text, once even when the result repeats them. Text resources are readable as
  * JSON and stay in it.
@@ -93,7 +112,7 @@ export const mcpResult = (value: Json): McpResult => {
       indexes.set(key, contentIndex);
     }
 
-    return placeholderOf(block.data, contentIndex);
+    return placeholderOf(object.data, contentIndex);
   };
 
   const text = JSON.stringify(lift(value));
