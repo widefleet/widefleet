@@ -16,8 +16,8 @@ export type RestOperation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
-  /** Query parameters by input name: the API's name, and whether a list repeats it. */
-  queryParameters: Record<string, [string, boolean]>;
+  /** Query parameters by input name: the API's name, whether a list repeats it, and whether it is required. */
+  queryParameters: Record<string, [string, boolean, boolean]>;
   body: "json" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
@@ -113,8 +113,10 @@ export const restRequest = (
 
   const url = new URL(path.replace(/^\//, ""), base);
 
-  for (const [key, [name, explode]] of Object.entries(operation.queryParameters)) {
+  for (const [key, [name, explode, required]] of Object.entries(operation.queryParameters)) {
     const value = own(values, key);
+
+    if (value === undefined && required) throw new InvalidRequest(`${method} needs ${key}`);
 
     if (value === undefined) continue;
     const list = Array.isArray(value) ? value : [value];

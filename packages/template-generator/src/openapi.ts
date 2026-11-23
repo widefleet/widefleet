@@ -135,8 +135,8 @@ export type OpenapiOperation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
-  /** Query parameters by input name: the API's name, and whether a list repeats it. */
-  queryParameters: Record<string, [string, boolean]>;
+  /** Query parameters by input name: the API's name, whether a list repeats it, and whether it is required. */
+  queryParameters: Record<string, [string, boolean, boolean]>;
   body: "json" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
@@ -153,10 +153,33 @@ const inputName = (name: string) =>
     ? name
     : name.replace(/[^\w$]+(\w)?/g, (_, next?: string) => next?.toUpperCase() ?? "");
 
-const queryParameter = (name: string, explode: boolean): [string, [string, boolean]] => [
-  inputName(name),
-  [name, explode],
-];
+const queryParameter = (
+  name: string,
+  explode: boolean,
+  required: boolean,
+): [string, [string, boolean, boolean]] => [inputName(name), [name, explode, required]];
+
+// The characters of a type, and whether each lies outside nested types and quoted values.
+const characters = (type: string) => {
+  const result: { character: string; outside: boolean }[] = [];
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+
+  for (const character of type) {
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+    } else if (character === '"') quoted = true;
+    else if ("{([<".includes(character)) depth++;
+    else if ("})]>".includes(character)) depth--;
+
+    result.push({ character, outside: !quoted && depth === 0 && character !== '"' });
+  }
+
+  return result;
+};
 
 const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? "";
 
@@ -236,43 +259,36 @@ export const generateOpenapi = (
 
   const literal = (value: string | number | boolean | null) => JSON.stringify(value);
 
-  // The members of a union, outside nested types.
+  // The members of a union, outside nested types and quoted values.
   const members = (type: string) => {
     const parts = [""];
-    let depth = 0;
 
-    for (const character of type) {
-      if ("{([<".includes(character)) depth++;
-      else if ("})]>".includes(character)) depth--;
-
-      if (depth === 0 && character === "|") parts.push("");
+    for (const { character, outside } of characters(type))
+      if (outside && character === "|") parts.push("");
       else parts[parts.length - 1] += character;
-    }
 
     return parts.map((part) => part.trim());
   };
 
-  // Whether a type is a string literal or a schema of string values only.
+  // A string literal, or a schema of string values and maybe null: which values
+  // `string` covers, and whether null remains. Other types are null.
   const stringValues = (type: string) => {
-    if (/^"[^"]*"$/.test(type)) return true;
+    if (/^"(?:[^"\\]|\\.)*"$/.test(type)) return { nullable: false };
     const value = schemas[takenTypes.get(type) ?? ""];
 
-    return value?.type === "string" && value.enum !== undefined;
+    return value?.type === "string" && value.enum
+      ? { nullable: value.nullable === true || value.enum.includes(null) }
+      : null;
   };
 
   // Parentheses for a union or intersection inside another type. Unions inside
-  // an object type's fields need none.
-  const wrap = (type: string) => {
-    let depth = 0;
-
-    for (const character of type) {
-      if ("{([<".includes(character)) depth++;
-      else if ("})]>".includes(character)) depth--;
-      else if (depth === 0 && (character === "|" || character === "&")) return `(${type})`;
-    }
-
-    return type;
-  };
+  // an object type's fields or quoted values need none.
+  const wrap = (type: string) =>
+    characters(type).some(
+      ({ character, outside }) => outside && (character === "|" || character === "&"),
+    )
+      ? `(${type})`
+      : type;
 
   // Navigation properties are only returned when expanded, so the types leave
   // them out, as do deprecated properties.
@@ -291,7 +307,8 @@ export const generateOpenapi = (
     const variants = value.anyOf ?? value.oneOf;
 
     // Graph writes nullable references as `anyOf: [reference, nullable object]`.
-    // A union with `string` needs none of the string values it also lists.
+    // A union with `string` needs none of the string values it also lists, but
+    // keeps the null a nullable enum allows.
     if (variants) {
       const types = new Set(
         variants.flatMap((member) =>
@@ -301,12 +318,16 @@ export const generateOpenapi = (
         ),
       );
 
-      const union = [...types].filter(
-        (type) =>
-          type !== "null" && !(types.has("string") && type !== "string" && stringValues(type)),
+      const covered = [...types].map((type) =>
+        types.has("string") && type !== "string" ? stringValues(type) : null,
       );
 
-      return [...union, ...(types.has("null") || value.nullable ? ["null"] : [])].join(" | ");
+      const union = [...types].filter((type, index) => type !== "null" && !covered[index]);
+
+      const nullable =
+        types.has("null") || value.nullable === true || covered.some((entry) => entry?.nullable);
+
+      return [...union, ...(nullable ? ["null"] : [])].join(" | ");
     }
 
     if (value.enum) return `${value.enum.map(literal).join(" | ")}${nullable}`;
@@ -344,10 +365,24 @@ export const generateOpenapi = (
           `${comment(describe(field), `${indent}  `)}${indent}  ${propertyName(name)}${required.has(name) ? "" : "?"}: ${typeOf(field, `${indent}  `)};`,
       );
 
-    if (value.additionalProperties)
-      fields.push(
-        `${indent}  [key: string]: ${value.additionalProperties === true ? "JsonValue" : typeOf(value.additionalProperties, `${indent}  `)};`,
+    // Every named field must also fit the type of the other keys.
+    if (value.additionalProperties) {
+      const others =
+        value.additionalProperties === true
+          ? "JsonValue"
+          : typeOf(value.additionalProperties, `${indent}  `);
+
+      const named = Object.values(value.properties ?? {}).flatMap((field) =>
+        field.deprecated || field["x-ms-navigationProperty"] ? [] : [typeOf(field, `${indent}  `)],
       );
+
+      const keys =
+        others === "JsonValue"
+          ? others
+          : [...new Set([others, ...named].flatMap(members))].join(" | ");
+
+      fields.push(`${indent}  [key: string]: ${keys};`);
+    }
 
     return fields.length ? `{\n${fields.join("\n")}\n${indent}}` : "JsonObject";
   };
@@ -437,7 +472,9 @@ export const generateOpenapi = (
       // Form style, the default for queries, repeats lists unless `explode` is false.
       queryParameters: Object.fromEntries(
         parameters.flatMap((value) =>
-          value.in === "query" ? [queryParameter(value.name, value.explode ?? true)] : [],
+          value.in === "query"
+            ? [queryParameter(value.name, value.explode ?? true, value.required === true)]
+            : [],
         ),
       ),
       body: bodyKind,
@@ -558,8 +595,8 @@ export type Operation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
-  /** Query parameters by input name: the API's name, and whether a list repeats it. */
-  queryParameters: Record<string, [string, boolean]>;
+  /** Query parameters by input name: the API's name, whether a list repeats it, and whether it is required. */
+  queryParameters: Record<string, [string, boolean, boolean]>;
   body: "json" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;

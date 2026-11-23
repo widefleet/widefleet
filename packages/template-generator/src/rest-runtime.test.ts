@@ -8,7 +8,11 @@ const list: RestOperation = {
   httpMethod: "GET",
   path: "/drives/{drive-id}/search(q='{q}')",
   pathParameters: { "drive-id": "driveId", q: "q" },
-  queryParameters: { $top: ["$top", true], $select: ["$select", false], tag: ["tag", true] },
+  queryParameters: {
+    $top: ["$top", true, false],
+    $select: ["$select", false, false],
+    tag: ["tag", true, false],
+  },
   body: null,
   bodyRequired: false,
   response: "json",
@@ -81,6 +85,14 @@ describe("REST requests", () => {
     expect(() => restRequest(base, "upload", upload, { itemId: "1" })).toThrow(
       "upload needs a body",
     );
+    expect(() =>
+      restRequest(
+        base,
+        "search",
+        { ...list, queryParameters: { view: ["view", true, true] } },
+        { driveId: "d", q: "x" },
+      ),
+    ).toThrow("search needs view");
   });
 
   it("returns download addresses and small content", async () => {

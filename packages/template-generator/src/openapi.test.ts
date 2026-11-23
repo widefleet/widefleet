@@ -28,6 +28,7 @@ const api = {
             schema: { type: "array", items: { type: "string" } },
           },
           { name: "ConsistencyLevel", in: "header", schema: { type: "string" } },
+          { name: "view", in: "query", required: true, schema: { type: "string" } },
         ],
         responses: { "2XX": { $ref: "#/components/responses/itemCollection" } },
         "x-ms-pageable": { nextLinkName: "@odata.nextLink" },
@@ -108,6 +109,13 @@ const api = {
               name: { type: "string", description: "The item's name." },
               size: { type: "integer", format: "int64", nullable: true },
               kind: { type: "string", enum: ["file", "folder"] },
+              counts: {
+                type: "object",
+                properties: { label: { type: "string" } },
+                additionalProperties: { type: "integer" },
+              },
+              mode: { anyOf: [{ $ref: "#/components/schemas/example.mode" }, { type: "string" }] },
+              scope: { anyOf: [{ type: "string", enum: ["read|write"] }, { type: "integer" }] },
               parent: {
                 anyOf: [
                   { $ref: "#/components/schemas/example.parent" },
@@ -124,6 +132,7 @@ const api = {
         ],
       },
       "example.parent": { type: "object", properties: { id: { type: "string" } }, nullable: true },
+      "example.mode": { type: "string", enum: ["ok"], nullable: true },
       "example.unused": { type: "object", properties: { id: { type: "string" } } },
     },
   },
@@ -151,7 +160,7 @@ describe("OpenAPI template generator", () => {
     const { files, summary } = generateOpenapi(JSON.stringify(api), rules, service, "");
     const generated = files["src/api.ts"] ?? "";
 
-    expect(summary).toBe("4 methods of 5 operations, 4 types");
+    expect(summary).toBe("4 methods of 5 operations, 5 types");
     // Prefixed schema names lose their prefix; unreached schemas are left out.
     expect(generated).toContain("export type Item = Entity & {");
     expect(generated).not.toContain("Unused");
@@ -162,6 +171,12 @@ describe("OpenAPI template generator", () => {
     expect(generated).toContain("  id: string;");
     expect(generated).toContain("size?: number | null;");
     expect(generated).toContain('kind?: "file" | "folder";');
+    // Named fields also fit the type of the other keys.
+    expect(generated).toContain("[key: string]: number | string;");
+    // A nullable enum next to string keeps its null, and quoted values stay whole.
+    expect(generated).toContain("mode?: string | null;");
+    expect(generated).toContain('export type Mode = "ok" | null;');
+    expect(generated).toContain('scope?: "read|write" | number;');
     expect(generated).toContain("parent?: Parent | null;");
     expect(generated).toContain("folderId: string;");
     expect(generated.match(/folderId: string;/g)).toHaveLength(2);
@@ -182,7 +197,7 @@ describe("OpenAPI template generator", () => {
 
     expect(files["src/schema.ts"]).toContain('export const base = "https://api.example.test/v1/";');
     expect(files["src/schema.ts"]).toContain(
-      '"listItems":{"httpMethod":"GET","path":"/folders/{folder-id}/items","pathParameters":{"folder-id":"folderId"},"queryParameters":{"$top":["$top",true],"$select":["$select",false]},"body":null,"bodyRequired":false,"response":"json","pageable":true,"change":null}',
+      '"listItems":{"httpMethod":"GET","path":"/folders/{folder-id}/items","pathParameters":{"folder-id":"folderId"},"queryParameters":{"$top":["$top",true,false],"$select":["$select",false,false],"view":["view",true,true]},"body":null,"bodyRequired":false,"response":"json","pageable":true,"change":null}',
     );
     expect(files["src/schema.ts"]).toContain('"body":"text","bodyRequired":true,"response":null');
   });
