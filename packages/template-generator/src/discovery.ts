@@ -11,10 +11,10 @@ import type { Change, GeneratedFiles, Hidden } from "./rules.ts";
 export interface DiscoveryRules {
   /**
    * Methods by Discovery ID, such as `gmail.users.messages.send`. Every method that
-   * is not a GET is listed with the change it makes or why it is not offered;
-   * GET methods are offered unless listed as hidden.
+   * is not a GET is listed with the change it makes, as `read` when it only reads,
+   * or with why it is not offered; GET methods are offered unless listed as hidden.
    */
-  operations: Record<string, Change | Hidden>;
+  operations: Record<string, Change | "read" | Hidden>;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -249,7 +249,9 @@ export const generateDiscovery = (
         `${entry.httpMethod} ${entry.id} is new; add it to the rules: ${entry.description?.split("\n")[0] ?? ""}`,
       );
 
-    return rule === undefined ? entry.httpMethod === "GET" : changes.safeParse(rule).success;
+    return rule === undefined
+      ? entry.httpMethod === "GET"
+      : rule === "read" || changes.safeParse(rule).success;
   });
 
   const names = methodNames(offered);
@@ -279,7 +281,7 @@ export const generateDiscovery = (
   const methods = offered.map((entry, index) => {
     const name = names[index] ?? entry.id;
     const rule = rules.get(entry.id);
-    const change = rule === undefined ? null : changes.parse(rule);
+    const change = rule === undefined || rule === "read" ? null : changes.parse(rule);
 
     const parameters = Object.entries(entry.parameters ?? {}).filter(
       ([, value]) => !value.deprecated,

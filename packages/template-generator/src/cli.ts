@@ -53,7 +53,7 @@ const configuration = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("discovery"),
     generator: z.object({ kind: z.literal("discovery"), source: z.url(), service }),
-    operations: z.record(z.string(), z.union([change, hidden])),
+    operations: z.record(z.string(), z.union([change, z.literal("read"), hidden])),
   }),
   z.object({
     kind: z.literal("openapi"),

@@ -1,4 +1,4 @@
-import { templateRepository } from "./template-repository.fixture.ts";
+import { templateIds, templateRepository } from "./template-repository.fixture.ts";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -79,7 +79,7 @@ it("lets members discover templates without creating apps or granting management
   const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
   expect(listing.status).toBe(200);
   const catalog = contract.appTemplateCatalog.parse(await listing.json());
-  expect(catalog.templates.map(({ id }) => id)).toEqual(["github", "gmail", "linear", "onedrive"]);
+  expect(catalog.templates.map(({ id }) => id)).toEqual(await templateIds());
   expect(catalog.createPrompt).toContain(
     `--organization '${principal.application.organizationId}'`,
   );
@@ -143,7 +143,8 @@ it.each([undefined, "", "fixture-catalog-token"])(
     const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
     expect(listing.status).toBe(200);
     const catalog = contract.appTemplateCatalog.parse(await listing.json());
-    expect(catalog.templates).toHaveLength(4);
+    const ids = await templateIds();
+    expect(catalog.templates).toHaveLength(ids.length);
     const detail = await api(new Request("http://localhost/api/v1/catalog/templates/gmail"));
     expect(detail.status).toBe(200);
     const template = contract.appTemplate.parse(await detail.json());
@@ -164,8 +165,8 @@ it.each([undefined, "", "fixture-catalog-token"])(
       (request) => new URL(request.url).hostname === "raw.githubusercontent.com",
     );
 
-    // Four listed templates, then the detail's template.md and widefleet.jsonc.
-    expect(documents).toHaveLength(6);
+    // Each listed template, then the detail's template.md and widefleet.jsonc.
+    expect(documents).toHaveLength(ids.length + 2);
 
     for (const document of documents) expect(document.headers.has("authorization")).toBe(false);
   },

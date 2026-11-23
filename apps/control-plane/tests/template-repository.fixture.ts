@@ -4,6 +4,12 @@ import { fileURLToPath } from "node:url";
 
 const root = new URL("../../../templates/", import.meta.url);
 
+/** The template directories of this repository, in name order. */
+export const templateIds = async () =>
+  (await readdir(root, { withFileTypes: true }))
+    .flatMap((entry) => (entry.isDirectory() ? [entry.name] : []))
+    .toSorted();
+
 /** The commit the synthetic repository serves templates at. */
 export const templateCommit = "0123456789abcdef0123456789abcdef01234567";
 
