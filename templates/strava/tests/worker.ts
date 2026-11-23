@@ -209,6 +209,19 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
     if (path === "/rpc/routes")
       return Response.json(await app.listRoutes({ id: 101, per_page: 5 }));
 
+    if (path === "/rpc/tagged")
+      return Response.json(
+        await app.createActivity({
+          body: {
+            name: "Walk",
+            sport_type: "Walk",
+            start_date_local: "2026-11-23T08:00:00Z",
+            elapsed_time: 900,
+            "tags[WithPet]": true,
+          },
+        }),
+      );
+
     if (path === "/rpc/level") return Response.json(await app.approvalLevel());
 
     if (path === "/rpc/set-level")

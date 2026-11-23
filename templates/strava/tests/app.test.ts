@@ -268,6 +268,14 @@ describe("Strava personal account app", () => {
       status: "connected",
     });
 
+    // Tags are form fields keyed by the tag's name, as Strava's reference describes them.
+    expect(await (await alice.request("/rpc/tagged")).json()).toMatchObject({
+      status: "connected",
+    });
+    expect(upstream.calls.at(-1)?.body).toBe(
+      "name=Walk&sport_type=Walk&start_date_local=2026-11-23T08%3A00%3A00Z&elapsed_time=900&tags%5BWithPet%5D=true",
+    );
+
     // Each user has their own level.
     const bob = browser("bob");
     await connect(bob, "102");

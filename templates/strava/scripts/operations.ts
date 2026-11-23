@@ -25,6 +25,24 @@ export const generator = {
 
 export type Change = "create" | "update" | "delete" | "send";
 
+// Strava's API reference (https://developers.strava.com/docs/reference/)
+// describes activity tags as form fields keyed by tag name, such as
+// `tags[WithPet]=true`, for the tags WithPet, Recovery, Competition, ForACause
+// and Commute, while its description lists one `tags` string field. The
+// methods take the keyed fields instead.
+const tagFields = {
+  tags: null,
+  ...Object.fromEntries(
+    ["WithPet", "Recovery", "Competition", "ForACause", "Commute"].map((tag) => [
+      `tags[${tag}]`,
+      {
+        type: "boolean",
+        description: `Whether the activity has the ${tag} tag: true adds it, false removes it. Tags cannot be combined with \`commute\` in the same request.`,
+      },
+    ]),
+  ),
+};
+
 export const operations = {
   // Athlete
   getLoggedInAthlete: { name: "getAthlete" },
@@ -34,7 +52,7 @@ export const operations = {
   // Activities
   getLoggedInAthleteActivities: { name: "listActivities" },
   getActivityById: { name: "getActivity" },
-  createActivity: { name: "createActivity", change: "send" },
+  createActivity: { name: "createActivity", change: "send", fields: tagFields },
   updateActivityById: { name: "updateActivity", change: "update" },
   getLapsByActivityId: { name: "listActivityLaps" },
   getZonesByActivityId: { name: "getActivityZones" },
@@ -80,7 +98,7 @@ export const operations = {
   getSegmentEffortById: { name: "getSegmentEffort" },
 
   // Uploads create activities from FIT, TCX or GPX files.
-  createUpload: { name: "createUpload", change: "send" },
+  createUpload: { name: "createUpload", change: "send", fields: tagFields },
   getUploadById: { name: "getUpload" },
 } satisfies Record<
   string,
@@ -89,5 +107,6 @@ export const operations = {
     change?: Change | "read";
     description?: string;
     parameters?: readonly object[];
+    fields?: typeof tagFields;
   }
 >;

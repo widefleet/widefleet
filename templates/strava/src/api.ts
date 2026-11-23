@@ -1484,9 +1484,25 @@ export class StravaApi extends WorkerEntrypoint<TemplateEnvironment, StravaPrope
        */
       visibility?: string;
       /**
-       * Activity tags to set, sent as form fields keyed by tag name with a boolean value, e.g. `tags[WithPet]=true` (true adds, false removes). Supported tags: WithPet, Recovery, Competition, ForACause, Commute. Any other tag is rejected. This cannot be combined with the legacy commute param in the same request.
+       * Whether the activity has the WithPet tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
        */
-      tags?: string;
+      "tags[WithPet]"?: boolean;
+      /**
+       * Whether the activity has the Recovery tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+       */
+      "tags[Recovery]"?: boolean;
+      /**
+       * Whether the activity has the Competition tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+       */
+      "tags[Competition]"?: boolean;
+      /**
+       * Whether the activity has the ForACause tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+       */
+      "tags[ForACause]"?: boolean;
+      /**
+       * Whether the activity has the Commute tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+       */
+      "tags[Commute]"?: boolean;
     };
   }): Promise<StravaResult<DetailedActivity>> {
     return run(this.env, this.ctx.props, "createActivity", input);
@@ -1971,10 +1987,6 @@ export class StravaApi extends WorkerEntrypoint<TemplateEnvironment, StravaPrope
          */
         visibility?: string;
         /**
-         * Activity tags to set on the resulting activity, sent as form fields keyed by tag name with a boolean value, e.g. `tags[WithPet]=true` (true adds, false removes). Supported tags: WithPet, Recovery, Competition, ForACause, Commute. Any other tag is rejected. This cannot be combined with the legacy commute param in the same request.
-         */
-        tags?: string;
-        /**
          * The format of the uploaded file.
          */
         data_type?: "fit" | "fit.gz" | "tcx" | "tcx.gz" | "gpx" | "gpx.gz";
@@ -1982,6 +1994,26 @@ export class StravaApi extends WorkerEntrypoint<TemplateEnvironment, StravaPrope
          * The desired external identifier of the resulting activity.
          */
         external_id?: string;
+        /**
+         * Whether the activity has the WithPet tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+         */
+        "tags[WithPet]"?: boolean;
+        /**
+         * Whether the activity has the Recovery tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+         */
+        "tags[Recovery]"?: boolean;
+        /**
+         * Whether the activity has the Competition tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+         */
+        "tags[Competition]"?: boolean;
+        /**
+         * Whether the activity has the ForACause tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+         */
+        "tags[ForACause]"?: boolean;
+        /**
+         * Whether the activity has the Commute tag: true adds it, false removes it. Tags cannot be combined with `commute` in the same request.
+         */
+        "tags[Commute]"?: boolean;
       };
     } = {},
   ): Promise<StravaResult<Upload>> {
