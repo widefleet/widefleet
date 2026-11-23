@@ -45617,7 +45617,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Submits a message to Linear support on behalf of the authenticated user. Delivery happens after the request succeeds.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The contact entry to create.
@@ -45635,7 +45635,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "contactCreate", change: "create" },
+      { root: "Mutation", field: "contactCreate", change: "send" },
       input,
       select,
     );
@@ -45676,7 +45676,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Create a notification to remind a user about an initiative update.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `initiativeId`: The identifier of the initiative to remind about.
@@ -45699,7 +45699,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "createInitiativeUpdateReminder", change: "create" },
+      { root: "Mutation", field: "createInitiativeUpdateReminder", change: "send" },
       input,
       select,
     );
@@ -45708,7 +45708,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Create a notification to remind a user about a project update.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `projectId`: The identifier of the project to remind about.
@@ -45731,7 +45731,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "createProjectUpdateReminder", change: "create" },
+      { root: "Mutation", field: "createProjectUpdateReminder", change: "send" },
       input,
       select,
     );
@@ -50109,7 +50109,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Invites an email address to the workspace and sends an invitation email. Your role and workspace invitation settings must allow the requested role and teams. Guest invitations require teams; an existing user or unexpired invitation for the address causes an error.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: The organization invite object to create.
@@ -50127,7 +50127,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "organizationInviteCreate", change: "create" },
+      { root: "Mutation", field: "organizationInviteCreate", change: "send" },
       input,
       select,
     );
@@ -51753,7 +51753,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Re-sends a workspace invitation email for the specified invite ID.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `id`: The identifier of the organization invite to re-send.
@@ -51771,7 +51771,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "resendOrganizationInvite", change: "create" },
+      { root: "Mutation", field: "resendOrganizationInvite", change: "send" },
       input,
       select,
     );
@@ -51780,7 +51780,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
   /**
    * Re-sends a workspace invitation email to the specified email address, if an outstanding invite exists for that address.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `email`: The email address tied to the organization invite to re-send.
@@ -51798,7 +51798,7 @@ export class LinearApi extends WorkerEntrypoint<Environment, LinearProperties> {
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "resendOrganizationInviteByEmail", change: "create" },
+      { root: "Mutation", field: "resendOrganizationInviteByEmail", change: "send" },
       input,
       select,
     );

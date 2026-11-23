@@ -6,7 +6,7 @@ import type { JsonValue } from "./selection.ts";
 
 /**
  * When a user is asked before a change runs, from most to least careful:
- * every change, changes to existing data, or never. Queries never ask.
+ * every change, changes that alter, delete or send, or never. Reads never ask.
  */
 export const approvalLevels = ["all_changes", "updates_and_deletions", "none"] as const;
 
@@ -16,7 +16,7 @@ export const approvalLevel = z.enum(approvalLevels);
 
 export const defaultApprovalLevel: ApprovalLevel = "updates_and_deletions";
 
-export type Change = "create" | "update" | "delete";
+export type Change = "create" | "update" | "delete" | "send";
 
 /** Whether a change asks the user first at an approval level. */
 export const asks = (level: ApprovalLevel, change: Change) =>
@@ -28,7 +28,7 @@ export const loosens = (from: ApprovalLevel, to: ApprovalLevel) =>
 
 export const levelDescriptions: Record<ApprovalLevel, string> = {
   all_changes: "Ask before every change",
-  updates_and_deletions: "Ask before changing or deleting existing data",
+  updates_and_deletions: "Ask before changing, deleting or sending",
   none: "Never ask",
 };
 
@@ -80,6 +80,7 @@ const changeWords: Record<Change, string> = {
   create: "creates data",
   update: "changes existing data",
   delete: "deletes or replaces data",
+  send: "sends something to other people",
 };
 
 /**

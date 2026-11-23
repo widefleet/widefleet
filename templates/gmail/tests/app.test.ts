@@ -4,8 +4,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { provider } from "./provider.ts";
-import { message } from "../src/messages.ts";
-import { maximumDownloadBytes } from "../src/bytes.ts";
 
 describe("Gmail personal account app", () => {
   const origin = "https://google.example.test:25453";
@@ -68,7 +66,7 @@ describe("Gmail personal account app", () => {
 
   const browser = (subject: string) => {
     const cookies = new Map<string, string>();
-    const identity = { subject, issuer: "https://identity.example.test" };
+    const identity = { subject, issuer: "https://identity.example.test", answer: "" };
 
     return {
       identity,
@@ -81,6 +79,7 @@ describe("Gmail personal account app", () => {
             cookie: [...cookies.values()].join("; "),
             "test-subject": identity.subject,
             "test-issuer": identity.issuer,
+            "test-answer": identity.answer,
           },
         });
 
@@ -119,22 +118,36 @@ describe("Gmail personal account app", () => {
     expect(page).toContain("/auth/callback/google");
     expect((await alice.request("/connect", "POST")).headers.get("location")).toBe("/");
   });
-  it("links, reads, encrypts tokens and isolates users and identity issuers", async () => {
+  it("links, sends typed requests with field selections and isolates users and issuers", async () => {
     const alice = browser("alice");
     const bob = browser("bob");
     expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
       status: "connection_required",
     });
     await connect(alice, "101");
-    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
       status: "connected",
+      data: { messages: [{ id: "message-101", threadId: "thread" }], resultSizeEstimate: 1 },
     });
-    const download = await alice.request("/rpc/content");
-    const downloaded = await download.text();
-    expect(download.status, downloaded).toBe(200);
-    const content: object = z.object().passthrough().parse(JSON.parse(downloaded));
-    expect(content).toMatchObject({ status: "connected" });
-    expect(content).toMatchObject({ message: { text: "Hello", attachments: [] } });
+    expect(await (await alice.request("/rpc/message?id=abc")).json()).toEqual({
+      status: "connected",
+      data: {
+        id: "abc",
+        snippet: "Hello",
+        payload: { headers: [{ name: "Subject", value: "Greetings" }] },
+      },
+    });
+    // The selection becomes Google's fields parameter; user IDs default to `me`.
+    expect(upstream.calls.map(({ method, url }) => [method, decodeURIComponent(url)])).toEqual([
+      [
+        "GET",
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=5&q=from:someone@example.test&fields=messages(id),resultSizeEstimate",
+      ],
+      [
+        "GET",
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/abc?fields=id,snippet,payload(headers(name,value))",
+      ],
+    ]);
     expect(await (await bob.request("/rpc/status")).json()).toMatchObject({
       status: "connection_required",
     });
@@ -153,6 +166,146 @@ describe("Gmail personal account app", () => {
     expect(saved.accessToken).toMatch(/^v1\./);
     expect(saved.refreshToken).not.toContain("synthetic-refresh-");
   });
+
+  it("asks before sending and deleting as each user's approval level says", async () => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    upstream.calls.length = 0;
+
+    const asked = z
+      .object({ inputRequests: z.object({ approve: z.object({ message: z.string() }) }) })
+      .parse(await (await alice.request("/rpc/send")).json());
+
+    expect(asked.inputRequests.approve.message).toContain(
+      'Run the Gmail change "messagesSend"? It sends something to other people.',
+    );
+    expect(upstream.calls).toEqual([]);
+
+    alice.identity.answer = "decline";
+    expect(await (await alice.request("/rpc/send")).json()).toEqual({ status: "declined" });
+    expect(upstream.calls).toEqual([]);
+
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/send")).json()).toEqual({
+      status: "connected",
+      data: { id: "sent", labelIds: ["SENT"] },
+    });
+    expect(upstream.calls).toEqual([
+      {
+        method: "POST",
+        url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send?fields=id%2ClabelIds",
+        body: { raw: "VG86IGEK" },
+      },
+    ]);
+
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/delete?id=m-1")).json()).toEqual({
+      status: "connected",
+      data: null,
+    });
+
+    // At level none, nothing asks.
+    alice.identity.answer = "";
+    expect(await (await alice.request("/rpc/set-level?level=none")).json()).toMatchObject({
+      resultType: "input_required",
+    });
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/set-level?level=none")).json()).toEqual({
+      status: "updated",
+      level: "none",
+    });
+    alice.identity.answer = "";
+    expect(await (await alice.request("/rpc/send")).json()).toMatchObject({ status: "connected" });
+    expect(await (await alice.request("/")).text()).toContain('value="none" checked');
+  });
+
+  it("reports Gmail's errors, rate limits, missing scopes and revoked tokens", async () => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    expect(await (await alice.request("/rpc/message?id=missing-message")).json()).toEqual({
+      status: "connected",
+      data: {
+        id: "missing-message",
+        snippet: "Hello",
+        payload: { headers: [{ name: "Subject", value: "Greetings" }] },
+      },
+    });
+    // Larger responses are not read.
+    upstream.state.answer = {
+      status: 200,
+      body: { id: "big", raw: "x".repeat(9 * 1024 * 1024) },
+      headers: {},
+    };
+    expect(await (await alice.request("/rpc/message?id=big")).json()).toEqual({
+      status: "too_large",
+      maximumBytes: 8 * 1024 * 1024,
+    });
+    upstream.state.answer = {
+      status: 404,
+      body: {
+        error: {
+          code: 404,
+          message: "Requested entity was not found.",
+          status: "NOT_FOUND",
+          errors: [{ reason: "notFound" }],
+        },
+      },
+      headers: {},
+    };
+    expect(await (await alice.request("/rpc/message?id=missing")).json()).toEqual({
+      status: "gmail_error",
+      error: {
+        message: "Requested entity was not found.",
+        code: 404,
+        status: "NOT_FOUND",
+        reasons: ["notFound"],
+      },
+    });
+    upstream.state.answer = {
+      status: 403,
+      body: {
+        error: { code: 403, message: "Quota", errors: [{ reason: "userRateLimitExceeded" }] },
+      },
+      headers: { "retry-after": "20" },
+    };
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "rate_limited",
+      retryAfter: "20",
+    });
+    upstream.state.answer = {
+      status: 403,
+      body: {
+        error: { code: 403, message: "Scopes", errors: [{ reason: "insufficientPermissions" }] },
+      },
+      headers: {},
+    };
+    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+      status: "permission_required",
+    });
+    upstream.state.answer = { status: 401, body: null, headers: {} };
+    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+      status: "reconnect_required",
+    });
+    upstream.state.answer = { status: 502, body: null, headers: {} };
+    expect((await alice.request("/rpc/list")).status).toBe(500);
+  });
+
+  it("asks users who granted fewer scopes to reconnect", async () => {
+    upstream.state.scope = "openid profile email https://www.googleapis.com/auth/gmail.readonly";
+    const alice = browser("alice");
+    await connect(alice, "101");
+    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+      status: "permission_required",
+    });
+    expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
+      status: "permission_required",
+    });
+    // A change does not ask first when the account could not run it.
+    expect(await (await alice.request("/rpc/delete")).json()).toMatchObject({
+      status: "permission_required",
+    });
+  });
+
   it("rejects changed callback identities, replay, cross-origin forms and public token endpoints", async () => {
     const alice = browser("alice");
     expect((await alice.request("/connect", "POST", "null")).status).toBe(403);
@@ -213,68 +366,5 @@ describe("Gmail personal account app", () => {
     expect(await (await bob.request("/rpc/status")).json()).toMatchObject({
       status: "connected",
     });
-  });
-  it.each([false, true])(
-    "bounds all message parts together when sizes are understated: %s",
-    async (understated) => {
-      const alice = browser("alice");
-      await connect(alice, "101");
-      const size = maximumDownloadBytes / 2;
-      upstream.state.message = message.parse({
-        ...upstream.state.message,
-        payload: {
-          partId: "",
-          mimeType: "multipart/mixed",
-          body: { size: 0 },
-          parts: ["first", "second", "third"].map((id) => ({
-            partId: id,
-            mimeType: "text/plain",
-            body: { size: understated ? 1 : size, attachmentId: id },
-          })),
-        },
-      });
-
-      for (const id of ["first", "second", "third"])
-        upstream.state.attachments.set(id, {
-          size: understated ? 1 : size,
-          data: btoa("A".repeat(size)),
-        });
-      expect(await (await alice.request("/rpc/content")).json()).toEqual({
-        status: "too_large",
-        maximumBytes: maximumDownloadBytes,
-      });
-      expect(upstream.state.attachmentReads).toEqual(understated ? ["first", "second"] : ["first"]);
-    },
-  );
-
-  it("reads inline content and multiple separately stored text parts within the message budget", async () => {
-    const alice = browser("alice");
-    await connect(alice, "101");
-    upstream.state.message = message.parse({
-      ...upstream.state.message,
-      payload: {
-        partId: "",
-        mimeType: "multipart/alternative",
-        body: { size: 0 },
-        parts: [
-          {
-            partId: "0",
-            mimeType: "text/plain",
-            body: { size: 6, data: btoa("Inline") },
-          },
-          { partId: "1", mimeType: "text/plain", body: { size: 5, attachmentId: "body" } },
-          { partId: "2", mimeType: "text/html", body: { size: 9, attachmentId: "html" } },
-        ],
-      },
-    });
-    upstream.state.attachments.set("html", {
-      size: 9,
-      data: btoa("<p>Hi</p>"),
-    });
-    expect(await (await alice.request("/rpc/content")).json()).toMatchObject({
-      status: "connected",
-      message: { text: "Inline\nHello", html: "<p>Hi</p>" },
-    });
-    expect(upstream.state.attachmentReads).toEqual(["body", "html"]);
   });
 });

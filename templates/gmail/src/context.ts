@@ -1,4 +1,3 @@
-import type { OAuthBinding } from "./oauth.ts";
 import { z } from "zod";
 
 export const caller = z.object({
@@ -10,7 +9,6 @@ export const caller = z.object({
 export type Caller = z.infer<typeof caller>;
 
 export interface Environment {
-  WIDEFLEET_OAUTH?: OAuthBinding;
   DB: D1Database;
   WIDEFLEET_ORIGIN: string;
   WIDEFLEET_SECRETS: { get(name: string): Promise<string> };

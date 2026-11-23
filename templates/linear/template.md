@@ -92,10 +92,11 @@ says:
 
 - `all_changes`: every mutation asks.
 - `updates_and_deletions`, the default: mutations that change, archive or delete
-  existing data ask; mutations that only create data run at once.
+  existing data or send messages to other people, such as invitations, ask;
+  mutations that only create data run at once.
 - `none`: no mutation asks.
 
-`scripts/operations.ts` records whether each mutation creates, updates or deletes.
+`scripts/operations.ts` records whether each mutation creates, updates, deletes or sends.
 Users choose their level on the app's page. `approvalLevel` returns the current level
 and `setApprovalLevel` changes it: asking more takes effect at once, asking less asks
 the user to confirm.

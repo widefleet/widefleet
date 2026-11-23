@@ -4,7 +4,8 @@
 // Every mutation is listed with the kind of change it makes, which decides when
 // it asks the user first (see src/approval.ts), or with the reason it is not
 // offered. A mutation that creates data but can also change existing data counts
-// as an update. Queries are offered unless listed.
+// as an update; one that sends a message to other people is `send`. Queries are
+// offered unless listed.
 
 /** Where the generator reads the API, and the names of the generated code. */
 export const generator = {
@@ -33,7 +34,7 @@ export const reasons = {
 
 type Hidden = { hidden: keyof typeof reasons };
 
-export type Change = "create" | "update" | "delete";
+export type Change = "create" | "update" | "delete" | "send";
 
 export const mutations = {
   agentActivityCreate: { hidden: "agentApp" },
@@ -66,10 +67,13 @@ export const mutations = {
   commentResolve: "update",
   commentUnresolve: "update",
   commentUpdate: "update",
-  contactCreate: "create",
+  // Sends a message to Linear support.
+  contactCreate: "send",
   createCsvExportReport: "create",
-  createInitiativeUpdateReminder: "create",
-  createProjectUpdateReminder: "create",
+  // Notifies another user.
+  createInitiativeUpdateReminder: "send",
+  // Notifies another user.
+  createProjectUpdateReminder: "send",
   customerCreate: "create",
   customerDelete: "delete",
   customerMerge: "delete",
@@ -256,7 +260,8 @@ export const mutations = {
   organizationDelete: "delete",
   organizationDeleteChallenge: "delete",
   organizationDomainDelete: "delete",
-  organizationInviteCreate: "create",
+  // Sends an invitation email.
+  organizationInviteCreate: "send",
   organizationInviteDelete: "delete",
   organizationInviteUpdate: "update",
   organizationStartTrialForPlan: "update",
@@ -317,8 +322,10 @@ export const mutations = {
   releaseUpdate: "update",
   releaseUpdateByPipeline: "update",
   releaseUpdateByPipelineByAccessKey: { hidden: "accessKey" },
-  resendOrganizationInvite: "create",
-  resendOrganizationInviteByEmail: "create",
+  // Sends the invitation email again.
+  resendOrganizationInvite: "send",
+  // Sends the invitation email again.
+  resendOrganizationInviteByEmail: "send",
   roadmapToProjectCreate: "create",
   roadmapToProjectDelete: "delete",
   roadmapToProjectUpdate: "update",

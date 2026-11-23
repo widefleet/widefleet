@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type Arguments, type FieldSelection, graphqlRequest, InvalidRequest } from "./graphql.ts";
+import { graphqlRequest } from "./graphql.ts";
+import { type Arguments, type FieldSelection, InvalidRequest } from "./input.ts";
 
 describe("Linear GraphQL requests", () => {
   it("passes every argument as a variable of its schema type", () => {

@@ -24,16 +24,10 @@ const compile = async (file: string) => {
   return z.string().parse(result.outputFiles[0]?.text);
 };
 
-// The operator clients a hosted installation configures for the templates.
+// The operator clients a hosted installation configures for the templates. The
+// Gmail template needs restricted Google scopes and uses the administrator's own
+// OAuth client only.
 const clients = {
-  google: {
-    provider: "google",
-    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
-    hosts: ["https://gmail.googleapis.com"],
-    options: { accessType: "offline", prompt: "select_account consent" },
-    issuer: "https://accounts.google.com",
-    revocationUrl: "https://oauth2.googleapis.com/revoke",
-  },
   github: {
     provider: "github",
     scopes: ["read:user", "user:email", "repo"],
@@ -55,10 +49,6 @@ const clients = {
 
 // Origins the synthetic providers serve, as an app's network policy allows them.
 const origins = [
-  "https://accounts.google.com",
-  "https://oauth2.googleapis.com",
-  "https://www.googleapis.com",
-  "https://gmail.googleapis.com",
   "https://github.com",
   "https://api.github.com",
   "https://login.microsoftonline.com",
@@ -67,7 +57,6 @@ const origins = [
 ];
 
 for (const [template, kind, prefix] of [
-  ["gmail", "google", "GOOGLE"],
   ["github", "github", "GITHUB"],
   ["onedrive", "microsoft", "MICROSOFT"],
   ["linear", "linear", "LINEAR"],

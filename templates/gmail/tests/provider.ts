@@ -1,7 +1,6 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { Request, Response } from "miniflare";
 import { z } from "zod";
-import { message } from "../src/messages.ts";
 
 const kind = "google";
 
@@ -12,6 +11,15 @@ const base64url = (value: Uint8Array) =>
     .replaceAll("=", "");
 
 const encode = (value: string) => base64url(new TextEncoder().encode(value));
+
+type Answer = { status: number; body: object | null; headers: Record<string, string> };
+
+type State = {
+  refreshes: number;
+  unavailable: boolean;
+  scope: string;
+  answer: Answer | null;
+};
 
 export const provider = () => {
   const codes = new Map<
@@ -26,26 +34,17 @@ export const provider = () => {
 
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
-  const attachmentReads: string[] = [];
 
-  const state = {
+  const calls: { method: string; url: string; body: unknown }[] = [];
+
+  const state: State = {
     refreshes: 0,
     unavailable: false,
-    apiStatus: 200,
-    attachmentReads,
-    attachments: new Map([["body", { size: 5, data: "SGVsbG8" }]]),
-    message: message.parse({
-      id: "message",
-      threadId: "thread",
-      snippet: "Hello",
-      internalDate: "1700000000000",
-      payload: {
-        partId: "",
-        mimeType: "text/plain",
-        headers: [],
-        body: { size: 5, attachmentId: "body" },
-      },
-    }),
+    // The scopes a consent grants; tests narrow them to check reauthorization.
+    scope:
+      "openid profile email https://mail.google.com/ https://www.googleapis.com/auth/gmail.settings.basic",
+    // An answer that replaces the next Gmail API response.
+    answer: null,
   };
 
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -88,12 +87,13 @@ export const provider = () => {
       id_token: `${unsigned}.${signature}`,
       expires_in: 3600,
       token_type: "Bearer",
-      scope: "openid profile email https://www.googleapis.com/auth/gmail.readonly",
+      scope: state.scope,
     });
   };
 
   return {
     state,
+    calls,
     authorize: (location: string, user: string) => {
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));
@@ -162,26 +162,51 @@ export const provider = () => {
 
       if (!user) return new Response(null, { status: 401 });
 
-      if (state.apiStatus !== 200) return new Response(null, { status: state.apiStatus });
+      if (url.origin !== "https://gmail.googleapis.com")
+        throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
+      const text = await request.text();
+      calls.push({ method: request.method, url: url.href, body: text ? JSON.parse(text) : null });
 
-      if (url.href.startsWith("https://gmail.googleapis.com/gmail/v1/users/me/messages?"))
-        return Response.json({
-          messages: [{ id: `message-${user}`, threadId: "thread" }],
-          nextPageToken: "next",
-        });
+      if (state.answer) {
+        const { status, body, headers } = state.answer;
 
-      if (url.href.startsWith("https://gmail.googleapis.com/gmail/v1/users/me/messages/message?"))
-        return Response.json(state.message);
-
-      if (url.pathname.startsWith("/gmail/v1/users/me/messages/message/attachments/")) {
-        const id = url.pathname.split("/").at(-1) ?? "";
-        state.attachmentReads.push(id);
-        const body = state.attachments.get(id);
-
-        return body ? Response.json(body) : new Response(null, { status: 404 });
+        return body
+          ? Response.json(body, { status, headers })
+          : new Response(null, { status, headers });
       }
 
-      throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
+      const path = url.pathname.replace("/gmail/v1/users/me/", "");
+
+      if (request.method === "GET" && path === "messages")
+        return Response.json({
+          messages: [{ id: `message-${user}`, threadId: "thread" }],
+          resultSizeEstimate: 1,
+        });
+
+      if (request.method === "GET" && path.startsWith("messages/"))
+        return Response.json({
+          id: path.slice("messages/".length),
+          snippet: "Hello",
+          payload: { headers: [{ name: "Subject", value: "Greetings" }] },
+        });
+
+      if (request.method === "POST" && path === "messages/send")
+        return Response.json({ id: "sent", labelIds: ["SENT"] });
+
+      if (request.method === "DELETE" && path.startsWith("messages/"))
+        return new Response(null, { status: 204 });
+
+      return Response.json(
+        {
+          error: {
+            code: 404,
+            message: "Requested entity was not found.",
+            status: "NOT_FOUND",
+            errors: [{ reason: "notFound" }],
+          },
+        },
+        { status: 404 },
+      );
     },
   };
 };

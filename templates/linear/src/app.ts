@@ -1,29 +1,9 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { z } from "zod";
 import { LinearApi } from "./api.ts";
-import {
-  approvalAnswer,
-  type ApprovalQuestion,
-  type ApprovalLevel,
-  approvalLevel,
-  approvals,
-  levelDescriptions,
-  loosens,
-  question,
-} from "./approval.ts";
+import type { ApprovalLevel } from "./approval.ts";
+import { changeApprovalLevel, readApprovalLevel, saveApprovalLevel } from "./approval-methods.ts";
 import { accountConnection } from "./connection.ts";
-import { caller, callerId, type Environment, type Properties } from "./context.ts";
-import { initialize } from "./database.ts";
-import type { Answered } from "./results.ts";
-
-const signedIn = async (environment: Environment, properties: Properties) => {
-  const identity = caller.safeParse(properties.caller);
-
-  if (!identity.success) return null;
-  await initialize(environment.DB);
-
-  return approvals(environment.DB, await callerId(identity.data));
-};
+import type { Environment, Properties } from "./context.ts";
 
 /**
  * Use the current user's Linear workspace through Linear's GraphQL API. Each
@@ -37,72 +17,23 @@ export default class Linear extends LinearApi {
   }
 
   /** The current user's approval level, which decides when changes ask first. */
-  async approvalLevel(): Promise<
-    Answered<{ status: "signed_in"; level: ApprovalLevel } | { status: "authentication_required" }>
-  > {
-    const user = await signedIn(this.env, this.ctx.props);
-
-    if (!user) return { status: "authentication_required" };
-
-    return { status: "signed_in", level: await user.level() };
+  async approvalLevel() {
+    return readApprovalLevel(this.env, this.ctx.props);
   }
 
   /**
    * Set when the current user is asked before changes run. Asking more takes
    * effect at once; asking less asks the user to confirm.
    */
-  async setApprovalLevel(input: {
-    level: ApprovalLevel;
-  }): Promise<
-    | ApprovalQuestion
-    | Answered<
-        | { status: "updated"; level: ApprovalLevel }
-        | { status: "declined" }
-        | { status: "authentication_required" }
-      >
-  > {
-    const { level } = z.strictObject({ level: approvalLevel }).parse(input);
-    const user = await signedIn(this.env, this.ctx.props);
-
-    if (!user) return { status: "authentication_required" };
-    const current = await user.level();
-
-    if (loosens(current, level)) {
-      const answer = approvalAnswer.parse(this.ctx.props.input)?.inputResponses.approve;
-
-      if (!answer)
-        return question(
-          `Ask less before Linear changes run?\n\nNow: ${levelDescriptions[current]}\nNew: ${levelDescriptions[level]}`,
-        );
-
-      if (answer.action !== "accept") return { status: "declined" };
-    }
-
-    await user.set(level);
-
-    return { status: "updated", level };
+  async setApprovalLevel(input: { level: ApprovalLevel }) {
+    return changeApprovalLevel("Linear", this.env, this.ctx.props, input);
   }
 
   override async fetch(request: Request) {
-    const url = new URL(request.url);
-
-    // The user chooses on their own page, so no further question is asked.
-    if (url.pathname === "/approval-level" && request.method === "POST") {
-      if (request.headers.get("origin") !== this.env.WIDEFLEET_ORIGIN)
-        return new Response("Invalid origin", { status: 403 });
-      const user = await signedIn(this.env, this.ctx.props);
-
-      if (!user) return new Response(null, { status: 401 });
-
-      const level = approvalLevel.safeParse(new URLSearchParams(await request.text()).get("level"));
-
-      if (!level.success) return new Response("Unknown approval level", { status: 400 });
-      await user.set(level.data);
-
-      return Response.json({ level: level.data });
-    }
-
-    return accountConnection(this.env, this.ctx.props).fetch(request);
+    return (
+      (await saveApprovalLevel(this.env, this.ctx.props, request)) ??
+      accountConnection(this.env, this.ctx.props).fetch(request)
+    );
   }
 }
 
