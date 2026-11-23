@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { managedOAuth, openAccessToken, type OAuthIdentity } from "./oauth.ts";
 import { managedOAuthConfiguration } from "./oauth-protocol.ts";
+import { decryptText, encryptText } from "./secrets.ts";
 
 const identity: OAuthIdentity = {
   appId: "2a600000-0000-4000-8000-000000000001",
@@ -452,6 +453,34 @@ describe("managed OAuth broker", () => {
         { action: "revoke", client: "google", token: granted.refreshToken },
       ),
     ).rejects.toThrow("another app");
+  });
+
+  it("revokes refresh grants sealed before their scopes were recorded", async () => {
+    const { broker, exchange } = await authorize();
+    const granted = tokens.parse(await broker.request(identity, exchange));
+    const purpose = "managed-oauth/refresh/v1";
+
+    const sealed = z
+      .object({ payload: z.string() })
+      .parse(JSON.parse(await decryptText(environment, purpose, granted.refreshToken)));
+
+    const { scopes: _scopes, ...earlier } = z
+      .looseObject({ scopes: z.array(z.string()) })
+      .parse(JSON.parse(sealed.payload));
+
+    const token = await encryptText(
+      environment,
+      purpose,
+      JSON.stringify({ payload: JSON.stringify(earlier) }),
+    );
+
+    expect(await broker.request(identity, { action: "revoke", client: "google", token })).toEqual({
+      revoked: true,
+    });
+    expect(requests.at(-1)?.body.get("token")).toBe("provider-refresh-1");
+    await expect(
+      broker.request(identity, { action: "refresh", client: "google", refreshToken: token }),
+    ).rejects.toThrow();
   });
 
   it("keeps unconfigured runtimes disabled and rejects credentials selected by a caller", async () => {

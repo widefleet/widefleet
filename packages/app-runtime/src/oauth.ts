@@ -47,7 +47,13 @@ const transaction = ownership.extend({
   scopes,
 });
 
-const refreshGrant = ownership.extend({ token: z.string().min(1).max(3000), scopes });
+const refreshToken = z.string().min(1).max(3000);
+
+const refreshGrant = ownership.extend({ token: refreshToken, scopes });
+
+// Revoking needs only the provider token, so grants sealed before their scopes
+// were recorded can still be revoked.
+const revocableGrant = ownership.extend({ token: refreshToken });
 
 const accessGrant = z.object({
   appId: z.uuid(),
@@ -489,7 +495,9 @@ export const managedOAuth = (environment: Environment) => ({
       return { revoked: await revoke(config, client, grant.token) };
     }
 
-    const grant = refreshGrant.parse(JSON.parse(await open(environment, "refresh", request.token)));
+    const grant = revocableGrant.parse(
+      JSON.parse(await open(environment, "refresh", request.token)),
+    );
 
     requireOwner(grant, owner);
 
