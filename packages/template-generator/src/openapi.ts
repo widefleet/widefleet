@@ -791,11 +791,23 @@ export const generateOpenapi = (
     // Forms send their fields, and multipart forms also files.
     const jsonBody = body?.content?.["application/json"];
 
-    const form = Object.entries(formBodies).flatMap(([type, kind]) => {
-      const entry = body?.content?.[type];
+    // Only the body that is sent counts: JSON before forms, and the first form.
+    // Checks of the form's fields and encoding apply to that body alone.
+    const sentForm = jsonBody
+      ? undefined
+      : Object.entries(formBodies).flatMap(([type, kind]) => {
+          const entry = body?.content?.[type];
 
-      return entry ? [{ kind, schema: formSchema(id, entry.schema, rule.fields), entry }] : [];
-    })[0];
+          return entry ? [{ kind, entry }] : [];
+        })[0];
+
+    if (rule.fields && !sentForm)
+      throw new Error(`${id}'s fields rule needs a form body that lists its fields`);
+
+    const form = sentForm && {
+      ...sentForm,
+      schema: formSchema(id, sentForm.entry.schema, rule.fields),
+    };
 
     // Multipart forms send objects as JSON parts; plain forms have no encoding for them.
     if (form?.kind === "form")

@@ -523,6 +523,51 @@ describe("Form shapes, local copies and literal data", () => {
     ).toThrow("createUpload's form field metadata is an object, which a form cannot send");
   });
 
+  it("checks only the body it sends: JSON before an unused form", () => {
+    const both = formWith("application/x-www-form-urlencoded");
+    const { requestBody } = both.paths["/uploads"].post;
+
+    const offered = {
+      ...both,
+      paths: {
+        "/uploads": {
+          post: {
+            ...both.paths["/uploads"].post,
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { title: { type: "string" } } },
+                },
+                "application/x-www-form-urlencoded": {
+                  ...requestBody.content["application/x-www-form-urlencoded"],
+                  encoding: { metadata: { style: "deepObject" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const { files } = generateOpenapi(offered, rules, service, "");
+
+    expect(files["src/schema.ts"]).toContain('"body":"json"');
+    expect(files["src/api.ts"]).toMatch(/body\?: \{\n\s+title\?: string;\n\s+\};/);
+    // A fields rule needs the form it changes to be the body that is sent.
+    expect(() =>
+      generateOpenapi(
+        offered,
+        {
+          operations: {
+            createUpload: { name: "createUpload", change: "create", fields: { title: null } },
+          },
+        },
+        service,
+        "",
+      ),
+    ).toThrow("createUpload's fields rule needs a form body that lists its fields");
+  });
+
   it("finds referred files beside a local copy, decoded and in parent folders", () => {
     const source = "https://api.example.test/specs/v3/swagger.json";
     const file = "/work/strava/swagger.json";
