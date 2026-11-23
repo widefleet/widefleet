@@ -14,6 +14,7 @@ import { hashAppClientSecret } from "./app-login-client.ts";
 import { authenticationReference } from "./authentication-context.ts";
 import type { SignIn } from "./sso-policy.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
+import { organizationMemberLimit } from "./organization.ts";
 import { personalSocialAccounts, socialProviders, validateSocialUser } from "./social-sign-in.ts";
 
 export const cliClientId = "platform-cli";
@@ -322,6 +323,7 @@ export const authenticationOptions = (
       organization({
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
+        membershipLimit: organizationMemberLimit,
         requireEmailVerificationOnInvitation: true,
         ac: organizationAccess,
         roles: organizationRoles,

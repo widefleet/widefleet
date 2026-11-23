@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UnsecuredJWT, type JWTPayload } from "jose";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import * as contract from "@platform/contracts";
 import { createTestEnvironment } from "./environment.ts";
@@ -374,6 +374,49 @@ describe("Joining organizations by company email domain", () => {
     await expect(runtime.domainAccess.join(signIn(late), team)).rejects.toMatchObject({
       code: "FORBIDDEN",
     });
+  });
+
+  it("serializes joining with removing the join domain", async () => {
+    const owner = await person("owner@race.example.test");
+    const team = await organizationOf("Race Team", owner);
+    await googleWorkspace(owner, "owner@race.example.test");
+    await runtime.domainAccess.addJoinDomain(await principal(owner, team), "race.example.test");
+    const late = await person("late@race.example.test");
+    let joining: ReturnType<typeof runtime.domainAccess.join> | undefined;
+
+    // A removal holds the settings lock while the join waits for it.
+    await database().transaction(async (transaction) => {
+      await transaction
+        .select({ id: organizationSettings.organizationId })
+        .from(organizationSettings)
+        .where(eq(organizationSettings.organizationId, team))
+        .for("update");
+      joining = runtime.domainAccess.join(signIn(late), team);
+      // The rejection is asserted after the removal commits.
+      joining.catch(() => undefined);
+      await expect
+        .poll(
+          async () =>
+            (
+              await database().execute<{ waiting: number }>(
+                sql`SELECT count(*)::int AS waiting FROM pg_locks WHERE NOT granted`,
+              )
+            ).rows[0]?.waiting,
+        )
+        .toBeGreaterThan(0);
+      await transaction
+        .update(organizationSettings)
+        .set({ joinDomains: [] })
+        .where(eq(organizationSettings.organizationId, team));
+    });
+
+    await expect(joining).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(
+      await database()
+        .select({ id: member.id })
+        .from(member)
+        .where(and(eq(member.organizationId, team), eq(member.userId, late))),
+    ).toEqual([]);
   });
 
   it("lets administrators manage join domains they can prove through the API", async () => {

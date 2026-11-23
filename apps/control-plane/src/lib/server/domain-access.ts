@@ -4,11 +4,10 @@ import type { z } from "zod";
 import type { joinableOrganization } from "@platform/contracts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { account, member, organization, ssoProvider, user } from "./auth-schema.ts";
-import type { Authentication } from "./auth.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { organizationOperation } from "./organization-operations.ts";
+import { organizationMemberLimit } from "./organization.ts";
 import { organizationRuntimes, organizationSettings } from "./schema.ts";
 import { providerEmailDomain } from "./social-sign-in.ts";
 import { companySignInLimit, type SignIn } from "./sso-policy.ts";
@@ -292,7 +291,6 @@ const joinableOrganizations = async (
 
 export const createDomainAccess = (
   database: DatabaseExecutor,
-  auth: Authentication,
   access: OrganizationAccess,
   // Joining by domain belongs to installations where people create their own organizations.
   enabled: boolean,
@@ -346,10 +344,39 @@ export const createDomainAccess = (
           message: "This organization is not open to your email domain",
         });
 
-      // Better Auth enforces the organization's member limit.
-      await organizationOperation({ auth, headers: new Headers() }, (api) =>
-        api.addMember({ body: { userId: signIn.userId, organizationId, role: "member" } }),
-      );
+      // Removing a join domain takes the same lock, so it either ends this join here or keeps
+      // the member who joined first, like any member who joined before the removal.
+      await database.transaction(async (transaction) => {
+        const current = await lockSettings(transaction, organizationId);
+
+        if (!current.joinDomains.includes(target.domain))
+          throw new InvalidOperation({
+            code: "NOT_FOUND",
+            message: "This organization is not open to your email domain",
+          });
+
+        const [members] = await transaction
+          .select({ total: count() })
+          .from(member)
+          .where(eq(member.organizationId, organizationId));
+
+        if ((members?.total ?? 0) >= organizationMemberLimit)
+          throw new InvalidOperation({
+            code: "FORBIDDEN",
+            message: "This organization has reached its member limit",
+          });
+
+        await transaction
+          .insert(member)
+          .values({
+            id: crypto.randomUUID(),
+            organizationId,
+            userId: signIn.userId,
+            role: "member",
+            createdAt: new Date(),
+          })
+          .onConflictDoNothing();
+      });
 
       return { organizationId: target.id, slug: target.slug };
     },

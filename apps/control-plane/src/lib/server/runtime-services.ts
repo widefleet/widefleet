@@ -152,7 +152,6 @@ export const createRuntime = ({
     onboarding: createOnboardingService(database.db, settings, createOrganization, observation),
     domainAccess: createDomainAccess(
       database.db,
-      auth,
       organizationAccess ?? {
         filterOrganizations: async () => [installationOrganizationId],
       },

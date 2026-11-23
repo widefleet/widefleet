@@ -238,7 +238,6 @@ export const createTestEnvironment = async (
     onboarding: createOnboardingService(database.db, settings),
     domainAccess: createDomainAccess(
       database.db,
-      auth,
       { filterOrganizations: async () => ["widefleet"] },
       false,
     ),
