@@ -161,13 +161,19 @@ export const createUploadService = (
 
         const variables = metadata.bindings.filter((binding) => binding.type === "plain_text");
 
-        // Saved under the same lock, so they reach only the deployment they come with.
-        const record = options.secrets
-          ? await saveAppSecrets(transaction, locked, options.secrets, {
-              hosted: Boolean(execution),
-              variables: variables.length,
-            })
-          : locked;
+        // Secrets reach only the deployment they come with. An agent installation
+        // accepts that deployment in this transaction, under the app lock. Cloudflare
+        // accepts it later, so the hosted command carries them, and recording the
+        // accepted deployment saves them; see registerCloudflareOperation.
+        const record =
+          options.secrets && !execution
+            ? await saveAppSecrets(transaction, locked, options.secrets, {
+                hosted: false,
+                variables: variables.length,
+              })
+            : locked;
+
+        const supplied = execution ? Object.keys(options.secrets ?? {}) : [];
 
         if (
           metadata.source &&
@@ -196,7 +202,10 @@ export const createUploadService = (
         checkCapabilityNames(metadata, contract.capabilityGrants.parse(record.capabilities));
 
         if (
-          Object.keys(z.record(z.string(), z.string()).parse(record.secrets)).length +
+          new Set([
+            ...Object.keys(z.record(z.string(), z.string()).parse(record.secrets)),
+            ...supplied,
+          ]).size +
             variables.length >
           contract.appEnvironmentMaxBindings
         )
@@ -297,6 +306,7 @@ export const createUploadService = (
 
           return enqueueDeployment(transaction, record, artifactId, requestId, {
             hosted: Boolean(execution),
+            suppliedSecrets: supplied,
           });
         }
 
@@ -315,12 +325,16 @@ export const createUploadService = (
 
         return enqueueDeployment(transaction, record, artifactId, requestId, {
           hosted: Boolean(execution),
+          suppliedSecrets: supplied,
         });
       }),
     );
 
     if (prepared.isErr() || !execution) return prepared;
 
-    return execution.deploy(prepared.value, requestId, false, principal);
+    return execution.deploy(prepared.value, requestId, false, principal, {
+      ...(options.secrets && { secrets: options.secrets }),
+      ...(options.firstDeployment && { firstDeployment: true }),
+    });
   },
 });

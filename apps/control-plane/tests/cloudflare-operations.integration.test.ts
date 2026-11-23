@@ -254,6 +254,64 @@ describe("Cloudflare operation history", () => {
     expect(deployment?.artifactId).toBe(second.artifact.id);
   });
 
+  it("saves a template's secrets only with the first deployment Cloudflare accepts for it", async () => {
+    const secrets = { API_KEY: "synthetic-ciphertext" };
+
+    const install = async (appId?: string) => {
+      const entry = await seedDeployment(environment.database.db, {
+        ...(appId && { appId }),
+        requiredSecrets: ["API_KEY"],
+      });
+
+      return {
+        ...entry,
+        command: deploymentCommand.parse({ ...entry.command, firstDeployment: true, secrets }),
+      };
+    };
+
+    const app = async (appId: string) => {
+      const [record] = await environment.database.db.select().from(apps).where(eq(apps.id, appId));
+
+      return record;
+    };
+
+    // Another deployment of the draft app was prepared during the install and is
+    // accepted first: the install is rejected and saves nothing.
+    const raced = await install();
+    const other = await seedDeployment(environment.database.db, { appId: raced.appId });
+    (await registerCloudflareOperation(environment.database.db, other.command)).unwrap();
+
+    const rejected = await registerCloudflareOperation(environment.database.db, raced.command);
+
+    expect(rejected.isErr() && rejected.error.message).toBe("The app already has a deployment");
+    expect(await app(raced.appId)).toMatchObject({ secrets: {}, secretRevision: 0 });
+    expect(
+      await environment.database.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, raced.command.id)),
+    ).toEqual([]);
+
+    // Accepted first, the install saves its secrets once, across request and
+    // Workflow races, and the history keeps the command without their values.
+    const accepted = await install();
+
+    const attempts = await Promise.all(
+      Array.from({ length: 3 }, () =>
+        registerCloudflareOperation(environment.database.db, accepted.command),
+      ),
+    );
+
+    for (const attempt of attempts) expect(attempt.unwrap().command).not.toHaveProperty("secrets");
+    expect(await app(accepted.appId)).toMatchObject({ secrets, secretRevision: 1 });
+
+    // Later deployments of the app use its secrets like any other deployment.
+    const later = await seedDeployment(environment.database.db, { appId: accepted.appId });
+    expect((await registerCloudflareOperation(environment.database.db, later.command)).isOk()).toBe(
+      true,
+    );
+  });
+
   it("applies access inheritance once and keeps settings saved before the first deployment", async () => {
     const first = await seedDeployment(environment.database.db);
     const preview = await seedDeployment(environment.database.db);
