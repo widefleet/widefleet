@@ -892,7 +892,10 @@ mod tests {
             "{\n  // Requested origins\n  \"network\": { \"backend\": [\"https://api.example.test\"], },\n  \"connector\": \"shared\",\n}\n",
         )?;
         let declared = declaration(root)?;
-        assert_eq!(declared.connector, Some(platform_core::model::ConnectorKind::Shared));
+        assert_eq!(
+            declared.connector,
+            Some(platform_core::model::ConnectorKind::Shared)
+        );
         let network = declared
             .network
             .ok_or_else(|| Error::invalid("Missing network declaration".into()))?;
