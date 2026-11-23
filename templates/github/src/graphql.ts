@@ -30,6 +30,19 @@ const argumentsSelected = (value: JsonValue | undefined) => {
   return nested.success ? (own(nested.data, "$args") ?? null) : null;
 };
 
+// JSON text with object keys in order, so equal values compare equal.
+const canonical = (value: JsonValue): string => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  const object = selection.safeParse(value);
+
+  if (!object.success) return JSON.stringify(value);
+
+  return `{${Object.keys(object.data)
+    .toSorted()
+    .map((key) => `${JSON.stringify(key)}:${canonical(own(object.data, key) ?? null)}`)
+    .join(",")}}`;
+};
+
 // Selections from callers may leave optional values undefined, as JSON does.
 const definedSelection = (select: FieldSelection | undefined) =>
   selection.safeParse(select === undefined ? undefined : definedJson.safeParse(select).data);
@@ -226,8 +239,7 @@ export const graphqlRequest = (
                 field !== "$args" &&
                 field !== "$on" &&
                 shared !== undefined &&
-                JSON.stringify(argumentsSelected(shared)) !==
-                  JSON.stringify(argumentsSelected(fieldValue))
+                canonical(argumentsSelected(shared)) !== canonical(argumentsSelected(fieldValue))
               )
                 throw new InvalidRequest(
                   `${type}.${field} and ${variant}.${field} in $on need the same $args`,

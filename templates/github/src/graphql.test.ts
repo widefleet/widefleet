@@ -149,5 +149,17 @@ describe("GitHub GraphQL requests", () => {
         "RepositoryOwner.repository and User.repository in $on need the same $args",
       ),
     );
+    // Equal arguments in another order select the same thing.
+    expect(
+      graphqlRequest(
+        "Query",
+        "repositoryOwner",
+        { login: "example" },
+        {
+          repository: { $args: { name: "one", followRenames: true }, name: true },
+          $on: { User: { repository: { $args: { followRenames: true, name: "one" }, id: true } } },
+        },
+      ).query,
+    ).toContain("repository__on__User: repository(");
   });
 });
