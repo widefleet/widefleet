@@ -4,6 +4,7 @@
 //   pnpm --filter @platform/template-generator generate gmail
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Environment as TemplateEnvironment } from "./context.ts";
+import type { UploadContent } from "./content.ts";
 import type { GmailResult } from "./results.ts";
 import { type GmailProperties, run } from "./run.ts";
 import type { Exact, JsonObject, Selection, ValueResult } from "./selection.ts";
@@ -1187,6 +1188,35 @@ export class GmailApi extends WorkerEntrypoint<TemplateEnvironment, GmailPropert
   }
 
   /**
+   * Creates a draft with the `DRAFT` label. For more information, see [Create and send draft emails](https://developers.google.com/workspace/gmail/api/guides/drafts).
+   *
+   * Sends the metadata and the content in one upload.
+   *
+   * Asks the user first when their approval level is `all_changes`.
+   *
+   * @param input - The arguments:
+   * - `userId`: The user's email address. The special value `me` can be used to indicate the authenticated user.
+   * - `body`: The file's metadata, a `Draft`.
+   * - `content`: The file's content: its `mimeType`, and `text` or `base64` bytes.
+   * @param select - The fields of `Draft` to return.
+   */
+  async draftsCreateWithContent<S extends Selection<Draft>>(
+    input: {
+      /**
+       * The user's email address. The special value `me` can be used to indicate the authenticated user.
+       */
+      userId?: string;
+      /** The file's metadata. */
+      body?: Draft;
+      /** The file's content, as text or base64. */
+      content: UploadContent;
+    },
+    select: S & Exact<S, Selection<Draft>>,
+  ): Promise<GmailResult<ValueResult<Draft, S>>> {
+    return run(this.env, this.ctx.props, "draftsCreateWithContent", input, select);
+  }
+
+  /**
    * Lists the drafts in the user's mailbox. For more information, see [Create and send draft emails](https://developers.google.com/workspace/gmail/api/guides/drafts).
    *
    * @param input - The arguments:
@@ -1279,6 +1309,35 @@ export class GmailApi extends WorkerEntrypoint<TemplateEnvironment, GmailPropert
   }
 
   /**
+   * Sends the specified, existing draft to the recipients in the `To`, `Cc`, and `Bcc` headers. For more information, see [Create and send draft emails](https://developers.google.com/workspace/gmail/api/guides/drafts).
+   *
+   * Sends the metadata and the content in one upload.
+   *
+   * Asks the user first unless their approval level is `none`.
+   *
+   * @param input - The arguments:
+   * - `userId`: The user's email address. The special value `me` can be used to indicate the authenticated user.
+   * - `body`: The file's metadata, a `Draft`.
+   * - `content`: The file's content: its `mimeType`, and `text` or `base64` bytes.
+   * @param select - The fields of `Message` to return.
+   */
+  async draftsSendWithContent<S extends Selection<Message>>(
+    input: {
+      /**
+       * The user's email address. The special value `me` can be used to indicate the authenticated user.
+       */
+      userId?: string;
+      /** The file's metadata. */
+      body?: Draft;
+      /** The file's content, as text or base64. */
+      content: UploadContent;
+    },
+    select: S & Exact<S, Selection<Message>>,
+  ): Promise<GmailResult<ValueResult<Message, S>>> {
+    return run(this.env, this.ctx.props, "draftsSendWithContent", input, select);
+  }
+
+  /**
    * Replaces a draft's content. For more information, see [Create and send draft emails](https://developers.google.com/workspace/gmail/api/guides/drafts).
    *
    * Asks the user first unless their approval level is `none`.
@@ -1305,6 +1364,40 @@ export class GmailApi extends WorkerEntrypoint<TemplateEnvironment, GmailPropert
     select: S & Exact<S, Selection<Draft>>,
   ): Promise<GmailResult<ValueResult<Draft, S>>> {
     return run(this.env, this.ctx.props, "draftsUpdate", input, select);
+  }
+
+  /**
+   * Replaces a draft's content. For more information, see [Create and send draft emails](https://developers.google.com/workspace/gmail/api/guides/drafts).
+   *
+   * Sends the metadata and the content in one upload.
+   *
+   * Asks the user first unless their approval level is `none`.
+   *
+   * @param input - The arguments:
+   * - `userId`: The user's email address. The special value `me` can be used to indicate the authenticated user.
+   * - `id`: The ID of the draft to update.
+   * - `body`: The file's metadata, a `Draft`.
+   * - `content`: The file's content: its `mimeType`, and `text` or `base64` bytes.
+   * @param select - The fields of `Draft` to return.
+   */
+  async draftsUpdateWithContent<S extends Selection<Draft>>(
+    input: {
+      /**
+       * The user's email address. The special value `me` can be used to indicate the authenticated user.
+       */
+      userId?: string;
+      /**
+       * The ID of the draft to update.
+       */
+      id: string;
+      /** The file's metadata. */
+      body?: Draft;
+      /** The file's content, as text or base64. */
+      content: UploadContent;
+    },
+    select: S & Exact<S, Selection<Draft>>,
+  ): Promise<GmailResult<ValueResult<Draft, S>>> {
+    return run(this.env, this.ctx.props, "draftsUpdateWithContent", input, select);
   }
 
   /**
@@ -1577,6 +1670,55 @@ export class GmailApi extends WorkerEntrypoint<TemplateEnvironment, GmailPropert
   }
 
   /**
+   * Imports a message into only this user's mailbox, with standard email delivery scanning and classification similar to receiving via SMTP. This method doesn't perform SPF checks, so it might not work for some spam messages, such as those attempting to perform domain spoofing. This method does not send a message. Note that the maximum size of the message is 150 MB.
+   *
+   * Sends the metadata and the content in one upload.
+   *
+   * Asks the user first when their approval level is `all_changes`.
+   *
+   * @param input - The arguments:
+   * - `deleted`: Mark the email as permanently deleted (not TRASH) and only visible in Google Vault to a Vault administrator. Only used for Google Workspace accounts.
+   * - `processForCalendar`: Process calendar invites in the email and add any extracted meetings to the Google Calendar for this user.
+   * - `userId`: The user's email address. The special value `me` can be used to indicate the authenticated user.
+   * - `neverMarkSpam`: Ignore the Gmail spam classifier decision and never mark this email as SPAM in the mailbox.
+   * - `internalDateSource`: Source for Gmail's internal date of the message.
+   * - `body`: The file's metadata, a `Message`.
+   * - `content`: The file's content: its `mimeType`, and `text` or `base64` bytes.
+   * @param select - The fields of `Message` to return.
+   */
+  async messagesImportWithContent<S extends Selection<Message>>(
+    input: {
+      /**
+       * Mark the email as permanently deleted (not TRASH) and only visible in Google Vault to a Vault administrator. Only used for Google Workspace accounts.
+       */
+      deleted?: boolean;
+      /**
+       * Process calendar invites in the email and add any extracted meetings to the Google Calendar for this user.
+       */
+      processForCalendar?: boolean;
+      /**
+       * The user's email address. The special value `me` can be used to indicate the authenticated user.
+       */
+      userId?: string;
+      /**
+       * Ignore the Gmail spam classifier decision and never mark this email as SPAM in the mailbox.
+       */
+      neverMarkSpam?: boolean;
+      /**
+       * Source for Gmail's internal date of the message.
+       */
+      internalDateSource?: "receivedTime" | "dateHeader";
+      /** The file's metadata. */
+      body?: Message;
+      /** The file's content, as text or base64. */
+      content: UploadContent;
+    },
+    select: S & Exact<S, Selection<Message>>,
+  ): Promise<GmailResult<ValueResult<Message, S>>> {
+    return run(this.env, this.ctx.props, "messagesImportWithContent", input, select);
+  }
+
+  /**
    * Removes the specified message from the trash.
    *
    * Asks the user first unless their approval level is `none`.
@@ -1673,6 +1815,35 @@ export class GmailApi extends WorkerEntrypoint<TemplateEnvironment, GmailPropert
   }
 
   /**
+   * Sends the specified message to the recipients in the `To`, `Cc`, and `Bcc` headers. For more information, see [Create and send email messages](https://developers.google.com/workspace/gmail/api/guides/sending).
+   *
+   * Sends the metadata and the content in one upload.
+   *
+   * Asks the user first unless their approval level is `none`.
+   *
+   * @param input - The arguments:
+   * - `userId`: The user's email address. The special value `me` can be used to indicate the authenticated user.
+   * - `body`: The file's metadata, a `Message`.
+   * - `content`: The file's content: its `mimeType`, and `text` or `base64` bytes.
+   * @param select - The fields of `Message` to return.
+   */
+  async messagesSendWithContent<S extends Selection<Message>>(
+    input: {
+      /**
+       * The user's email address. The special value `me` can be used to indicate the authenticated user.
+       */
+      userId?: string;
+      /** The file's metadata. */
+      body?: Message;
+      /** The file's content, as text or base64. */
+      content: UploadContent;
+    },
+    select: S & Exact<S, Selection<Message>>,
+  ): Promise<GmailResult<ValueResult<Message, S>>> {
+    return run(this.env, this.ctx.props, "messagesSendWithContent", input, select);
+  }
+
+  /**
    * Directly inserts a message into only this user's mailbox similar to `IMAP APPEND`, bypassing most scanning and classification. Does not send a message. For more information, see [Create and send email messages](https://developers.google.com/workspace/gmail/api/guides/sending).
    *
    * Asks the user first when their approval level is `all_changes`.
@@ -1704,6 +1875,45 @@ export class GmailApi extends WorkerEntrypoint<TemplateEnvironment, GmailPropert
     select: S & Exact<S, Selection<Message>>,
   ): Promise<GmailResult<ValueResult<Message, S>>> {
     return run(this.env, this.ctx.props, "messagesInsert", input, select);
+  }
+
+  /**
+   * Directly inserts a message into only this user's mailbox similar to `IMAP APPEND`, bypassing most scanning and classification. Does not send a message. For more information, see [Create and send email messages](https://developers.google.com/workspace/gmail/api/guides/sending).
+   *
+   * Sends the metadata and the content in one upload.
+   *
+   * Asks the user first when their approval level is `all_changes`.
+   *
+   * @param input - The arguments:
+   * - `internalDateSource`: Source for Gmail's internal date of the message.
+   * - `deleted`: Mark the email as permanently deleted (not TRASH) and only visible in Google Vault to a Vault administrator. Only used for Google Workspace accounts.
+   * - `userId`: The user's email address. The special value `me` can be used to indicate the authenticated user.
+   * - `body`: The file's metadata, a `Message`.
+   * - `content`: The file's content: its `mimeType`, and `text` or `base64` bytes.
+   * @param select - The fields of `Message` to return.
+   */
+  async messagesInsertWithContent<S extends Selection<Message>>(
+    input: {
+      /**
+       * Source for Gmail's internal date of the message.
+       */
+      internalDateSource?: "receivedTime" | "dateHeader";
+      /**
+       * Mark the email as permanently deleted (not TRASH) and only visible in Google Vault to a Vault administrator. Only used for Google Workspace accounts.
+       */
+      deleted?: boolean;
+      /**
+       * The user's email address. The special value `me` can be used to indicate the authenticated user.
+       */
+      userId?: string;
+      /** The file's metadata. */
+      body?: Message;
+      /** The file's content, as text or base64. */
+      content: UploadContent;
+    },
+    select: S & Exact<S, Selection<Message>>,
+  ): Promise<GmailResult<ValueResult<Message, S>>> {
+    return run(this.env, this.ctx.props, "messagesInsertWithContent", input, select);
   }
 
   /**

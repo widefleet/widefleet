@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { approvalAnswer, approvals, asks, changeQuestion } from "./approval.ts";
+import { binaryContent } from "./content.ts";
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { googleErrorOf, googleRequest } from "./google.ts";
@@ -11,7 +12,7 @@ import {
   maximumResponseBytes,
 } from "./input.ts";
 import type { GoogleCalendarResult } from "./results.ts";
-import { base, operations } from "./schema.ts";
+import { base, type Operation, operations } from "./schema.ts";
 
 /** Props of a call, with the user's answer when Widefleet calls again after a question. */
 export type GoogleCalendarProperties = Properties & { input?: z.input<typeof approvalAnswer> };
@@ -31,7 +32,7 @@ export const run = async <T>(
   input: Arguments,
   select?: FieldSelection,
 ): Promise<GoogleCalendarResult<T>> => {
-  const operation = operations[method];
+  const operation: Operation = operations[method];
   const request = googleRequest(base, method, operation, input, select);
   const connection = accountConnection(environment, properties);
 
@@ -66,6 +67,16 @@ export const run = async <T>(
 
   if (response.status === 401) return { status: "reconnect_required", connectUrl };
 
+  // A file's content, up to the size results can carry.
+  if (operation.response === "content" && response.ok) {
+    const content = await binaryContent(response);
+
+    // SAFETY: the generated signature types content results as BinaryContent.
+    return content
+      ? { status: "connected", data: content as T }
+      : { status: "too_large", maximumBytes: maximumResponseBytes };
+  }
+
   const read = await boundedJson(response);
 
   if (read.status === "too_large")
@@ -75,7 +86,7 @@ export const run = async <T>(
   if (response.ok)
     // SAFETY: Google Calendar answered the request written from this method's selection,
     // which its generated signature types as T.
-    return { status: "connected", data: (operation.response ? body : null) as T };
+    return { status: "connected", data: (operation.response === "json" ? body : null) as T };
 
   const error = googleErrorOf(body);
 

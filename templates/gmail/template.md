@@ -91,6 +91,11 @@ fields it has no value for; they are `undefined` in the result. See `src/api.ts`
 every method, its input and Google's description. Treat email HTML as untrusted
 content.
 
+Methods that accept uploads also have a `...WithContent` method, such as
+`messagesSendWithContent`, which sends the message as MIME in `content`:
+`{ mimeType: "message/rfc822", text }`, or `base64` for bytes. It asks like the method
+it extends.
+
 `scripts/operations.ts` lists the methods that are not offered, with the reason:
 managing delegates, forwarding addresses, send-as aliases and auto-forwarding needs a
 service account with domain-wide delegation.

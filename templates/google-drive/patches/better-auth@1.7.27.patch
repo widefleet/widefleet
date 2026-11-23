@@ -1,0 +1,292 @@
+diff --git a/dist/api/routes/account.mjs b/dist/api/routes/account.mjs
+index 189509d3331c3fb618dbbff205c11f312de8db84..d29a1bab579e5b9e8178ee4ed9868a7254854431 100644
+--- a/dist/api/routes/account.mjs
++++ b/dist/api/routes/account.mjs
+@@ -248,7 +248,7 @@ const linkSocialAccount = createAuthEndpoint("/link-social", {
+ 		link: {
+ 			userId: session.user.id,
+ 			email: session.user.email,
+-			encryptedSessionToken: await symmetricEncrypt({
++			encryptedSessionToken: c.context.options.keys ? await c.context.options.keys.encrypt(session.session.token) : await symmetricEncrypt({
+ 				key: derivePurposeKey(c.context.secretConfig, "oauth-link-session-token"),
+ 				data: session.session.token
+ 			})
+diff --git a/dist/api/routes/session.mjs b/dist/api/routes/session.mjs
+index 238eecac64d513428c26febb6b8a752c9b36b570..65b37d41dbb01b206d8f7cbec34f2d401d02830d 100644
+--- a/dist/api/routes/session.mjs
++++ b/dist/api/routes/session.mjs
+@@ -8,6 +8,7 @@ import { getShouldSkipSessionRefresh } from "../state/should-session-refresh.mjs
+ import { APIError, BASE_ERROR_CODES } from "@better-auth/core/error";
+ import { createAuthEndpoint, createAuthMiddleware } from "@better-auth/core/api";
+ import * as z from "zod";
++import { getSignedAuthCookie, setSignedAuthCookie } from "../../cookies/signed.mjs";
+ // src/api/routes/session.ts
+ const getSession = () => createAuthEndpoint("/get-session", {
+ 	method: ["GET", "POST"],
+@@ -39,7 +40,7 @@ const getSession = () => createAuthEndpoint("/get-session", {
+ 	if (isPostRequest && !deferSessionRefresh) throw APIError.from("METHOD_NOT_ALLOWED", BASE_ERROR_CODES.METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED);
+ 	try {
+ 		const cookieCacheEnabled = ctx.context.options.session?.cookieCache?.enabled === true;
+-		const sessionCookieToken = await ctx.getSignedCookie(ctx.context.authCookies.sessionToken.name, ctx.context.secret);
++		const sessionCookieToken = await getSignedAuthCookie(ctx, ctx.context.authCookies.sessionToken.name);
+ 		if (!sessionCookieToken && cookieCacheEnabled) return null;
+ 		const sessionDataCookie = getChunkedCookie(ctx, ctx.context.authCookies.sessionData.name);
+ 		if (sessionDataCookie && !cookieCacheEnabled) {
+@@ -50,7 +51,7 @@ const getSession = () => createAuthEndpoint("/get-session", {
+ 		const shouldUseCookieCache = cookieCacheEnabled && !ctx.query?.disableCookieCache;
+ 		const sessionDataPayload = shouldUseCookieCache && sessionDataCookie ? await decodeCookieCache(ctx, sessionDataCookie) : null;
+ 		if (shouldUseCookieCache && sessionDataCookie && !sessionDataPayload) expireCookie(ctx, ctx.context.authCookies.sessionData);
+-		const dontRememberMe = await ctx.getSignedCookie(ctx.context.authCookies.dontRememberToken.name, ctx.context.secret);
++		const dontRememberMe = await getSignedAuthCookie(ctx, ctx.context.authCookies.dontRememberToken.name);
+ 		/**
+ 		* If session data is present in the cookie, check if it should be used or refreshed
+ 		*/
+@@ -107,7 +108,7 @@ const getSession = () => createAuthEndpoint("/get-session", {
+ 					await setCookieCache(ctx, refreshedSession, false);
+ 					const sessionTokenOptions = ctx.context.authCookies.sessionToken.attributes;
+ 					const sessionTokenMaxAge = dontRememberMe ? void 0 : ctx.context.sessionConfig.expiresIn;
+-					await ctx.setSignedCookie(ctx.context.authCookies.sessionToken.name, session.session.token, ctx.context.secret, {
++					await setSignedAuthCookie(ctx, ctx.context.authCookies.sessionToken.name, session.session.token, {
+ 						...sessionTokenOptions,
+ 						maxAge: sessionTokenMaxAge
+ 					});
+diff --git a/dist/api/routes/sign-out.mjs b/dist/api/routes/sign-out.mjs
+index 1b78e952b297834f0f84ad5f65fc607f8e3ff198..c233a007b2e5e3baa7e7dfd00819cf790c076fa2 100644
+--- a/dist/api/routes/sign-out.mjs
++++ b/dist/api/routes/sign-out.mjs
+@@ -1,6 +1,7 @@
+ import { deleteSessionCookie } from "../../cookies/index.mjs";
+ import { createAuthEndpoint } from "@better-auth/core/api";
+ import * as z from "zod";
++import { getSignedAuthCookie } from "../../cookies/signed.mjs";
+ // src/api/routes/sign-out.ts
+ const signOutBodySchema = z.object({
+ 	callbackURL: z.string().meta({ description: "The URL to redirect to after provider logout" }).optional(),
+@@ -39,7 +40,7 @@ const signOut = createAuthEndpoint("/sign-out", {
+ 		} }
+ 	} }
+ }, async (ctx) => {
+-	const sessionCookieToken = await ctx.getSignedCookie(ctx.context.authCookies.sessionToken.name, ctx.context.secret);
++	const sessionCookieToken = await getSignedAuthCookie(ctx, ctx.context.authCookies.sessionToken.name);
+ 	let currentSession = null;
+ 	if (sessionCookieToken) try {
+ 		currentSession = await ctx.context.internalAdapter.findSession(sessionCookieToken);
+diff --git a/dist/context/create-context.mjs b/dist/context/create-context.mjs
+index 8be86cf61e21b58618c4c4088304046821d7cac2..a9a39d863f1608366ad5006437d6ad897df51e3d 100644
+--- a/dist/context/create-context.mjs
++++ b/dist/context/create-context.mjs
+@@ -76,8 +76,11 @@ Most of the features of Better Auth will not work correctly.`);
+ 		secret = secretsArray[0].value;
+ 		secretConfig = buildSecretConfig(secretsArray, legacySecret);
+ 	} else {
+-		secret = legacySecret || "better-auth-secret-12345678901234567890";
+-		validateSecret(secret, logger);
++		// With external key operations and no secret, features that still need a
++		// secret get one that changes per instance: they fail instead of signing
++		// with a well-known default.
++		secret = legacySecret || (options.keys ? Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) => byte.toString(16).padStart(2, "0")).join("") : "better-auth-secret-12345678901234567890");
++		if (legacySecret || !options.keys) validateSecret(secret, logger);
+ 		secretConfig = secret;
+ 	}
+ 	options = {
+diff --git a/dist/cookies/index.mjs b/dist/cookies/index.mjs
+index 0e1986f884a255a6fdda4102d740c2a37e9b2da0..c6d444462586d5d6b398544f751dfe1f844ab867 100644
+--- a/dist/cookies/index.mjs
++++ b/dist/cookies/index.mjs
+@@ -16,6 +16,7 @@ import { filterOutputFields } from "@better-auth/core/utils/db";
+ import { base64Url } from "@better-auth/utils/base64";
+ import { binary } from "@better-auth/utils/binary";
+ import { createHMAC } from "@better-auth/utils/hmac";
++import { getSignedAuthCookie, setSignedAuthCookie } from "./signed.mjs";
+ // src/cookies/index.ts
+ function createCookieGetter(options) {
+ 	const baseURLString = typeof options.baseURL === "string" ? options.baseURL : void 0;
+@@ -167,16 +168,16 @@ async function decodeCookieCache(ctx, value) {
+ 	} : null;
+ }
+ async function setSessionCookie(ctx, session, dontRememberMe, overrides) {
+-	const dontRememberMeCookie = await ctx.getSignedCookie(ctx.context.authCookies.dontRememberToken.name, ctx.context.secret);
++	const dontRememberMeCookie = await getSignedAuthCookie(ctx, ctx.context.authCookies.dontRememberToken.name);
+ 	dontRememberMe = dontRememberMe !== void 0 ? dontRememberMe : !!dontRememberMeCookie;
+ 	const options = ctx.context.authCookies.sessionToken.attributes;
+ 	const maxAge = dontRememberMe ? void 0 : ctx.context.sessionConfig.expiresIn;
+-	await ctx.setSignedCookie(ctx.context.authCookies.sessionToken.name, session.session.token, ctx.context.secret, {
++	await setSignedAuthCookie(ctx, ctx.context.authCookies.sessionToken.name, session.session.token, {
+ 		...options,
+ 		maxAge,
+ 		...overrides
+ 	});
+-	if (dontRememberMe) await ctx.setSignedCookie(ctx.context.authCookies.dontRememberToken.name, "true", ctx.context.secret, ctx.context.authCookies.dontRememberToken.attributes);
++	if (dontRememberMe) await setSignedAuthCookie(ctx, ctx.context.authCookies.dontRememberToken.name, "true", ctx.context.authCookies.dontRememberToken.attributes);
+ 	else if (dontRememberMeCookie) expireCookie(ctx, ctx.context.authCookies.dontRememberToken);
+ 	await setCookieCache(ctx, session, dontRememberMe);
+ 	ctx.context.setNewSession(session);
+diff --git a/dist/cookies/signed.mjs b/dist/cookies/signed.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..4972da7d8d3b37d19abc65cfff00f0ec040a712c
+--- /dev/null
++++ b/dist/cookies/signed.mjs
+@@ -0,0 +1,26 @@
++//#region src/cookies/signed.ts
++/**
++* Set a signed cookie. With the `keys` option, the signature comes from the
++* configured key operations, and the secret is not used.
++*/
++async function setSignedAuthCookie(ctx, name, value, attributes) {
++	const keys = ctx.context.options.keys;
++	if (!keys) return ctx.setSignedCookie(name, value, ctx.context.secret, attributes);
++	return ctx.setCookie(name, `${value}.${await keys.sign(value)}`, attributes);
++}
++/**
++* Read a signed cookie: its value, `null` when it is missing or malformed, or
++* `false` when its signature is invalid, as `getSignedCookie` returns.
++*/
++async function getSignedAuthCookie(ctx, name) {
++	const keys = ctx.context.options.keys;
++	if (!keys) return ctx.getSignedCookie(name, ctx.context.secret);
++	const cookie = ctx.getCookie(name);
++	if (!cookie) return null;
++	const separator = cookie.lastIndexOf(".");
++	if (separator < 1) return null;
++	const value = cookie.substring(0, separator);
++	return await keys.verify(value, cookie.substring(separator + 1)) ? value : false;
++}
++//#endregion
++export { getSignedAuthCookie, setSignedAuthCookie };
+diff --git a/dist/oauth2/link-account.mjs b/dist/oauth2/link-account.mjs
+index a915cc838203812f498dfe8d99cc02f45ce36cd2..0fd687299fcfc8692218b66c3d84ff3d99f2435d 100644
+--- a/dist/oauth2/link-account.mjs
++++ b/dist/oauth2/link-account.mjs
+@@ -29,10 +29,11 @@ function linkOAuthAccountFailure(code, message) {
+ */
+ async function isLinkSessionLive(c, link) {
+ 	if (!link.encryptedSessionToken || !isStateful(c)) return true;
+-	const sessionToken = await symmetricDecrypt({
++	const keys = c.context.options.keys;
++	const sessionToken = await (keys ? keys.decrypt(link.encryptedSessionToken) : symmetricDecrypt({
+ 		key: derivePurposeKey(c.context.secretConfig, "oauth-link-session-token"),
+ 		data: link.encryptedSessionToken
+-	}).catch(() => null);
++	})).catch(() => null);
+ 	if (!sessionToken) return false;
+ 	const source = await c.context.internalAdapter.findSession(sessionToken);
+ 	if (!source) return false;
+diff --git a/dist/oauth2/utils.mjs b/dist/oauth2/utils.mjs
+index fba0974295a79c3b3778a4e129b757003cdcb1a0..46a3978c0294758f2ebf4b2969ab543c7d35b0e7 100644
+--- a/dist/oauth2/utils.mjs
++++ b/dist/oauth2/utils.mjs
+@@ -10,6 +10,7 @@ function isLikelyEncrypted(token) {
+ function decryptOAuthToken(token, ctx) {
+ 	if (!token) return token;
+ 	if (ctx.options.account?.encryptOAuthTokens) {
++		if (ctx.options.keys) return ctx.options.keys.decrypt(token);
+ 		if (!isLikelyEncrypted(token)) return token;
+ 		return symmetricDecrypt({
+ 			key: ctx.secretConfig,
+@@ -19,7 +20,7 @@ function decryptOAuthToken(token, ctx) {
+ 	return token;
+ }
+ function setTokenUtil(token, ctx) {
+-	if (ctx.options.account?.encryptOAuthTokens && token) return symmetricEncrypt({
++	if (ctx.options.account?.encryptOAuthTokens && token) return ctx.options.keys ? ctx.options.keys.encrypt(token) : symmetricEncrypt({
+ 		key: ctx.secretConfig,
+ 		data: token
+ 	});
+diff --git a/dist/plugins/device-authorization/index.d.mts b/dist/plugins/device-authorization/index.d.mts
+index f725a9ddf49f698163cab77b9b21fd349abb74f2..d53bd6801749472d4fd5f63d38e9cf8d43dc4d71 100644
+--- a/dist/plugins/device-authorization/index.d.mts
++++ b/dist/plugins/device-authorization/index.d.mts
+@@ -86,6 +86,11 @@ export interface DeviceAuthorizationGrant<RequestFields extends z.ZodRawShape =
+     ctx: GenericEndpointContext;
+     request: DeviceAuthorizationRequest & z.infer<z.ZodObject<RequestFields>>;
+   }) => DeviceAuthorizationGrantAuthorization | undefined | Promise<DeviceAuthorizationGrantAuthorization | undefined>;
++  /** Capture grant-owned context in the same update that approves the code. */
++  prepareApproval?: (input: {
++    ctx: GenericEndpointContext;
++    deviceCode: Record<string, unknown>;
++  }) => Record<string, unknown> | Promise<Record<string, unknown>>;
+   /** Refuse the standalone session-token endpoint for grant-owned codes. */
+   assertSessionRedemption: (input: {
+     ctx: GenericEndpointContext;
+diff --git a/dist/plugins/device-authorization/index.mjs b/dist/plugins/device-authorization/index.mjs
+index 0ce48b4af40ce973d81c3bba709aaa0083ca1952..8cb0f13d93d16d328010c68537712f6786e51141 100644
+--- a/dist/plugins/device-authorization/index.mjs
++++ b/dist/plugins/device-authorization/index.mjs
+@@ -67,7 +67,7 @@ const deviceAuthorization = (options = {}) => {
+ 			deviceCode: deviceCode(opts, grant),
+ 			deviceToken: deviceToken(opts, grant),
+ 			deviceVerify: deviceVerify(grant),
+-			deviceApprove,
++			deviceApprove: deviceApprove(grant),
+ 			deviceDeny
+ 		},
+ 		rateLimit: [{
+diff --git a/dist/plugins/device-authorization/routes.mjs b/dist/plugins/device-authorization/routes.mjs
+index 3167f911f34d70427ba8fd194a3e16d48ea4b67b..b9122b44e2ea68ebf037278137ede8c3fdb28570 100644
+--- a/dist/plugins/device-authorization/routes.mjs
++++ b/dist/plugins/device-authorization/routes.mjs
+@@ -579,7 +579,7 @@ const deviceVerify = (grant) => createAuthEndpoint("/device", {
+ 	};
+ 	return ctx.json(response);
+ });
+-const deviceApprove = createAuthEndpoint("/device/approve", {
++const deviceApprove = (grant) => createAuthEndpoint("/device/approve", {
+ 	method: "POST",
+ 	body: z.object({ userCode: z.string().meta({ description: "The user code to approve" }) }),
+ 	error: z.object({
+@@ -631,17 +631,23 @@ const deviceApprove = createAuthEndpoint("/device/approve", {
+ 		error: "access_denied",
+ 		error_description: "You are not authorized to approve this device authorization"
+ 	});
+-	await ctx.context.adapter.update({
++	const approval = await grant?.prepareApproval?.({ ctx, deviceCode: deviceCodeRecord });
++	const updated = await ctx.context.adapter.update({
+ 		model: "deviceCode",
+ 		where: [{
+ 			field: "id",
+ 			value: deviceCodeRecord.id
+-		}],
++		}, { field: "status", value: "pending" }],
+ 		update: {
++			...approval,
+ 			status: "approved",
+ 			userId: session.user.id
+ 		}
+ 	});
++	if (!updated) throw new APIError("BAD_REQUEST", {
++		error: "invalid_request",
++		error_description: DEVICE_AUTHORIZATION_ERROR_CODES.DEVICE_CODE_ALREADY_PROCESSED.message
++	});
+ 	return ctx.json({ success: true });
+ });
+ const deviceDeny = createAuthEndpoint("/device/deny", {
+diff --git a/dist/state.mjs b/dist/state.mjs
+index f04916ba0bceb276e138405cac94d11fe2be97a4..b37a0d204a0b6b0a8f4117d4532b622b3eb6c952 100644
+--- a/dist/state.mjs
++++ b/dist/state.mjs
+@@ -5,6 +5,7 @@ import { derivePurposeKey } from "./crypto/purpose.mjs";
+ import { BetterAuthError } from "@better-auth/core/error";
+ import * as z from "zod";
+ import { getAuthStateVerificationIdentifier } from "@better-auth/core/utils/state";
++import { getSignedAuthCookie, setSignedAuthCookie } from "./cookies/signed.mjs";
+ // src/state.ts
+ const stateDataSchema = z.looseObject({
+ 	callbackURL: z.string(),
+@@ -73,7 +74,7 @@ async function generateGenericState(c, stateData, settings) {
+ 		};
+ 	}
+ 	const stateCookie = c.context.createAuthCookie(settings?.cookieName ?? "state", { maxAge: 300 });
+-	await c.setSignedCookie(stateCookie.name, state, c.context.secret, stateCookie.attributes);
++	await setSignedAuthCookie(c, stateCookie.name, state, stateCookie.attributes);
+ 	const expiresAt = new Date(Date.now() + 6e5);
+ 	if (!await c.context.internalAdapter.createVerificationValue({
+ 		value: JSON.stringify({
+@@ -131,7 +132,7 @@ async function parseGenericState(c, state, settings) {
+ 			errorURL: parsedData.errorURL
+ 		});
+ 		const stateCookie = c.context.createAuthCookie(settings?.cookieName ?? "state");
+-		const stateCookieValue = await c.getSignedCookie(stateCookie.name, c.context.secret);
++		const stateCookieValue = await getSignedAuthCookie(c, stateCookie.name);
+ 		if (!(settings?.skipStateCookieCheck ?? c.context.oauthConfig.skipStateCookieCheck) && (!stateCookieValue || stateCookieValue !== state)) throw new StateError("State mismatch: State not persisted correctly", {
+ 			code: "state_security_mismatch",
+ 			details: { state },

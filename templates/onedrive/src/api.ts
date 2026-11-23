@@ -4,7 +4,7 @@
 //   pnpm --filter @platform/template-generator generate onedrive
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Environment as TemplateEnvironment } from "./context.ts";
-import type { BinaryContent } from "./rest.ts";
+import type { BinaryContent } from "./content.ts";
 import type { OneDriveResult } from "./results.ts";
 import { type OneDriveProperties, run } from "./run.ts";
 

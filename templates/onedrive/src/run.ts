@@ -3,7 +3,8 @@ import { approvalAnswer, approvals, asks, changeQuestion } from "./approval.ts";
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { type Arguments, boundedJson, definedJson, maximumResponseBytes } from "./input.ts";
-import { binaryContent, restRequest } from "./rest.ts";
+import { binaryContent } from "./content.ts";
+import { restRequest } from "./rest.ts";
 import type { OneDriveResult } from "./results.ts";
 import { base, operations } from "./schema.ts";
 

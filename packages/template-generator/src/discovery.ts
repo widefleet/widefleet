@@ -25,6 +25,11 @@ export interface DiscoveryRules {
    * required, by method ID, such as Sheets' `valueInputOption` for writes.
    */
   required?: Readonly<Record<string, readonly string[]>> | undefined;
+  /**
+   * Map fields, as `Schema.field`, whose entries may be null, which Google
+   * documents in prose: Drive removes a file property set to null.
+   */
+  nullableValues?: readonly string[] | undefined;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -51,6 +56,7 @@ const schema: z.ZodType<Schema> = z.lazy(() =>
     properties: z.record(z.string(), schema).optional(),
     additionalProperties: schema.optional(),
     readOnly: z.boolean().optional(),
+    nullable: z.boolean().optional(),
     deprecated: z.boolean().optional(),
   }),
 );
@@ -66,6 +72,8 @@ interface Schema {
   properties?: Record<string, Schema> | undefined;
   additionalProperties?: Schema | undefined;
   readOnly?: boolean | undefined;
+  /** Set by the rules' `nullableValues`: null is a value, for example to remove an entry. */
+  nullable?: boolean | undefined;
   deprecated?: boolean | undefined;
 }
 
@@ -91,6 +99,14 @@ const method = z.looseObject({
   response: z.object({ $ref: z.string() }).optional(),
   scopes: z.array(z.string()).optional(),
   deprecated: z.boolean().optional(),
+  supportsMediaDownload: z.boolean().optional(),
+  mediaUpload: z
+    .looseObject({
+      protocols: z.looseObject({
+        simple: z.looseObject({ path: z.string(), multipart: z.boolean().optional() }).optional(),
+      }),
+    })
+    .optional(),
 });
 
 type Method = z.infer<typeof method>;
@@ -123,7 +139,12 @@ export type DiscoveryOperation = {
   /** Query parameters the method needs. */
   requiredParameters: string[];
   body: boolean;
-  response: boolean;
+  /** A JSON result, the file's content, or none. */
+  response: "json" | "content" | null;
+  /** Whether `alt=media` asks for the content instead of the metadata. */
+  altMedia: boolean;
+  /** The path that receives an upload of metadata and content, for `...WithContent` methods. */
+  upload: string | null;
   change: Change | null;
 };
 
@@ -135,7 +156,10 @@ const parameterSchema = (value: z.infer<typeof parameter>): Schema => ({
 });
 
 // TypeScript for a Discovery schema. 64-bit integers and bytes travel as strings.
-const typeOf = (value: Schema, indent: string): string => {
+const typeOf = (value: Schema, indent: string): string =>
+  value.nullable ? `${valueType(value, indent)} | null` : valueType(value, indent);
+
+const valueType = (value: Schema, indent: string): string => {
   if (value.$ref) return identifier(value.$ref);
 
   if (value.enum) return value.enum.map((entry) => JSON.stringify(entry)).join(" | ");
@@ -240,14 +264,23 @@ const changes = z.enum(["create", "update", "delete", "send"]);
 
 export const generateDiscovery = (
   source: string,
-  { operations, scopes, required: requiredByRules = {} }: DiscoveryRules,
+  { operations, scopes, required: requiredByRules = {}, nullableValues = [] }: DiscoveryRules,
   service: DiscoveryService,
   header: string,
 ): GeneratedFiles => {
   const api = document.parse(JSON.parse(source));
+  const problems: string[] = [];
+
+  for (const path of nullableValues) {
+    const [schemaName = "", field = ""] = path.split(".");
+    const entries = api.schemas[schemaName]?.properties?.[field]?.additionalProperties;
+
+    if (entries) entries.nullable = true;
+    else problems.push(`The rules name map field ${path}, which the API does not have`);
+  }
+
   const all = collect(api.resources).filter((entry) => !entry.deprecated);
   const rules = new Map(Object.entries(operations));
-  const problems: string[] = [];
 
   for (const id of rules.keys())
     if (!all.some((entry) => entry.id === id))
@@ -272,11 +305,35 @@ export const generateDiscovery = (
   });
 
   const names = methodNames(offered);
+
+  // Methods that read file content get a `...Content` method, or return the
+  // content when they have no other result; methods that accept uploads get a
+  // `...WithContent` method that sends metadata and content together.
+  const specs = offered.flatMap((entry, index) => {
+    const name = names[index] ?? entry.id;
+
+    const upload = entry.mediaUpload?.protocols.simple?.multipart
+      ? entry.mediaUpload.protocols.simple.path
+      : null;
+
+    return [
+      {
+        entry,
+        name,
+        variant: entry.supportsMediaDownload && !entry.response ? "content" : "plain",
+      },
+      ...(entry.supportsMediaDownload && entry.response
+        ? [{ entry, name: `${name}Content`, variant: "content" }]
+        : []),
+      ...(upload ? [{ entry, name: `${name}WithContent`, variant: "upload" }] : []),
+    ] as const;
+  });
+
   const taken = new Set<string>();
 
-  for (const [index, name] of names.entries()) {
+  for (const { entry, name } of specs) {
     if (reservedMethod(name) || taken.has(name))
-      problems.push(`${offered[index]?.id} becomes method ${name}, which is taken`);
+      problems.push(`${entry.id} becomes method ${name}, which is taken`);
     taken.add(name);
   }
 
@@ -299,8 +356,7 @@ export const generateDiscovery = (
 
   const runtime: Record<string, DiscoveryOperation> = {};
 
-  const methods = offered.map((entry, index) => {
-    const name = names[index] ?? entry.id;
+  const methods = specs.map(({ entry, name, variant }) => {
     const rule = rules.get(entry.id);
     const change = rule === undefined || rule === "read" ? null : changes.parse(rule);
 
@@ -330,7 +386,9 @@ export const generateDiscovery = (
         )
         .map(([key]) => key),
       body: entry.request !== undefined,
-      response: entry.response !== undefined,
+      response: variant === "content" ? "content" : entry.response ? "json" : null,
+      altMedia: variant === "content" && entry.response !== undefined,
+      upload: variant === "upload" ? (entry.mediaUpload?.protocols.simple?.path ?? null) : null,
       change,
     };
 
@@ -344,7 +402,14 @@ export const generateDiscovery = (
     });
 
     if (entry.request)
-      fields.push(`    /** The request body. */\n    body: ${identifier(entry.request.$ref)};`);
+      fields.push(
+        variant === "upload"
+          ? `    /** The file's metadata. */\n    body?: ${identifier(entry.request.$ref)};`
+          : `    /** The request body. */\n    body: ${identifier(entry.request.$ref)};`,
+      );
+
+    if (variant === "upload")
+      fields.push(`    /** The file's content, as text or base64. */\n    content: UploadContent;`);
 
     const input = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
 
@@ -361,9 +426,25 @@ export const generateDiscovery = (
     );
 
     if (entry.request)
-      argumentDocs.push(`- \`body\`: The request body, a \`${entry.request.$ref}\`.`);
+      argumentDocs.push(
+        variant === "upload"
+          ? `- \`body\`: The file's metadata, a \`${entry.request.$ref}\`.`
+          : `- \`body\`: The request body, a \`${entry.request.$ref}\`.`,
+      );
 
-    const target = entry.response?.$ref;
+    if (variant === "upload")
+      argumentDocs.push(
+        "- `content`: The file's content: its `mimeType`, and `text` or `base64` bytes.",
+      );
+
+    const target = variant === "content" ? undefined : entry.response?.$ref;
+
+    const media =
+      variant === "content"
+        ? "Returns the file's content, up to 8 MiB."
+        : variant === "upload"
+          ? "Sends the metadata and the content in one upload."
+          : "";
 
     const tags = [
       argumentDocs.length
@@ -373,28 +454,34 @@ export const generateDiscovery = (
     ].filter(Boolean);
 
     const description = comment(
-      [entry.description, approval, tags.join("\n")].filter(Boolean).join("\n\n"),
+      [entry.description, media, approval, tags.join("\n")].filter(Boolean).join("\n\n"),
       "  ",
     );
 
     const call = `run(this.env, this.ctx.props, ${JSON.stringify(name)}, input${target ? ", select" : ""})`;
 
     const required =
-      entry.request !== undefined ||
+      (entry.request !== undefined && variant !== "content") ||
+      variant === "upload" ||
       parameters.some(([, value]) => value.required && value.default === undefined);
 
     const inputParameter = `input: ${input}${required ? "" : " = {}"}`;
 
-    return target
-      ? `${description}  async ${name}<S extends Selection<${identifier(target)}>>(${inputParameter}, select: S & Exact<S, Selection<${identifier(target)}>>): Promise<${service.result}<ValueResult<${identifier(target)}, S>>> {\n    return ${call};\n  }\n`
-      : `${description}  async ${name}(${inputParameter}): Promise<${service.result}<null>> {\n    return ${call};\n  }\n`;
+    if (target)
+      return `${description}  async ${name}<S extends Selection<${identifier(target)}>>(${inputParameter}, select: S & Exact<S, Selection<${identifier(target)}>>): Promise<${service.result}<ValueResult<${identifier(target)}, S>>> {\n    return ${call};\n  }\n`;
+
+    return `${description}  async ${name}(${inputParameter}): Promise<${service.result}<${variant === "content" ? "BinaryContent" : "null"}>> {\n    return ${call};\n  }\n`;
   });
+
+  const contentImports = ["BinaryContent", "UploadContent"].filter((name) =>
+    specs.some(({ variant }) => variant === (name === "BinaryContent" ? "content" : "upload")),
+  );
 
   return {
     files: {
       "src/api.ts": `${header}import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Environment as TemplateEnvironment } from "./context.ts";
-import type { ${service.result} } from "./results.ts";
+${contentImports.length ? `import type { ${contentImports.join(", ")} } from "./content.ts";\n` : ""}import type { ${service.result} } from "./results.ts";
 import { type ${service.properties}, run } from "./run.ts";
 import type { Exact, ${["JsonObject", "JsonValue"]
         .flatMap((used) => (new RegExp(`\\b${used}\\b`).test(models) ? [`${used}, `] : []))
@@ -419,7 +506,9 @@ export type Operation = {
   queryParameters: string[];
   requiredParameters: string[];
   body: boolean;
-  response: boolean;
+  response: "json" | "content" | null;
+  altMedia: boolean;
+  upload: string | null;
   change: "create" | "update" | "delete" | "send" | null;
 };
 

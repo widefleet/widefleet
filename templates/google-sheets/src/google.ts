@@ -12,10 +12,23 @@ export type GoogleOperation = {
   queryParameters: readonly string[];
   requiredParameters: readonly string[];
   body: boolean;
-  response: boolean;
+  response: "json" | "content" | null;
+  altMedia: boolean;
+  upload: string | null;
 };
 
 const name = z.string().regex(/^[A-Za-z_][\w]*$/);
+
+// A media type, without line breaks that would end the part's headers.
+const mediaType = z.string().regex(/^[\w.+-]+\/[\w.+-]+(?:[ \t]*;[^\r\n]*)?$/);
+
+// The charset a media type names, if any.
+const charsetOf = (mimeType: string) => /;\s*charset="?([^";]+)"?/i.exec(mimeType)?.[1]?.trim();
+
+const uploadContent = z.union([
+  z.strictObject({ mimeType: mediaType, text: z.string() }),
+  z.strictObject({ mimeType: mediaType, base64: z.base64() }),
+]);
 
 const selection = z.record(z.string(), z.json());
 
@@ -59,13 +72,20 @@ export const googleRequest = (
 ) => {
   // Optional arguments may be passed as undefined, which leaves them out.
   const values = z.record(z.string(), definedJson.optional()).parse(input);
-  const known = new Set([...Object.keys(operation.pathParameters), ...operation.queryParameters]);
+
+  const known = new Set([
+    ...Object.keys(operation.pathParameters),
+    ...operation.queryParameters,
+    ...(operation.body ? ["body"] : []),
+    ...(operation.upload ? ["content"] : []),
+  ]);
 
   for (const [key, value] of Object.entries(values))
-    if (value !== undefined && !known.has(key) && !(key === "body" && operation.body))
+    if (value !== undefined && !known.has(key))
       throw new InvalidRequest(`${method} has no argument ${key}`);
 
-  const path = operation.path.replace(/\{\+?(\w+)\}/g, (_, key: string) => {
+  // An upload goes to the API's upload path, which starts at its root.
+  const path = (operation.upload ?? operation.path).replace(/\{\+?(\w+)\}/g, (_, key: string) => {
     const value = scalar.safeParse(own(values, key) ?? own(operation.pathParameters, key));
 
     if (!value.success) throw new InvalidRequest(`${method} needs ${key}`);
@@ -95,16 +115,51 @@ export const googleRequest = (
     }
   }
 
-  if (operation.response) {
+  if (operation.response === "json") {
     if (!select) throw new InvalidRequest(`${method} needs a selection of the fields to return`);
     url.searchParams.set("fields", fieldsExpression(select));
   }
 
+  if (operation.altMedia) url.searchParams.set("alt", "media");
   const body: JsonValue | undefined = operation.body ? own(values, "body") : undefined;
+  const init: RequestInit = { method: operation.httpMethod };
+
+  if (operation.upload) {
+    const content = uploadContent.safeParse(own(values, "content"));
+
+    if (!content.success)
+      throw new InvalidRequest(`${method} needs content: a mimeType, and text or base64`);
+    const charset = charsetOf(content.data.mimeType);
+
+    // Text travels as UTF-8, so a media type naming another charset would
+    // misdescribe its bytes.
+    if ("text" in content.data && charset !== undefined && !/^utf-?8$/i.test(charset))
+      throw new InvalidRequest(`${method} sends text as UTF-8; send ${charset} content as base64`);
+    url.searchParams.set("uploadType", "multipart");
+    const boundary = `widefleet-${crypto.randomUUID()}`;
+
+    const encoded =
+      "base64" in content.data
+        ? `Content-Transfer-Encoding: base64\r\n\r\n${content.data.base64}`
+        : `\r\n${content.data.text}`;
+
+    init.body = [
+      `--${boundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify(body ?? {}),
+      `--${boundary}`,
+      `Content-Type: ${content.data.mimeType}`,
+      encoded,
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+    init.headers = { "content-type": `multipart/related; boundary=${boundary}` };
+
+    return { url: url.href, init };
+  }
 
   if (operation.body && body === undefined) throw new InvalidRequest(`${method} needs a body`);
-
-  const init: RequestInit = { method: operation.httpMethod };
 
   if (body !== undefined) {
     init.body = JSON.stringify(body);

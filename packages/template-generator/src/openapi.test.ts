@@ -218,7 +218,7 @@ describe("OpenAPI template generator", () => {
     expect(generated).toContain("Promise<ExampleResult<Page & {");
     expect(generated).toContain("async getContent(input: {");
     expect(generated).toContain("Promise<ExampleResult<BinaryContent>>");
-    expect(generated).toContain('import type { BinaryContent } from "./rest.ts";');
+    expect(generated).toContain('import type { BinaryContent } from "./content.ts";');
     expect(generated).toContain("contentType?: string;");
     expect(generated).toContain("Promise<ExampleResult<null>>");
 

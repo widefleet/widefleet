@@ -56,6 +56,7 @@ const configuration = z.discriminatedUnion("kind", [
     operations: z.record(z.string(), z.union([change, z.literal("read"), hidden])),
     scopes: z.array(z.string()).optional(),
     required: z.record(z.string(), z.array(z.string())).optional(),
+    nullableValues: z.array(z.string()).optional(),
   }),
   z.object({
     kind: z.literal("openapi"),
@@ -123,7 +124,11 @@ const runtime = [
   "approval-page.ts",
   "approval-methods.ts",
   "input.ts",
-  { graphql: "graphql.ts", discovery: "google.ts", openapi: "rest.ts" }[rules.kind],
+  ...{
+    graphql: ["graphql.ts"],
+    discovery: ["google.ts", "content.ts"],
+    openapi: ["rest.ts", "content.ts"],
+  }[rules.kind],
 ];
 
 for (const file of runtime) copyFileSync(join(here, "runtime", file), join(directory, "src", file));
