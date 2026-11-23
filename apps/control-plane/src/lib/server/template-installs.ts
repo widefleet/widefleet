@@ -7,7 +7,7 @@ import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { z } from "zod";
 import type { AppBuilder } from "./app-builder.ts";
-import { templateSources } from "./app-templates.ts";
+import { templateDescription, templateSources } from "./app-templates.ts";
 import { templateProject } from "./template-project.ts";
 import type { createAppService } from "./apps.ts";
 import type { Configuration } from "./config.ts";
@@ -85,6 +85,9 @@ export const createTemplateInstalls = (
         templateSources(configuration, input.templateId),
       );
 
+      // The app starts with the template's description.
+      const description = templateDescription(files);
+
       // The builder bundles the code; static assets are uploaded as the CLI does.
       const { sources, assets } = yield* templateProject(files);
       const built = yield* Result.await(builder.bundle(sources));
@@ -125,7 +128,7 @@ export const createTemplateInstalls = (
       // failed to publish, which this one completes.
       const created = await (existing
         ? apps.resolve(principal, name)
-        : apps.create(principal, appInput.data));
+        : apps.create(principal, { ...appInput.data, description }));
 
       if (
         created.isErr() &&

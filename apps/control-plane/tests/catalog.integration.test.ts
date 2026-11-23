@@ -74,6 +74,7 @@ describe("App catalog", () => {
       {
         id: app.id,
         displayName: "team-notes",
+        description: null,
         hostname: "team-notes.apps.localhost",
         url: "https://team-notes.apps.localhost:25453/",
         activeDeploymentId,

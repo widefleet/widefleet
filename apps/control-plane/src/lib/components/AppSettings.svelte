@@ -1,9 +1,11 @@
 <script lang="ts">
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { getAppDetails, removeApp } from "#lib/apps.remote";
-  import { setCatalogListing } from "#lib/catalog.remote";
+  import { setAppDescription, setCatalogListing } from "#lib/catalog.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { appDescriptionLength } from "@platform/contracts";
   import CopyValue from "./CopyValue.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import { getWorkspaceContext } from "#lib/workspace-context";
@@ -24,7 +26,36 @@
     </p>
     <CopyValue value={app.id} label="Copy app ID" />
   </section>
-  {#if !app.parentId}<section id="catalog" class="rounded-xl border p-5 sm:p-6">
+  {#if !app.parentId}<section id="description">
+      <h2 id="description-heading" class="text-base font-semibold">Description</h2>
+      <p class="text-muted-foreground mt-2 mb-5 text-sm">
+        One sentence that tells people what this app is for. It appears with the app on Home.
+      </p>
+      <form {...setAppDescription} class="space-y-3">
+        <OrganizationField field={setAppDescription.fields.organizationId} />
+        <input {...setAppDescription.fields.appId.as("hidden", app.id)} />
+        <input {...setAppDescription.fields.search.as("hidden", search)} />
+        <Input
+          {...setAppDescription.fields.description.as("text", app.description ?? "")}
+          aria-labelledby="description-heading"
+          maxlength={appDescriptionLength}
+          placeholder="For example, Create and approve purchase orders."
+        />
+        <FormIssues issues={setAppDescription.fields.allIssues()} />
+        <div class="flex items-center gap-2">
+          <Button type="submit" variant="outline" disabled={setAppDescription.pending > 0}
+            >{setAppDescription.pending ? "Saving description …" : "Save description"}</Button
+          ><Button type="reset" variant="ghost">Cancel</Button>
+          {#if setAppDescription.result?.saved && setAppDescription.pending === 0}<p
+              role="status"
+              class="text-muted-foreground text-xs"
+            >
+              Description saved.
+            </p>{/if}
+        </div>
+      </form>
+    </section>
+    <section id="catalog" class="rounded-xl border p-5 sm:p-6">
       <h2 class="text-base font-semibold">App catalog</h2>
       <p class="text-muted-foreground mt-2 text-sm leading-6">
         Make this app discoverable to everyone in the workspace. The app's access rules still apply.

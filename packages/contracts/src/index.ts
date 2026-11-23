@@ -62,12 +62,18 @@ export const appSlug = z
   .max(48)
   .regex(/^[a-z](?:[a-z0-9-]*[a-z0-9])?$/);
 
+/** One sentence that tells people what an app is for. An empty text removes it. */
+export const appDescriptionLength = 200;
+
+export const appDescription = z.string().trim().max(appDescriptionLength);
+
 export const createAppInput = z.strictObject({
   slug: appSlug.refine(
     (value) => !["auth", "mcp"].includes(value),
     "The auth and mcp hostnames are reserved for platform services",
   ),
   displayName: z.string().trim().min(1).max(120),
+  description: appDescription.optional(),
   parentId: identifier.nullable().default(null),
   previewBranch: gitBranch.optional(),
   previewName: z
@@ -83,6 +89,7 @@ export const app = z.strictObject({
   id: identifier,
   slug: appSlug,
   displayName: z.string(),
+  description: z.string().nullable().default(null),
   catalogListed: z.boolean(),
   web: z.boolean().default(true),
   parentId: identifier.nullable(),
@@ -133,6 +140,7 @@ export const sourceDeployTargetInput = z.union([appPath, z.strictObject({ slug: 
 export const catalogEntry = app.pick({
   id: true,
   displayName: true,
+  description: true,
   hostname: true,
   url: true,
   activeDeploymentId: true,
@@ -141,6 +149,10 @@ export const catalogEntry = app.pick({
 export const catalogListing = z.strictObject({ listed: z.boolean() });
 
 export const catalogListingInput = appPath.extend(catalogListing.shape);
+
+export const appDescriptionChange = z.strictObject({ description: appDescription });
+
+export const appDescriptionInput = appPath.extend(appDescriptionChange.shape);
 
 export const deploymentPath = z.strictObject({ deploymentId: identifier });
 

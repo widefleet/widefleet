@@ -73,6 +73,7 @@ export const apps = pgTable(
     id: uuid().primaryKey(),
     slug: text().notNull(),
     displayName: text("display_name").notNull(),
+    description: text(),
     serviceAccessMode: text("service_access_mode", { enum: ["approval_required", "organization"] })
       .notNull()
       .default("approval_required"),

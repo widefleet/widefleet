@@ -2366,11 +2366,19 @@ test.describe(`app catalog`, () => {
       await expect(
         page.getByRole("button", { name: "Remove from catalog", exact: true }),
       ).toBeVisible();
+
+      // The description the owner saves appears with the app on Home.
+      await page
+        .getByRole("textbox", { name: "Description", exact: true })
+        .fill("Counts the stock.");
+      await page.getByRole("button", { name: "Save description", exact: true }).click();
+      await expect(page.getByText("Description saved.", { exact: true })).toBeVisible();
       await readerPage.reload();
       await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveAttribute(
         "href",
         record.url,
       );
+      await expect(readerPage.getByText("Counts the stock.", { exact: true })).toBeVisible();
       expect((await readerContext.request.get(`/widefleet/apps/${record.id}`)).status()).toBe(404);
       expect((await readerContext.request.get(`/api/v1/apps/${record.id}`)).status()).toBe(404);
       const catalog = await readerContext.request.get(queryUrl);

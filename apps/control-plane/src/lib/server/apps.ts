@@ -154,6 +154,7 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     id: record.id,
     slug: record.slug,
     displayName: record.displayName,
+    description: record.description,
     catalogListed: record.catalogListed,
     web: record.webEnabled,
     parentId: record.parentId,
@@ -399,6 +400,7 @@ const provisionApp = async (
         id: crypto.randomUUID(),
         slug: input.slug,
         displayName: input.displayName,
+        description: input.description || null,
         parentId: input.parentId,
         sourceBranch: input.previewBranch ?? null,
         accessGroups,
@@ -448,6 +450,7 @@ export const createAppService = (
         .select({
           id: apps.id,
           displayName: apps.displayName,
+          description: apps.description,
           hostname: apps.hostname,
           activeDeploymentId: apps.activeDeploymentId,
         })
@@ -471,6 +474,16 @@ export const createAppService = (
           url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
         })),
       );
+    }),
+  setDescription: (principal: Principal, appId: string, text: string) =>
+    transact(database, async (transaction) => {
+      const access = await managedApp(transaction, principal, appId);
+
+      if (access.isErr()) return access;
+      const description = text || null;
+      await transaction.update(apps).set({ description }).where(eq(apps.id, appId));
+
+      return Result.ok({ description });
     }),
   setCatalogListing: (principal: Principal, appId: string, listed: boolean) =>
     transact(database, async (transaction) => {

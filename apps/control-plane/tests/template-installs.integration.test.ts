@@ -181,6 +181,14 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   expect(record).toMatchObject({ templateId: "gmail", templateCommit });
 
+  // The app starts with the template's description.
+  const guide = await readFile(
+    new URL("../../../templates/gmail/template.md", import.meta.url),
+    "utf8",
+  );
+
+  expect(result.app.description).toBe(/^description: (.*)$/mu.exec(guide)?.[1]);
+
   const api = createApi(runtime);
 
   const installedTemplate = contract.appTemplate.parse(

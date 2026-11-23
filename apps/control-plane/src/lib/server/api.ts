@@ -791,6 +791,15 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.apps.setCatalogListing(context.principal, input.appId, input.listed)),
       ),
+    setAppDescription: write
+      .route({ method: "PUT", path: "/apps/{appId}/description" })
+      .input(contract.appDescriptionInput)
+      .output(contract.app.pick({ description: true }))
+      .handler(async ({ context, input }) =>
+        unwrap(
+          await runtime.apps.setDescription(context.principal, input.appId, input.description),
+        ),
+      ),
     sourceDeployTarget: write
       // Deployment tokens need this read-only check without platform:read scope.
       .route({ method: "POST", path: "/apps/source-target" })
