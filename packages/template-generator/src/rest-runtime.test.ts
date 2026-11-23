@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { InvalidRequest } from "./runtime/input.ts";
 import { binaryContent, type RestOperation, restRequest } from "./runtime/rest.ts";
 
@@ -121,7 +122,15 @@ describe("REST requests", () => {
     ).toEqual({ downloadUrl: "https://download.test/f" });
     expect(
       await binaryContent(new Response("text", { headers: { "content-type": "text/plain" } })),
-    ).toEqual({ contentType: "text/plain", data: new TextEncoder().encode("text") });
+    ).toEqual({ contentType: "text/plain", base64: btoa("text") });
+    // Content larger than one chunk of the encoding stays whole, and results are JSON.
+    const bytes = Uint8Array.from({ length: 100_000 }, (_, index) => index % 256);
+    const large = await binaryContent(new Response(bytes));
+
+    expect(z.json().parse(large)).toEqual(large);
+    expect(
+      large && "base64" in large && Uint8Array.from(atob(large.base64), (c) => c.charCodeAt(0)),
+    ).toEqual(bytes);
     // Larger content is not read.
     expect(await binaryContent(new Response(new Uint8Array(9 * 1024 * 1024)))).toBeNull();
     expect(
