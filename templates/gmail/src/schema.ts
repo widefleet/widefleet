@@ -584,7 +584,7 @@ export const operations = {
     queryParameters: [],
     body: true,
     response: true,
-    change: "create",
+    change: "send",
   },
   threadsUntrash: {
     httpMethod: "POST",

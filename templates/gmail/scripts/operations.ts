@@ -57,7 +57,8 @@ export const operations = {
   "gmail.users.settings.delegates.delete": { hidden: "serviceAccount" },
   "gmail.users.settings.delegates.get": { hidden: "serviceAccount" },
   "gmail.users.settings.delegates.list": { hidden: "serviceAccount" },
-  "gmail.users.settings.filters.create": "create",
+  // A filter can forward future mail to another address.
+  "gmail.users.settings.filters.create": "send",
   "gmail.users.settings.filters.delete": "delete",
   "gmail.users.settings.forwardingAddresses.create": { hidden: "serviceAccount" },
   "gmail.users.settings.forwardingAddresses.delete": { hidden: "serviceAccount" },

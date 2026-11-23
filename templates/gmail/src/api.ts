@@ -2660,7 +2660,7 @@ export class GmailApi extends WorkerEntrypoint<Environment, GmailProperties> {
   /**
    * Creates a filter. Note: you can only create a maximum of 1,000 filters. For more information, see [Manage Gmail filters](https://developers.google.com/workspace/gmail/api/guides/filter_settings).
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `userId`: User's email address. The special value "me" can be used to indicate the authenticated user.
