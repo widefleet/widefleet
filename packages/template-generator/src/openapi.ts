@@ -13,9 +13,14 @@ import type { Change, GeneratedFiles } from "./rules.ts";
 export interface OpenapiRules {
   /**
    * Offered operations by operation ID, such as `drives.items.ListChildren`, with
-   * the method name and, for every operation that is not a GET, its change.
+   * the method name and, for every operation that is not a GET, its change, or
+   * `read` when it only reads. `description` replaces the API's own text where it
+   * describes another operation, as Microsoft Graph's does for some.
    */
-  operations: Record<string, { name: string; change?: Change | undefined }>;
+  operations: Record<
+    string,
+    { name: string; change?: Change | "read" | undefined; description?: string | undefined }
+  >;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -452,7 +457,7 @@ export const generateOpenapi = (
 
     if (!found) throw new Error(`The rules list ${id}, which the API no longer offers`);
     const { path, item, method, entry } = found;
-    const change = rule.change ? changes.parse(rule.change) : null;
+    const change = rule.change && rule.change !== "read" ? changes.parse(rule.change) : null;
 
     // Header parameters, such as Graph's ConsistencyLevel, are not offered.
     // An operation's parameter replaces the path's parameter of the same name and place.
@@ -619,7 +624,12 @@ export const generateOpenapi = (
           : "Asks the user first unless their approval level is `none`.";
 
     const description = comment(
-      [entry.summary, entry.description !== entry.summary ? entry.description : "", approval]
+      [
+        ...(rule.description
+          ? [rule.description]
+          : [entry.summary, entry.description !== entry.summary ? entry.description : ""]),
+        approval,
+      ]
         .filter(Boolean)
         .join("\n\n"),
       "  ",

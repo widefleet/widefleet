@@ -229,6 +229,30 @@ describe("OpenAPI template generator", () => {
     expect(files["src/schema.ts"]).toContain('"body":"text","bodyRequired":true,"response":null');
   });
 
+  it("offers operations that only read through a POST without asking", () => {
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      { operations: { "folders.CreateItem": { name: "findItems", change: "read" } } },
+      service,
+      "",
+    );
+
+    expect(files["src/schema.ts"]).toContain('"httpMethod":"POST"');
+    expect(files["src/schema.ts"]).toContain('"change":null');
+  });
+
+  it("describes operations with the rules' text where it replaces the API's", () => {
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      { operations: { "folders.ListItems": { name: "listItems", description: "Lists items." } } },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain("   * Lists items.\n   */\n  async listItems");
+    expect(files["src/api.ts"]).not.toContain("List items\n");
+  });
+
   it("reads YAML descriptions", () => {
     const yaml = `openapi: 3.0.4
 servers:

@@ -30,7 +30,8 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
   const scopes = {
     google: "openid profile email https://www.googleapis.com/auth/gmail.readonly",
     github: "read:user user:email repo workflow project read:org user",
-    microsoft: "openid profile email offline_access User.Read Files.ReadWrite.All",
+    microsoft:
+      "openid profile email offline_access User.Read Files.ReadWrite.All Mail.ReadWrite Mail.Send Calendars.ReadWrite Contacts.ReadWrite MailboxSettings.ReadWrite",
     linear: "read write",
   };
 
@@ -215,6 +216,8 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
 
       if (url.pathname === "/v1.0/drives/drive-1/items/root/children")
         return Response.json({ value: [] });
+
+      if (url.pathname === "/v1.0/me/messages") return Response.json({ value: [] });
 
       // Linear's GraphQL API: the viewer for the account profile, otherwise issues.
       if (url.href === "https://api.linear.app/graphql") {
