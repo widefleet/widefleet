@@ -680,6 +680,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           expect(result.stderr).toContain("local branch feature");
           expect(result.stderr).toContain("updates branch main in Widefleet Git");
           expect(result.stderr).toContain("publishes the code as the main app");
+          // Without a local main, renaming is the way onto the main app's branch.
+          expect(result.stderr).toContain("Rename the branch with git branch -m main");
           expect(result.stderr).toContain("--allow-branch-mismatch");
           expect(result.stderr).not.toContain("Synthetic build output");
           expect(requests).toEqual(["POST /api/v1/apps/source-target"]);

@@ -412,6 +412,16 @@ pub async fn confirm_deployment_branch(
     if local.as_deref() == Some(branch.as_str()) {
         return Ok(true);
     }
+    // A repository started with a plain `git init` may have only master.
+    let switch = if local.is_some()
+        && revision(project, &format!("refs/heads/{branch}"))
+            .await?
+            .is_none()
+    {
+        format!("Rename the branch with git branch -m {branch}")
+    } else {
+        format!("Switch to {branch}")
+    };
     let message = format!(
         "You are on {}. This deploy updates branch {branch} in Widefleet Git and publishes the code as the main app.",
         local.map_or_else(
@@ -427,7 +437,7 @@ pub async fn confirm_deployment_branch(
     let stderr = std::io::stderr();
     if !stdin.is_terminal() || !stderr.is_terminal() {
         return Err(Error::invalid(format!(
-            "{message} Switch to {branch}, or pass --allow-branch-mismatch to confirm this deployment"
+            "{message} {switch}, or pass --allow-branch-mismatch to confirm this deployment"
         )));
     }
     confirm_branch(&message, &mut stdin.lock(), &mut stderr.lock())?;
