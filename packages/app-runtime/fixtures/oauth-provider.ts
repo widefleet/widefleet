@@ -15,7 +15,18 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
   const codes = new Map<string, { user: string; challenge: string | null; redirect: string }>();
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
-  const state = { refreshes: 0, exchanges: 0, revocations: 0, unavailable: false, expiring: true };
+  // The `scope` of each token request, which decides a Microsoft token's resource.
+  const requested: (string | null)[] = [];
+
+  const state = {
+    refreshes: 0,
+    exchanges: 0,
+    revocations: 0,
+    unavailable: false,
+    expiring: true,
+    requested,
+  };
+
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
   const jwk = {
@@ -31,7 +42,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
     google: "openid profile email https://www.googleapis.com/auth/gmail.readonly",
     github: "read:user user:email repo workflow project read:org user",
     microsoft:
-      "openid profile email offline_access User.Read Files.ReadWrite.All Mail.ReadWrite Mail.Send Calendars.ReadWrite Contacts.ReadWrite MailboxSettings.ReadWrite Chat.ReadWrite ChatMessage.Send Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send",
+      "openid profile email offline_access User.Read Files.ReadWrite.All Mail.ReadWrite Mail.Send Calendars.ReadWrite Contacts.ReadWrite MailboxSettings.ReadWrite Chat.ReadWrite ChatMessage.Send Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send https://api.businesscentral.dynamics.com/Financials.ReadWrite.All",
     linear: "read write",
   };
 
@@ -158,6 +169,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
           form.get("client_secret") !== `test-${kind}-secret`
         )
           return Response.json({ error: "invalid_client" }, { status: 400 });
+        state.requested.push(form.get("scope"));
 
         if (form.get("grant_type") === "authorization_code") {
           const code = form.get("code") ?? "";
@@ -223,6 +235,11 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
         return Response.json({ value: [] });
 
       if (url.pathname === "/v1.0/me/chats") return Response.json({ value: [] });
+
+      if (
+        url.href === "https://api.businesscentral.dynamics.com/v2.0/production/api/v2.0/companies"
+      )
+        return Response.json({ value: [] });
 
       // Linear's GraphQL API: the viewer for the account profile, otherwise issues.
       if (url.href === "https://api.linear.app/graphql") {

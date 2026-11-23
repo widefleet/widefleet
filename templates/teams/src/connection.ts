@@ -246,7 +246,7 @@ export const accountConnection = (environment: Environment, properties: Properti
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
     },
-    /** Sends one request to Microsoft Graph with the user's token. */
+    /** Sends one request to the provider's API with the user's token. */
     send: async (url: string, init: RequestInit) => {
       const result = await token();
 

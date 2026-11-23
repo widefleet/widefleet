@@ -53,8 +53,9 @@ const clients = {
       "Channel.ReadBasic.All",
       "ChannelMessage.Read.All",
       "ChannelMessage.Send",
+      "https://api.businesscentral.dynamics.com/Financials.ReadWrite.All",
     ],
-    hosts: ["https://graph.microsoft.com"],
+    hosts: ["https://graph.microsoft.com", "https://api.businesscentral.dynamics.com"],
     issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
   },
   linear: {
@@ -71,6 +72,7 @@ const origins = [
   "https://api.github.com",
   "https://login.microsoftonline.com",
   "https://graph.microsoft.com",
+  "https://api.businesscentral.dynamics.com",
   "https://api.linear.app",
 ];
 
@@ -80,6 +82,7 @@ for (const [template, kind, prefix] of [
   ["outlook", "microsoft", "MICROSOFT"],
   ["excel", "microsoft", "MICROSOFT"],
   ["teams", "microsoft", "MICROSOFT"],
+  ["business-central", "microsoft", "MICROSOFT"],
   ["linear", "linear", "LINEAR"],
 ] as const)
   describe(`${template} managed OAuth`, () => {
@@ -433,6 +436,22 @@ for (const [template, kind, prefix] of [
       }
 
       expect(upstream.state.refreshes).toBe(2);
+
+      // Business Central's tokens are for its own resource: Microsoft issues a
+      // token for the resource the scopes name, so no request names Graph's.
+      if (template === "business-central") {
+        const scopes = [
+          "openid",
+          "profile",
+          "email",
+          "offline_access",
+          "https://api.businesscentral.dynamics.com/Financials.ReadWrite.All",
+        ].join(" ");
+
+        expect(destination.searchParams.get("scope")).toBe(scopes);
+        expect(upstream.state.requested).toEqual([null, scopes, scopes]);
+      }
+
       expect(await (await browser("bob").request("/rpc/list")).json()).toMatchObject({
         status: "connection_required",
       });
