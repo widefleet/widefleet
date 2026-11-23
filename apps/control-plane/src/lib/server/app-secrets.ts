@@ -1,12 +1,12 @@
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { managedApp, readableApp, enqueueDeployment, presentDeployment } from "./apps.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
-import { apps, artifacts, deployments } from "./schema.ts";
+import { apps, artifacts, cloudflareOperations, deployments } from "./schema.ts";
 import { encryptSecret } from "./secret-encryption.ts";
 import { InvalidOperation } from "./errors.ts";
 import { requireAgentExecution } from "./organization-runtime.ts";
@@ -19,13 +19,19 @@ const status = async (transaction: DatabaseExecutor, app: typeof apps.$inferSele
     ? await transaction.select().from(deployments).where(eq(deployments.id, app.secretDeploymentId))
     : [];
 
-  // The latest accepted code, which secret changes redeploy.
+  // The latest accepted code, which secret changes redeploy. Cloudflare accepts
+  // deployments in its own order, which can differ from their request times.
   const [latest] = await transaction
     .select({ metadata: artifacts.metadata })
     .from(deployments)
     .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+    .leftJoin(cloudflareOperations, eq(cloudflareOperations.id, deployments.id))
     .where(eq(deployments.appId, app.id))
-    .orderBy(desc(deployments.createdAt), desc(deployments.id))
+    .orderBy(
+      sql`${cloudflareOperations.sequence} desc nulls last`,
+      desc(deployments.createdAt),
+      desc(deployments.id),
+    )
     .limit(1);
 
   return contract.appSecretStatus.parse({

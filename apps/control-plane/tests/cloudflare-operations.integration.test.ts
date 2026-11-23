@@ -21,6 +21,7 @@ import {
   jobs,
 } from "../src/lib/server/schema.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
+import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
 
 const objects = new Map<string, Uint8Array>();
 
@@ -310,6 +311,32 @@ describe("Cloudflare operation history", () => {
     expect((await registerCloudflareOperation(environment.database.db, later.command)).isOk()).toBe(
       true,
     );
+  });
+
+  it("reports the required secrets of the deployment Cloudflare accepted last", async () => {
+    const older = await seedDeployment(environment.database.db, { requiredSecrets: ["OLDER"] });
+
+    const newer = await seedDeployment(environment.database.db, {
+      appId: older.appId,
+      requiredSecrets: ["NEWER"],
+    });
+
+    // The older request reaches Cloudflare after the newer one.
+    (await registerCloudflareOperation(environment.database.db, newer.command)).unwrap();
+    (await registerCloudflareOperation(environment.database.db, older.command)).unwrap();
+
+    const status = await createAppSecrets(environment.database.db, "unused-key").read(
+      {
+        ...environment.owner,
+        role: "owner",
+        admin: true,
+        creator: true,
+        application: { organizationId: older.organizationId, admin: true },
+      },
+      older.appId,
+    );
+
+    expect(status.unwrap().required).toEqual(["OLDER"]);
   });
 
   it("applies access inheritance once and keeps settings saved before the first deployment", async () => {
