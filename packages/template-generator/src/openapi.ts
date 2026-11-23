@@ -65,6 +65,12 @@ export interface OpenapiRules {
    * message's attachments when sending it.
    */
   navigation?: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> | undefined;
+  /**
+   * Navigation properties a body can bind to existing entities, by schema: the
+   * type gains `<property>@odata.bind` for the entity's address, or a list of
+   * addresses for a collection. Graph adds a chat's members by binding `user`.
+   */
+  bindings?: Readonly<Record<string, readonly string[]>> | undefined;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -257,7 +263,7 @@ const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? 
 
 export const generateOpenapi = (
   source: string,
-  { operations: described, navigation = {}, undescribed = {} }: OpenapiRules,
+  { operations: described, navigation = {}, bindings = {}, undescribed = {} }: OpenapiRules,
   service: OpenapiService,
   header: string,
 ): GeneratedFiles => {
@@ -443,6 +449,7 @@ export const generateOpenapi = (
   const objectType = (value: Schema, indent: string): string => {
     const required = new Set(value.required?.filter((name) => !name.startsWith("@")));
     const kept = owner === undefined ? {} : (navigation[owner] ?? {});
+    const bound = owner === undefined ? [] : (bindings[owner] ?? []);
 
     // Navigation fields appear only when a rule keeps them, typed as it says.
     const typed = Object.entries(value.properties ?? {})
@@ -461,6 +468,15 @@ export const generateOpenapi = (
 
         return { name, field, type };
       });
+
+    // A bound navigation property names its entity by address.
+    for (const [name, field] of Object.entries(value.properties ?? {}))
+      if (field["x-ms-navigationProperty"] && bound.includes(name))
+        typed.push({
+          name: `${name}@odata.bind`,
+          field: { description: `Binds ${name} to the existing entity at this address.` },
+          type: field.type === "array" ? "string[]" : "string",
+        });
 
     const fields = typed.map(
       ({ name, field, type }) =>
@@ -499,6 +515,21 @@ export const generateOpenapi = (
   const problems: string[] = [];
   const names = new Set<string>();
   const added: OpenapiRules["operations"] = {};
+
+  // Each binding names a navigation property its schema declares.
+  for (const [key, names] of Object.entries(bindings)) {
+    const value = schemas[key];
+
+    const declared = [value, ...(value?.allOf ?? [])].flatMap((part) =>
+      Object.entries(part?.properties ?? {}).flatMap(([name, field]) =>
+        field["x-ms-navigationProperty"] ? [name] : [],
+      ),
+    );
+
+    for (const name of names)
+      if (!declared.includes(name))
+        problems.push(`The bindings name ${key}.${name}, which is not a navigation property`);
+  }
 
   // An undescribed operation shares the path and path parameters of the
   // operation it names and takes the JSON its rule names.

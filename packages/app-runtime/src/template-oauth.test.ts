@@ -47,6 +47,12 @@ const clients = {
       "Calendars.ReadWrite",
       "Contacts.ReadWrite",
       "MailboxSettings.ReadWrite",
+      "Chat.ReadWrite",
+      "ChatMessage.Send",
+      "Team.ReadBasic.All",
+      "Channel.ReadBasic.All",
+      "ChannelMessage.Read.All",
+      "ChannelMessage.Send",
     ],
     hosts: ["https://graph.microsoft.com"],
     issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
@@ -73,6 +79,7 @@ for (const [template, kind, prefix] of [
   ["onedrive", "microsoft", "MICROSOFT"],
   ["outlook", "microsoft", "MICROSOFT"],
   ["excel", "microsoft", "MICROSOFT"],
+  ["teams", "microsoft", "MICROSOFT"],
   ["linear", "linear", "LINEAR"],
 ] as const)
   describe(`${template} managed OAuth`, () => {
