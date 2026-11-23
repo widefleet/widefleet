@@ -38,6 +38,9 @@
     ),
   );
 
+  // A screenshot that does not load is left out.
+  let broken = $state<string[]>([]);
+
   // A connector whose status check finds no personal connection drops out of the list.
   const visible = $derived(connections.filter((_, index) => statuses[index]?.current !== null));
 </script>
@@ -49,12 +52,13 @@
         {@const source = workspace.path(
           `/apps/${listing.id}/screenshots/${number}?deployment=${listing.activeDeploymentId}`,
         )}
-        <li class="shrink-0">
+        <li class="shrink-0" hidden={broken.includes(source)}>
           <a href={source} target="_blank" rel="noreferrer"
             ><img
               src={source}
               alt={`Screenshot ${number} of ${listing.displayName}`}
               loading="lazy"
+              onerror={() => broken.push(source)}
               class="bg-muted h-56 rounded-lg border"
             /></a
           >

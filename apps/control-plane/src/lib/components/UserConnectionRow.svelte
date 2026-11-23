@@ -67,7 +67,7 @@
           {connection.displayName}
         </h3>
         {#if connection.description}
-          <p class="text-muted-foreground mt-0.5 text-xs wrap-anywhere">{connection.description}</p>
+          <p class="text-muted-foreground mt-1 text-sm wrap-anywhere">{connection.description}</p>
         {/if}
         {#if showHostname}
           <p class="text-muted-foreground mt-1 text-xs wrap-anywhere">{connection.hostname}</p>

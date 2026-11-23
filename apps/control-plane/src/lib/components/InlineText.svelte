@@ -90,7 +90,7 @@
       type="button"
       onclick={start}
       aria-label={`Edit ${name}`}
-      class={`text-muted-foreground shrink-0 rounded-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 ${html ? "mt-1.5" : "after:absolute after:inset-0"}`}
+      class={`text-muted-foreground shrink-0 rounded-sm opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 ${html ? "mt-1.5" : "after:absolute after:inset-0"}`}
       ><Pencil class={heading ? "size-4" : "size-3.5"} aria-hidden="true" /></button
     >
   </div>

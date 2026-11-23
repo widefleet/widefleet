@@ -100,7 +100,12 @@
   {:else if entries.length === visible.length}
     {#each groups as group (group.id)}
       <section aria-labelledby={`connections-${group.id}`}>
-        <h2 id={`connections-${group.id}`} class="text-sm font-semibold">{group.title}</h2>
+        <h2
+          id={`connections-${group.id}`}
+          class="text-muted-foreground text-[11px] font-medium tracking-wider uppercase"
+        >
+          {group.title}
+        </h2>
         <ul class="divide-border/60 divide-y">
           {#each group.entries as connection (connection.appId)}
             <UserConnectionRow

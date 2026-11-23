@@ -3815,8 +3815,18 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await expect(uses.getByRole("heading", { name: "GitHub", exact: true })).toHaveCount(0);
 
     // A connector that calls no other app shows the reader's account with it alone.
+    // A screenshot that does not load is left out.
+    await environment.database.db
+      .update(artifacts)
+      .set({ manifest: { "/screenshots/1.png": { hash: "a".repeat(32), size: 68 } } })
+      .where(eq(artifacts.appId, github));
+    await page.route(`**/widefleet/apps/${github}/screenshots/1?*`, (route) =>
+      route.fulfill({ status: 404 }),
+    );
     await page.goto(`/widefleet/catalog/apps/${github}`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("GitHub");
+    await expect(page.getByRole("list", { name: "Screenshots" })).toBeAttached();
+    await expect(page.getByRole("img", { name: "Screenshot 1 of GitHub" })).toHaveCount(0);
     await expect(uses.getByRole("listitem")).toHaveCount(1);
     await page.goto("/widefleet/connections");
     await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
