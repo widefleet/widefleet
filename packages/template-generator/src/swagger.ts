@@ -137,6 +137,13 @@ export const upgradeSwagger = (description: Json): Json => {
     return found;
   };
 
+  // A list's format as OpenAPI 3's style; Swagger joins lists with commas unless it says otherwise.
+  const listFormat = (value: Parameter) => {
+    const format = listStyle.safeParse(value.collectionFormat ?? "csv");
+
+    return format.success ? listStyles[format.data] : { style: value.collectionFormat ?? "" };
+  };
+
   // A query or path parameter, with the list format of a query list as its style.
   const valueParameter = (value: Parameter) => {
     const upgraded: JsonObject = { name: value.name, in: value.in, schema: valueSchema(value) };
@@ -145,13 +152,7 @@ export const upgradeSwagger = (description: Json): Json => {
 
     if (value.required !== undefined) upgraded["required"] = value.required;
 
-    if (value.type === "array" && value.in === "query") {
-      const format = listStyle.safeParse(value.collectionFormat ?? "csv");
-      Object.assign(
-        upgraded,
-        format.success ? listStyles[format.data] : { style: value.collectionFormat ?? "" },
-      );
-    }
+    if (value.type === "array" && value.in === "query") Object.assign(upgraded, listFormat(value));
 
     return upgraded;
   };
@@ -188,6 +189,11 @@ export const upgradeSwagger = (description: Json): Json => {
         ? "multipart/form-data"
         : "application/x-www-form-urlencoded";
 
+    // A form's lists keep their format as the field's encoding.
+    const encoding = Object.fromEntries(
+      form.flatMap((value) => (value.type === "array" ? [[value.name, listFormat(value)]] : [])),
+    );
+
     return {
       required: form.some((value) => value.required),
       content: {
@@ -197,6 +203,7 @@ export const upgradeSwagger = (description: Json): Json => {
             properties: Object.fromEntries(form.map((value) => [value.name, valueSchema(value)])),
             required: form.flatMap((value) => (value.required ? [value.name] : [])),
           },
+          encoding,
         },
       },
     };

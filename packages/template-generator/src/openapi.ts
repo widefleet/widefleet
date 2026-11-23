@@ -27,7 +27,10 @@ export interface OpenapiRules {
    * schemas a body or result can be where the description only names their
    * common base, such as Graph's attachment types. `headers` are
    * inputs the method sends as headers the description does not declare, such
-   * as Graph's `workbook-session-id`.
+   * as Graph's `workbook-session-id`. Where the description leaves out or
+   * misdescribes inputs, `parameters` adds OpenAPI parameters or replaces those
+   * of the same name and place, and `fields` replaces, adds or, with null,
+   * removes the fields of a form body.
    */
   operations: Record<
     string,
@@ -38,6 +41,8 @@ export interface OpenapiRules {
       body?: readonly string[] | undefined;
       result?: readonly string[] | undefined;
       headers?: HeaderRules | undefined;
+      parameters?: readonly Json[] | undefined;
+      fields?: Readonly<Record<string, Json>> | undefined;
     }
   >;
   /**
@@ -76,6 +81,8 @@ export interface OpenapiRules {
    */
   bindings?: Readonly<Record<string, readonly string[]>> | undefined;
 }
+
+type OperationRule = OpenapiRules["operations"][string];
 
 /** The names the generated code uses for the template's service. */
 export interface OpenapiService {
@@ -146,7 +153,16 @@ const parameter = z.looseObject({
   deprecated: z.boolean().optional(),
 });
 
-const content = z.record(z.string(), z.looseObject({ schema: schema.optional() }));
+// How a form field is encoded, such as a list joined with commas.
+const encoding = z.looseObject({ style: z.string().optional(), explode: z.boolean().optional() });
+
+const content = z.record(
+  z.string(),
+  z.looseObject({
+    schema: schema.optional(),
+    encoding: z.record(z.string(), encoding).optional(),
+  }),
+);
 
 const response = z.looseObject({ description: z.string().optional(), content: content.optional() });
 
@@ -202,6 +218,8 @@ export type OpenapiOperation = {
   /** Header names by input name. */
   headerParameters: Record<string, string>;
   body: "json" | "form" | "multipart" | "text" | null;
+  /** Form fields whose lists are joined into one value, with the separator; others repeat. */
+  formLists?: Record<string, string>;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
   /** Whether the method continues at an earlier result's `@odata.nextLink`. */
@@ -246,21 +264,30 @@ const characters = (type: string) => {
   return result;
 };
 
-const separators = { form: ",", spaceDelimited: " ", pipeDelimited: "|" } as const;
+// OpenAPI 3 has no tab-separated style; the Swagger 2.0 upgrade writes `tsv` lists as this one.
+const separators = {
+  form: ",",
+  spaceDelimited: " ",
+  pipeDelimited: "|",
+  tabDelimited: "\t",
+} as const;
 
-const listStyle = z.enum(["form", "spaceDelimited", "pipeDelimited"]);
+const listStyle = z.enum(["form", "spaceDelimited", "pipeDelimited", "tabDelimited"]);
 
-// The separator that joins a query list into one value, or null to repeat it.
-const separator = (id: string, value: z.infer<typeof parameter>) => {
-  if (value.explode ?? true) return null;
-  const style = listStyle.safeParse(value.style ?? "form");
+// The separator that joins a list into one value, or null to repeat it. Form
+// style repeats unless `explode` is false; the delimited styles join unless it is true.
+const separator = (
+  where: string,
+  value: { style?: string | undefined; explode?: boolean | undefined },
+) => {
+  const style = value.style ?? "form";
 
-  if (!style.success)
-    throw new Error(
-      `${id}'s query parameter ${value.name} has the unsupported style ${value.style}`,
-    );
+  if (value.explode ?? style === "form") return null;
+  const known = listStyle.safeParse(style);
 
-  return separators[style.data];
+  if (!known.success) throw new Error(`${where} has the unsupported style ${style}`);
+
+  return separators[known.data];
 };
 
 const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? "";
@@ -279,6 +306,25 @@ const formBodies = {
   "application/x-www-form-urlencoded": "form",
   "multipart/form-data": "multipart",
 } as const;
+
+// A form body's schema with the rules' fields: replaced, added or, when null, removed.
+const formSchema = (id: string, value: Schema | undefined, fields: OperationRule["fields"]) => {
+  if (!fields) return value;
+
+  if (!value?.properties)
+    throw new Error(`${id}'s fields rule needs a form body that lists its fields`);
+  const properties = { ...value.properties };
+
+  for (const [name, field] of Object.entries(fields))
+    if (field === null) delete properties[name];
+    else properties[name] = schema.parse(field);
+
+  return {
+    ...value,
+    properties,
+    required: (value.required ?? []).filter((name) => Object.hasOwn(properties, name)),
+  };
+};
 
 export const generateOpenapi = (
   description: Json,
@@ -339,6 +385,37 @@ export const generateOpenapi = (
   // Whether binary strings are being typed as files a multipart body uploads.
   let uploads = false;
   let usesUpload = false;
+  // The schemas a multipart body's type writes out, which a schema may not repeat.
+  const inlined: string[] = [];
+
+  // Whether a schema holds binary strings, which a multipart body uploads as files.
+  const carriesFiles = (value: Schema, seen: Set<string>): boolean => {
+    if (value.$ref) {
+      const key = value.$ref.replace("#/components/schemas/", "");
+      const target = schemas[key];
+
+      if (seen.has(key) || !target) return false;
+      seen.add(key);
+
+      return carriesFiles(target, seen);
+    }
+
+    return (
+      (value.type === "string" && value.format === "binary") ||
+      [
+        ...Object.values(value.properties ?? {}),
+        ...(value.items ? [value.items] : []),
+        ...(value.allOf ?? []),
+        ...(value.anyOf ?? []),
+        ...(value.oneOf ?? []),
+        ...(value.additionalProperties === undefined ||
+        value.additionalProperties === true ||
+        value.additionalProperties === false
+          ? []
+          : [value.additionalProperties]),
+      ].some((part) => carriesFiles(part, seen))
+    );
+  };
 
   const typeName = (ref: string) => {
     const key = ref.replace("#/components/schemas/", "");
@@ -399,6 +476,21 @@ export const generateOpenapi = (
   // them out, as do deprecated properties.
   const typeOf = (value: Schema, indent: string): string => {
     const nullable = value.nullable ? " | null" : "";
+
+    // A multipart body writes out the schemas that carry files, so their binary
+    // fields become uploads; the named types keep strings for answers.
+    if (value.$ref && uploads && carriesFiles(value, new Set())) {
+      const key = value.$ref.replace("#/components/schemas/", "");
+      const target = schemas[key];
+
+      if (!target || inlined.includes(key))
+        throw new Error(`The multipart schema ${key} carries files and contains itself`);
+      inlined.push(key);
+      const written = typeOf(target, indent);
+      inlined.pop();
+
+      return `${wrap(written)}${nullable}`;
+    }
 
     if (value.$ref) return `${typeName(value.$ref)}${nullable}`;
 
@@ -641,8 +733,13 @@ export const generateOpenapi = (
 
     // Header parameters, such as Graph's ConsistencyLevel, are not offered.
     // An operation's parameter replaces the path's parameter of the same name and place.
+    // The rules' parameters come last, so they replace the description's.
     const declared = new Map(
-      [...(item.parameters ?? []), ...(entry.parameters ?? [])].map((value) => {
+      [
+        ...(item.parameters ?? []),
+        ...(entry.parameters ?? []),
+        ...(rule.parameters ?? []).map((value) => parameter.parse(value)),
+      ].map((value) => {
         const resolved = resolve(value, "parameters", parameter);
 
         return [`${resolved.in}:${resolved.name}`, resolved] as const;
@@ -652,6 +749,11 @@ export const generateOpenapi = (
     const parameters = [...declared.values()].filter(
       (value) => (value.in === "path" || value.in === "query") && !value.deprecated,
     );
+
+    // Every place in the path needs a path parameter to fill it.
+    for (const [, name] of path.matchAll(/\{([^}]+)\}/g))
+      if (!parameters.some((value) => value.in === "path" && value.name === name))
+        throw new Error(`${id}'s path ${path} has {${name}}, which no path parameter fills`);
 
     const body = entry.requestBody
       ? resolve(entry.requestBody, "requestBodies", requestBody)
@@ -664,8 +766,17 @@ export const generateOpenapi = (
     const form = Object.entries(formBodies).flatMap(([type, kind]) => {
       const entry = body?.content?.[type];
 
-      return entry ? [{ kind, schema: entry.schema }] : [];
+      return entry ? [{ kind, schema: formSchema(id, entry.schema, rule.fields), entry }] : [];
     })[0];
+
+    // Form fields whose lists the encoding joins into one value.
+    const formLists = Object.fromEntries(
+      Object.entries(form?.entry.encoding ?? {}).flatMap(([name, value]) => {
+        const joined = separator(`${id}'s form field ${name}`, value);
+
+        return joined === null ? [] : [[name, joined]];
+      }),
+    );
 
     const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : "text";
 
@@ -696,7 +807,7 @@ export const generateOpenapi = (
     // Pages are read again with GET; Graph also marks some actions pageable.
     const pageable = method === "get" && entry["x-ms-pageable"] !== undefined;
 
-    runtime[rule.name] = {
+    const call: OpenapiOperation = {
       httpMethod: method.toUpperCase(),
       path,
       pathParameters: Object.fromEntries(
@@ -709,7 +820,13 @@ export const generateOpenapi = (
       queryParameters: Object.fromEntries(
         parameters.flatMap((value) =>
           value.in === "query"
-            ? [queryParameter(value.name, separator(id, value), value.required === true)]
+            ? [
+                queryParameter(
+                  value.name,
+                  separator(`${id}'s query parameter ${value.name}`, value),
+                  value.required === true,
+                ),
+              ]
             : [],
         ),
       ),
@@ -720,6 +837,9 @@ export const generateOpenapi = (
       pageable,
       change,
     };
+
+    if (Object.keys(formLists).length) call.formLists = formLists;
+    runtime[rule.name] = call;
 
     const inputOf = (value: z.infer<typeof parameter>) =>
       value.in === "path" ? inputName(value.name) : value.name;
@@ -924,6 +1044,8 @@ export type Operation = {
   /** Header names by input name. */
   headerParameters: Record<string, string>;
   body: "json" | "form" | "multipart" | "text" | null;
+  /** Form fields whose lists are joined into one value, with the separator; others repeat. */
+  formLists?: Record<string, string>;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
   pageable: boolean;

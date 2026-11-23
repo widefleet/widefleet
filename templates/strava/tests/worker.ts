@@ -112,6 +112,7 @@ type Binding = Pick<
   | "updateActivity"
   | "createUpload"
   | "exportRouteGpx"
+  | "listRoutes"
   | "approvalLevel"
   | "setApprovalLevel"
   | "fetch"
@@ -204,6 +205,9 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
       );
 
     if (path === "/rpc/gpx") return Response.json(await app.exportRouteGpx({ id: 3001 }));
+
+    if (path === "/rpc/routes")
+      return Response.json(await app.listRoutes({ id: 101, per_page: 5 }));
 
     if (path === "/rpc/level") return Response.json(await app.approvalLevel());
 

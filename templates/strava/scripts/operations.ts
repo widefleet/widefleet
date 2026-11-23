@@ -53,7 +53,20 @@ export const operations = {
   getGearById: { name: "getGear" },
 
   // Routes
-  getRoutesByAthleteId: { name: "listRoutes" },
+  // Strava's path is /athletes/{id}/routes, but its description and API
+  // reference document no `id` parameter.
+  getRoutesByAthleteId: {
+    name: "listRoutes",
+    parameters: [
+      {
+        name: "id",
+        in: "path",
+        required: true,
+        description: "The identifier of the athlete. Must match the authenticated athlete.",
+        schema: { type: "integer", format: "int64" },
+      },
+    ],
+  },
   getRouteById: { name: "getRoute" },
   getRouteAsGPX: { name: "exportRouteGpx" },
   getRouteAsTCX: { name: "exportRouteTcx" },
@@ -69,4 +82,12 @@ export const operations = {
   // Uploads create activities from FIT, TCX or GPX files.
   createUpload: { name: "createUpload", change: "send" },
   getUploadById: { name: "getUpload" },
-} satisfies Record<string, { name: string; change?: Change | "read"; description?: string }>;
+} satisfies Record<
+  string,
+  {
+    name: string;
+    change?: Change | "read";
+    description?: string;
+    parameters?: readonly object[];
+  }
+>;

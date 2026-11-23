@@ -149,6 +149,14 @@ describe("Strava personal account app", () => {
       "https://www.strava.com/api/v3/activities/18014398509481985",
     );
     // Route exports arrive as text, as their XML media type says.
+    // Routes are listed by the athlete's ID, which Strava's description leaves out.
+    expect(await (await alice.request("/rpc/routes")).json()).toEqual({
+      status: "connected",
+      data: [{ id: 3001, id_str: "3001", name: "Loop" }],
+    });
+    expect(upstream.calls.at(-1)?.url).toBe(
+      "https://www.strava.com/api/v3/athletes/101/routes?per_page=5",
+    );
     expect(await (await alice.request("/rpc/gpx")).json()).toEqual({
       status: "connected",
       data: { contentType: "application/gpx+xml", text: '<?xml version="1.0"?><gpx/>' },

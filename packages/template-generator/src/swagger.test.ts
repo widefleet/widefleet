@@ -259,3 +259,225 @@ describe("Swagger descriptions", () => {
     ).toThrow("updateAthlete's path parameter weight has no place in its path /athlete");
   });
 });
+
+// A small Swagger 2.0 description for one operation.
+const single = (path: string, method: string, operation: Json) => ({
+  swagger: "2.0",
+  host: "api.example.test",
+  paths: { [path]: { [method]: operation } },
+});
+
+const schemaOf = (description: Json, rules: Parameters<typeof generateOpenapi>[1]) =>
+  generateOpenapi(description, rules, service, "").files["src/schema.ts"] ?? "";
+
+describe("Swagger lists, paths and references", () => {
+  it("joins query and form lists as their format says", () => {
+    const lists = (place: "query" | "formData") =>
+      single("/items", place === "query" ? "get" : "post", {
+        operationId: "items",
+        parameters: [
+          ...["csv", "ssv", "pipes", "tsv", "multi"].map((format) => ({
+            name: format,
+            in: place,
+            type: "array",
+            items: { type: "string" },
+            collectionFormat: format,
+          })),
+          // Swagger joins lists with commas unless they say otherwise.
+          { name: "plain", in: place, type: "array", items: { type: "string" } },
+        ],
+        responses: { "204": { description: "Done." } },
+      });
+
+    expect(schemaOf(lists("query"), { operations: { items: { name: "items" } } })).toContain(
+      '"queryParameters":{"csv":["csv",",",false],"ssv":["ssv"," ",false],"pipes":["pipes","|",false],"tsv":["tsv","\\t",false],"multi":["multi",null,false],"plain":["plain",",",false]}',
+    );
+    // Form lists join the same way; `multi` lists repeat the field.
+    expect(
+      schemaOf(lists("formData"), { operations: { items: { name: "items", change: "create" } } }),
+    ).toContain(
+      '"body":"form","bodyRequired":false,"response":null,"pageable":false,"change":"create","formLists":{"csv":",","ssv":" ","pipes":"|","tsv":"\\t","plain":","}',
+    );
+  });
+
+  it("stops on places in a path that no parameter fills, unless a rule adds the parameter", () => {
+    const routes = single("/athletes/{id}/routes", "get", {
+      operationId: "listRoutes",
+      parameters: [{ name: "page", in: "query", type: "integer" }],
+      responses: { "200": { description: "The routes." } },
+    });
+
+    expect(() => schemaOf(routes, { operations: { listRoutes: { name: "listRoutes" } } })).toThrow(
+      "listRoutes's path /athletes/{id}/routes has {id}, which no path parameter fills",
+    );
+
+    const { files } = generateOpenapi(
+      routes,
+      {
+        operations: {
+          listRoutes: {
+            name: "listRoutes",
+            parameters: [
+              {
+                name: "id",
+                in: "path",
+                required: true,
+                description: "The athlete.",
+                schema: { type: "integer", format: "int64" },
+              },
+            ],
+          },
+        },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/schema.ts"]).toContain('"pathParameters":{"id":"id"}');
+    expect(files["src/api.ts"]).toMatch(/\* The athlete\.\n\s+\*\/\n\s+id: number \| string;/);
+  });
+
+  it("replaces, adds and removes form fields as the rules say", () => {
+    const create = single("/activities", "post", {
+      operationId: "createActivity",
+      parameters: [
+        { name: "name", in: "formData", type: "string", required: true },
+        { name: "tags", in: "formData", type: "string", required: true },
+      ],
+      responses: { "201": { description: "Created." } },
+    });
+
+    const types =
+      generateOpenapi(
+        create,
+        {
+          operations: {
+            createActivity: {
+              name: "createActivity",
+              change: "create",
+              fields: { tags: null, "tags[WithPet]": { type: "boolean" } },
+            },
+          },
+        },
+        service,
+        "",
+      ).files["src/api.ts"] ?? "";
+
+    expect(types).toContain('"tags[WithPet]"?: boolean;');
+    expect(types).not.toMatch(/\btags[?:]/);
+    expect(types).toContain("name: string;");
+  });
+
+  it("uploads the files of named multipart schemas and keeps strings in their answers", () => {
+    const upload = {
+      openapi: "3.0.3",
+      servers: [{ url: "https://api.example.test" }],
+      paths: {
+        "/uploads": {
+          post: {
+            operationId: "createUpload",
+            requestBody: {
+              content: {
+                "multipart/form-data": { schema: { $ref: "#/components/schemas/Upload" } },
+              },
+            },
+            responses: {
+              "201": {
+                content: {
+                  "application/json": { schema: { $ref: "#/components/schemas/Upload" } },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Upload: {
+            type: "object",
+            properties: {
+              file: { $ref: "#/components/schemas/File" },
+              name: { type: "string" },
+            },
+          },
+          File: { type: "string", format: "binary" },
+        },
+      },
+    };
+
+    const types =
+      generateOpenapi(
+        upload,
+        { operations: { createUpload: { name: "createUpload", change: "create" } } },
+        service,
+        "",
+      ).files["src/api.ts"] ?? "";
+
+    expect(types).toMatch(/body\?: \{\n\s+file\?: UploadContent;\n\s+name\?: string;\n\s+\};/);
+    expect(types).toContain("export type File = string;");
+    expect(types).toContain("Promise<ExampleResult<Upload>>");
+  });
+
+  it("keeps references back to the description's schemas and names whole-file schemas", async () => {
+    const root = {
+      swagger: "2.0",
+      host: "api.example.test",
+      definitions: {
+        Parent: {
+          type: "object",
+          properties: { child: { $ref: "https://api.example.test/swagger/child.json#/Child" } },
+        },
+      },
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            responses: { "200": { description: "Pets.", schema: { $ref: "pets/Pet.yaml" } } },
+          },
+        },
+      },
+    };
+
+    const siblings = new Map<string, Json>([
+      [
+        "https://api.example.test/swagger/child.json",
+        {
+          Child: {
+            type: "object",
+            properties: {
+              parent: { $ref: "https://api.example.test/swagger/swagger.json#/definitions/Parent" },
+            },
+          },
+        },
+      ],
+      [
+        "https://api.example.test/swagger/pets/Pet.yaml",
+        {
+          type: "object",
+          properties: { tag: { $ref: "#/definitions/Tag" } },
+          definitions: { Tag: { type: "string" } },
+        },
+      ],
+    ]);
+
+    const bundled = await bundleReferences(root, source, async (url) => {
+      const found = siblings.get(url);
+
+      if (!found) throw new Error(`No file at ${url}`);
+
+      return found;
+    });
+
+    expect(bundled).toMatchObject({
+      definitions: {
+        Parent: { properties: { child: { $ref: "#/definitions/Child" } } },
+        Child: { properties: { parent: { $ref: "#/definitions/Parent" } } },
+        Pet: { properties: { tag: { $ref: "#/definitions/Tag" } } },
+        Tag: { type: "string" },
+      },
+      paths: {
+        "/pets": { get: { responses: { "200": { schema: { $ref: "#/definitions/Pet" } } } } },
+      },
+    });
+  });
+});

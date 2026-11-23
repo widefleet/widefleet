@@ -63,6 +63,16 @@ describe("REST requests", () => {
       init: { method: "GET" },
     });
 
+    // Tab-separated lists join with a tab.
+    expect(
+      restRequest(
+        base,
+        "search",
+        { ...list, queryParameters: { cells: ["cells", "\t", false] } },
+        { driveId: "d", q: "x", cells: ["a", "b"] },
+      ).url,
+    ).toBe("https://graph.example.test/v1.0/drives/d/search(q='x')?cells=a%09b");
+
     expect(restRequest(base, "search", list, { driveId: "d", q: "it's" }).url).toBe(
       "https://graph.example.test/v1.0/drives/d/search(q='it''s')",
     );
@@ -160,6 +170,26 @@ describe("REST requests", () => {
     expect(z.instanceof(URLSearchParams).parse(created.init.body).toString()).toBe(
       "name=Run&elapsed_time=60&trainer=false&tags=a&tags=b",
     );
+
+    // Lists the operation joins become one value, with their separator.
+    const joined = restRequest(
+      base,
+      "create",
+      { ...form, formLists: { tags: ",", ids: "\t" } },
+      { body: { tags: ["a", "b"], ids: [1, 2], kinds: ["x", "y"] } },
+    );
+
+    expect(z.instanceof(URLSearchParams).parse(joined.init.body).toString()).toBe(
+      "tags=a%2Cb&ids=1%092&kinds=x&kinds=y",
+    );
+    expect(() =>
+      restRequest(
+        base,
+        "upload",
+        { ...form, body: "multipart", formLists: { files: "," } },
+        { body: { files: [{ mimeType: "text/plain", text: "x" }] } },
+      ),
+    ).toThrow(new InvalidRequest("upload's files joins values, not files"));
     // Files and nested objects are no form fields.
     expect(() =>
       restRequest(base, "create", form, { body: { file: { mimeType: "text/plain", text: "x" } } }),

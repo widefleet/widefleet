@@ -1749,18 +1749,20 @@ export class StravaApi extends WorkerEntrypoint<TemplateEnvironment, StravaPrope
    *
    * Returns a list of the routes created by the authenticated athlete. Private routes are filtered out unless requested by a token with read_all scope.
    */
-  async listRoutes(
-    input: {
-      /**
-       * Page number. Defaults to 1.
-       */
-      page?: number;
-      /**
-       * Number of items per page. Defaults to 30.
-       */
-      per_page?: number;
-    } = {},
-  ): Promise<StravaResult<Route[]>> {
+  async listRoutes(input: {
+    /**
+     * Page number. Defaults to 1.
+     */
+    page?: number;
+    /**
+     * Number of items per page. Defaults to 30.
+     */
+    per_page?: number;
+    /**
+     * The identifier of the athlete. Must match the authenticated athlete.
+     */
+    id: number | string;
+  }): Promise<StravaResult<Route[]>> {
     return run(this.env, this.ctx.props, "listRoutes", input);
   }
 

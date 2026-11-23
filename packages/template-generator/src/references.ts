@@ -70,7 +70,10 @@ export const bundleReferences = async (
   const added: JsonObject = {};
   // The address each added name stands for.
   const names = new Map<string, string>();
-  const documents = new Map<string, Promise<Json>>();
+  // The description itself, which referred files may point back into.
+  const home = new URL(url);
+  home.hash = "";
+  const documents = new Map<string, Promise<Json>>([[home.href, Promise.resolve(description)]]);
 
   const document = (address: string) => {
     const known = documents.get(address);
@@ -87,7 +90,21 @@ export const bundleReferences = async (
     const pointer = decodeURIComponent(target.hash.slice(1));
     target.hash = "";
     const address = `${target.href}#${pointer}`;
-    const name = pointer.split("/").at(-1) ?? "";
+
+    // A reference back to one of the description's own schemas stays local.
+    if (target.href === home.href && pointer.startsWith(local.slice(1))) {
+      const schema = pointer.slice(local.length - 1);
+
+      if (Object.hasOwn(own, schema)) return `${local}${schema}`;
+    }
+
+    // A file that is one schema takes its name from the file, such as `Pet` for `Pet.yaml`.
+    const name =
+      (pointer
+        ? pointer.split("/").at(-1)
+        : decodeURIComponent(target.pathname.split("/").at(-1) ?? "").replace(/\.[^.]*$/, "")) ??
+      "";
+
     const taken = names.get(name);
 
     if (taken === address) return `${local}${name}`;

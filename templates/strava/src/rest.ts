@@ -19,10 +19,15 @@ export type RestOperation = {
   /** Header names by input name. */
   headerParameters: Record<string, string>;
   body: "json" | "form" | "multipart" | "text" | null;
+  /** Form fields whose lists are joined into one value, with the separator; others repeat. */
+  formLists?: Record<string, string> | undefined;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
   pageable: boolean;
 };
+
+const own = <T>(record: Record<string, T>, key: string) =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
 
@@ -47,21 +52,33 @@ const upload = z
   );
 
 // A form's fields as text, or in multipart forms also files: values, and lists
-// of them, which repeat the field. Fields passed as undefined are left out.
-const formFields = <T>(method: string, body: JsonValue, field: z.ZodType<T>, accepts: string) => {
+// of them, which repeat the field unless the operation joins them into one
+// value. Fields passed as undefined are left out.
+const formFields = <T>(
+  method: string,
+  operation: RestOperation,
+  body: JsonValue,
+  field: z.ZodType<T | string>,
+  accepts: string,
+) => {
   const fields = z.record(z.string(), z.union([field, z.array(field)]).optional()).safeParse(body);
 
   if (!fields.success) throw new InvalidRequest(`${method} takes its body as fields of ${accepts}`);
 
-  return Object.entries(fields.data).flatMap(([name, value]) =>
-    value === undefined
-      ? []
-      : (Array.isArray(value) ? value : [value]).map((item): [string, T] => [name, item]),
-  );
-};
+  return Object.entries(fields.data).flatMap(([name, value]): [string, T | string][] => {
+    if (value === undefined) return [];
+    const joiner = own(operation.formLists ?? {}, name);
 
-const own = <T>(record: Record<string, T>, key: string) =>
-  Object.hasOwn(record, key) ? record[key] : undefined;
+    if (!Array.isArray(value)) return [[name, value]];
+
+    if (joiner === undefined) return value.map((item) => [name, item]);
+    const items = z.array(z.string()).safeParse(value);
+
+    if (!items.success) throw new InvalidRequest(`${method}'s ${name} joins values, not files`);
+
+    return [[name, items.data.join(joiner)]];
+  });
+};
 
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -136,13 +153,14 @@ export const restRequest = (
 
   // Fetch writes the form's media type, with the boundary of a multipart form.
   if (operation.body === "form" && body !== undefined)
-    init.body = new URLSearchParams(formFields(method, body, text, "values and lists"));
+    init.body = new URLSearchParams(formFields(method, operation, body, text, "values and lists"));
 
   if (operation.body === "multipart" && body !== undefined) {
     const form = new FormData();
 
     for (const [name, item] of formFields(
       method,
+      operation,
       body,
       z.union([text, upload]),
       "values, lists and files",

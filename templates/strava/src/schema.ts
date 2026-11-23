@@ -17,6 +17,8 @@ export type Operation = {
   /** Header names by input name. */
   headerParameters: Record<string, string>;
   body: "json" | "form" | "multipart" | "text" | null;
+  /** Form fields whose lists are joined into one value, with the separator; others repeat. */
+  formLists?: Record<string, string>;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
   pageable: boolean;
@@ -256,7 +258,7 @@ export const operations = {
   listRoutes: {
     httpMethod: "GET",
     path: "/athletes/{id}/routes",
-    pathParameters: {},
+    pathParameters: { id: "id" },
     queryParameters: { page: ["page", null, false], per_page: ["per_page", null, false] },
     headerParameters: {},
     body: null,

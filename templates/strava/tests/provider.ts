@@ -191,6 +191,9 @@ export const provider = () => {
           { status: 201 },
         );
 
+      if (path === `${api}/athletes/${user}/routes` && request.method === "GET")
+        return Response.json([{ id: 3001, id_str: "3001", name: "Loop" }]);
+
       if (path === `${api}/routes/3001/export_gpx` && request.method === "GET")
         return new Response('<?xml version="1.0"?><gpx/>', {
           headers: { "content-type": "application/gpx+xml" },
