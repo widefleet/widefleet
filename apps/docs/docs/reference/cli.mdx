@@ -87,6 +87,7 @@ IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet hi
 | `widefleet catalog list`                             | List published app launch URLs.                                        |
 | `widefleet catalog templates list [--search TEXT]`   | Find available app templates and a prompt for creating your own app.   |
 | `widefleet catalog templates show ID`                | Read a template's source, Markdown instructions and setup prompt.      |
+| `widefleet rename APP_UUID NAME`                     | Change the name colleagues see; the app's address stays.               |
 | `widefleet delete APP_UUID --yes`                    | Request removal of an app and all its previews.                        |
 
 The target is the selected platform URL, organization context and `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data.

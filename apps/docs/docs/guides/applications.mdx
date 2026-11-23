@@ -63,6 +63,19 @@ group IDs from the CLI.
 Permission to edit an app does not bypass its access rules. Business permissions
 inside the app remain the app author's responsibility.
 
+## Rename the app
+
+Everyone who manages the app can change the name colleagues see. On the app's
+page, choose the name, edit it and save, or use the CLI:
+
+```sh
+widefleet rename APP_UUID "Purchasing"
+```
+
+The app's address, ID and the `name` in `wrangler.jsonc` stay the same, so links,
+commands and deployments keep working. Renaming requires platform and CLI
+**0.7.21 or newer**.
+
 ## Make the app discoverable
 
 Replace `APP_UUID` with the app ID shown by `widefleet apps`:
