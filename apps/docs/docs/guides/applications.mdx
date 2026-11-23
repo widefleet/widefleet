@@ -93,6 +93,11 @@ widefleet catalog about APP_UUID "Counts the stock per shelf.
 widefleet catalog show APP_UUID
 ```
 
+To show screenshots on the page, put up to three images among the app's static files
+as `screenshots/1.png`, `screenshots/2.png` and `screenshots/3.png` and deploy. JPEG
+(`.jpg`) and WebP (`.webp`) work too; an image may be up to 2 MiB. Static files are
+the directory that `assets.directory` in `wrangler.jsonc` names.
+
 `catalog show` prints the page as JSON. An empty text removes the longer text. The
 latest deployment, the app's address and **Create preview** are in the app's
 **Status** section. The app's page requires platform and CLI **0.7.21 or newer**.
