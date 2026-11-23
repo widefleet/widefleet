@@ -41,4 +41,22 @@ export const examples = async () => {
   });
 
   if (sent.resultType === "input_required") void sent.inputRequests.approve.message;
+
+  // A later page needs only its address.
+  await outlook.calendarView({
+    nextLink: "https://graph.microsoft.com/v1.0/me/calendarView?$skiptoken=1",
+  });
+
+  const attached = await outlook.addAttachment({
+    messageId: "draft-1",
+    body: {
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: "notes.txt",
+      contentType: "text/plain",
+      contentBytes: "SGVsbG8=",
+    },
+  });
+
+  if (attached.status === "connected" && "contentBytes" in attached.data)
+    void attached.data.contentBytes;
 };

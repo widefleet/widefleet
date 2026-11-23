@@ -659,6 +659,22 @@ export type EventType = "singleInstance" | "occurrence" | "exception" | "seriesM
  */
 export type ExternalAudienceScope = "none" | "contactsOnly" | "all";
 
+export type FileAttachment = Attachment & {
+  /**
+   * The base64-encoded contents of the file.
+   */
+  contentBytes?: string | null;
+  /**
+   * The ID of the attachment in the Exchange store.
+   */
+  contentId?: string | null;
+  /**
+   * Don't use this property as it isn't supported.
+   */
+  contentLocation?: string | null;
+  "@odata.type"?: string;
+};
+
 /**
  * followupFlag
  */
@@ -729,6 +745,10 @@ export type InternetMessageHeader = {
    * The value in a key-value pair.
    */
   value?: string | null;
+  "@odata.type"?: string;
+};
+
+export type ItemAttachment = Attachment & {
   "@odata.type"?: string;
 };
 
@@ -1597,6 +1617,10 @@ export type RecurrenceRange = {
  */
 export type RecurrenceRangeType = "endDate" | "noEnd" | "numbered";
 
+export type ReferenceAttachment = Attachment & {
+  "@odata.type"?: string;
+};
+
 export type ReferenceNumeric = "-INF" | "INF" | "NaN" | null;
 
 /**
@@ -1784,49 +1808,51 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * List the messages in the user's mailbox. Use `$filter`, `$search`, `$orderby` and `$select` to narrow them.
    */
   async listMessages(
-    input: {
-      /**
-       * Include Hidden Messages
-       */
-      includeHiddenMessages?: string;
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * Include Hidden Messages
+           */
+          includeHiddenMessages?: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<OutlookResult<MessageCollectionResponse>> {
     return run(this.env, this.ctx.props, "listMessages", input);
   }
@@ -1876,49 +1902,51 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * having to fetch the entire set of messages from the server every time.
    */
   async messagesDelta(
-    input: {
-      /**
-       * A custom query option to filter the delta response based on the type of change. Supported values are created, updated or deleted.
-       */
-      changeType?: string;
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * A custom query option to filter the delta response based on the type of change. Supported values are created, updated or deleted.
+           */
+          changeType?: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<
     OutlookResult<
       BaseDeltaFunctionResponse & {
@@ -2219,49 +2247,53 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    *
    * Retrieve a list of attachment objects.
    */
-  async listAttachments(input: {
-    /**
-     * The unique identifier of message
-     */
-    messageId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OutlookResult<AttachmentCollectionResponse>> {
+  async listAttachments(
+    input:
+      | {
+          /**
+           * The unique identifier of message
+           */
+          messageId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OutlookResult<AttachmentCollectionResponse>> {
     return run(this.env, this.ctx.props, "listAttachments", input);
   }
 
@@ -2287,7 +2319,7 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
      * Expand related entities
      */
     $expand?: string[];
-  }): Promise<OutlookResult<Attachment>> {
+  }): Promise<OutlookResult<FileAttachment | ItemAttachment | ReferenceAttachment>> {
     return run(this.env, this.ctx.props, "getAttachment", input);
   }
 
@@ -2307,8 +2339,8 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
     /**
      * New navigation property
      */
-    body: Attachment;
-  }): Promise<OutlookResult<Attachment>> {
+    body: FileAttachment | ItemAttachment | ReferenceAttachment;
+  }): Promise<OutlookResult<FileAttachment | ItemAttachment | ReferenceAttachment>> {
     return run(this.env, this.ctx.props, "addAttachment", input);
   }
 
@@ -2336,49 +2368,51 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * Get the mail folder collection directly under the root folder of the signed-in user. The returned collection includes any mail search folders directly under the root. By default, this operation doesn't return hidden folders. Use a query parameter includeHiddenFolders to include them in the response. This operation doesn't return all mail folders in a mailbox, only the child folders of the root folder. To return all mail folders in a mailbox, each child folder must be traversed separately.
    */
   async listMailFolders(
-    input: {
-      /**
-       * Include Hidden Folders
-       */
-      includeHiddenFolders?: string;
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * Include Hidden Folders
+           */
+          includeHiddenFolders?: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<OutlookResult<MailFolderCollectionResponse>> {
     return run(this.env, this.ctx.props, "listMailFolders", input);
   }
@@ -2411,53 +2445,57 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * Get the folder collection under the specified folder. You can use the .../me/mailFolders shortcut to get the top-level
    * folder collection and navigate to another folder. By default, this operation doesn't return hidden folders. Use a query parameter includeHiddenFolders to include them in the response.
    */
-  async listChildFolders(input: {
-    /**
-     * The unique identifier of mailFolder
-     */
-    mailFolderId: string;
-    /**
-     * Include Hidden Folders
-     */
-    includeHiddenFolders?: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OutlookResult<MailFolderCollectionResponse>> {
+  async listChildFolders(
+    input:
+      | {
+          /**
+           * The unique identifier of mailFolder
+           */
+          mailFolderId: string;
+          /**
+           * Include Hidden Folders
+           */
+          includeHiddenFolders?: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OutlookResult<MailFolderCollectionResponse>> {
     return run(this.env, this.ctx.props, "listChildFolders", input);
   }
 
@@ -2466,49 +2504,53 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    *
    * Get all the messages in the specified user's mailbox, or those messages in a specified folder in the mailbox.
    */
-  async listFolderMessages(input: {
-    /**
-     * The unique identifier of mailFolder
-     */
-    mailFolderId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OutlookResult<MessageCollectionResponse>> {
+  async listFolderMessages(
+    input:
+      | {
+          /**
+           * The unique identifier of mailFolder
+           */
+          mailFolderId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OutlookResult<MessageCollectionResponse>> {
     return run(this.env, this.ctx.props, "listFolderMessages", input);
   }
 
@@ -2520,53 +2562,57 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * that folder](/graph/delta-query-messages). It allows you to maintain and synchronize a local store of a user's messages without
    * having to fetch the entire set of messages from the server every time.
    */
-  async folderMessagesDelta(input: {
-    /**
-     * The unique identifier of mailFolder
-     */
-    mailFolderId: string;
-    /**
-     * A custom query option to filter the delta response based on the type of change. Supported values are created, updated or deleted.
-     */
-    changeType?: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<
+  async folderMessagesDelta(
+    input:
+      | {
+          /**
+           * The unique identifier of mailFolder
+           */
+          mailFolderId: string;
+          /**
+           * A custom query option to filter the delta response based on the type of change. Supported values are created, updated or deleted.
+           */
+          changeType?: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<
     OutlookResult<
       BaseDeltaFunctionResponse & {
         value?: Message[];
@@ -2653,49 +2699,53 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    *
    * Get all the messageRule objects defined for the user's inbox.
    */
-  async listMessageRules(input: {
-    /**
-     * The unique identifier of mailFolder
-     */
-    mailFolderId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OutlookResult<MessageRuleCollectionResponse>> {
+  async listMessageRules(
+    input:
+      | {
+          /**
+           * The unique identifier of mailFolder
+           */
+          mailFolderId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OutlookResult<MessageRuleCollectionResponse>> {
     return run(this.env, this.ctx.props, "listMessageRules", input);
   }
 
@@ -2795,45 +2845,47 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * Get all the user's calendars (/calendars navigation property), get the calendars from the default calendar group or from a specific calendar group.
    */
   async listCalendars(
-    input: {
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<OutlookResult<CalendarCollectionResponse>> {
     return run(this.env, this.ctx.props, "listCalendars", input);
   }
@@ -2916,53 +2968,57 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * Get the occurrences, exceptions, and single instances of events in a calendar view defined by a time range, from the user's default calendar,
    * or from some other calendar of the user.
    */
-  async calendarView(input: {
-    /**
-     * The start date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T19:00:00-08:00
-     */
-    startDateTime: string;
-    /**
-     * The end date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T20:00:00-08:00
-     */
-    endDateTime: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OutlookResult<EventCollectionResponse>> {
+  async calendarView(
+    input:
+      | {
+          /**
+           * The start date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T19:00:00-08:00
+           */
+          startDateTime: string;
+          /**
+           * The end date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T20:00:00-08:00
+           */
+          endDateTime: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OutlookResult<EventCollectionResponse>> {
     return run(this.env, this.ctx.props, "calendarView", input);
   }
 
@@ -2971,57 +3027,61 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    *
    * The calendar view for the calendar. Navigation property. Read-only.
    */
-  async calendarViewOfCalendar(input: {
-    /**
-     * The unique identifier of calendar
-     */
-    calendarId: string;
-    /**
-     * The start date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T19:00:00-08:00
-     */
-    startDateTime: string;
-    /**
-     * The end date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T20:00:00-08:00
-     */
-    endDateTime: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OutlookResult<EventCollectionResponse>> {
+  async calendarViewOfCalendar(
+    input:
+      | {
+          /**
+           * The unique identifier of calendar
+           */
+          calendarId: string;
+          /**
+           * The start date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T19:00:00-08:00
+           */
+          startDateTime: string;
+          /**
+           * The end date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T20:00:00-08:00
+           */
+          endDateTime: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OutlookResult<EventCollectionResponse>> {
     return run(this.env, this.ctx.props, "calendarViewOfCalendar", input);
   }
 
@@ -3033,45 +3093,47 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * get the instances of an event. Currently, this operation returns event bodies in only HTML format. There are two scenarios where an app can get events in another user's calendar:
    */
   async listEvents(
-    input: {
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<OutlookResult<EventCollectionResponse>> {
     return run(this.env, this.ctx.props, "listEvents", input);
   }
@@ -3081,49 +3143,53 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    *
    * The events in the calendar. Navigation property. Read-only.
    */
-  async listCalendarEvents(input: {
-    /**
-     * The unique identifier of calendar
-     */
-    calendarId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OutlookResult<EventCollectionResponse>> {
+  async listCalendarEvents(
+    input:
+      | {
+          /**
+           * The unique identifier of calendar
+           */
+          calendarId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OutlookResult<EventCollectionResponse>> {
     return run(this.env, this.ctx.props, "listCalendarEvents", input);
   }
 
@@ -3155,57 +3221,61 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * Get the instances (occurrences) of an event for a specified time range.  If the event is a seriesMaster type, this API returns the
    * occurrences and exceptions of the event in the specified time range.
    */
-  async listInstances(input: {
-    /**
-     * The unique identifier of event
-     */
-    eventId: string;
-    /**
-     * The start date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T19:00:00-08:00
-     */
-    startDateTime: string;
-    /**
-     * The end date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T20:00:00-08:00
-     */
-    endDateTime: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OutlookResult<EventCollectionResponse>> {
+  async listInstances(
+    input:
+      | {
+          /**
+           * The unique identifier of event
+           */
+          eventId: string;
+          /**
+           * The start date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T19:00:00-08:00
+           */
+          startDateTime: string;
+          /**
+           * The end date and time of the time range, represented in ISO 8601 format. For example, 2019-11-08T20:00:00-08:00
+           */
+          endDateTime: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OutlookResult<EventCollectionResponse>> {
     return run(this.env, this.ctx.props, "listInstances", input);
   }
 
@@ -3494,45 +3564,47 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * Get a contact collection from the default contacts folder of the signed-in user. There are two scenarios where an app can get contacts in another user's contact folder:
    */
   async listContacts(
-    input: {
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<OutlookResult<ContactCollectionResponse>> {
     return run(this.env, this.ctx.props, "listContacts", input);
   }
@@ -3617,45 +3689,47 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * Get the contact folder collection in the default Contacts folder of the signed-in user.
    */
   async listContactFolders(
-    input: {
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<OutlookResult<ContactFolderCollectionResponse>> {
     return run(this.env, this.ctx.props, "listContactFolders", input);
   }
@@ -3702,45 +3776,47 @@ export class OutlookApi extends WorkerEntrypoint<TemplateEnvironment, OutlookPro
    * Get all the categories that have been defined for a user.
    */
   async listCategories(
-    input: {
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<OutlookResult<OutlookCategoryCollectionResponse>> {
     return run(this.env, this.ctx.props, "listCategories", input);
   }

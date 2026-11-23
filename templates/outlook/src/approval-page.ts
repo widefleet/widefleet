@@ -9,7 +9,8 @@ const escape = (value: string) =>
 export const approvalStyles =
   "fieldset{border:0;margin:24px 0;padding:0}legend{font-weight:600;margin-bottom:8px;padding:0}input[type=radio]{margin:0}label{display:flex;gap:10px;align-items:center;padding:6px 0;cursor:pointer}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#202124;color:white;border-radius:7px;padding:10px 18px;font-size:14px}.toast[hidden]{display:none}";
 
-// Saves a new level at once and restores the previous one if saving fails.
+// Saves a new level at once. When saving fails, the page shows the stored level
+// again, which the failed request may or may not have changed.
 export const approvalForm = (service: string, level: ApprovalLevel) => `
 <fieldset id="approval"><legend>Before ${escape(service)} changes run</legend>
 ${approvalLevels.map((option) => `<label><input type="radio" name="level" value="${option}"${option === level ? " checked" : ""}> ${escape(levelDescriptions[option])}</label>`).join("")}
@@ -21,9 +22,18 @@ const toast = document.querySelector(".toast");
 let saved = form.querySelector("input:checked").value;
 let latest = saved;
 let saving = Promise.resolve();
-const restore = () => {
+const levels = ${JSON.stringify(approvalLevels)};
+const restore = async (attempted) => {
+  try {
+    const response = await fetch("/approval-level");
+    const { level } = response.ok ? await response.json() : {};
+    if (levels.includes(level)) saved = level;
+  } catch {}
+  // A newer choice stays: the next save sends it.
+  if (latest !== attempted) return;
   latest = saved;
   form.querySelector(\`input[value="\${saved}"]\`).checked = true;
+  if (saved === attempted) return;
   toast.textContent = "The approval level could not be saved. Try again.";
   toast.hidden = false;
   setTimeout(() => (toast.hidden = true), 4000);
@@ -42,7 +52,7 @@ form.addEventListener("change", (event) => {
         return;
       }
     } catch {}
-    restore();
+    await restore(level);
   });
 });
 </script>`;

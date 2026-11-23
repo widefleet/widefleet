@@ -342,6 +342,27 @@ paths:
     );
   });
 
+  it("types bodies and results with the schemas the rules name", () => {
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      {
+        operations: {
+          "folders.CreateItem": {
+            name: "createItem",
+            change: "create",
+            body: ["example.item", "example.parent"],
+            result: ["example.parent"],
+          },
+        },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain("body: Item | Parent;");
+    expect(files["src/api.ts"]).toContain("Promise<ExampleResult<Parent>>");
+  });
+
   it("takes any JSON where a JSON body or result has no schema", () => {
     const item = '{"schema":{"$ref":"#/components/schemas/example.item"}}';
 

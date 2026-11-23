@@ -15,11 +15,19 @@ export interface OpenapiRules {
    * Offered operations by operation ID, such as `drives.items.ListChildren`, with
    * the method name and, for every operation that is not a GET, its change, or
    * `read` when it only reads. `description` replaces the API's own text where it
-   * describes another operation, as Microsoft Graph's does for some.
+   * describes another operation, as Microsoft Graph's does for some. `body` and
+   * `result` name the schemas a body or result can be where the description only
+   * names their common base, such as Graph's attachment types.
    */
   operations: Record<
     string,
-    { name: string; change?: Change | "read" | undefined; description?: string | undefined }
+    {
+      name: string;
+      change?: Change | "read" | undefined;
+      description?: string | undefined;
+      body?: readonly string[] | undefined;
+      result?: readonly string[] | undefined;
+    }
   >;
 }
 
@@ -286,6 +294,10 @@ export const generateOpenapi = (
   };
 
   const literal = (value: string | number | boolean | null) => JSON.stringify(value);
+
+  // A union of the named schemas, which rules give for a body or result.
+  const schemaUnion = (keys: readonly string[]) =>
+    keys.map((key) => typeName(`#/components/schemas/${key}`)).join(" | ");
 
   // The members of a union, outside nested types and quoted values.
   const members = (type: string) => {
@@ -583,7 +595,7 @@ export const generateOpenapi = (
 
     if (bodyKind)
       fields.push(
-        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${jsonBody ? (jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue") : "string"};`,
+        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${rule.body ? schemaUnion(rule.body) : jsonBody ? (jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue") : "string"};`,
       );
 
     if (bodyKind === "text")
@@ -592,14 +604,17 @@ export const generateOpenapi = (
       );
 
     // An empty success answers null; binary content always arrives as BinaryContent.
+    // A rule can name the schemas a JSON result can be, where the API names their base.
     const result =
       responseKind === "binary"
         ? "BinaryContent"
         : [
             ...new Set([
-              ...jsonResponses.map((json) =>
-                json.schema ? typeOf(json.schema, "  ") : "JsonValue",
-              ),
+              ...(rule.result && jsonResponses.length
+                ? [schemaUnion(rule.result)]
+                : jsonResponses.map((json) =>
+                    json.schema ? typeOf(json.schema, "  ") : "JsonValue",
+                  )),
               ...(empty || !responseKind ? ["null"] : []),
             ]),
           ].join(" | ");

@@ -23,6 +23,13 @@ export const generator = {
 
 export type Change = "create" | "update" | "delete" | "send";
 
+// Graph describes attachments by their base type; these are the kinds it sends and accepts.
+const attachmentTypes = [
+  "microsoft.graph.fileAttachment",
+  "microsoft.graph.itemAttachment",
+  "microsoft.graph.referenceAttachment",
+];
+
 export const operations = {
   // Messages
   "me.ListMessages": {
@@ -66,9 +73,14 @@ export const operations = {
   "me.messages.message.move": { name: "moveMessage", change: "update" },
   "me.messages.message.copy": { name: "copyMessage", change: "create" },
   "me.messages.ListAttachments": { name: "listAttachments" },
-  "me.messages.GetAttachments": { name: "getAttachment" },
+  "me.messages.GetAttachments": { name: "getAttachment", result: attachmentTypes },
   // Adds an attachment to a draft.
-  "me.messages.CreateAttachments": { name: "addAttachment", change: "create" },
+  "me.messages.CreateAttachments": {
+    name: "addAttachment",
+    change: "create",
+    body: attachmentTypes,
+    result: attachmentTypes,
+  },
   "me.messages.DeleteAttachments": { name: "deleteAttachment", change: "delete" },
 
   // Mail folders
@@ -134,4 +146,13 @@ export const operations = {
   // Includes automatic replies, which answer everyone who writes.
   "me.UpdateMailboxSettings": { name: "updateMailboxSettings", change: "update" },
   "me.outlook.ListMasterCategories": { name: "listCategories" },
-} satisfies Record<string, { name: string; change?: Change | "read"; description?: string }>;
+} satisfies Record<
+  string,
+  {
+    name: string;
+    change?: Change | "read";
+    description?: string;
+    body?: readonly string[];
+    result?: readonly string[];
+  }
+>;

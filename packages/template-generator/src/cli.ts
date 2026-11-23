@@ -70,6 +70,8 @@ const configuration = z.discriminatedUnion("kind", [
         name: z.string(),
         change: z.union([change, z.literal("read")]).optional(),
         description: z.string().optional(),
+        body: z.array(z.string()).optional(),
+        result: z.array(z.string()).optional(),
       }),
     ),
   }),

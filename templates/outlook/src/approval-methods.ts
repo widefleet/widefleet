@@ -80,7 +80,8 @@ export const changeApprovalLevel = async (
 
 /**
  * Saves the level a user chooses on the app's page, or returns null for other
- * requests. The user chooses in person, so no further question is asked.
+ * requests. The user chooses in person, so no further question is asked. A GET
+ * returns the stored level, which the page shows again when a save fails.
  */
 export const saveApprovalLevel = async (
   environment: Environment,
@@ -89,7 +90,17 @@ export const saveApprovalLevel = async (
 ) => {
   const url = new URL(request.url);
 
-  if (url.pathname !== "/approval-level" || request.method !== "POST") return null;
+  if (url.pathname !== "/approval-level") return null;
+
+  if (request.method === "GET") {
+    const user = await signedIn(environment, properties);
+
+    return user
+      ? Response.json({ level: await user.level() })
+      : new Response(null, { status: 401 });
+  }
+
+  if (request.method !== "POST") return null;
 
   if (request.headers.get("origin") !== environment.WIDEFLEET_ORIGIN)
     return new Response("Invalid origin", { status: 403 });
