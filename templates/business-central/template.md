@@ -36,8 +36,9 @@ Installations whose managed OAuth for Microsoft allows Business Central's
 `Financials.ReadWrite.All` permission need no registration: users connect their
 accounts directly. Otherwise, an administrator needs to:
 
-1. Register a Microsoft Entra application. Choose **Accounts in any organizational
-   directory** or **Accounts in this organizational directory only**.
+1. Register a Microsoft Entra application for **Accounts in any organizational
+   directory**. The app signs users in through Microsoft's multi-tenant endpoint,
+   which a registration for a single organization does not accept.
 2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI. On
    **API permissions**, add **Dynamics 365 Business Central** > **Delegated
    permissions** > `Financials.ReadWrite.All`.

@@ -77,6 +77,8 @@ export const authentication = (
       microsoft: {
         clientId: credentials.clientId,
         clientSecret: credentials.clientSecret,
+        // Microsoft's multi-tenant endpoint, which accepts only registrations for
+        // any organizational directory, as template.md asks for.
         tenantId: "common",
         // Microsoft issues a token for the one resource its scopes name, so the
         // app requests no Graph scope, such as Better Auth's default User.Read.
