@@ -2553,6 +2553,15 @@ test.describe(`app catalog`, () => {
 
       await publish.click();
       await expect(publish).not.toBeChecked();
+      // The switch shows the choice before it is saved, so wait for the save itself.
+      await expect
+        .poll(() =>
+          environment.database.db
+            .select({ catalogListed: apps.catalogListed })
+            .from(apps)
+            .where(eq(apps.id, record.id)),
+        )
+        .toEqual([{ catalogListed: false }]);
       await readerPage.reload();
       await expect(
         readerPage.getByRole("link", { name: "Stock Counter", exact: true }),
