@@ -14,7 +14,10 @@ export type BinaryContent =
   | { contentType: string; text: string }
   | { contentType: string; base64: string };
 
-/** File content to upload, with its media type: text, or bytes as base64. */
+/**
+ * File content to upload, with its media type: text, sent as UTF-8, or bytes as
+ * base64, such as text in another charset.
+ */
 export type UploadContent =
   | { mimeType: string; text: string }
   | { mimeType: string; base64: string };

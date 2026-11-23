@@ -158,12 +158,25 @@ describe("Google API requests", () => {
       ].join("\r\n"),
     );
 
+    // Text that names UTF-8 as its charset is accepted.
+    expect(
+      googleRequest(
+        base,
+        "filesCreateWithContent",
+        upload,
+        { content: { mimeType: "text/plain; charset=UTF-8", text: "Käse" } },
+        { id: true },
+      ).init.body,
+    ).toContain("Content-Type: text/plain; charset=UTF-8\r\n\r\nKäse");
+
     // Content needs text or base64, and a media type without line breaks.
     for (const content of [
       { mimeType: "text/plain" },
       { mimeType: "text/plain\r\nX: y", text: "a" },
       { mimeType: "text/plain\r\n\r\n; charset=utf-8", text: "a" },
       { mimeType: "text/plain", base64: "not base64!" },
+      // Text is sent as UTF-8; other charsets travel as base64.
+      { mimeType: "text/plain; charset=windows-1252", text: "Käse" },
     ])
       expect(() =>
         googleRequest(base, "filesCreateWithContent", upload, { content }, { id: true }),

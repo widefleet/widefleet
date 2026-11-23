@@ -22,6 +22,9 @@ const name = z.string().regex(/^[A-Za-z_][\w]*$/);
 // A media type, without line breaks that would end the part's headers.
 const mediaType = z.string().regex(/^[\w.+-]+\/[\w.+-]+(?:[ \t]*;[^\r\n]*)?$/);
 
+// The charset a media type names, if any.
+const charsetOf = (mimeType: string) => /;\s*charset="?([^";]+)"?/i.exec(mimeType)?.[1]?.trim();
+
 const uploadContent = z.union([
   z.strictObject({ mimeType: mediaType, text: z.string() }),
   z.strictObject({ mimeType: mediaType, base64: z.base64() }),
@@ -126,6 +129,12 @@ export const googleRequest = (
 
     if (!content.success)
       throw new InvalidRequest(`${method} needs content: a mimeType, and text or base64`);
+    const charset = charsetOf(content.data.mimeType);
+
+    // Text travels as UTF-8, so a media type naming another charset would
+    // misdescribe its bytes.
+    if ("text" in content.data && charset !== undefined && !/^utf-?8$/i.test(charset))
+      throw new InvalidRequest(`${method} sends text as UTF-8; send ${charset} content as base64`);
     url.searchParams.set("uploadType", "multipart");
     const boundary = `widefleet-${crypto.randomUUID()}`;
 

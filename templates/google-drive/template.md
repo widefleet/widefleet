@@ -94,7 +94,8 @@ Results carry content up to 8 MiB; larger files return `too_large`. Through MCP,
 results are limited to 1 MiB.
 
 `filesCreateWithContent` and `filesUpdateWithContent` send a file's metadata and
-content in one upload. The content has its `mimeType` and either `text` or `base64`:
+content in one upload. The content has its `mimeType` and either `text`, sent as UTF-8,
+or `base64`, for any other bytes, including text in another charset:
 
 ```ts
 const created = await env.DRIVE.filesCreateWithContent(
