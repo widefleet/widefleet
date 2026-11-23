@@ -55,7 +55,10 @@ it("builds native CLI packages once per main push while preserving PR checks", (
   expect(main.jobs["main-checks"]?.needs).toBe("main-changes");
   expect(main.jobs["build-canary"]).toBeUndefined();
   expect(checks.jobs["pull-request-checks"]?.uses).toBe("./.github/workflows/check-suites.yaml");
-  expect(checks.jobs["source-and-integration"]?.needs).toBe("pull-request-checks");
+  expect(checks.jobs["source-and-integration"]?.needs).toEqual([
+    "pull-request-checks",
+    "actions-lockfile",
+  ]);
   expect(suites.jobs["cli-platforms"]?.uses).toBe("./.github/workflows/cli-platforms.yaml");
   expect(suites.jobs["cli-platforms"]?.if).toBeUndefined();
   expect(suites.jobs["cli-platforms"]?.with?.["canary"]).toBe(true);
@@ -136,3 +139,29 @@ it.each([
     else await expect(run).rejects.toThrow();
   },
 );
+
+it("verifies the Actions lockfile on every pull request", () => {
+  const steps = checks.jobs["actions-lockfile"]?.steps;
+
+  expect(checks.jobs["actions-lockfile"]?.if).toBeUndefined();
+  expect(steps?.at(-1)?.run).toBe("gh actions-lock --verify");
+});
+
+it.each([
+  ["success", "success", true],
+  ["failure", "success", false],
+  ["success", "failure", false],
+  ["skipped", "success", false],
+  ["success", "cancelled", false],
+])("checks pull request results: suites=%s, lockfile=%s", async (suites, lockfile, passes) => {
+  const gate = checks.jobs["source-and-integration"]?.steps?.find((step) => step.run)?.run;
+
+  if (!gate) throw new Error("Missing pull request check gate");
+
+  const run = execute("bash", ["-e", "-c", gate], {
+    env: { ...process.env, PR_RESULT: suites, LOCKFILE_RESULT: lockfile },
+  });
+
+  if (passes) await expect(run).resolves.toMatchObject({ stdout: "" });
+  else await expect(run).rejects.toThrow();
+});

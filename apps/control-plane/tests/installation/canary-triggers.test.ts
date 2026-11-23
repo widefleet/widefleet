@@ -130,6 +130,7 @@ it.each([
   ".github/workflows/publish-cli.yaml",
   ".github/workflows/cli-platforms.yaml",
   ".github/workflows/check-suites.yaml",
+  ".github/workflows/actions.lock",
   ".github/cli-inputs.json",
   "tools/check-main-changes.py",
 ])("publishes for CLI input %s", async (file) => {
