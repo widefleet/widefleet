@@ -1,7 +1,7 @@
 ---
 title: CLI authentication
 description: Credential stores, headless sessions, token renewal and external credentials.
-lastModified: 2026-10-23
+lastModified: 2026-11-22
 ---
 
 Run `widefleet login`, open the printed link and approve the device code in your
@@ -11,7 +11,9 @@ and version requirements. The default scopes are `platform:read platform:write`;
 select additional scopes explicitly when needed.
 
 With platform and CLI 0.4.0 or newer, company SSO grants the CLI access within
-that organization. Widefleet email login uses the account's admitted memberships.
+that organization. For addresses on the organization's verified domains, it also
+covers the account's other memberships. Widefleet email login uses the account's
+admitted memberships.
 Sign in again after upgrading from an earlier version. See
 [members and company sign-in](/guides/members) for linking and invitations.
 
