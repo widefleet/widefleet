@@ -48,6 +48,9 @@ import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
 import { prepareOrganizationInvitation } from "../../src/lib/server/members.ts";
 import { installationOrganizationId } from "../../src/lib/organization.ts";
+import { storedAppSecrets } from "../../src/lib/server/app-secrets.ts";
+import { parseJsonc } from "@platform/contracts/jsonc";
+import { bundleResult } from "@platform/contracts/builds";
 
 // A remote function's redirect arrives as a result whose serialized data names the location.
 // A query names its page's organization. SvelteKit sends a query argument as URL-safe Base64 of
@@ -76,6 +79,57 @@ let logs = "";
 
 // While this file exists, the server's template source answers the list with an error.
 const templateOutage = join(tmpdir(), `widefleet-template-outage-${process.pid}`);
+
+// A synthetic app builder for one-click installs. It builds every template as
+// one fixed Worker that requires the secrets the template's Wrangler file lists.
+const builder = createServer((request, response) => {
+  let body = "";
+  request.setEncoding("utf8").on("data", (chunk: string) => {
+    body += chunk;
+  });
+  request.on("end", () => {
+    response.setHeader("content-type", "application/json");
+
+    if (request.url === "/document") {
+      response.end(
+        JSON.stringify({ documentation: { format: 3, entrypoints: [], types: [] }, warnings: [] }),
+      );
+
+      return;
+    }
+
+    const { files } = z.object({ files: z.record(z.string(), z.string()) }).parse(JSON.parse(body));
+
+    const wrangler = z
+      .object({ secrets: z.object({ required: z.array(z.string()) }).optional() })
+      .parse(parseJsonc(files["wrangler.jsonc"] ?? "{}"));
+
+    const map = `map-${"e".repeat(64)}.map`;
+
+    response.end(
+      JSON.stringify(
+        bundleResult.parse({
+          worker: 'export default { fetch: () => new Response("Hello") };\n',
+          map: JSON.stringify({ version: 3, sources: ["src/app.ts"], names: [], mappings: "" }),
+          entry: "src/app.ts",
+          metadata: {
+            main_module: "worker.js",
+            compatibility_date: "2026-10-01",
+            compatibility_flags: [],
+            bindings: [],
+            debug: { build_id: crypto.randomUUID(), source_maps: { "worker.js": map } },
+            web: true,
+            entrypoints: [],
+            crons: [],
+            queue_consumers: [],
+            required_secrets: wrangler.secrets?.required,
+          },
+          warnings: [],
+        }),
+      ),
+    );
+  });
+});
 
 // Model the trusted reverse proxy for browser and OAuth back-channel requests.
 const edge = createServer((request, response) => {
@@ -115,6 +169,8 @@ test.beforeAll(async () => {
   await s3.send(new CreateBucketCommand({ Bucket: bucket }));
   edge.listen(25430);
   await once(edge, "listening");
+  builder.listen(25437, "127.0.0.1");
+  await once(builder, "listening");
   server = spawn(
     process.execPath,
     ["--import", fileURLToPath(new URL("./templates.fixture.ts", import.meta.url)), "build"],
@@ -125,6 +181,7 @@ test.beforeAll(async () => {
         ...environment.environment,
         LOGIN_CODE_DELIVERY: "console",
         TEMPLATE_OUTAGE: templateOutage,
+        PLATFORM_APP_BUILDER_URL: "http://127.0.0.1:25437/",
         GOOGLE_CLIENT_ID: "synthetic-google-client",
         GOOGLE_CLIENT_SECRET: "synthetic-google-secret",
         MICROSOFT_CLIENT_ID: "synthetic-microsoft-client",
@@ -774,6 +831,8 @@ test("completes app OAuth through the built server after signing in", async ({ p
 test.afterAll(async () => {
   edge.closeAllConnections();
   await new Promise<void>((resolve) => edge.close(() => resolve()));
+  builder.closeAllConnections();
+  await new Promise<void>((resolve) => builder.close(() => resolve()));
 
   if (server?.exitCode === null) {
     const exited = once(server, "exit");
@@ -3234,6 +3293,107 @@ test("keeps the email step usable after a failed send and clears feedback on bac
 test.describe(`app templates`, () => {
   test.use({});
 
+  test("installs a template with its required secrets and shows them on the Secrets page", async ({
+    page,
+    context,
+  }, testInfo) => {
+    const person = environment.users.createUser({
+      name: "Template Installer",
+      email: `template-installer@example.test`,
+    });
+
+    await environment.users.saveUser(person);
+    await environment.linkMicrosoftUser(person.id);
+    const session = await environment.users.login({ userId: person.id });
+    await context.addCookies(
+      session.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax",
+        secure: false,
+      })),
+    );
+
+    const shoot = async (name: string) => {
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+          await page.screenshot({
+            path: testInfo.outputPath(`${name}-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+        }
+      }
+
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.emulateMedia({ colorScheme: "light" });
+    };
+
+    await page.goto("/widefleet/catalog/templates/gmail");
+    await expect(
+      page.getByRole("heading", { name: "Required secrets", exact: true }),
+    ).toBeVisible();
+
+    const install = page.getByRole("button", { name: "Install", exact: true });
+    const clientId = page.getByLabel("GOOGLE_CLIENT_ID", { exact: true });
+    const clientSecret = page.getByLabel("GOOGLE_CLIENT_SECRET", { exact: true });
+
+    // Install waits for every value, which stays hidden.
+    await expect(clientId).toHaveAttribute("type", "password");
+    await expect(install).toBeDisabled();
+    await shoot("template-install");
+    await clientId.fill("synthetic-client-id.apps.example.test");
+    await expect(install).toBeDisabled();
+    await clientSecret.fill("synthetic-client-secret");
+    await expect(install).toBeEnabled();
+    await shoot("template-install-filled");
+    await clientSecret.press("Enter");
+
+    await expect(page).toHaveURL(/\/widefleet\/apps\/[0-9a-f-]+\/deployments$/);
+    const appId = z.uuid().parse(page.url().split("/").at(-2));
+
+    const [installed] = await environment.database.db
+      .select({ secrets: apps.secrets, templateId: apps.templateId })
+      .from(apps)
+      .where(eq(apps.id, appId));
+
+    expect(installed?.templateId).toBe("gmail");
+    expect(Object.keys(storedAppSecrets.parse(installed?.secrets)).sort()).toEqual([
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+    ]);
+    // Stored encrypted.
+    expect(JSON.stringify(installed?.secrets)).not.toContain("synthetic-client-secret");
+
+    // Both secrets are set and required by the installed version.
+    await page.goto(`/widefleet/apps/${appId}/secrets`);
+    const rows = page.locator("section form, section > div.rounded-lg");
+    await expect(page.getByText("Required", { exact: true })).toHaveCount(2);
+    await expect(page.getByText("Missing", { exact: true })).toHaveCount(0);
+    await shoot("secrets-required");
+
+    // Removing one leaves it missing, with a shortcut to set it again.
+    await rows
+      .filter({ hasText: "GOOGLE_CLIENT_SECRET" })
+      .getByRole("button", { name: "Remove", exact: true })
+      .click();
+    await expect(page.getByText("Missing", { exact: true })).toBeVisible();
+    await expect(page.getByText("The app requires secrets that are not set.")).toBeVisible();
+    await page.getByRole("button", { name: "Set value", exact: true }).click();
+    await expect(page.getByLabel("Name", { exact: true })).toHaveValue("GOOGLE_CLIENT_SECRET");
+    await expect(page.getByLabel("Value", { exact: true })).toBeFocused();
+    await shoot("secrets-missing");
+    await page.getByLabel("Value", { exact: true }).fill("synthetic-client-secret");
+    await page.getByRole("button", { name: "Save secret", exact: true }).click();
+    await expect(page.getByText("Missing", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Required", { exact: true })).toHaveCount(2);
+  });
+
   test("keeps My apps and the template list usable while templates are unavailable", async ({
     page,
     context,
@@ -3353,7 +3513,9 @@ test.describe(`app templates`, () => {
     await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
     const response = await context.request.get("/api/v1/catalog/templates/gmail");
     const detail = z.object({ prompt: z.string() }).parse(await response.json());
-    await expect(page.locator("code").first()).toHaveText(detail.prompt);
+    await expect(
+      page.getByRole("region", { name: "Set up with your agent" }).locator("code"),
+    ).toHaveText(detail.prompt);
     expect(detail.prompt).toContain("--organization 'widefleet'");
     expect(detail.prompt).toContain(`--url '${environment.configuration.PLATFORM_URL}'`);
 

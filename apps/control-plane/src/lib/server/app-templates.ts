@@ -14,7 +14,7 @@ import type { Principal } from "./identity.ts";
 import type { Configuration } from "./config.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { iconPaths, maxIconBytes } from "./app-icons.ts";
-import { declaredAssets } from "./template-project.ts";
+import { declaredAssets, declaredSecrets } from "./template-project.ts";
 import { readBody } from "./upload-body.ts";
 
 const maxWranglerBytes = 1024 * 1024;
@@ -79,6 +79,21 @@ const loadNetwork = async (id: string) => {
   const network = appDeclaration.parse(parseJsonc(await response.text())).network;
 
   return network && { backend: network.backend, browser: network.browser };
+};
+
+// The secrets a template's Wrangler file requires, which an install provides.
+const loadRequiredSecrets = async (id: string) => {
+  // The installer's precedence for the Wrangler file.
+  for (const file of ["wrangler.jsonc", "wrangler.json"]) {
+    const response = await fetch(`${files}/${id}/${file}`, { signal: AbortSignal.timeout(10_000) });
+
+    if (response.ok) return declaredSecrets(await response.text());
+    await response.body?.cancel();
+
+    if (response.status !== 404) throw new Error(`GitHub returned HTTP ${response.status}`);
+  }
+
+  return [];
 };
 
 export const templateCatalog = (
@@ -149,9 +164,13 @@ export const readTemplate = (
     const template = yield* Result.await(
       Result.tryPromise({
         try: async () => {
-          const [template, network] = await Promise.all([loadTemplate(id), loadNetwork(id)]);
+          const [template, network, requiredSecrets] = await Promise.all([
+            loadTemplate(id),
+            loadNetwork(id),
+            loadRequiredSecrets(id),
+          ]);
 
-          return template && { ...template, network };
+          return template && { ...template, network, requiredSecrets };
         },
         catch: (cause) =>
           new StorageUnavailable({

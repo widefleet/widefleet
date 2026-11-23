@@ -98,7 +98,10 @@ export const getTemplates = query(
 );
 
 export const installTemplate = form(
-  templateInstallInput.extend(organizationSelection.shape).extend({
+  templateInstallInput.omit({ secrets: true }).extend({
+    ...organizationSelection.shape,
+    // The leading underscore keeps the values out of a returned failed form.
+    _secrets: templateInstallInput.shape.secrets,
     // The origins the page showed next to the install button, as JSON.
     network: z.string().transform((value, context) => {
       let parsed;
@@ -115,12 +118,12 @@ export const installTemplate = form(
       return z.NEVER;
     }),
   }),
-  async ({ organizationId, templateId, name, network }, issue) => {
+  async ({ organizationId, templateId, name, network, _secrets }, issue) => {
     const { runtime, principal, organization } = await remoteContext({ organizationId });
 
     const installed = await runtime.templates.install(
       principal,
-      { templateId, name },
+      { templateId, name, secrets: _secrets },
       { consentedNetwork: network },
     );
 

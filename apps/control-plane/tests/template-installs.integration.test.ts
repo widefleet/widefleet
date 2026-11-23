@@ -55,6 +55,12 @@ const documentation = {
   types: [],
 };
 
+// The Gmail template requires the organization's Google OAuth client.
+const googleClient = {
+  GOOGLE_CLIENT_ID: "synthetic-client-id",
+  GOOGLE_CLIENT_SECRET: "synthetic-client-secret",
+};
+
 const builderRequests: { phase: "bundle" | "document"; body: string }[] = [];
 
 let bundleResponse = () =>
@@ -164,7 +170,7 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   expect(contract.appTemplate.parse(await template.json()).installable).toBe(true);
 
-  const response = await install(runtime, "gmail", { name: "mail-reader" });
+  const response = await install(runtime, "gmail", { name: "mail-reader", secrets: googleClient });
 
   expect(response.status).toBe(200);
   const result = contract.templateInstall.parse(await response.json());
@@ -180,6 +186,10 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   });
 
   expect(record).toMatchObject({ templateId: "gmail", templateCommit });
+  // The install saved the template's required secrets before deploying.
+  expect(Object.keys(z.record(z.string(), z.string()).parse(record?.secrets))).toEqual(
+    Object.keys(googleClient),
+  );
 
   // The app starts with the template's description.
   const guide = await readFile(
@@ -289,14 +299,16 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   // An install never replaces an app: a taken name ends it before the build.
   const requests = builderRequests.length;
-  const taken = await install(runtime, "gmail", { name: "mail-reader" });
+  const taken = await install(runtime, "gmail", { name: "mail-reader", secrets: googleClient });
 
   expect(taken.status).toBe(409);
   expect(await taken.text()).toContain("An app named mail-reader already exists");
   expect(builderRequests).toHaveLength(requests);
 
   const renamed = contract.templateInstall.parse(
-    await (await install(runtime, "gmail", { name: "mail-reader-2" })).json(),
+    await (
+      await install(runtime, "gmail", { name: "mail-reader-2", secrets: googleClient })
+    ).json(),
   );
 
   expect(renamed.app.id).not.toBe(result.app.id);
@@ -316,7 +328,7 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   const empty = contract.app.parse(await draft.json());
 
   const resumed = contract.templateInstall.parse(
-    await (await install(runtime, "gmail", { name: "mail-draft" })).json(),
+    await (await install(runtime, "gmail", { name: "mail-draft", secrets: googleClient })).json(),
   );
 
   expect(resumed.app.id).toBe(empty.id);
@@ -345,7 +357,9 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   );
 
   const described = contract.templateInstall.parse(
-    await (await install(runtime, "gmail", { name: "mail-described" })).json(),
+    await (
+      await install(runtime, "gmail", { name: "mail-described", secrets: googleClient })
+    ).json(),
   );
 
   expect(described.app.description).toBe("Reads the team inbox.");
@@ -416,7 +430,7 @@ it("grants consented origins on the template page and requests them through the 
     // The page showed fewer origins than the template now declares.
     const changed = await runtime.templates.install(
       principal,
-      { templateId: "github", name: "github-changed" },
+      { templateId: "github", name: "github-changed", secrets: {} },
       { consentedNetwork: { backend: [], browser: [] } },
     );
 
@@ -426,7 +440,7 @@ it("grants consented origins on the template page and requests them through the 
     const granted = (
       await runtime.templates.install(
         principal,
-        { templateId: "github", name: "github-granted" },
+        { templateId: "github", name: "github-granted", secrets: {} },
         { consentedNetwork: github },
       )
     ).unwrap();
@@ -446,7 +460,7 @@ it("grants consented origins on the template page and requests them through the 
     const pending = (
       await runtime.templates.install(
         principal,
-        { templateId: "github", name: "github-pending" },
+        { templateId: "github", name: "github-pending", secrets: {} },
         { consentedNetwork: github },
       )
     ).unwrap();
@@ -584,7 +598,7 @@ it("does not install over an app deployed while the template builds", async () =
     // Installing from the page, whose consent must not reach the other app.
     const raced = await runtime.templates.install(
       principal,
-      { templateId: "gmail", name: "mail-race" },
+      { templateId: "gmail", name: "mail-race", secrets: googleClient },
       { consentedNetwork: github },
     );
 
@@ -602,12 +616,139 @@ it("does not install over an app deployed while the template builds", async () =
   // Only the concurrent deployment exists.
   expect(deployments).toHaveLength(1);
 
-  // The other deployment's app is not marked as installed from the template or described by it.
+  // The other deployment's app is not marked as installed from the template or described by
+  // it, and the template's secrets do not reach it.
   const record = await environment.database.db.query.apps.findFirst({
     where: (apps, { eq }) => eq(apps.id, app.id),
   });
 
-  expect(record).toMatchObject({ templateId: null, templateCommit: null, description: null });
+  expect(record).toMatchObject({
+    templateId: null,
+    templateCommit: null,
+    description: null,
+    secrets: {},
+    secretRevision: 0,
+  });
+});
+
+it("saves the secrets a template requires before its first deployment", async () => {
+  const runtime = await runtimeWith(builder);
+  const fixed = bundleResponse;
+  const required = ["SYNTHETIC_CLIENT_ID", "SYNTHETIC_CLIENT_SECRET"];
+
+  const principal = (
+    await runtime.identity.authenticate(new Request("http://localhost"), "platform:write")
+  ).unwrap();
+
+  // The template's Wrangler file requires two secrets, at the pinned commit
+  // and on its page.
+  vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+
+    if (url.pathname.endsWith("/templates/linear/wrangler.jsonc"))
+      return Response.json({
+        name: "linear",
+        main: "src/app.ts",
+        compatibility_date: "2026-10-01",
+        secrets: { required },
+      });
+
+    return (await templateRepository(url)) ?? originalFetch(input, init);
+  });
+
+  bundleResponse = () =>
+    Response.json(
+      bundleResult.parse({
+        worker,
+        map,
+        entry: "src/app.ts",
+        metadata: {
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          compatibility_flags: [],
+          bindings: [],
+          debug: { build_id: "d".repeat(64), source_maps: { "worker.js": mapName } },
+          web: true,
+          entrypoints: ["default"],
+          crons: [],
+          queue_consumers: [],
+          required_secrets: required,
+        },
+        warnings: [],
+      }),
+    );
+
+  try {
+    const page = await createApi(runtime)(
+      new Request("http://localhost/api/v1/catalog/templates/linear"),
+    );
+
+    expect(contract.appTemplate.parse(await page.json()).requiredSecrets).toEqual(required);
+
+    // Every required value is needed, and only those, before anything is built.
+    const missing = await install(runtime, "linear", {
+      name: "issues",
+      secrets: { SYNTHETIC_CLIENT_ID: "client" },
+    });
+
+    expect(missing.status).toBe(400);
+    expect(await missing.text()).toContain(
+      "Provide values for the template's required secrets: SYNTHETIC_CLIENT_SECRET",
+    );
+
+    const extra = await install(runtime, "linear", {
+      name: "issues",
+      secrets: { SYNTHETIC_CLIENT_ID: "client", SYNTHETIC_CLIENT_SECRET: "secret", OTHER: "x" },
+    });
+
+    expect(extra.status).toBe(400);
+    expect(await extra.text()).toContain("The template does not require OTHER");
+    expect(builderRequests).toEqual([]);
+    expect((await runtime.apps.named(principal, "issues")).unwrap()).toBeNull();
+
+    // Only members who may create apps install templates, and nothing is saved otherwise.
+    vi.mocked(runtime.identity.authenticate).mockResolvedValueOnce(
+      Result.ok({ ...principal, creator: false }),
+    );
+
+    const forbidden = await install(runtime, "linear", {
+      name: "issues",
+      secrets: { SYNTHETIC_CLIENT_ID: "client", SYNTHETIC_CLIENT_SECRET: "secret" },
+    });
+
+    expect(forbidden.status).toBe(403);
+    expect((await runtime.apps.named(principal, "issues")).unwrap()).toBeNull();
+
+    const response = await install(runtime, "linear", {
+      name: "issues",
+      secrets: { SYNTHETIC_CLIENT_ID: "client", SYNTHETIC_CLIENT_SECRET: "secret" },
+    });
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    const installed = contract.templateInstall.parse(await response.json());
+
+    expect(installed.deployment.status).toBe("queued");
+
+    // The values are app secrets, and the deployed version records its list.
+    const secrets = (await runtime.appSecrets.read(principal, installed.app.id)).unwrap();
+
+    expect(secrets).toMatchObject({ names: required, required });
+
+    const artifact = await environment.database.db.query.artifacts.findFirst({
+      where: (artifacts, { eq }) => eq(artifacts.id, installed.deployment.artifactId),
+    });
+
+    expect(contract.workerMetadata.parse(artifact?.metadata).required_secrets).toEqual(required);
+
+    // Removing a required secret is allowed; the page then lists it as missing.
+    const removed = (
+      await runtime.appSecrets.set(principal, installed.app.id, "SYNTHETIC_CLIENT_SECRET", null)
+    ).unwrap();
+
+    expect(removed).toMatchObject({ names: ["SYNTHETIC_CLIENT_ID"], required });
+  } finally {
+    bundleResponse = fixed;
+  }
 });
 
 it("keeps offering a template whose deployment was rejected", async () => {
@@ -618,7 +759,10 @@ it("keeps offering a template whose deployment was rejected", async () => {
     Result.err(new InvalidOperation({ code: "BAD_REQUEST", message: "Deployment rejected" })),
   );
 
-  const response = await install(runtime, "gmail", { name: "mail-rejected" });
+  const response = await install(runtime, "gmail", {
+    name: "mail-rejected",
+    secrets: googleClient,
+  });
 
   expect(response.status).toBe(400);
 
@@ -639,6 +783,35 @@ it("reports build errors and missing templates", async () => {
   expect(failed.status).toBe(400);
   expect(await failed.text()).toContain("Could not resolve left-pad");
 
+  // A build the upload would reject fails before the app exists, here a
+  // required secret named like the default assets binding.
+  bundleResponse = () =>
+    Response.json(
+      bundleResult.parse({
+        worker,
+        map,
+        entry: "src/app.ts",
+        metadata: {
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          compatibility_flags: [],
+          bindings: [],
+          debug: { build_id: "f".repeat(64), source_maps: { "worker.js": mapName } },
+          web: true,
+          entrypoints: ["default"],
+          crons: [],
+          queue_consumers: [],
+          required_secrets: ["ASSETS"],
+        },
+        warnings: [],
+      }),
+    );
+
+  const undeployable = await install(runtime, "github", { name: "repository-reader" });
+
+  expect(undeployable.status).toBe(400);
+  expect(await undeployable.text()).toContain("The template's build is not deployable");
+
   bundleResponse = () => new Response("Internal error", { status: 500 });
 
   const unavailable = await install(runtime, "github", { name: "repository-reader" });
@@ -648,7 +821,7 @@ it("reports build errors and missing templates", async () => {
   const missing = await install(runtime, "missing");
 
   expect(missing.status).toBe(404);
-  expect(builderRequests).toHaveLength(2);
+  expect(builderRequests).toHaveLength(3);
 
   // A template whose document cannot be read fails before anything is built or created.
   vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
@@ -663,7 +836,7 @@ it("reports build errors and missing templates", async () => {
 
   expect(unreadable.status).toBe(400);
   expect(await unreadable.text()).toContain("no readable description");
-  expect(builderRequests).toHaveLength(2);
+  expect(builderRequests).toHaveLength(3);
 
   // Failed builds create no app, so the name stays free.
   const apps = await environment.database.db.query.apps.findMany({
@@ -675,7 +848,7 @@ it("reports build errors and missing templates", async () => {
   const reserved = await install(runtime, "github", { name: "auth" });
 
   expect(reserved.status).toBe(400);
-  expect(builderRequests).toHaveLength(2);
+  expect(builderRequests).toHaveLength(3);
 });
 
 it("ends a build that exceeds the deadline", async () => {

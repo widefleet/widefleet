@@ -873,7 +873,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
               status: 'queued', finishedAt: null, message: null }, command.requestId, command.rollback,
               command.attribution ? {id: command.attribution.userId, application: {organizationId: command.attribution.organizationId}} : undefined,
-              command.refreshSecrets ? {refreshSecrets:true} : undefined);
+              { ...(command.refreshSecrets && {refreshSecrets:true}), ...(command.firstDeployment && {firstDeployment:true}), ...(command.secrets && {secrets:command.secrets}) });
           });
           return Response.json(result.isErr() ? { error: result.error.message, attemptedId } : result.value, { status: result.isErr() ? 400 : 200 });
         }
@@ -2437,6 +2437,67 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       );
       await dispatch(refresh);
     }, 30_000);
+
+    it("gives a template install's secrets only to its own first deployment", async () => {
+      const reader = (label: string) =>
+        `export default { async fetch(request, env) { try { return new Response('${label}:' + await env.WIDEFLEET_SECRETS.get('TOKEN')); } catch { return new Response('${label}:none'); } } };`;
+
+      const secrets = {
+        TOKEN: await encryptSecret(environment.environment.PLATFORM_ENCRYPTION_KEY, "synthetic"),
+      };
+
+      const install = async (appId?: string) => {
+        const entry = await seedDeployment(environment.database.db, {
+          ...(appId && { appId }),
+          bindings: [],
+          requiredSecrets: ["TOKEN"],
+          source: reader("template"),
+        });
+
+        await seed(entry);
+
+        return {
+          ...entry,
+          command: { ...entry.command, firstDeployment: true, secrets },
+        };
+      };
+
+      const record = async (appId: string) =>
+        (await environment.database.db.select().from(apps).where(eq(apps.id, appId)))[0];
+
+      // Other code prepared for the draft app is accepted before the install.
+      const raced = await install();
+
+      const other = await seedDeployment(environment.database.db, {
+        appId: raced.appId,
+        bindings: [],
+        source: reader("other"),
+      });
+
+      await seed(other);
+      await dispatch(other);
+      await completed(other.command.id);
+
+      const rejected = await submit(raced);
+
+      expect(rejected.status).toBe(400);
+      expect(await rejected.text()).toContain("The app already has a deployment");
+      expect(await record(raced.appId)).toMatchObject({ secrets: {}, secretRevision: 0 });
+      expect(await (await authenticatedFetch(`https://${raced.hostname}/`)).text()).toBe(
+        "other:none",
+      );
+
+      // Accepted as the first deployment, the install's code receives its secrets.
+      const accepted = await install();
+
+      await dispatch(accepted);
+      await completed(accepted.command.id);
+      expect(await record(accepted.appId)).toMatchObject({ secretRevision: 1 });
+      expect((await operation(accepted.command.id))?.command).not.toHaveProperty("secrets");
+      expect(await (await authenticatedFetch(`https://${accepted.hostname}/`)).text()).toBe(
+        "template:synthetic",
+      );
+    }, 60_000);
 
     it("deploys app services with private secrets and follows their activated versions", async () => {
       const serviceSource = `import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint { async read() { return { version: 'one', secret: await this.env.WIDEFLEET_SECRETS.get('TOKEN') }; } }`;

@@ -5,6 +5,7 @@ import {
   appSecretValue,
   appSecretPreparation,
   capabilityGrant,
+  executionWorkerMetadata,
   runtimeVersion,
   workerMetadata,
 } from "./index.ts";
@@ -117,6 +118,28 @@ describe("deployment contracts", () => {
         assets: { upload_session: "93d8fffd-d0ed-48cf-8fb7-570219c62a70" },
       }).success,
     ).toBe(false);
+  });
+
+  it("carries required secrets for the control plane, apart from bindings", () => {
+    const parse = (required_secrets: string[]) =>
+      workerMetadata.safeParse({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        bindings: [{ type: "plain_text", name: "GREETING", text: "hi" }],
+        required_secrets,
+        assets: { upload_session: "93d8fffd-d0ed-48cf-8fb7-570219c62a70" },
+      });
+
+    const parsed = parse(["API_KEY"]);
+
+    expect(parsed.data?.required_secrets).toEqual(["API_KEY"]);
+    // Runtimes do not know the field; the control plane checks it.
+    expect(parsed.data && executionWorkerMetadata(parsed.data)).not.toHaveProperty(
+      "required_secrets",
+    );
+
+    for (const names of [["API_KEY", "API_KEY"], ["GREETING"], ["ASSETS"], ["WIDEFLEET_KEY"]])
+      expect(parse(names).success).toBe(false);
   });
 
   it("rejects undeclared binding types", () => {

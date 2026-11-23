@@ -16,11 +16,16 @@ for CLI setup and authentication. Copy this directory into your project and run:
 ```sh
 pnpm install
 pnpm test
+widefleet create google-calendar --name "Google Calendar"
+widefleet secret put GOOGLE_CLIENT_ID --file /path/to/client-id
+widefleet secret put GOOGLE_CLIENT_SECRET --file /path/to/client-secret
 widefleet deploy
 ```
 
-Choose the app name in `wrangler.jsonc` before deploying. The CLI creates the app
-and its declared database. Keep your local source for subsequent changes.
+Choose the app name in `wrangler.jsonc` and create the app with that name. Its
+deployments need the Google OAuth client from [Configure Google](#configure-google), which
+`wrangler.jsonc` lists as required secrets. The CLI creates the app's declared
+database. Keep your local source for subsequent changes.
 
 Keep `pnpm-workspace.yaml` and `patches/` with the source. They patch Better Auth to
 sign cookies and encrypt saved account tokens with the app's Widefleet keys, which
@@ -36,10 +41,14 @@ An administrator needs to:
    before people outside its test users can connect. An internal app of a Google
    Workspace organization does not.
 2. Create an OAuth client with the **Web application** type. Register
-   `https://YOUR-APP-URL/auth/callback/google` as an authorized redirect URI.
-3. Set the app secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Use the app's
-   Secrets page or `widefleet secret put NAME --file /path/to/secret` to provide
-   values.
+   `https://YOUR-APP-URL/auth/callback/google` as an authorized redirect URI. You can
+   add it once the app is installed and its URL is known.
+3. Provide the client ID and client secret as the app secrets `GOOGLE_CLIENT_ID` and
+   `GOOGLE_CLIENT_SECRET`. Installing from the template page asks for them;
+   `widefleet catalog templates install` reads them with
+   `--secret-file GOOGLE_CLIENT_ID=/path/to/client-id --secret-file GOOGLE_CLIENT_SECRET=/path/to/client-secret`.
+   Change them later on the app's Secrets page or with
+   `widefleet secret put NAME --file /path/to/secret`.
 4. Allow the backend origins that `widefleet.jsonc` declares. A one-click install
    from the template page allows them, as does `widefleet catalog templates install`
    with the CLI's `network:manage` scope. After `widefleet deploy`, run from the app

@@ -37,6 +37,15 @@ struct Configuration {
     workflows: Vec<Workflow>,
     #[serde(rename = "no_bundle")]
     _no_bundle: Option<bool>,
+    #[serde(default)]
+    secrets: Secrets,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Secrets {
+    #[serde(default)]
+    required: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -298,6 +307,7 @@ async fn publish(
     {
         return Err(Error::invalid("Compatibility flags must be unique".into()));
     }
+    check_required_secrets(&configuration)?;
     if matches!(target, Target::App(None)) {
         let name = configuration.name.as_deref().unwrap_or_default();
         if name.is_empty()
@@ -538,6 +548,7 @@ async fn publish(
         network: declaration(project)?.network,
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
+        required_secrets: configuration.secrets.required,
         worker: worker_metadata,
         assets: WorkerAssets {
             upload_session: session.id,
@@ -571,6 +582,73 @@ async fn publish(
         source: metadata.source,
         requested_network,
     })
+}
+
+// The control plane validates the deployment again; these checks report a
+// mistake before the build.
+fn check_required_secrets(configuration: &Configuration) -> Result<()> {
+    let required = &configuration.secrets.required;
+    // The contract's requiredSecrets in packages/contracts: app secret names
+    // and at most appEnvironmentMaxBindings of them.
+    if required.len() > 128 {
+        return Err(Error::invalid("List at most 128 required secrets".into()));
+    }
+    if let Some(name) = required.iter().find(|name| {
+        name.len() > 64
+            || name.starts_with("WIDEFLEET_")
+            || name.as_str() == "__proto__"
+            || !name
+                .starts_with(|character: char| character.is_ascii_alphabetic() || character == '_')
+            || !name
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    }) {
+        return Err(Error::invalid(format!(
+            "Invalid required secret {name:?}: use up to 64 letters, digits and underscores, starting with a letter or underscore; WIDEFLEET_ names and __proto__ are reserved"
+        )));
+    }
+    if required.iter().collect::<BTreeSet<_>>().len() != required.len() {
+        return Err(Error::invalid("Required secrets must be unique".into()));
+    }
+    let worker = &configuration.worker;
+    let bindings: BTreeSet<&str> = worker
+        .vars
+        .keys()
+        .map(String::as_str)
+        .chain(worker.binding_names())
+        .chain(
+            configuration
+                .queues
+                .producers
+                .iter()
+                .map(|producer| producer.binding.as_str()),
+        )
+        .chain(
+            configuration
+                .workflows
+                .iter()
+                .map(|workflow| workflow.binding.as_str()),
+        )
+        // Every deployment has an assets binding, ASSETS by default.
+        .chain(std::iter::once(
+            configuration
+                .assets
+                .as_ref()
+                .map_or("ASSETS", |assets| assets.binding.as_str()),
+        ))
+        .collect();
+    let taken: Vec<&str> = required
+        .iter()
+        .map(String::as_str)
+        .filter(|name| bindings.contains(name))
+        .collect();
+    if !taken.is_empty() {
+        return Err(Error::invalid(format!(
+            "Required secrets cannot use the name of a binding or variable: {}",
+            taken.join(", ")
+        )));
+    }
+    Ok(())
 }
 
 #[derive(serde::Deserialize)]
@@ -894,6 +972,53 @@ mod tests {
         assert!(network.browser.is_empty());
         std::fs::write(root.join("widefleet.jsonc"), r#"{"networks":{}}"#)?;
         assert!(declaration(root).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn required_secrets_are_wrangler_names_apart_from_bindings() -> Result<()> {
+        let configuration = |secrets: serde_json::Value| -> Result<Configuration> {
+            Ok(serde_json::from_value(value!({
+                "main": "src/app.ts",
+                "compatibility_date": "2026-10-01",
+                "vars": { "GREETING": "hi" },
+                "d1_databases": [{ "binding": "DB", "database_name": "accounts" }],
+                "assets": { "directory": "public", "binding": "ASSETS" },
+                "secrets": secrets,
+            }))?)
+        };
+        let declared = configuration(value!({ "required": ["API_KEY", "_TOKEN"] }))?;
+        check_required_secrets(&declared)?;
+        assert_eq!(declared.secrets.required, ["API_KEY", "_TOKEN"]);
+        let empty = configuration(value!({}))?;
+        check_required_secrets(&empty)?;
+        assert!(empty.secrets.required.is_empty());
+        assert!(configuration(value!({ "optional": ["API_KEY"] })).is_err());
+        let too_many: Vec<String> = (0..129).map(|index| format!("SECRET_{index}")).collect();
+        let at_limit = configuration(value!({ "required": too_many[..128] }))?;
+        check_required_secrets(&at_limit)?;
+        // Without an assets key, deployments still bind ASSETS.
+        let without_assets: Configuration = serde_json::from_value(value!({
+            "main": "src/app.ts",
+            "compatibility_date": "2026-10-01",
+            "secrets": { "required": ["ASSETS"] },
+        }))?;
+        assert!(check_required_secrets(&without_assets).is_err());
+        for (required, message) in [
+            (value!(["API_KEY", "API_KEY"]), "unique"),
+            (value!(["GREETING", "ASSETS", "DB"]), "GREETING, ASSETS, DB"),
+            (value!(["WIDEFLEET_TOKEN"]), "Invalid required secret"),
+            (value!(["api-key"]), "Invalid required secret"),
+            (value!(["1KEY"]), "Invalid required secret"),
+            (value!(["__proto__"]), "Invalid required secret"),
+            (value!(too_many), "at most 128"),
+        ] {
+            let invalid = configuration(value!({ "required": required }))?;
+            let error = check_required_secrets(&invalid)
+                .err()
+                .ok_or_else(|| Error::invalid("Expected an invalid configuration".into()))?;
+            assert!(error.to_string().contains(message), "{error}");
+        }
         Ok(())
     }
 

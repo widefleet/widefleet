@@ -188,13 +188,30 @@ export const presentDeployment = (record: typeof deployments.$inferSelect) =>
     message: record.message,
   });
 
+export const missingRequiredSecrets = (names: readonly string[]) =>
+  `The following required secrets have not been set: ${names.join(", ")}. Set them on the app's Secrets page or with widefleet secret put NAME, then try again.`;
+
 export const enqueueDeployment = async (
   transaction: Transaction,
   record: typeof apps.$inferSelect,
   artifactId: string,
   requestId: string,
-  rollback = false,
-  hosted = false,
+  {
+    rollback = false,
+    hosted = false,
+    secretChange = false,
+    suppliedSecrets = [],
+  }: {
+    rollback?: boolean;
+    hosted?: boolean;
+    /** Secrets this deployment brings, which Cloudflare saves when it accepts it. */
+    suppliedSecrets?: readonly string[];
+    /**
+     * Redeploys the selected code with changed secrets. As on Cloudflare,
+     * deleting a secret that the code requires is allowed.
+     */
+    secretChange?: boolean;
+  } = {},
 ) => {
   const [existing] = await transaction
     .select()
@@ -220,11 +237,23 @@ export const enqueueDeployment = async (
 
   if (!artifact)
     throw new InvalidOperation({ code: "NOT_FOUND", message: "App artifact not found" });
-  await checkServiceConsumers(
-    transaction,
-    record,
-    contract.workerMetadata.parse(artifact.metadata).entrypoints ?? [],
-  );
+  const metadata = contract.workerMetadata.parse(artifact.metadata);
+  await checkServiceConsumers(transaction, record, metadata.entrypoints ?? []);
+
+  // As `wrangler deploy`, every deployment and rollback of a version needs the
+  // secrets it requires.
+  const stored = z.record(z.string(), z.unknown()).parse(record.secrets);
+
+  const missing = secretChange
+    ? []
+    : (metadata.required_secrets ?? []).filter(
+        (name) => !Object.hasOwn(stored, name) && !suppliedSecrets.includes(name),
+      );
+
+  if (missing.length > 0)
+    return Result.err(
+      new InvalidOperation({ code: "BAD_REQUEST", message: missingRequiredSecrets(missing) }),
+    );
 
   const deploymentId = hosted ? operationId(record.id, requestId) : crypto.randomUUID();
 
@@ -727,14 +756,10 @@ export const createAppService = (
           new InvalidOperation({ code: "NOT_FOUND", message: "Artifact not found in this app" }),
         );
 
-      return enqueueDeployment(
-        transaction,
-        access.value,
-        artifactId,
-        requestId,
-        true,
-        Boolean(execution),
-      );
+      return enqueueDeployment(transaction, access.value, artifactId, requestId, {
+        rollback: true,
+        hosted: Boolean(execution),
+      });
     });
 
     if (prepared.isErr() || !execution) return prepared;

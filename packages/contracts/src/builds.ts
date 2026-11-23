@@ -2,7 +2,13 @@
 // and receives the Worker module, its source map and its metadata, as
 // `widefleet deploy` would upload them.
 import { z } from "zod";
-import { bindingName, queueConsumer, serviceDocumentation, workerConfiguration } from "./index.ts";
+import {
+  bindingName,
+  queueConsumer,
+  requiredSecrets,
+  serviceDocumentation,
+  workerConfiguration,
+} from "./index.ts";
 import { networkDeclaration } from "./network.ts";
 
 const maximumSourceBytes = 16 * 1024 * 1024;
@@ -41,6 +47,7 @@ export const builtWorker = workerConfiguration.extend({
   crons: z.array(z.string().min(1)),
   queue_consumers: z.array(queueConsumer),
   network: networkDeclaration.optional(),
+  required_secrets: requiredSecrets.optional(),
 });
 
 export const bundleResult = z.strictObject({

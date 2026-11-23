@@ -10,4 +10,6 @@
       "database_name": "accounts",
     },
   ],
+  // The organization's Google OAuth client. Every deployment needs both values.
+  "secrets": { "required": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] },
 }

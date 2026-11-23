@@ -36,5 +36,6 @@
   "apps/docs/docs/getting-started/installation.md",
   ".github/cli-inputs.json",
   ".github/workflows/check-suites.yaml",
+  ".github/workflows/actions.lock",
   "tools/check-main-changes.py"
 ]

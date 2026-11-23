@@ -115,20 +115,6 @@ export const deployment = z.strictObject({
   message: z.string().nullable(),
 });
 
-export const templateInstallInput = templatePath.extend({
-  /** The new app's name; the template ID by default. */
-  name: appSlug.optional(),
-});
-
-export const templateInstall = z.strictObject({
-  app,
-  deployment,
-  /** Build notes, such as dependencies whose types could not be installed. */
-  warnings: z.array(z.string()),
-  /** Origins the template declares that the app is not allowed to reach yet. */
-  requestedNetwork: networkPolicy.optional(),
-});
-
 export const deploymentEvent = z.strictObject({
   id: z.number().int(),
   deploymentId: identifier,
@@ -230,6 +216,19 @@ export const uploadSession = z.strictObject({
 });
 
 export const bindingName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+
+export const appEnvironmentMaxBindings = 128;
+
+export const appSecretName = bindingName.refine(
+  (name) => !name.startsWith("WIDEFLEET_") && name !== "__proto__",
+  "Reserved app secret name",
+);
+
+/** The secrets a deployment needs, from Wrangler's `secrets.required`. */
+export const requiredSecrets = z
+  .array(appSecretName)
+  .max(appEnvironmentMaxBindings)
+  .refine((names) => new Set(names).size === names.length, "Required secrets must be unique");
 
 export const workerBinding = z.discriminatedUnion("type", [
   z.strictObject({
@@ -340,6 +339,7 @@ export const workerMetadata = workerConfiguration
       .optional(),
     crons: z.array(z.string().min(1)).default([]),
     queue_consumers: z.array(queueConsumer).default([]),
+    required_secrets: requiredSecrets.optional(),
     assets: z.strictObject({ upload_session: identifier, binding: bindingName.default("ASSETS") }),
   })
   .superRefine((metadata, context) => {
@@ -354,6 +354,12 @@ export const workerMetadata = workerConfiguration
     if (new Set(names).size !== names.length) {
       context.addIssue({ code: "custom", message: "Binding names must be unique" });
     }
+
+    if (metadata.required_secrets?.some((name) => names.includes(name)))
+      context.addIssue({
+        code: "custom",
+        message: "Required secrets cannot use the name of a binding or variable",
+      });
 
     if (names.some((name) => name.startsWith("WIDEFLEET_"))) {
       context.addIssue({
@@ -371,6 +377,8 @@ export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
   // Declared origins are a control-plane request; runtimes enforce the granted
   // policy and reject metadata fields they do not know.
   delete metadata.network;
+  // The control plane checks required secrets before it accepts a deployment.
+  delete metadata.required_secrets;
 
   return metadata;
 }
@@ -426,13 +434,6 @@ export { appCaller } from "./app-caller.ts";
 
 const appSecretMaxBytes = 5_000;
 
-export const appEnvironmentMaxBindings = 128;
-
-export const appSecretName = bindingName.refine(
-  (name) => !name.startsWith("WIDEFLEET_") && name !== "__proto__",
-  "Reserved app secret name",
-);
-
 const appSecretSizeMessage = "Secret value must contain at most 5 KB (5000 UTF-8 bytes)";
 
 export const appSecretValue = z
@@ -452,9 +453,27 @@ export const appSecretPreparation = z.strictObject({
 
 export const appSecretStatus = z.strictObject({
   names: z.array(appSecretName),
+  /** The secrets the latest deployment's version requires, set or not. */
+  required: z.array(appSecretName),
   revision: z.number().int().nonnegative(),
   appliedRevision: z.number().int().nonnegative().nullable(),
   deployment: deployment.nullable(),
+});
+
+export const templateInstallInput = templatePath.extend({
+  /** The new app's name; the template ID by default. */
+  name: appSlug.optional(),
+  /** Values of the secrets the template requires, saved before its first deployment. */
+  secrets: z.record(appSecretName, appSecretValue).default({}),
+});
+
+export const templateInstall = z.strictObject({
+  app,
+  deployment,
+  /** Build notes, such as dependencies whose types could not be installed. */
+  warnings: z.array(z.string()),
+  /** Origins the template declares that the app is not allowed to reach yet. */
+  requestedNetwork: networkPolicy.optional(),
 });
 
 export const serviceAccessMode = z.enum(["approval_required", "organization"]);

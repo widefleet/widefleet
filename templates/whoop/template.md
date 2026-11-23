@@ -17,11 +17,16 @@ for CLI setup and authentication. Copy this directory into your project and run:
 ```sh
 pnpm install
 pnpm test
+widefleet create whoop --name "WHOOP"
+widefleet secret put WHOOP_CLIENT_ID --file /path/to/client-id
+widefleet secret put WHOOP_CLIENT_SECRET --file /path/to/client-secret
 widefleet deploy
 ```
 
-Choose the app name in `wrangler.jsonc` before deploying. The CLI creates the app
-and its declared database. Keep your local source for subsequent changes.
+Choose the app name in `wrangler.jsonc` and create the app with that name. Its
+deployments need the WHOOP developer app from [Configure WHOOP](#configure-whoop), which
+`wrangler.jsonc` lists as required secrets. The CLI creates the app's declared
+database. Keep your local source for subsequent changes.
 
 Keep `pnpm-workspace.yaml` and `patches/` with the source. They patch Better Auth to
 sign cookies and encrypt saved account tokens with the app's Widefleet keys, which
@@ -36,10 +41,14 @@ needs to:
 1. Create an app in the [WHOOP Developer Dashboard](https://developer-dashboard.whoop.com/)
    with the scopes `read:profile`, `read:body_measurement`, `read:cycles`,
    `read:recovery`, `read:sleep` and `read:workout`. Add
-   `https://YOUR-APP-URL/auth/callback/whoop` as a redirect URL.
-2. Set the app secrets `WHOOP_CLIENT_ID` and `WHOOP_CLIENT_SECRET` to the app's client
-   ID and client secret. Use the app's Secrets page or
-   `widefleet secret put NAME --file /path/to/secret` to provide values.
+   `https://YOUR-APP-URL/auth/callback/whoop` as a redirect URL. You can add it once
+   the app is installed and its URL is known.
+2. Provide the WHOOP app's client ID and client secret as the app secrets
+   `WHOOP_CLIENT_ID` and `WHOOP_CLIENT_SECRET`. Installing from the template page asks
+   for them; `widefleet catalog templates install` reads them with
+   `--secret-file WHOOP_CLIENT_ID=/path/to/client-id --secret-file WHOOP_CLIENT_SECRET=/path/to/client-secret`.
+   Change them later on the app's Secrets page or with
+   `widefleet secret put NAME --file /path/to/secret`.
 3. Allow the backend origin that `widefleet.jsonc` declares. A one-click install from
    the template page allows it, as does `widefleet catalog templates install` with the
    CLI's `network:manage` scope. After `widefleet deploy`, run from the app directory:

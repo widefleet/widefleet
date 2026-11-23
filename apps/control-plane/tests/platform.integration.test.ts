@@ -131,6 +131,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         createAppService(environment.database.db, configuration),
         createUploadService(environment.database.db, storage, configuration),
         createNetworkService(environment.database.db),
+        createAppSecrets(environment.database.db, environment.environment.PLATFORM_ENCRYPTION_KEY),
       ),
       telemetry: createTelemetry(environment.database.db, storage, configuration),
     });

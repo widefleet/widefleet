@@ -18,11 +18,16 @@ for CLI setup and authentication. Copy this directory into your project and run:
 ```sh
 pnpm install
 pnpm test
+widefleet create strava --name "Strava"
+widefleet secret put STRAVA_CLIENT_ID --file /path/to/client-id
+widefleet secret put STRAVA_CLIENT_SECRET --file /path/to/client-secret
 widefleet deploy
 ```
 
-Choose the app name in `wrangler.jsonc` before deploying. The CLI creates the app
-and its declared database. Keep your local source for subsequent changes.
+Choose the app name in `wrangler.jsonc` and create the app with that name. Its
+deployments need the Strava API application from [Configure Strava](#configure-strava),
+which `wrangler.jsonc` lists as required secrets. The CLI creates the app's declared
+database. Keep your local source for subsequent changes.
 
 Keep `pnpm-workspace.yaml` and `patches/` with the source. They patch Better Auth to
 sign cookies and encrypt saved account tokens with the app's Widefleet keys, which
@@ -40,9 +45,13 @@ data under those terms. An administrator needs to:
 1. Create an application on [Strava's API settings page](https://www.strava.com/settings/api).
    Set its **Authorization Callback Domain** to the app's host name, without
    `https://`. The connector's callback is `https://YOUR-APP-HOST/auth/callback/strava`.
-2. Set the app secrets `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET` to the
-   application's client ID and client secret. Use the app's Secrets page or
-   `widefleet secret put NAME --file /path/to/secret` to provide values.
+   You can set the domain once the app is installed and its host name is known.
+2. Provide the application's client ID and client secret as the app secrets
+   `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET`. Installing from the template page
+   asks for them; `widefleet catalog templates install` reads them with
+   `--secret-file STRAVA_CLIENT_ID=/path/to/client-id --secret-file STRAVA_CLIENT_SECRET=/path/to/client-secret`.
+   Change them later on the app's Secrets page or with
+   `widefleet secret put NAME --file /path/to/secret`.
 3. Allow the backend origin that `widefleet.jsonc` declares. A one-click install from
    the template page allows it, as does `widefleet catalog templates install` with the
    CLI's `network:manage` scope. After `widefleet deploy`, run from the app directory:

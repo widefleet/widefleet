@@ -5,8 +5,8 @@ use platform_core::{
     model::NetworkPolicy,
 };
 use reqwest::Method;
-use serde_json::{Value, json as value};
-use std::time::Duration;
+use serde_json::{Map, Value, json as value};
+use std::{path::PathBuf, time::Duration};
 use uuid::Uuid;
 
 #[derive(Args)]
@@ -47,7 +47,32 @@ enum TemplateCommand {
         /// The new app's name; the template ID by default. An existing app is never replaced.
         #[arg(long)]
         name: Option<String>,
+        /// Save a secret the template requires from a file before it deploys. Repeat for each
+        /// secret that `catalog templates show` lists in requiredSecrets.
+        #[arg(long = "secret-file", value_name = "NAME=PATH", value_parser = secret_file)]
+        secret_files: Vec<(String, PathBuf)>,
     },
+}
+
+fn secret_file(value: &str) -> std::result::Result<(String, PathBuf), String> {
+    let (name, path) = value
+        .split_once('=')
+        .filter(|(name, path)| !name.is_empty() && !path.is_empty())
+        .ok_or("Use NAME=PATH, such as API_KEY=./api-key.txt")?;
+    Ok((name.to_owned(), PathBuf::from(path)))
+}
+
+// Values come from files, as with `widefleet secret put --file`, never from
+// the command line.
+fn template_secrets(files: Vec<(String, PathBuf)>) -> Result<Map<String, Value>> {
+    let mut secrets = Map::new();
+    for (name, path) in files {
+        let value = crate::app_bindings::secret_value(Some(path))?;
+        if secrets.insert(name.clone(), Value::String(value)).is_some() {
+            return Err(Error::invalid(format!("{name} is provided more than once")));
+        }
+    }
+    Ok(secrets)
 }
 
 fn template_id(template: &str) -> Result<&str> {
@@ -83,18 +108,29 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
                 &format!("/catalog/templates/{}", template_id(&template)?),
                 token,
             ),
-            TemplateCommand::Install { template, name } => api
-                .authenticated(
+            TemplateCommand::Install {
+                template,
+                name,
+                secret_files,
+            } => {
+                let mut body = Map::new();
+                if let Some(name) = name {
+                    body.insert("name".into(), Value::String(name));
+                }
+                // Servers without required secrets accept only the name.
+                let secrets = template_secrets(secret_files)?;
+                if !secrets.is_empty() {
+                    body.insert("secrets".into(), Value::Object(secrets));
+                }
+                api.authenticated(
                     Method::POST,
                     &format!("/catalog/templates/{}/install", template_id(&template)?),
                     token,
                 )
-                .json(&match name {
-                    Some(name) => value!({ "name": name }),
-                    None => value!({}),
-                })
+                .json(&body)
                 // The installation builds the template before it answers.
-                .timeout(Duration::from_secs(10 * 60)),
+                .timeout(Duration::from_secs(10 * 60))
+            }
         },
         Command::Publish { app } | Command::Unpublish { app } => api
             .authenticated(Method::PUT, &format!("/apps/{app}/catalog"), token)

@@ -1,6 +1,6 @@
 // Splits a template's files into the sources the app builder bundles and the
 // static assets the control plane uploads, with the CLI's asset limits.
-import { assetManifest, bindingName } from "@platform/contracts";
+import { assetManifest, bindingName, requiredSecrets } from "@platform/contracts";
 import { buildSourcePath } from "@platform/contracts/builds";
 import { parseJsonc } from "@platform/contracts/jsonc";
 import { Result } from "better-result";
@@ -14,7 +14,12 @@ const maxAssetTotal = 250 * 1024 * 1024;
 
 const maxAssets = 10_000;
 
-const wranglerConfiguration = z.looseObject({ assets: z.unknown() });
+const wranglerConfiguration = z.looseObject({
+  assets: z.unknown().optional(),
+  secrets: z.unknown().optional(),
+});
+
+const secretsSettings = z.looseObject({ required: requiredSecrets.default([]) });
 
 const assetsSettings = z.strictObject({ directory: z.string().min(1), binding: bindingName });
 
@@ -50,6 +55,20 @@ export const declaredAssets = (wrangler: string | undefined) => {
     return Result.err(invalid("The static asset directory must be inside the template"));
 
   return Result.ok({ binding: assets.data.binding, directory });
+};
+
+/**
+ * The secrets a Wrangler file requires. An unreadable list is left to the
+ * builder, which reports it with its own message.
+ */
+export const declaredSecrets = (wrangler: string | undefined) => {
+  const configuration = wranglerConfiguration.safeParse(
+    wrangler === undefined ? null : Result.try(() => parseJsonc(wrangler)).unwrapOr(null),
+  );
+
+  if (!configuration.success || configuration.data.secrets === undefined) return [];
+
+  return secretsSettings.safeParse(configuration.data.secrets).data?.required ?? [];
 };
 
 export const templateProject = (files: Readonly<Record<string, Uint8Array>>) =>

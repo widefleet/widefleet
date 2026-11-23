@@ -178,6 +178,10 @@ pub struct WorkerMetadata {
     pub crons: Vec<String>,
     #[serde(default)]
     pub queue_consumers: Vec<QueueConsumer>,
+    /// Wrangler's `secrets.required`: app secrets each deployment of this
+    /// version requires.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_secrets: Vec<String>,
     pub assets: WorkerAssets,
 }
 

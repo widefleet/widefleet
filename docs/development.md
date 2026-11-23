@@ -136,6 +136,8 @@ Templates install standalone, so each declares the patches it needs in its own `
 
 The TypeScript version remains 6.0.3 for the selected Svelte compiler integration. Keep compiler upgrades covered by the starter and control-plane checks.
 
+GitHub Actions dependencies are locked in `.github/workflows/actions.lock`, and the runner executes the commits recorded there. After adding a workflow or changing a `uses:` reference, run `gh actions-lock` from the [`github/gh-actions-lock`](https://github.com/github/gh-actions-lock) extension and commit the lockfile with the workflow change. The `Check` workflow fails while the lockfile is stale.
+
 The starter checks authored TypeScript and Svelte sources. JavaScript checking is disabled there because Wrangler's generated `GlobalProps` imports the adapter's generated Worker bundle; checking that JavaScript would re-check bundled dependencies as application source. All `strictest` TypeScript options remain enabled.
 
 ## CI and releases

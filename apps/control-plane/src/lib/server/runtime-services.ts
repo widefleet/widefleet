@@ -139,6 +139,8 @@ export const createRuntime = ({
 
   const uploads = createUploadService(database.db, storage, configuration, execution, source);
 
+  const appSecrets = createAppSecrets(database.db, encryptionKey, execution);
+
   const runtime = {
     auth,
     userConnections: createUserConnections(
@@ -202,10 +204,10 @@ export const createRuntime = ({
     workflows: createWorkflowService(database.db, execution),
     migrations: createMigrationService(database.db, storage, execution),
     connections: createConnectionService(database.db, storage, execution),
-    appSecrets: createAppSecrets(database.db, encryptionKey, execution),
+    appSecrets,
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads,
-    templates: createTemplateInstalls(configuration, apps, uploads, network, builder),
+    templates: createTemplateInstalls(configuration, apps, uploads, network, appSecrets, builder),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };
 

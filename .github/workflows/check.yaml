@@ -24,14 +24,28 @@ jobs:
     cache-mode: read
     uses: ./.github/workflows/check-suites.yaml
 
+  # Fails when actions.lock no longer matches the workflows or a locked commit
+  # no longer verifies upstream. The pinned extension release is immutable.
+  actions-lockfile:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          persist-credentials: false
+      - run: gh extension install github/gh-actions-lock --pin v0.5.1
+      - run: gh actions-lock --verify
+
   # Preserve the existing status check and require every suite to succeed.
   source-and-integration:
     runs-on: ubuntu-24.04
-    needs: pull-request-checks
+    needs: [pull-request-checks, actions-lockfile]
     if: always()
     steps:
       - name: Require all checks to pass
         env:
           PR_RESULT: ${{ needs.pull-request-checks.result }}
+          LOCKFILE_RESULT: ${{ needs.actions-lockfile.result }}
         run: |
-          [[ "$PR_RESULT" == success ]]
+          [[ "$PR_RESULT" == success && "$LOCKFILE_RESULT" == success ]]
