@@ -134,16 +134,22 @@ fn git(project: &Path) -> Command {
     command
 }
 
+/// Runs Git and explains a missing installation. Every Git call goes through
+/// here, so deploy never reports a bare I/O error when Git is not installed.
+pub(crate) async fn execute(command: &mut Command) -> Result<Output> {
+    command.output().await.map_err(|cause| {
+        Error::invalid(format!(
+            "Could not run Git ({cause}). Install Git to use Widefleet source storage; deploy and preview skip it with --no-source"
+        ))
+    })
+}
+
 async fn output(command: &mut Command) -> Result<String> {
     let Output {
         status,
         stdout,
         stderr,
-    } = command.output().await.map_err(|cause| {
-        Error::invalid(format!(
-            "Could not run Git; install Git to use source storage: {cause}"
-        ))
-    })?;
+    } = execute(command).await?;
     if !status.success() {
         return Err(Error::invalid(format!(
             "Git failed: {}",
@@ -213,10 +219,7 @@ async fn configure(project: &Path, url: &str, helper: &str) -> Result<()> {
 }
 
 async fn root(project: &Path) -> Result<PathBuf> {
-    let probe = git(project)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .await?;
+    let probe = execute(git(project).args(["rev-parse", "--show-toplevel"])).await?;
     if probe.status.success() {
         return Ok(
             PathBuf::from(String::from_utf8_lossy(&probe.stdout).trim_end()).canonicalize()?,
@@ -227,10 +230,8 @@ async fn root(project: &Path) -> Result<PathBuf> {
 }
 
 async fn revision(project: &Path, reference: &str) -> Result<Option<String>> {
-    let result = git(project)
-        .args(["rev-parse", "--verify", "--quiet", reference])
-        .output()
-        .await?;
+    let result =
+        execute(git(project).args(["rev-parse", "--verify", "--quiet", reference])).await?;
     if result.status.success() {
         return Ok(Some(
             String::from_utf8_lossy(&result.stdout).trim().to_owned(),
@@ -246,10 +247,8 @@ async fn revision(project: &Path, reference: &str) -> Result<Option<String>> {
 }
 
 async fn is_ancestor(project: &Path, ancestor: &str, descendant: &str) -> Result<bool> {
-    let result = git(project)
-        .args(["merge-base", "--is-ancestor", ancestor, descendant])
-        .output()
-        .await?;
+    let result =
+        execute(git(project).args(["merge-base", "--is-ancestor", ancestor, descendant])).await?;
     match result.status.code() {
         Some(0) => Ok(true),
         Some(1) => Ok(false),
@@ -338,9 +337,7 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
         ("user.name", "Widefleet"),
         ("user.email", "noreply@widefleet.app"),
     ] {
-        if !git(project)
-            .args(["config", "--get", key])
-            .output()
+        if !execute(git(project).args(["config", "--get", key]))
             .await?
             .status
             .success()
@@ -445,18 +442,12 @@ pub async fn confirm_deployment_branch(
 }
 
 async fn deployment_branch(project: &Path) -> Result<Option<String>> {
-    let probe = git(project)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .await?;
+    let probe = execute(git(project).args(["rev-parse", "--show-toplevel"])).await?;
     if !probe.status.success() {
         // Source saving initializes a new local repository on main.
         return Ok(Some("main".into()));
     }
-    let head = git(project)
-        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
-        .output()
-        .await?;
+    let head = execute(git(project).args(["symbolic-ref", "--quiet", "--short", "HEAD"])).await?;
     if head.status.code() == Some(1) {
         return Ok(None);
     }
@@ -491,10 +482,7 @@ pub async fn require_preview_branch(
     project: &Path,
     requested_branch: Option<&str>,
 ) -> Result<String> {
-    let head = git(project)
-        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
-        .output()
-        .await?;
+    let head = execute(git(project).args(["symbolic-ref", "--quiet", "--short", "HEAD"])).await?;
     let branch = if head.status.success() {
         String::from_utf8(head.stdout)
             .map_err(|_| Error::invalid("Git branch name is not UTF-8".into()))?
@@ -718,10 +706,8 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
                     Error::invalid("Configuration has no parent directory".into())
                 })?)
                 .await?;
-            let existing = git(&project)
-                .args(["remote", "get-url", "--", &remote])
-                .output()
-                .await?;
+            let existing =
+                execute(git(&project).args(["remote", "get-url", "--", &remote])).await?;
             if existing.status.success() {
                 if String::from_utf8_lossy(&existing.stdout).trim() != repository.url {
                     return Err(Error::invalid(format!(
