@@ -16,7 +16,7 @@ export type Operation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
   pageable: boolean;

@@ -1,15 +1,16 @@
-// Generates a template's typed API from an OpenAPI 3 description: one method
-// per offered operation, with typed inputs and results. Large APIs, such as
-// Microsoft Graph, describe far more than one template offers, so the
-// template's rules list the operations it offers by operation ID, each with
-// its method name and, for operations that are not GET, the change it makes.
-// Operations without an ID are listed by method and path. Rules can add
-// operations the API serves but its description leaves out.
+// Generates a template's typed API from an OpenAPI 3 description, or a Swagger
+// 2.0 one: one method per offered operation, with typed inputs and results.
+// Large APIs, such as Microsoft Graph, describe far more than one template
+// offers, so the template's rules list the operations it offers by operation
+// ID, each with its method name and, for operations that are not GET, the
+// change it makes. Operations without an ID are listed by method and path.
+// Rules can add operations the API serves but its description leaves out.
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
 import { reservedMethod } from "./reserved.ts";
-import type { Change, GeneratedFiles } from "./rules.ts";
+import { type Change, type GeneratedFiles, json, type Json } from "./rules.ts";
+import { isSwagger, upgradeSwagger } from "./swagger.ts";
 
 /** Header inputs of an operation, by input name: the header's name and what it carries. */
 type HeaderRules = Readonly<Record<string, { name: string; description: string }>>;
@@ -200,7 +201,7 @@ export type OpenapiOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
   /** Whether the method continues at an earlier result's `@odata.nextLink`. */
@@ -264,17 +265,28 @@ const separator = (id: string, value: z.infer<typeof parameter>) => {
 
 const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? "";
 
+/** A description's JSON or YAML text, parsed. */
+export const parseDescription = (source: string) => {
+  const text = source.trimStart();
+
+  return json.parse(
+    text.startsWith("{") ? JSON.parse(text) : parseYaml(text, { maxAliasCount: -1 }),
+  );
+};
+
+// Form bodies by their media type; other bodies that are not JSON are sent as text.
+const formBodies = {
+  "application/x-www-form-urlencoded": "form",
+  "multipart/form-data": "multipart",
+} as const;
+
 export const generateOpenapi = (
-  source: string,
+  description: Json,
   { operations: described, navigation = {}, bindings = {}, undescribed = {} }: OpenapiRules,
   service: OpenapiService,
   header: string,
 ): GeneratedFiles => {
-  const text = source.trimStart();
-
-  const api = document.parse(
-    text.startsWith("{") ? JSON.parse(text) : parseYaml(text, { maxAliasCount: -1 }),
-  );
+  const api = document.parse(isSwagger(description) ? upgradeSwagger(description) : description);
 
   const components = api.components ?? {};
   const schemas = components.schemas ?? {};
@@ -324,6 +336,9 @@ export const generateOpenapi = (
 
   // The schema whose type is being written, which navigation rules name.
   let owner: string | undefined;
+  // Whether binary strings are being typed as files a multipart body uploads.
+  let uploads = false;
+  let usesUpload = false;
 
   const typeName = (ref: string) => {
     const key = ref.replace("#/components/schemas/", "");
@@ -433,6 +448,12 @@ export const generateOpenapi = (
       case "boolean":
         return `boolean${nullable}`;
       case "string":
+        if (uploads && value.format === "binary") {
+          usesUpload = true;
+
+          return `UploadContent${nullable}`;
+        }
+
         return `string${nullable}`;
       case "array": {
         return `${wrap(typeOf(value.items ?? {}, indent))}[]${nullable}`;
@@ -637,8 +658,16 @@ export const generateOpenapi = (
       : null;
 
     // JSON is chosen by its media type; a JSON entry without a schema takes any JSON.
+    // Forms send their fields, and multipart forms also files.
     const jsonBody = body?.content?.["application/json"];
-    const bodyKind = !body ? null : jsonBody ? "json" : "text";
+
+    const form = Object.entries(formBodies).flatMap(([type, kind]) => {
+      const entry = body?.content?.[type];
+
+      return entry ? [{ kind, schema: entry.schema }] : [];
+    })[0];
+
+    const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : "text";
 
     // Every success answer counts: JSON, other content, or none, such as a 204.
     const successes = Object.entries(entry.responses ?? {}).flatMap(([code, value]) =>
@@ -710,6 +739,10 @@ export const generateOpenapi = (
     const fields = parameters.map((value) => {
       const declaredType = value.schema ?? { type: "string" };
 
+      // A path parameter the path has no place for would never be sent.
+      if (value.in === "path" && !path.includes(`{${value.name}}`))
+        throw new Error(`${id}'s path parameter ${value.name} has no place in its path ${path}`);
+
       const target = value.schema?.$ref
         ? schemas[value.schema.$ref.replace("#/components/schemas/", "")]
         : value.schema;
@@ -735,11 +768,12 @@ export const generateOpenapi = (
           `${id} has the object query parameter ${value.name}, which is not supported`,
         );
 
-      // A path needs a value: path parameters are never null.
-      const type = typeOf(
+      // A path needs a value: path parameters are never null. 64-bit IDs may
+      // exceed what a JSON number holds exactly, so they may also be strings.
+      const type = `${typeOf(
         value.in === "path" ? { ...declaredType, nullable: false } : declaredType,
         "    ",
-      );
+      )}${target?.type === "integer" && target.format === "int64" ? " | string" : ""}`;
 
       return `${comment(single(value.description), "    ")}    ${propertyName(inputOf(value))}${value.in === "path" || value.required ? "" : "?"}: ${type};`;
     });
@@ -752,9 +786,23 @@ export const generateOpenapi = (
 
     fields.push(...headerFields);
 
+    // A form's fields are typed by its schema; a multipart form's binary fields are files.
+    const bodyType = () => {
+      if (rule.body) return schemaUnion(rule.body);
+
+      if (jsonBody) return jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue";
+
+      if (!form) return "string";
+      uploads = form.kind === "multipart";
+      const type = form.schema ? typeOf(form.schema, "    ") : "JsonObject";
+      uploads = false;
+
+      return type;
+    };
+
     if (bodyKind)
       fields.push(
-        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${rule.body ? schemaUnion(rule.body) : jsonBody ? (jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue") : "string"};`,
+        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${bodyType()};`,
       );
 
     if (bodyKind === "text")
@@ -850,7 +898,7 @@ export const generateOpenapi = (
     files: {
       "src/api.ts": `${header}import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Environment as TemplateEnvironment } from "./context.ts";
-${usesBinary ? 'import type { BinaryContent } from "./content.ts";\n' : ""}import type { ${service.result} } from "./results.ts";
+${usesBinary || usesUpload ? `import type { ${[...(usesBinary ? ["BinaryContent"] : []), ...(usesUpload ? ["UploadContent"] : [])].join(", ")} } from "./content.ts";\n` : ""}import type { ${service.result} } from "./results.ts";
 import { type ${service.properties}, run } from "./run.ts";
 ${["JsonObject", "JsonValue"].some(used) ? `import type { ${["JsonObject", "JsonValue"].filter(used).join(", ")} } from "./selection.ts";\n` : ""}
 ${typeText}
@@ -875,7 +923,7 @@ export type Operation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
   pageable: boolean;

@@ -3,6 +3,7 @@
 // packages/template-generator/src/runtime.
 import { z } from "zod";
 import { type Arguments, definedJson, InvalidRequest } from "./input.ts";
+import type { JsonValue } from "./selection.ts";
 
 /** How a method of a REST API is called, as src/schema.ts describes it. */
 export type RestOperation = {
@@ -17,13 +18,47 @@ export type RestOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
   pageable: boolean;
 };
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
+
+const text = scalar.transform(String);
+
+// A file a multipart form uploads: text, sent as UTF-8, or bytes as base64.
+const upload = z
+  .union([
+    z.strictObject({ mimeType: z.string().min(1), text: z.string() }),
+    z.strictObject({ mimeType: z.string().min(1), base64: z.base64() }),
+  ])
+  .transform(
+    (file) =>
+      new Blob(
+        [
+          "text" in file
+            ? file.text
+            : Uint8Array.from(atob(file.base64), (character) => character.charCodeAt(0)),
+        ],
+        { type: file.mimeType },
+      ),
+  );
+
+// A form's fields as text, or in multipart forms also files: values, and lists
+// of them, which repeat the field. Fields passed as undefined are left out.
+const formFields = <T>(method: string, body: JsonValue, field: z.ZodType<T>, accepts: string) => {
+  const fields = z.record(z.string(), z.union([field, z.array(field)]).optional()).safeParse(body);
+
+  if (!fields.success) throw new InvalidRequest(`${method} takes its body as fields of ${accepts}`);
+
+  return Object.entries(fields.data).flatMap(([name, value]) =>
+    value === undefined
+      ? []
+      : (Array.isArray(value) ? value : [value]).map((item): [string, T] => [name, item]),
+  );
+};
 
 const own = <T>(record: Record<string, T>, key: string) =>
   Object.hasOwn(record, key) ? record[key] : undefined;
@@ -97,6 +132,24 @@ export const restRequest = (
   if (operation.body === "json" && body !== undefined) {
     init.body = JSON.stringify(body);
     headers["content-type"] = "application/json";
+  }
+
+  // Fetch writes the form's media type, with the boundary of a multipart form.
+  if (operation.body === "form" && body !== undefined)
+    init.body = new URLSearchParams(formFields(method, body, text, "values and lists"));
+
+  if (operation.body === "multipart" && body !== undefined) {
+    const form = new FormData();
+
+    for (const [name, item] of formFields(
+      method,
+      body,
+      z.union([text, upload]),
+      "values, lists and files",
+    ))
+      form.append(name, item);
+
+    init.body = form;
   }
 
   if (operation.body === "text" && body !== undefined) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { generateOpenapi } from "./openapi.ts";
+import { generateOpenapi, parseDescription } from "./openapi.ts";
+import { json } from "./rules.ts";
 
 const api = {
   openapi: "3.0.4",
@@ -169,17 +170,15 @@ const rules = {
 } as const;
 
 // The description with one part of its JSON text replaced.
-const edited = (from: string, to: string) => {
-  const text = JSON.stringify(api);
-
+const edited = (from: string, to: string, text = JSON.stringify(api)) => {
   if (!text.includes(from)) throw new Error(`The description has no ${from}`);
 
-  return text.replace(from, to);
+  return json.parse(JSON.parse(text.replace(from, to)));
 };
 
 describe("OpenAPI template generator", () => {
   it("writes the offered operations with the types they reach", () => {
-    const { files, summary } = generateOpenapi(JSON.stringify(api), rules, service, "");
+    const { files, summary } = generateOpenapi(api, rules, service, "");
     const generated = files["src/api.ts"] ?? "";
 
     expect(summary).toBe("4 methods of 5 operations, 5 types");
@@ -231,7 +230,7 @@ describe("OpenAPI template generator", () => {
 
   it("offers operations that only read through a POST without asking", () => {
     const { files } = generateOpenapi(
-      JSON.stringify(api),
+      api,
       { operations: { "folders.CreateItem": { name: "findItems", change: "read" } } },
       service,
       "",
@@ -255,7 +254,7 @@ describe("OpenAPI template generator", () => {
 
   it("describes operations with the rules' text where it replaces the API's", () => {
     const { files } = generateOpenapi(
-      JSON.stringify(api),
+      api,
       { operations: { "folders.ListItems": { name: "listItems", description: "Lists items." } } },
       service,
       "",
@@ -269,7 +268,7 @@ describe("OpenAPI template generator", () => {
     const session = { sessionId: { name: "session-id", description: "The session to work in." } };
 
     const { files } = generateOpenapi(
-      JSON.stringify(api),
+      api,
       { operations: { "items.GetContent": { name: "getContent", headers: session } } },
       service,
       "",
@@ -282,7 +281,7 @@ describe("OpenAPI template generator", () => {
 
     // A later page keeps the headers of the first.
     const paged = generateOpenapi(
-      JSON.stringify(api),
+      api,
       { operations: { "folders.ListItems": { name: "listItems", headers: session } } },
       service,
       "",
@@ -294,7 +293,7 @@ describe("OpenAPI template generator", () => {
 
     expect(() =>
       generateOpenapi(
-        JSON.stringify(api),
+        api,
         {
           operations: {
             "items.GetContent": {
@@ -320,7 +319,7 @@ describe("OpenAPI template generator", () => {
     } as const;
 
     const { files } = generateOpenapi(
-      JSON.stringify(api),
+      api,
       {
         operations: {},
         undescribed: {
@@ -346,7 +345,7 @@ describe("OpenAPI template generator", () => {
 
     // An added method follows the method whose path it shares.
     const ordered = generateOpenapi(
-      JSON.stringify(api),
+      api,
       { operations: rules.operations, undescribed: { updateItem } },
       service,
       "",
@@ -363,7 +362,7 @@ describe("OpenAPI template generator", () => {
     // The generator stops once the API describes the operation, or no longer the path.
     expect(() =>
       generateOpenapi(
-        JSON.stringify(api),
+        api,
         {
           operations: {},
           undescribed: {
@@ -406,15 +405,19 @@ paths:
 `;
 
     expect(
-      generateOpenapi(yaml, { operations: { "status.Get": { name: "status" } } }, service, "")
-        .files["src/api.ts"],
+      generateOpenapi(
+        parseDescription(yaml),
+        { operations: { "status.Get": { name: "status" } } },
+        service,
+        "",
+      ).files["src/api.ts"],
     ).toContain("ok?: boolean;");
   });
 
   it("stops on changes without a kind, stale rules and taken names", () => {
     expect(() =>
       generateOpenapi(
-        JSON.stringify(api),
+        api,
         {
           operations: {
             "folders.CreateItem": { name: "createItem" },
@@ -477,7 +480,7 @@ paths:
 
   it("types bodies and results with the schemas the rules name", () => {
     const { files } = generateOpenapi(
-      JSON.stringify(api),
+      api,
       {
         operations: {
           "folders.CreateItem": {
@@ -498,7 +501,7 @@ paths:
 
   it("keeps the navigation properties the rules name, typed with their schemas", () => {
     const { files } = generateOpenapi(
-      JSON.stringify(api),
+      api,
       {
         ...rules,
         navigation: { "example.item": { children: ["example.item", "example.parent"] } },
@@ -616,11 +619,11 @@ paths:
 
     // Generated names stay free for the imports.
     const shadowing = edited(
-      '"example.unused":',
-      '"example.BinaryContent":{"type":"object"},"example.unused":',
-    ).replace(
       '"parent":{"anyOf":[{"$ref":"#/components/schemas/example.parent"},{"type":"object","nullable":true}]}',
       '"parent":{"$ref":"#/components/schemas/example.BinaryContent"}',
+      JSON.stringify(
+        edited('"example.unused":', '"example.BinaryContent":{"type":"object"},"example.unused":'),
+      ),
     );
 
     expect(() => generateOpenapi(shadowing, rules, service, "")).toThrow(

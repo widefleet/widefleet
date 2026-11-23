@@ -35,6 +35,18 @@ const upload: RestOperation = {
   pageable: false,
 };
 
+const form: RestOperation = {
+  httpMethod: "POST",
+  path: "/activities",
+  pathParameters: {},
+  queryParameters: {},
+  headerParameters: {},
+  body: "form",
+  bodyRequired: true,
+  response: "json",
+  pageable: false,
+};
+
 describe("REST requests", () => {
   it("fills the path, writes query lists and follows pages on the API's origin", () => {
     expect(
@@ -138,6 +150,43 @@ describe("REST requests", () => {
         { driveId: "d", q: "x" },
       ),
     ).toThrow("search needs view");
+  });
+
+  it("sends form fields as a form, and files in a multipart form", async () => {
+    const created = restRequest(base, "create", form, {
+      body: { name: "Run", elapsed_time: 60, trainer: false, tags: ["a", "b"], gone: undefined },
+    });
+
+    expect(z.instanceof(URLSearchParams).parse(created.init.body).toString()).toBe(
+      "name=Run&elapsed_time=60&trainer=false&tags=a&tags=b",
+    );
+    // Files and nested objects are no form fields.
+    expect(() =>
+      restRequest(base, "create", form, { body: { file: { mimeType: "text/plain", text: "x" } } }),
+    ).toThrow(new InvalidRequest("create takes its body as fields of values and lists"));
+    expect(() => restRequest(base, "create", form, { body: "name=Run" })).toThrow(InvalidRequest);
+
+    const multipart = { ...form, body: "multipart" } as const;
+
+    const uploaded = restRequest(base, "upload", multipart, {
+      body: {
+        file: { mimeType: "application/gpx+xml", text: "<gpx/>" },
+        bytes: { mimeType: "application/octet-stream", base64: btoa("\x00\xff") },
+        data_type: "gpx",
+      },
+    });
+
+    const sent = z.instanceof(FormData).parse(uploaded.init.body);
+    // Fetch writes the media type with the form's boundary.
+    expect(uploaded.init.headers).toBeUndefined();
+    expect(sent.get("data_type")).toBe("gpx");
+    const file = z.instanceof(Blob).parse(sent.get("file"));
+    expect([file.type, await file.text()]).toEqual(["application/gpx+xml", "<gpx/>"]);
+    const bytes = z.instanceof(Blob).parse(sent.get("bytes"));
+    expect([...new Uint8Array(await bytes.arrayBuffer())]).toEqual([0x00, 0xff]);
+    expect(() =>
+      restRequest(base, "upload", multipart, { body: { file: { mimeType: "text/plain" } } }),
+    ).toThrow(new InvalidRequest("upload takes its body as fields of values, lists and files"));
   });
 
   it("returns download addresses and small content", async () => {
