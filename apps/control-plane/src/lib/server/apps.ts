@@ -48,6 +48,18 @@ export const appVisibility = (
         ),
   );
 
+// The apps that the catalog shows to everyone in the organization.
+const published = (principal: Pick<Principal, "application">) =>
+  and(
+    isNull(apps.removedAt),
+    eq(apps.organizationId, principal.application.organizationId),
+    eq(apps.catalogListed, true),
+    eq(apps.webEnabled, true),
+    isNull(apps.parentId),
+    eq(apps.state, "active"),
+    isNotNull(apps.activeDeploymentId),
+  );
+
 export const managedApp = async (
   transaction: Transaction,
   principal: Pick<Principal, "id" | "application">,
@@ -155,6 +167,7 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     slug: record.slug,
     displayName: record.displayName,
     description: record.description,
+    about: record.about,
     catalogListed: record.catalogListed,
     web: record.webEnabled,
     parentId: record.parentId,
@@ -483,17 +496,7 @@ export const createAppService = (
           activeDeploymentId: apps.activeDeploymentId,
         })
         .from(apps)
-        .where(
-          and(
-            isNull(apps.removedAt),
-            eq(apps.organizationId, principal.application.organizationId),
-            eq(apps.catalogListed, true),
-            eq(apps.webEnabled, true),
-            isNull(apps.parentId),
-            eq(apps.state, "active"),
-            isNotNull(apps.activeDeploymentId),
-          ),
-        )
+        .where(published(principal))
         .orderBy(apps.displayName, apps.id);
 
       return Result.ok(
@@ -502,6 +505,46 @@ export const createAppService = (
           url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
         })),
       );
+    }),
+  /** An app's page for the people who use it. Those who manage the app see it before it is published. */
+  listing: (principal: Principal, appId: string) =>
+    readOnly(database, async (transaction) => {
+      const [record] = await transaction
+        .select({
+          id: apps.id,
+          displayName: apps.displayName,
+          description: apps.description,
+          about: apps.about,
+          hostname: apps.hostname,
+          activeDeploymentId: apps.activeDeploymentId,
+          appliedCapabilities: apps.appliedCapabilities,
+          owner: user.name,
+        })
+        .from(apps)
+        .leftJoin(user, eq(user.id, apps.ownerId))
+        .where(
+          and(eq(apps.id, appId), or(published(principal), appVisibility(transaction, principal))),
+        );
+
+      if (!record)
+        return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
+
+      const { appliedCapabilities, ...listing } = record;
+
+      return Result.ok({
+        ...listing,
+        url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
+        uses:
+          record.activeDeploymentId && appliedCapabilities
+            ? [
+                ...new Set(
+                  Object.values(contract.capabilitySnapshot.parse(appliedCapabilities).grants).map(
+                    (grant) => grant.app,
+                  ),
+                ),
+              ]
+            : [],
+      });
     }),
   rename: (principal: Principal, appId: string, displayName: string) =>
     transact(database, async (transaction) => {
@@ -521,6 +564,16 @@ export const createAppService = (
       await transaction.update(apps).set({ description }).where(eq(apps.id, appId));
 
       return Result.ok({ description });
+    }),
+  setAbout: (principal: Principal, appId: string, text: string) =>
+    transact(database, async (transaction) => {
+      const access = await managedApp(transaction, principal, appId);
+
+      if (access.isErr()) return access;
+      const about = text || null;
+      await transaction.update(apps).set({ about }).where(eq(apps.id, appId));
+
+      return Result.ok({ about });
     }),
   setCatalogListing: (principal: Principal, appId: string, listed: boolean) =>
     transact(database, async (transaction) => {

@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { getCatalog } from "#lib/catalog.remote";
+  import { getAppListing } from "#lib/catalog.remote";
+  import AppAbout from "#shadcn/components/AppAbout.svelte";
   import AppIcon from "#shadcn/components/AppIcon.svelte";
   import { getWorkspaceContext } from "#lib/workspace-context";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import { Button } from "@platform/ui/button";
-  import { error } from "@sveltejs/kit";
   import type { PageProps } from "./$types";
 
   const workspace = getWorkspaceContext();
@@ -14,9 +14,7 @@
 
   // A published app's page for the people who use it: what it is for and the way into it.
   const app = $derived(
-    (await getCatalog({ organizationId: workspace.organizationId })).find(
-      (entry) => entry.id === params.appId,
-    ) ?? error(404, "App not found"),
+    await getAppListing({ organizationId: workspace.organizationId, appId: params.appId }),
   );
 </script>
 
@@ -38,3 +36,4 @@
   </div>
   <Button href={app.url} target="_blank" rel="noreferrer">Open app<ArrowUpRight /></Button>
 </div>
+<div class="mt-8"><AppAbout appId={app.id} /></div>

@@ -375,6 +375,7 @@ test(`creates apps in the organization a tab shows while another tab opens anoth
       new RegExp(`^${environment.configuration.PLATFORM_URL}/${alpha}/apps/[a-f0-9-]+$`),
     );
     await expect(first.getByText(`${slug}-${alpha}.apps.localhost`, { exact: true })).toBeVisible();
+    await first.getByRole("link", { name: "Status", exact: true }).click();
     await first.getByRole("link", { name: "Create preview", exact: true }).click();
     await first.getByLabel("App name", { exact: true }).fill("Review");
     await first.getByLabel("URL slug").fill(`${slug}-review`);

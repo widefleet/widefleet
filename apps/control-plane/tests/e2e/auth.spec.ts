@@ -1744,6 +1744,7 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   await expect(page.getByText("No deployments yet.", { exact: false })).toBeVisible();
   const appId = z.uuid().parse(new URL(page.url()).pathname.split("/").at(-1));
 
+  await page.getByRole("link", { name: "Status", exact: true }).click();
   await page.getByRole("link", { name: "Create preview", exact: true }).click();
   await page.getByLabel("App name", { exact: true }).fill("Notes Preview");
   await page.getByLabel("URL slug").fill("notes-preview");
@@ -2474,6 +2475,22 @@ test.describe(`app catalog`, () => {
       await readerPage.reload();
       await expect(readerPage.getByText("Counts the stock.", { exact: true })).toBeVisible();
 
+      // The owner's overview is the app's page: a longer text, written in place as Markdown.
+      await page.getByRole("link", { name: "Overview", exact: true }).click();
+      await page.getByRole("button", { name: "Edit about" }).click();
+      const more = page.getByRole("textbox", { name: "About", exact: true });
+      await expect(more).toBeFocused();
+      await more.fill(
+        "Tracks every shelf.\n\n- Counts per shelf\n\n![chart](https://example.test/chart.png)",
+      );
+      await page.getByRole("button", { name: "Save about", exact: true }).click();
+      await expect(
+        page.getByRole("listitem").filter({ hasText: /^Counts per shelf$/u }),
+      ).toBeVisible();
+      // The text loads nothing from other sites.
+      await expect(page.getByRole("main").getByRole("img", { name: "chart" })).toHaveCount(0);
+      await expect(page.getByText(/^Owned by \S/u)).toBeVisible();
+
       // The tile opens the app with its button and leads to the app's page with its name.
       const opens = { name: `Open app ${record.displayName} in a new tab`, exact: true };
       await expect(readerPage.getByRole("link", opens)).toHaveAttribute("href", record.url);
@@ -2486,8 +2503,13 @@ test.describe(`app catalog`, () => {
         "href",
         record.url,
       );
+      await expect(
+        readerPage.getByRole("listitem").filter({ hasText: /^Counts per shelf$/u }),
+      ).toBeVisible();
+      await expect(readerPage.getByText(/^Owned by \S/u)).toBeVisible();
       await expect(readerPage.getByRole("navigation", { name: "App sections" })).toHaveCount(0);
       await expect(readerPage.getByRole("button", { name: "Edit name" })).toHaveCount(0);
+      await expect(readerPage.getByRole("button", { name: "Edit about" })).toHaveCount(0);
 
       // The pages for managing the app lead them here too, so a link someone shares still works.
       await readerPage.goto(`/widefleet/apps/${record.id}/secrets`);
@@ -3749,6 +3771,25 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await expect(page.getByRole("link", { name: "Refresh", exact: true })).toHaveCount(0);
     await expect(page.getByText("taylor@example.test", { exact: false })).toBeVisible();
 
+    await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
+
+    // An app's page shows the reader's accounts with the app itself and with the apps it calls.
+    await environment.database.db
+      .update(apps)
+      .set({ appliedCapabilities: { revision: 1, grants: { FILES: { app: files } } } })
+      .where(eq(apps.id, gmail));
+    await page.goto(`/widefleet/catalog/apps/${gmail}`);
+    const uses = page.getByRole("region", { name: "Connections", exact: true });
+    await expect(uses.getByRole("listitem")).toHaveCount(2);
+    await expect(uses.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
+    await expect(uses.getByText("taylor@example.test", { exact: false })).toBeVisible();
+    await expect(uses.getByRole("heading", { name: "GitHub", exact: true })).toHaveCount(0);
+
+    // A connector that calls no other app shows the reader's account with it alone.
+    await page.goto(`/widefleet/catalog/apps/${github}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("GitHub");
+    await expect(uses.getByRole("listitem")).toHaveCount(1);
+    await page.goto("/widefleet/connections");
     await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
 
     await mkdir("../../.local/personal-connections", { recursive: true });

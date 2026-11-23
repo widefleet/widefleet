@@ -9,7 +9,7 @@
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import InlineText from "#shadcn/components/InlineText.svelte";
-  import { renameApp, setAppDescription } from "#lib/catalog.remote";
+  import { getAppListing, renameApp, setAppDescription } from "#lib/catalog.remote";
   import { appDescriptionLength, appNameLength } from "@platform/contracts";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
@@ -75,6 +75,13 @@
 
     try {
       await details.refresh();
+
+      // A deployment can change the apps this one calls, which its page shows.
+      if (activeTab === "overview")
+        await getAppListing({
+          organizationId: workspace.organizationId,
+          appId: route.appId,
+        }).refresh();
 
       if (activeTab === "source")
         await getAppSource({
@@ -142,6 +149,7 @@
 
   const tabs = $derived([
     { id: "overview", label: "Overview" },
+    { id: "status", label: "Status" },
     { id: "deployments", label: "Deployments" },
     ...(data.source.supported ? [{ id: "source", label: "Source" }] : []),
     { id: "api", label: "API" },

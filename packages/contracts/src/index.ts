@@ -72,6 +72,11 @@ export const appDescriptionLength = 200;
 
 export const appDescription = z.string().trim().max(appDescriptionLength);
 
+/** A few sentences and points that tell people more about an app. An empty text removes it. */
+export const appAboutLength = 2000;
+
+export const appAbout = z.string().trim().max(appAboutLength);
+
 export const createAppInput = z.strictObject({
   slug: appSlug.refine(
     (value) => !["auth", "mcp"].includes(value),
@@ -94,6 +99,7 @@ export const app = z.strictObject({
   slug: appSlug,
   displayName: z.string(),
   description: z.string().nullable().default(null),
+  about: z.string().nullable().default(null),
   catalogListed: z.boolean(),
   web: z.boolean().default(true),
   parentId: identifier.nullable(),
@@ -136,6 +142,15 @@ export const catalogEntry = app.pick({
   activeDeploymentId: true,
 });
 
+/** An app's page for the people who use it. */
+export const catalogApp = catalogEntry.extend({
+  about: z.string().nullable(),
+  /** The name of the person who owns the app. */
+  owner: z.string().nullable(),
+  /** The apps whose APIs the active deployment may call. */
+  uses: z.array(identifier),
+});
+
 export const catalogListing = z.strictObject({ listed: z.boolean() });
 
 export const catalogListingInput = appPath.extend(catalogListing.shape);
@@ -143,6 +158,10 @@ export const catalogListingInput = appPath.extend(catalogListing.shape);
 export const appDescriptionChange = z.strictObject({ description: appDescription });
 
 export const appDescriptionInput = appPath.extend(appDescriptionChange.shape);
+
+export const appAboutChange = z.strictObject({ about: appAbout });
+
+export const appAboutInput = appPath.extend(appAboutChange.shape);
 
 export const appNameChange = z.strictObject({ displayName: appDisplayName });
 

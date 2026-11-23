@@ -750,6 +750,13 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "GET", path: "/catalog" })
       .output(z.array(contract.catalogEntry))
       .handler(async ({ context }) => unwrap(await runtime.apps.catalog(context.principal))),
+    catalogApp: read
+      .route({ method: "GET", path: "/catalog/apps/{appId}" })
+      .input(contract.appPath)
+      .output(contract.catalogApp)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.apps.listing(context.principal, input.appId)),
+      ),
     listTemplates: read
       .route({ method: "GET", path: "/catalog/templates" })
       .input(contract.templateSearch)
@@ -819,6 +826,13 @@ export const createApi = (runtime: Runtime) => {
         unwrap(
           await runtime.apps.setDescription(context.principal, input.appId, input.description),
         ),
+      ),
+    setAppAbout: write
+      .route({ method: "PUT", path: "/apps/{appId}/about" })
+      .input(contract.appAboutInput)
+      .output(contract.app.pick({ about: true }))
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.apps.setAbout(context.principal, input.appId, input.about)),
       ),
     sourceDeployTarget: write
       // Deployment tokens need this read-only check without platform:read scope.

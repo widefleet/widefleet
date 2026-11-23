@@ -288,6 +288,13 @@
       "when": 1795478400000,
       "tag": "0040_domain_sso",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795564800000,
+      "tag": "0041_app_about",
+      "breakpoints": true
     }
   ]
 }

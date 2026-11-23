@@ -7,6 +7,8 @@
   import X from "@lucide/svelte/icons/x";
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
+  import { Textarea } from "@platform/ui/textarea";
+  import Markdown from "#shadcn/components/Markdown.svelte";
   import { tick } from "svelte";
 
   // A text of an app, such as its name, that people who manage the app edit in place.
@@ -19,6 +21,7 @@
     maxlength,
     heading = false,
     empty = "",
+    html,
   }: {
     /** The form that saves the text; the app's text forms share one shape. */
     form: typeof setAppDescription;
@@ -32,7 +35,11 @@
     heading?: boolean;
     /** Offers to add a text that is missing. */
     empty?: string;
+    /** The text as rendered Markdown, which makes it a text of several lines. */
+    html?: string;
   } = $props();
+
+  const multiline = $derived(html !== undefined);
 
   const name = $derived(label.toLowerCase());
 
@@ -40,7 +47,7 @@
 
   let draft = $state("");
 
-  let input = $state<HTMLInputElement | null>(null);
+  let input = $state<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
   let trigger = $state<HTMLButtonElement>();
 
@@ -53,7 +60,9 @@
     draft = value;
     editing = true;
     await tick();
-    input?.select();
+
+    if (multiline) input?.focus();
+    else input?.select();
   };
 
   const close = async () => {
@@ -65,11 +74,14 @@
 
 {#snippet text()}
   <!-- The button covers the text, so choosing the text starts the edit, and the text keeps
-       its own role: a heading reads as the name alone. -->
-  <div class={`group relative flex max-w-full items-center gap-2 ${heading ? "" : "mt-2 text-sm"}`}>
+       its own role: a heading reads as the name alone. A longer text can hold links, so there
+       only the button starts the edit. -->
+  <div
+    class={`group relative flex max-w-full gap-2 ${heading ? "items-center" : multiline ? "items-start" : "mt-2 items-center text-sm"}`}
+  >
     {#if heading}<h1 class="text-2xl font-semibold tracking-tight wrap-anywhere">
         {value}
-      </h1>{:else}<span
+      </h1>{:else if html}<Markdown {html} />{:else}<span
         class={`wrap-anywhere ${value ? "" : "text-muted-foreground group-hover:text-foreground"}`}
         >{value || empty}</span
       >{/if}
@@ -78,7 +90,7 @@
       type="button"
       onclick={start}
       aria-label={`Edit ${name}`}
-      class="text-muted-foreground shrink-0 rounded-sm opacity-0 group-hover:opacity-100 after:absolute after:inset-0 focus-visible:opacity-100 pointer-coarse:opacity-100"
+      class={`text-muted-foreground shrink-0 rounded-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 ${html ? "mt-1.5" : "after:absolute after:inset-0"}`}
       ><Pencil class={heading ? "size-4" : "size-3.5"} aria-hidden="true" /></button
     >
   </div>
@@ -93,7 +105,7 @@
     {...form.enhance(async ({ submit }) => {
       if (!changed || (await submit())) await close();
     })}
-    class={`-ml-2.5 flex max-w-xl flex-wrap items-center gap-1 ${heading ? "-my-1" : "mt-0.5 -mb-1.5"}`}
+    class={`-ml-2.5 flex flex-wrap gap-1 ${heading ? "-my-1 max-w-xl items-center" : multiline ? "-my-2 max-w-2xl items-start" : "mt-0.5 -mb-1.5 max-w-xl items-center"}`}
     onfocusout={(event) => {
       if (
         !changed &&
@@ -108,18 +120,32 @@
     <OrganizationField field={form.fields.organizationId} />
     <input {...form.fields.appId.as("hidden", appId)} />
     <input {...form.fields.search.as("hidden", search)} />
-    <Input
-      bind:ref={input}
-      {...form.fields.value.as("text", value)}
-      aria-label={label}
-      {maxlength}
-      required={heading}
-      readonly={saving}
-      oninput={(event) => {
-        draft = event.currentTarget.value;
-      }}
-      class={`min-w-0 flex-1 ${heading ? "h-10 text-2xl font-semibold tracking-tight md:text-2xl" : ""}`}
-    />
+    {#if multiline}
+      <Textarea
+        bind:ref={input}
+        {...form.fields.value.as("text", value)}
+        aria-label={label}
+        {maxlength}
+        readonly={saving}
+        oninput={(event) => {
+          draft = event.currentTarget.value;
+        }}
+        class="min-w-0 flex-1 leading-7"
+      />
+    {:else}
+      <Input
+        bind:ref={input}
+        {...form.fields.value.as("text", value)}
+        aria-label={label}
+        {maxlength}
+        required={heading}
+        readonly={saving}
+        oninput={(event) => {
+          draft = event.currentTarget.value;
+        }}
+        class={`min-w-0 flex-1 ${heading ? "h-10 text-2xl font-semibold tracking-tight md:text-2xl" : ""}`}
+      />
+    {/if}
     {#if changed}
       <Button
         type="submit"
