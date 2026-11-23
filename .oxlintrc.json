@@ -66,5 +66,13 @@
     "typescript/no-unsafe-member-access": "error",
     "typescript/no-unsafe-return": "error",
     "no-debugger": "error"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["templates/*/src/api.ts"],
+      "rules": {
+        "anti-slop/no-shape-in-symbol-names": "off"
+      }
+    }
+  ]
 }

@@ -130,6 +130,26 @@ describe("Discovery template generator", () => {
     ).toThrow(/^The rules list example\.users\.items\.gone, which the API no longer offers$/);
   });
 
+  it("requests the scopes the rules name when every offered method accepts one", () => {
+    const operations = {
+      "example.users.items.send": "send",
+      "example.users.items.delete": "delete",
+    } as const;
+
+    expect(
+      generateDiscovery(document, { operations, scopes: ["https://example/full"] }, service, "")
+        .files["src/schema.ts"],
+    ).toContain('export const scopes = ["https://example/full"];');
+    expect(() =>
+      generateDiscovery(
+        document,
+        { operations, scopes: ["https://example/readonly"] },
+        service,
+        "",
+      ),
+    ).toThrow("example.users.items.send needs one of the scopes https://example/full");
+  });
+
   it("offers methods that only read without asking", () => {
     const { files } = generateDiscovery(
       document,

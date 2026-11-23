@@ -15,6 +15,11 @@ export interface DiscoveryRules {
    * or with why it is not offered; GET methods are offered unless listed as hidden.
    */
   operations: Record<string, Change | "read" | Hidden>;
+  /**
+   * The OAuth scopes to request, when the smallest covering set would choose a
+   * broader one, such as Drive's for Sheets. Every offered method must accept one.
+   */
+  scopes?: readonly string[] | undefined;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -228,7 +233,7 @@ const changes = z.enum(["create", "update", "delete", "send"]);
 
 export const generateDiscovery = (
   source: string,
-  { operations }: DiscoveryRules,
+  { operations, scopes }: DiscoveryRules,
   service: DiscoveryService,
   header: string,
 ): GeneratedFiles => {
@@ -262,6 +267,10 @@ export const generateDiscovery = (
       problems.push(`${offered[index]?.id} becomes method ${name}, which is taken`);
     taken.add(name);
   }
+
+  for (const entry of offered)
+    if (scopes && entry.scopes?.length && !entry.scopes.some((scope) => scopes.includes(scope)))
+      problems.push(`${entry.id} needs one of the scopes ${entry.scopes.join(", ")}`);
 
   if (problems.length) throw new Error(problems.join("\n"));
   checkTypeNames(Object.keys(api.schemas).map(identifier), service);
@@ -397,7 +406,7 @@ export const base = ${JSON.stringify(new URL(api.servicePath, api.rootUrl).href)
 export const operations = ${JSON.stringify(runtime)} satisfies Record<string, Operation>;
 
 /** OAuth scopes that authorize every offered method. */
-export const scopes = ${JSON.stringify(coveringScopes(offered))};
+export const scopes = ${JSON.stringify(scopes ?? coveringScopes(offered))};
 `,
     },
     summary: `${methods.length} methods, ${all.length - offered.length} not offered, ${Object.keys(api.schemas).length} types`,
