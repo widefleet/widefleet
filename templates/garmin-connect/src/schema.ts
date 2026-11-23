@@ -16,6 +16,8 @@ export type Operation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
+  /** The header inputs every call needs. */
+  requiredHeaders?: string[];
   body: "json" | "form" | "multipart" | "text" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
