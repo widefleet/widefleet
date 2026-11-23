@@ -6,6 +6,7 @@
       "https://accounts.google.com",
       "https://oauth2.googleapis.com",
       "https://www.googleapis.com",
+      "https://sheets.googleapis.com",
     ],
   },
 }

@@ -20,6 +20,11 @@ export interface DiscoveryRules {
    * broader one, such as Drive's for Sheets. Every offered method must accept one.
    */
   scopes?: readonly string[] | undefined;
+  /**
+   * Parameters a method needs although its description does not mark them
+   * required, by method ID, such as Sheets' `valueInputOption` for writes.
+   */
+  required?: Readonly<Record<string, readonly string[]>> | undefined;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -115,6 +120,8 @@ export type DiscoveryOperation = {
   path: string;
   pathParameters: Record<string, string | null>;
   queryParameters: string[];
+  /** Query parameters the method needs. */
+  requiredParameters: string[];
   body: boolean;
   response: boolean;
   change: Change | null;
@@ -233,7 +240,7 @@ const changes = z.enum(["create", "update", "delete", "send"]);
 
 export const generateDiscovery = (
   source: string,
-  { operations, scopes }: DiscoveryRules,
+  { operations, scopes, required: requiredByRules = {} }: DiscoveryRules,
   service: DiscoveryService,
   header: string,
 ): GeneratedFiles => {
@@ -245,6 +252,11 @@ export const generateDiscovery = (
   for (const id of rules.keys())
     if (!all.some((entry) => entry.id === id))
       problems.push(`The rules list ${id}, which the API no longer offers`);
+
+  for (const [id, names] of Object.entries(requiredByRules))
+    for (const name of names)
+      if (!all.some((entry) => entry.id === id && entry.parameters?.[name]))
+        problems.push(`The rules require ${id}'s parameter ${name}, which it no longer has`);
 
   const offered = all.filter((entry) => {
     const rule = rules.get(entry.id);
@@ -292,9 +304,13 @@ export const generateDiscovery = (
     const rule = rules.get(entry.id);
     const change = rule === undefined || rule === "read" ? null : changes.parse(rule);
 
-    const parameters = Object.entries(entry.parameters ?? {}).filter(
-      ([, value]) => !value.deprecated,
-    );
+    const parameters = Object.entries(entry.parameters ?? {})
+      .filter(([, value]) => !value.deprecated)
+      .map(([key, value]) =>
+        requiredByRules[entry.id]?.includes(key)
+          ? ([key, { ...value, required: true }] as const)
+          : ([key, value] as const),
+      );
 
     runtime[name] = {
       httpMethod: entry.httpMethod,
@@ -306,6 +322,12 @@ export const generateDiscovery = (
       ),
       queryParameters: parameters
         .filter(([, value]) => value.location === "query")
+        .map(([key]) => key),
+      requiredParameters: parameters
+        .filter(
+          ([, value]) =>
+            value.location === "query" && value.required && value.default === undefined,
+        )
         .map(([key]) => key),
       body: entry.request !== undefined,
       response: entry.response !== undefined,
@@ -395,6 +417,7 @@ export type Operation = {
   /** Path parameters and their defaults. */
   pathParameters: Record<string, string | null>;
   queryParameters: string[];
+  requiredParameters: string[];
   body: boolean;
   response: boolean;
   change: "create" | "update" | "delete" | "send" | null;

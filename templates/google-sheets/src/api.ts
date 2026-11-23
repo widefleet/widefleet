@@ -6675,7 +6675,7 @@ export class GoogleSheetsApi extends WorkerEntrypoint<TemplateEnvironment, Googl
       /**
        * How the input data should be interpreted.
        */
-      valueInputOption?: "INPUT_VALUE_OPTION_UNSPECIFIED" | "RAW" | "USER_ENTERED";
+      valueInputOption: "INPUT_VALUE_OPTION_UNSPECIFIED" | "RAW" | "USER_ENTERED";
       /**
        * Determines how values in the response should be rendered. The default render option is FORMATTED_VALUE.
        */
@@ -6962,7 +6962,7 @@ export class GoogleSheetsApi extends WorkerEntrypoint<TemplateEnvironment, Googl
       /**
        * How the input data should be interpreted.
        */
-      valueInputOption?: "INPUT_VALUE_OPTION_UNSPECIFIED" | "RAW" | "USER_ENTERED";
+      valueInputOption: "INPUT_VALUE_OPTION_UNSPECIFIED" | "RAW" | "USER_ENTERED";
       /**
        * The ID of the spreadsheet to update.
        */

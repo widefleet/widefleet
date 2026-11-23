@@ -7,6 +7,7 @@ const get: GoogleOperation = {
   path: "gmail/v1/users/{userId}/messages/{id}",
   pathParameters: { userId: "me", id: null },
   queryParameters: ["format", "metadataHeaders"],
+  requiredParameters: [],
   body: false,
   response: true,
 };
@@ -16,6 +17,7 @@ const send: GoogleOperation = {
   path: "gmail/v1/users/{userId}/messages/send",
   pathParameters: { userId: "me" },
   queryParameters: [],
+  requiredParameters: [],
   body: true,
   response: true,
 };
@@ -69,6 +71,17 @@ describe("Google API requests", () => {
       new InvalidRequest("messagesGet has no argument unknown"),
     );
     expect(invalid({}, { id: true })).toThrow("messagesGet needs id");
+    expect(() =>
+      googleRequest(
+        base,
+        "messagesGet",
+        { ...get, requiredParameters: ["format"] },
+        { id: "a" },
+        {
+          id: true,
+        },
+      ),
+    ).toThrow("messagesGet needs format");
     // `..` would move the request to the parent path.
     expect(invalid({ id: ".." }, { id: true })).toThrow("messagesGet's id is not an ID");
     expect(invalid({ id: "a" })).toThrow("messagesGet needs a selection of the fields to return");

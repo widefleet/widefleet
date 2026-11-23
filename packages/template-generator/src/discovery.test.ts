@@ -150,6 +150,31 @@ describe("Discovery template generator", () => {
     ).toThrow("example.users.items.send needs one of the scopes https://example/full");
   });
 
+  it("requires the parameters the rules name", () => {
+    const operations = {
+      "example.users.items.send": "send",
+      "example.users.items.delete": "delete",
+    } as const;
+
+    const { files } = generateDiscovery(
+      document,
+      { operations, required: { "example.users.items.get": ["view"] } },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain('view: "full" | "minimal";');
+    expect(files["src/schema.ts"]).toContain('"requiredParameters":["view"]');
+    expect(() =>
+      generateDiscovery(
+        document,
+        { operations, required: { "example.users.items.get": ["gone"] } },
+        service,
+        "",
+      ),
+    ).toThrow("The rules require example.users.items.get's parameter gone, which it no longer has");
+  });
+
   it("offers methods that only read without asking", () => {
     const { files } = generateDiscovery(
       document,
@@ -164,7 +189,7 @@ describe("Discovery template generator", () => {
     );
 
     expect(files["src/schema.ts"]).toContain(
-      '"itemsSend":{"httpMethod":"POST","path":"v1/users/{userId}/items/send","pathParameters":{"userId":"me"},"queryParameters":[],"body":true,"response":true,"change":null}',
+      '"itemsSend":{"httpMethod":"POST","path":"v1/users/{userId}/items/send","pathParameters":{"userId":"me"},"queryParameters":[],"requiredParameters":[],"body":true,"response":true,"change":null}',
     );
   });
 

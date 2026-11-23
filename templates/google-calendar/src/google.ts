@@ -10,6 +10,7 @@ export type GoogleOperation = {
   path: string;
   pathParameters: Record<string, string | null>;
   queryParameters: readonly string[];
+  requiredParameters: readonly string[];
   body: boolean;
   response: boolean;
 };
@@ -80,6 +81,9 @@ export const googleRequest = (
 
   for (const key of operation.queryParameters) {
     const value = own(values, key);
+
+    if (value === undefined && operation.requiredParameters.includes(key))
+      throw new InvalidRequest(`${method} needs ${key}`);
 
     if (value === undefined) continue;
 

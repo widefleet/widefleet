@@ -29,6 +29,12 @@ export const selections = async () => {
     { updatedCells: true },
   );
 
+  await sheets.valuesUpdate(
+    // @ts-expect-error valueInputOption is required for writes.
+    { spreadsheetId: "s", range: "A1", body: { values: [["1"]] } },
+    { updatedCells: true },
+  );
+
   const appended = await sheets.valuesAppend(
     {
       spreadsheetId: "s",

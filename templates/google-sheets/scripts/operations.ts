@@ -25,6 +25,15 @@ export const generator = {
  */
 export const scopes = ["https://www.googleapis.com/auth/spreadsheets"];
 
+/**
+ * Writes need valueInputOption, which says whether values are parsed like user
+ * input, although Google's description leaves it optional.
+ */
+export const required = {
+  "sheets.spreadsheets.values.update": ["valueInputOption"],
+  "sheets.spreadsheets.values.append": ["valueInputOption"],
+};
+
 /** Why a method is not offered. */
 export const reasons = {} as const;
 

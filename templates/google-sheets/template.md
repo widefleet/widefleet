@@ -46,7 +46,7 @@ An administrator needs to:
    directory:
 
    ```sh
-   widefleet network allow https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com
+   widefleet network allow https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://sheets.googleapis.com
    ```
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration
