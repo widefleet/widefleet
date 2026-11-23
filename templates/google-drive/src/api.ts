@@ -1086,7 +1086,7 @@ export type File = {
    * Entries with null values are cleared in update and copy requests.
    */
   properties?: {
-    [key: string]: string;
+    [key: string]: string | null;
   };
   /**
    * Output only. If the file has been explicitly trashed, the user who trashed it. Only populated for items in shared drives.
@@ -1466,7 +1466,7 @@ export type File = {
    * Entries with null values are cleared in update and copy requests. These properties can only be retrieved using an authenticated request. An authenticated request uses an access token obtained with a OAuth 2 client ID. You cannot use an API key to retrieve private properties.
    */
   appProperties?: {
-    [key: string]: string;
+    [key: string]: string | null;
   };
   /**
    * Output only. Whether the file was created or opened by the requesting app.
@@ -2992,7 +2992,7 @@ export class GoogleDriveApi extends WorkerEntrypoint<TemplateEnvironment, Google
   /**
    * Creates a reply to a comment. For more information, see [Manage comments and replies](https://developers.google.com/workspace/drive/api/guides/manage-comments).
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `commentId`: The ID of the comment.

@@ -25,6 +25,9 @@ export const generator = {
 /** Full access to the user's files, which every offered method accepts. */
 export const scopes = ["https://www.googleapis.com/auth/drive"];
 
+/** Drive removes a file property set to null. */
+export const nullableValues = ["File.properties", "File.appProperties"];
+
 /** Why a method is not offered. */
 export const reasons = {
   teamDrives: "Replaced by the drives methods",
@@ -50,7 +53,8 @@ export const operations = {
   "drive.comments.create": "create",
   "drive.comments.update": "update",
   "drive.comments.delete": "delete",
-  "drive.replies.create": "create",
+  // With action resolve or reopen, a reply changes its comment.
+  "drive.replies.create": "update",
   "drive.replies.update": "update",
   "drive.replies.delete": "delete",
   // Asks the reviewers to approve the file.

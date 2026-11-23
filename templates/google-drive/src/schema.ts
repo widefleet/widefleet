@@ -242,7 +242,7 @@ export const operations = {
     response: "json",
     altMedia: false,
     upload: null,
-    change: "create",
+    change: "update",
   },
   repliesUpdate: {
     httpMethod: "PATCH",

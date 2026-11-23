@@ -56,6 +56,7 @@ const configuration = z.discriminatedUnion("kind", [
     operations: z.record(z.string(), z.union([change, z.literal("read"), hidden])),
     scopes: z.array(z.string()).optional(),
     required: z.record(z.string(), z.array(z.string())).optional(),
+    nullableValues: z.array(z.string()).optional(),
   }),
   z.object({
     kind: z.literal("openapi"),

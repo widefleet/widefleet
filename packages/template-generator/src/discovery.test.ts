@@ -271,4 +271,35 @@ describe("Discovery template generator", () => {
     expect(schema).toContain('"response":"content","altMedia":false');
     expect(schema).toContain('"upload":"/upload/files/v1/files","change":"create"');
   });
+
+  it("lets map entries be null where the rules say so and keeps names free for the imports", () => {
+    const children = '"children":{"type":"array","items":{"$ref":"Item"}}';
+
+    const withMap = document.replace(
+      children,
+      `${children},"labels":{"type":"object","additionalProperties":{"type":"string"}}`,
+    );
+
+    const operations = {
+      "example.users.items.send": "send",
+      "example.users.items.delete": "delete",
+    } as const;
+
+    expect(
+      generateDiscovery(withMap, { operations, nullableValues: ["Item.labels"] }, service, "")
+        .files["src/api.ts"],
+    ).toContain("[key: string]: string | null;");
+    expect(() =>
+      generateDiscovery(withMap, { operations, nullableValues: ["Item.gone"] }, service, ""),
+    ).toThrow("The rules name map field Item.gone, which the API does not have");
+
+    const shadowing = document.replace(
+      '"schemas":{',
+      '"schemas":{"UploadContent":{"id":"UploadContent","type":"object"},',
+    );
+
+    expect(() => generateDiscovery(shadowing, { operations }, service, "")).toThrow(
+      "The API's types UploadContent have the names of imports of the generated file",
+    );
+  });
 });

@@ -25,6 +25,11 @@ export interface DiscoveryRules {
    * required, by method ID, such as Sheets' `valueInputOption` for writes.
    */
   required?: Readonly<Record<string, readonly string[]>> | undefined;
+  /**
+   * Map fields, as `Schema.field`, whose entries may be null, which Google
+   * documents in prose: Drive removes a file property set to null.
+   */
+  nullableValues?: readonly string[] | undefined;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -51,6 +56,7 @@ const schema: z.ZodType<Schema> = z.lazy(() =>
     properties: z.record(z.string(), schema).optional(),
     additionalProperties: schema.optional(),
     readOnly: z.boolean().optional(),
+    nullable: z.boolean().optional(),
     deprecated: z.boolean().optional(),
   }),
 );
@@ -66,6 +72,8 @@ interface Schema {
   properties?: Record<string, Schema> | undefined;
   additionalProperties?: Schema | undefined;
   readOnly?: boolean | undefined;
+  /** Set by the rules' `nullableValues`: null is a value, for example to remove an entry. */
+  nullable?: boolean | undefined;
   deprecated?: boolean | undefined;
 }
 
@@ -148,7 +156,10 @@ const parameterSchema = (value: z.infer<typeof parameter>): Schema => ({
 });
 
 // TypeScript for a Discovery schema. 64-bit integers and bytes travel as strings.
-const typeOf = (value: Schema, indent: string): string => {
+const typeOf = (value: Schema, indent: string): string =>
+  value.nullable ? `${valueType(value, indent)} | null` : valueType(value, indent);
+
+const valueType = (value: Schema, indent: string): string => {
   if (value.$ref) return identifier(value.$ref);
 
   if (value.enum) return value.enum.map((entry) => JSON.stringify(entry)).join(" | ");
@@ -253,14 +264,23 @@ const changes = z.enum(["create", "update", "delete", "send"]);
 
 export const generateDiscovery = (
   source: string,
-  { operations, scopes, required: requiredByRules = {} }: DiscoveryRules,
+  { operations, scopes, required: requiredByRules = {}, nullableValues = [] }: DiscoveryRules,
   service: DiscoveryService,
   header: string,
 ): GeneratedFiles => {
   const api = document.parse(JSON.parse(source));
+  const problems: string[] = [];
+
+  for (const path of nullableValues) {
+    const [schemaName = "", field = ""] = path.split(".");
+    const entries = api.schemas[schemaName]?.properties?.[field]?.additionalProperties;
+
+    if (entries) entries.nullable = true;
+    else problems.push(`The rules name map field ${path}, which the API does not have`);
+  }
+
   const all = collect(api.resources).filter((entry) => !entry.deprecated);
   const rules = new Map(Object.entries(operations));
-  const problems: string[] = [];
 
   for (const id of rules.keys())
     if (!all.some((entry) => entry.id === id))

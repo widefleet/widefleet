@@ -162,6 +162,7 @@ describe("Google API requests", () => {
     for (const content of [
       { mimeType: "text/plain" },
       { mimeType: "text/plain\r\nX: y", text: "a" },
+      { mimeType: "text/plain\r\n\r\n; charset=utf-8", text: "a" },
       { mimeType: "text/plain", base64: "not base64!" },
     ])
       expect(() =>

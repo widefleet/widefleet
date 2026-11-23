@@ -20,7 +20,7 @@ export type GoogleOperation = {
 const name = z.string().regex(/^[A-Za-z_][\w]*$/);
 
 // A media type, without line breaks that would end the part's headers.
-const mediaType = z.string().regex(/^[\w.+-]+\/[\w.+-]+(?:\s*;[^\r\n]*)?$/);
+const mediaType = z.string().regex(/^[\w.+-]+\/[\w.+-]+(?:[ \t]*;[^\r\n]*)?$/);
 
 const uploadContent = z.union([
   z.strictObject({ mimeType: mediaType, text: z.string() }),

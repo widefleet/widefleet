@@ -114,9 +114,9 @@ level says:
 - `updates_and_deletions`, the default: changing, moving or deleting files, emptying
   the trash, changing shared drives, revisions and comments, `permissionsCreate`,
   which shares with people and emails them unless `sendNotificationEmail` is false,
-  and starting or commenting on an approval, which notifies its participants, ask.
-  Creating or copying files, folders and shared drives and adding comments to files
-  run at once.
+  starting or commenting on an approval, which notifies its participants, and replies,
+  which can resolve or reopen a comment, ask. Creating or copying files, folders and
+  shared drives and adding comments to files run at once.
 - `none`: nothing asks.
 
 `...WithContent` methods ask like the method they extend. `scripts/operations.ts`
