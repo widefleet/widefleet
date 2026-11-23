@@ -527,7 +527,7 @@ export class WhoopApi extends WorkerEntrypoint<TemplateEnvironment, WhoopPropert
     /**
      * ID of the cycle to retrieve
      */
-    cycleId: number;
+    cycleId: number | string;
   }): Promise<WhoopResult<Cycle>> {
     return run(this.env, this.ctx.props, "getCycle", input);
   }
@@ -539,7 +539,7 @@ export class WhoopApi extends WorkerEntrypoint<TemplateEnvironment, WhoopPropert
     /**
      * ID of the cycle to retrieve
      */
-    cycleId: number;
+    cycleId: number | string;
   }): Promise<WhoopResult<Recovery>> {
     return run(this.env, this.ctx.props, "getCycleRecovery", input);
   }
@@ -551,7 +551,7 @@ export class WhoopApi extends WorkerEntrypoint<TemplateEnvironment, WhoopPropert
     /**
      * ID of the cycle to retrieve sleep for
      */
-    cycleId: number;
+    cycleId: number | string;
   }): Promise<WhoopResult<Sleep>> {
     return run(this.env, this.ctx.props, "getCycleSleep", input);
   }

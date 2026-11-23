@@ -35,6 +35,18 @@ const upload: RestOperation = {
   pageable: false,
 };
 
+const form: RestOperation = {
+  httpMethod: "POST",
+  path: "/activities",
+  pathParameters: {},
+  queryParameters: {},
+  headerParameters: {},
+  body: "form",
+  bodyRequired: true,
+  response: "json",
+  pageable: false,
+};
+
 describe("REST requests", () => {
   it("fills the path, writes query lists and follows pages on the API's origin", () => {
     expect(
@@ -50,6 +62,16 @@ describe("REST requests", () => {
       url: "https://graph.example.test/v1.0/drives/a%2Fb/search(q='report')?%24top=5&%24select=id%2Cname&tag=x&tag=y&ids=1%7C2",
       init: { method: "GET" },
     });
+
+    // Tab-separated lists join with a tab.
+    expect(
+      restRequest(
+        base,
+        "search",
+        { ...list, queryParameters: { cells: ["cells", "\t", false] } },
+        { driveId: "d", q: "x", cells: ["a", "b"] },
+      ).url,
+    ).toBe("https://graph.example.test/v1.0/drives/d/search(q='x')?cells=a%09b");
 
     expect(restRequest(base, "search", list, { driveId: "d", q: "it's" }).url).toBe(
       "https://graph.example.test/v1.0/drives/d/search(q='it''s')",
@@ -138,6 +160,81 @@ describe("REST requests", () => {
         { driveId: "d", q: "x" },
       ),
     ).toThrow("search needs view");
+  });
+
+  it("sends form fields as a form, and files in a multipart form", async () => {
+    const created = restRequest(base, "create", form, {
+      body: { name: "Run", elapsed_time: 60, trainer: false, tags: ["a", "b"], gone: undefined },
+    });
+
+    expect(z.instanceof(URLSearchParams).parse(created.init.body).toString()).toBe(
+      "name=Run&elapsed_time=60&trainer=false&tags=a&tags=b",
+    );
+
+    // Lists the operation joins become one value, with their separator.
+    const joined = restRequest(
+      base,
+      "create",
+      { ...form, formLists: { tags: ",", ids: "\t" } },
+      { body: { tags: ["a", "b"], ids: [1, 2], kinds: ["x", "y"] } },
+    );
+
+    expect(z.instanceof(URLSearchParams).parse(joined.init.body).toString()).toBe(
+      "tags=a%2Cb&ids=1%092&kinds=x&kinds=y",
+    );
+    expect(() =>
+      restRequest(
+        base,
+        "upload",
+        { ...form, body: "multipart", formLists: { files: "," } },
+        { body: { files: [{ mimeType: "text/plain", text: "x" }] } },
+      ),
+    ).toThrow(new InvalidRequest("upload's files joins values, not files"));
+    // Files and nested objects are no form fields.
+    expect(() =>
+      restRequest(base, "create", form, { body: { file: { mimeType: "text/plain", text: "x" } } }),
+    ).toThrow(new InvalidRequest("create takes its body as fields of values and lists"));
+    expect(() => restRequest(base, "create", form, { body: "name=Run" })).toThrow(InvalidRequest);
+
+    const multipart = { ...form, body: "multipart" } as const;
+
+    const uploaded = restRequest(base, "upload", multipart, {
+      body: {
+        file: { mimeType: "application/gpx+xml", text: "<gpx/>" },
+        bytes: { mimeType: "application/octet-stream", base64: btoa("\x00\xff") },
+        data_type: "gpx",
+      },
+    });
+
+    const sent = z.instanceof(FormData).parse(uploaded.init.body);
+    // Fetch writes the media type with the form's boundary.
+    expect(uploaded.init.headers).toBeUndefined();
+    expect(sent.get("data_type")).toBe("gpx");
+    const file = z.instanceof(Blob).parse(sent.get("file"));
+    expect([file.type, await file.text()]).toEqual(["application/gpx+xml", "<gpx/>"]);
+    const bytes = z.instanceof(Blob).parse(sent.get("bytes"));
+    expect([...new Uint8Array(await bytes.arrayBuffer())]).toEqual([0x00, 0xff]);
+
+    // Objects, and each object of a list, are JSON parts, as OpenAPI encodes them by default.
+    const described = z.instanceof(FormData).parse(
+      restRequest(base, "upload", multipart, {
+        body: { metadata: { title: "Ride", laps: [1, 2] }, notes: [{ text: "a" }, { text: "b" }] },
+      }).init.body,
+    );
+
+    const metadata = z.instanceof(Blob).parse(described.get("metadata"));
+    expect([metadata.type, await metadata.text()]).toEqual([
+      "application/json",
+      '{"title":"Ride","laps":[1,2]}',
+    ]);
+    expect(
+      await Promise.all(
+        described.getAll("notes").map((part) => z.instanceof(Blob).parse(part).text()),
+      ),
+    ).toEqual(['{"text":"a"}', '{"text":"b"}']);
+    expect(() => restRequest(base, "upload", multipart, { body: "file" })).toThrow(
+      new InvalidRequest("upload takes its body as fields of values, lists, files and objects"),
+    );
   });
 
   it("returns download addresses and small content", async () => {

@@ -6867,27 +6867,27 @@ export class GarminConnectApi extends WorkerEntrypoint<
       /**
        * Inclusive minimum activity distance, in meters.
        */
-      minDistance?: number;
+      minDistance?: number | string;
       /**
        * Inclusive maximum activity distance, in meters.
        */
-      maxDistance?: number;
+      maxDistance?: number | string;
       /**
        * Inclusive minimum activity timer duration, in seconds.
        */
-      minDuration?: number;
+      minDuration?: number | string;
       /**
        * Inclusive maximum activity timer duration, in seconds.
        */
-      maxDuration?: number;
+      maxDuration?: number | string;
       /**
        * Inclusive minimum total elevation gain for the activity, in meters.
        */
-      minElevation?: number;
+      minElevation?: number | string;
       /**
        * Inclusive maximum total elevation gain for the activity, in meters.
        */
-      maxElevation?: number;
+      maxElevation?: number | string;
       /**
        * Inclusive earliest activity start date, based on the activity's local start time, in YYYY-MM-DD format.
        */
@@ -6915,11 +6915,11 @@ export class GarminConnectApi extends WorkerEntrypoint<
       /**
        * Inclusive lower bound on the dive activity's maximum depth, in centimeters.
        */
-      lowerMaxDepth?: number;
+      lowerMaxDepth?: number | string;
       /**
        * Inclusive upper bound on the dive activity's maximum depth, in centimeters.
        */
-      upperMaxDepth?: number;
+      upperMaxDepth?: number | string;
       /**
        * Filter by decompression dive status: true returns decompression dives and false returns activities marked as non-decompression dives. Omit to apply no decompression dive filter.
        */
@@ -6927,23 +6927,23 @@ export class GarminConnectApi extends WorkerEntrypoint<
       /**
        * Inclusive minimum total elapsed activity duration, including paused time, in seconds.
        */
-      minElapsedDuration?: number;
+      minElapsedDuration?: number | string;
       /**
        * Inclusive maximum total elapsed activity duration, including paused time, in seconds.
        */
-      maxElapsedDuration?: number;
+      maxElapsedDuration?: number | string;
       /**
        * Inclusive minimum dive bottom time, in seconds.
        */
-      minBottomTime?: number;
+      minBottomTime?: number | string;
       /**
        * Inclusive maximum dive bottom time, in seconds.
        */
-      maxBottomTime?: number;
+      maxBottomTime?: number | string;
       /**
        * Inclusive minimum average activity power, in watts.
        */
-      minAvgPower?: number;
+      minAvgPower?: number | string;
       /**
        * Activity subtype keys to exclude. Repeat this query parameter to exclude multiple subtypes.
        */
@@ -6964,7 +6964,7 @@ export class GarminConnectApi extends WorkerEntrypoint<
     /**
      * The ID of the activity to retrieve the summary
      */
-    activityId: number;
+    activityId: number | string;
   }): Promise<GarminConnectResult<ActivitySummaryDTO>> {
     return run(this.env, this.ctx.props, "getActivity", input);
   }
@@ -6976,7 +6976,7 @@ export class GarminConnectApi extends WorkerEntrypoint<
     /**
      * The ID of the activity for which to retrieve workouts
      */
-    activityId: number;
+    activityId: number | string;
   }): Promise<GarminConnectResult<ActivityWorkoutDTO[]>> {
     return run(this.env, this.ctx.props, "getActivityWorkouts", input);
   }
@@ -6985,7 +6985,7 @@ export class GarminConnectApi extends WorkerEntrypoint<
    * Download an activity's original file, such as its FIT file, as a ZIP archive in `base64`.
    */
   async downloadActivity(input: {
-    activityId: number;
+    activityId: number | string;
   }): Promise<GarminConnectResult<BinaryContent>> {
     return run(this.env, this.ctx.props, "downloadActivity", input);
   }
@@ -7257,7 +7257,7 @@ export class GarminConnectApi extends WorkerEntrypoint<
     /**
      * Id of the meal like id for Breakfast, Lunch, Snacks or Dinner
      */
-    mealId?: number;
+    mealId?: number | string;
     /**
      * Date for which to retrieve the daily nutrition logs. Date must be in the YYYY-MM-DD format. The date is interpreted in the user's local timezone.
      */
