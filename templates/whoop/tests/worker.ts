@@ -149,6 +149,11 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
 
     if (path === "/rpc/personal/status") return Response.json(await connection.status());
 
+    if (path === "/rpc/personal/prepare")
+      return Response.json(
+        await connection.prepare(z.object({ completionUrl: z.url() }).parse(await request.json())),
+      );
+
     if (path === "/rpc/personal/disconnect") return Response.json(await connection.disconnect());
 
     if (path === "/rpc/status") return Response.json(await app.connectionStatus());
