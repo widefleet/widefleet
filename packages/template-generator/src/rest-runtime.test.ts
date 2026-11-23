@@ -1,0 +1,173 @@
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { InvalidRequest } from "./runtime/input.ts";
+import { binaryContent, type RestOperation, restRequest } from "./runtime/rest.ts";
+
+const base = "https://graph.example.test/v1.0/";
+
+const list: RestOperation = {
+  httpMethod: "GET",
+  path: "/drives/{drive-id}/search(q='{q}')",
+  pathParameters: { "drive-id": "driveId", q: "q" },
+  queryParameters: {
+    $top: ["$top", null, false],
+    $select: ["$select", ",", false],
+    tag: ["tag", null, false],
+    ids: ["ids", "|", false],
+  },
+  body: null,
+  bodyRequired: false,
+  response: "json",
+  pageable: true,
+};
+
+const upload: RestOperation = {
+  httpMethod: "PUT",
+  path: "/items/{item-id}/content",
+  pathParameters: { "item-id": "itemId" },
+  queryParameters: {},
+  body: "text",
+  bodyRequired: true,
+  response: "json",
+  pageable: false,
+};
+
+describe("REST requests", () => {
+  it("fills the path, writes query lists and follows pages on the API's origin", () => {
+    expect(
+      restRequest(base, "search", list, {
+        driveId: "a/b",
+        q: "report",
+        $top: 5,
+        $select: ["id", "name"],
+        tag: ["x", "y"],
+        ids: ["1", "2"],
+      }),
+    ).toEqual({
+      url: "https://graph.example.test/v1.0/drives/a%2Fb/search(q='report')?%24top=5&%24select=id%2Cname&tag=x&tag=y&ids=1%7C2",
+      init: { method: "GET" },
+    });
+
+    expect(restRequest(base, "search", list, { driveId: "d", q: "it's" }).url).toBe(
+      "https://graph.example.test/v1.0/drives/d/search(q='it''s')",
+    );
+
+    const next = `${base}drives/d/search(q='report')?$skiptoken=2`;
+
+    expect(restRequest(base, "search", list, { nextLink: next }).url).toBe(next);
+    expect(() => restRequest(base, "search", list, { nextLink: "https://other.test/" })).toThrow(
+      InvalidRequest,
+    );
+    // Graph's links may name the function's argument `query`.
+    const renamed = `${base}drives/d/search(query='report')?$skiptoken=2`;
+
+    expect(restRequest(base, "search", list, { nextLink: renamed }).url).toBe(renamed);
+    // A link must lead to a page of the same operation.
+    expect(() => restRequest(base, "search", list, { nextLink: `${base}me` })).toThrow(
+      InvalidRequest,
+    );
+    expect(() =>
+      restRequest(base, "search", list, { nextLink: `${base}drives/d/other(q='report')` }),
+    ).toThrow(InvalidRequest);
+
+    const delta = { ...list, path: "/drives/{drive-id}/items/{item-id}/delta()" };
+
+    for (const link of [
+      `${base}drives/d/items/root/delta()?$skiptoken=1`,
+      `${base}drives/d/items/root/delta(token='abc')`,
+      `${base}drives/d/items/root/delta(token=%27abc%27)`,
+    ])
+      expect(restRequest(base, "delta", delta, { nextLink: link }).url).toBe(link);
+    expect(() =>
+      restRequest(base, "delta", delta, { nextLink: `${base}drives/d/items/root/children` }),
+    ).toThrow(InvalidRequest);
+  });
+
+  it("sends text bodies with their media type and rejects unknown arguments", () => {
+    expect(
+      restRequest(base, "upload", upload, {
+        itemId: "1",
+        body: "hello",
+        contentType: "text/plain",
+      }),
+    ).toEqual({
+      url: "https://graph.example.test/v1.0/items/1/content",
+      init: { method: "PUT", body: "hello", headers: { "content-type": "text/plain" } },
+    });
+    expect(restRequest(base, "upload", upload, { itemId: "1", body: "x" }).init.headers).toEqual({
+      "content-type": "application/octet-stream",
+    });
+    expect(() => restRequest(base, "upload", upload, { itemId: "1", body: 3 })).toThrow(
+      InvalidRequest,
+    );
+    expect(() => restRequest(base, "search", list, { driveId: "d", q: "x", top: 1 })).toThrow(
+      new InvalidRequest("search has no argument top"),
+    );
+    expect(() => restRequest(base, "search", list, { q: "x" })).toThrow("search needs driveId");
+    // `..` would move a request to the parent path.
+    expect(() => restRequest(base, "search", list, { driveId: "..", q: "x" })).toThrow(
+      "search's driveId is not an ID",
+    );
+    expect(() => restRequest(base, "upload", upload, { itemId: "1" })).toThrow(
+      "upload needs a body",
+    );
+    expect(() =>
+      restRequest(
+        base,
+        "search",
+        { ...list, queryParameters: { view: ["view", null, true] } },
+        { driveId: "d", q: "x" },
+      ),
+    ).toThrow("search needs view");
+  });
+
+  it("returns download addresses and small content", async () => {
+    expect(
+      await binaryContent(
+        new Response(null, { status: 302, headers: { location: "https://download.test/f" } }),
+      ),
+    ).toEqual({ downloadUrl: "https://download.test/f" });
+
+    const content = (body: BodyInit, contentType: string) =>
+      binaryContent(new Response(body, { headers: { "content-type": contentType } }));
+
+    // Text media types arrive as text, in their charset; other content as base64.
+    expect(await content("text", "text/plain")).toEqual({
+      contentType: "text/plain",
+      text: "text",
+    });
+    expect(await content("{}", "application/ld+json")).toEqual({
+      contentType: "application/ld+json",
+      text: "{}",
+    });
+    expect(
+      await content(new Uint8Array([0x4b, 0xe4, 0x73, 0x65]), "text/csv; charset=windows-1252"),
+    ).toEqual({ contentType: "text/csv; charset=windows-1252", text: "Käse" });
+    expect(await content("text", "image/png")).toEqual({
+      contentType: "image/png",
+      base64: btoa("text"),
+    });
+    // Bytes that are not text in the named charset, or an unknown charset, stay bytes.
+    expect(await content(new Uint8Array([0xff, 0xfe, 0x00]), "text/plain")).toEqual({
+      contentType: "text/plain",
+      base64: btoa("\xff\xfe\x00"),
+    });
+    expect(await content("text", "text/plain; charset=unknown-charset")).toEqual({
+      contentType: "text/plain; charset=unknown-charset",
+      base64: btoa("text"),
+    });
+    // Content larger than one chunk of the encoding stays whole, and results are JSON.
+    const bytes = Uint8Array.from({ length: 100_000 }, (_, index) => index % 256);
+    const large = await binaryContent(new Response(bytes));
+
+    expect(z.json().parse(large)).toEqual(large);
+    expect(
+      large && "base64" in large && Uint8Array.from(atob(large.base64), (c) => c.charCodeAt(0)),
+    ).toEqual(bytes);
+    // Larger content is not read.
+    expect(await binaryContent(new Response(new Uint8Array(9 * 1024 * 1024)))).toBeNull();
+    expect(
+      restRequest(base, "upload", upload, { itemId: "1", body: "x", contentType: undefined }).init,
+    ).toMatchObject({ headers: { "content-type": "application/octet-stream" } });
+  });
+});

@@ -69,6 +69,8 @@ describe("Google API requests", () => {
       new InvalidRequest("messagesGet has no argument unknown"),
     );
     expect(invalid({}, { id: true })).toThrow("messagesGet needs id");
+    // `..` would move the request to the parent path.
+    expect(invalid({ id: ".." }, { id: true })).toThrow("messagesGet's id is not an ID");
     expect(invalid({ id: "a" })).toThrow("messagesGet needs a selection of the fields to return");
     expect(invalid({ id: "a" }, { "id)": true })).toThrow("Unknown field id)");
     expect(invalid({ id: "a" }, { payload: {} })).toThrow("Select at least one field of payload");

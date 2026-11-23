@@ -66,7 +66,7 @@ describe("OneDrive personal account app", () => {
 
   const browser = (subject: string) => {
     const cookies = new Map<string, string>();
-    const identity = { subject, issuer: "https://identity.example.test" };
+    const identity = { subject, issuer: "https://identity.example.test", answer: "" };
 
     return {
       identity,
@@ -79,6 +79,7 @@ describe("OneDrive personal account app", () => {
             cookie: [...cookies.values()].join("; "),
             "test-subject": identity.subject,
             "test-issuer": identity.issuer,
+            "test-answer": identity.answer,
           },
         });
 
@@ -117,28 +118,52 @@ describe("OneDrive personal account app", () => {
     expect(page).toContain("/auth/callback/microsoft");
     expect((await alice.request("/connect", "POST")).headers.get("location")).toBe("/");
   });
-  it("links, reads, encrypts tokens and isolates users and identity issuers", async () => {
+  it("sends typed requests through generated methods and isolates users and identity issuers", async () => {
     const alice = browser("alice");
     const bob = browser("bob");
     expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
       status: "connection_required",
     });
     await connect(alice, "101");
-    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+    expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
       status: "connected",
+      accountId: "101",
     });
-    const download = await alice.request("/rpc/content");
-    const downloaded = await download.text();
-    expect(download.status, downloaded).toBe(200);
-    const content: object = z.object().passthrough().parse(JSON.parse(downloaded));
-    expect(content).toMatchObject({ status: "connected" });
-    {
-      expect(content).toMatchObject({
-        url: "https://download.example.test/file?token=synthetic",
-      });
-      expect(upstream.state.downloads).toBe(0);
-    }
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "connected",
+      data: {
+        value: [
+          {
+            id: "file-101",
+            name: "report.txt",
+            size: 12,
+            file: { mimeType: "text/plain" },
+            parentReference: { driveId: "drive-1", id: "root" },
+          },
+        ],
+        "@odata.nextLink":
+          "https://graph.microsoft.com/v1.0/drives/drive-1/items/root/children?$skiptoken=page-2",
+      },
+    });
+    // Path parameters fill the path; OData lists are joined with commas.
+    expect(upstream.calls.map((call) => call.url)).toEqual([
+      "https://graph.microsoft.com/v1.0/drives/drive-1/items/root/children?%24top=5&%24select=id%2Cname",
+    ]);
 
+    // A later page is read at the address Graph gave.
+    const next =
+      "https://graph.microsoft.com/v1.0/drives/drive-1/items/root/children?$skiptoken=page-2";
+
+    expect(
+      await (await alice.request(`/rpc/next?link=${encodeURIComponent(next)}`)).json(),
+    ).toMatchObject({ status: "connected", data: { value: [{ id: "file-2" }] } });
+    expect(upstream.calls.at(-1)?.url).toBe(next);
+    // File content is the temporary download address, which the app never fetches.
+    expect(await (await alice.request("/rpc/content")).json()).toEqual({
+      status: "connected",
+      data: { downloadUrl: "https://download.example.test/file?token=synthetic" },
+    });
+    expect(upstream.state.downloads).toBe(0);
     expect(await (await bob.request("/rpc/status")).json()).toMatchObject({
       status: "connection_required",
     });
@@ -152,11 +177,135 @@ describe("OneDrive personal account app", () => {
       .object({ accessToken: z.string(), refreshToken: z.string() })
       .parse(await db.prepare("SELECT accessToken, refreshToken FROM account").first());
 
-    expect(saved.accessToken).not.toContain("synthetic-access-");
     // Encrypted through the app key binding, not with an app-held secret.
     expect(saved.accessToken).toMatch(/^v1\./);
-    expect(saved.refreshToken).not.toContain("synthetic-refresh-");
+    expect(JSON.stringify(saved)).not.toContain("synthetic-");
   });
+
+  it("asks before changes as each user's approval level says and runs them only after approval", async () => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    upstream.calls.length = 0;
+
+    // By default, creating runs at once; replacing content and deleting ask first.
+    expect(await (await alice.request("/rpc/create")).json()).toMatchObject({
+      status: "connected",
+      data: { id: "folder-1", name: "Reports" },
+    });
+    expect(upstream.calls[0]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ name: "Reports", folder: {} }),
+      type: "application/json",
+    });
+    expect(await (await alice.request("/rpc/delete")).json()).toEqual({
+      resultType: "input_required",
+      inputRequests: {
+        approve: {
+          message: `Run the OneDrive change "deleteItem"? It deletes or replaces data.\n\nInput:\n${JSON.stringify({ driveId: "drive-1", driveItemId: "file-1" }, null, 2)}`,
+          requestedSchema: { type: "object", properties: {} },
+        },
+      },
+    });
+    expect(await (await alice.request("/rpc/upload")).json()).toMatchObject({
+      resultType: "input_required",
+    });
+    expect(upstream.calls).toHaveLength(1);
+
+    alice.identity.answer = "decline";
+    expect(await (await alice.request("/rpc/delete")).json()).toEqual({ status: "declined" });
+    expect(upstream.calls).toHaveLength(1);
+
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/delete")).json()).toEqual({
+      status: "connected",
+      data: null,
+    });
+    expect(await (await alice.request("/rpc/upload")).json()).toMatchObject({
+      status: "connected",
+      data: { id: "file-1" },
+    });
+    expect(upstream.calls.slice(1)).toEqual([
+      {
+        method: "DELETE",
+        url: "https://graph.microsoft.com/v1.0/drives/drive-1/items/file-1",
+        body: null,
+        type: null,
+      },
+      {
+        method: "PUT",
+        url: "https://graph.microsoft.com/v1.0/drives/drive-1/items/file-1/content",
+        body: "new content",
+        type: "text/plain",
+      },
+    ]);
+
+    // Asking more takes effect at once; then creating asks too.
+    alice.identity.answer = "";
+    expect(await (await alice.request("/rpc/set-level?level=all_changes")).json()).toEqual({
+      status: "updated",
+      level: "all_changes",
+    });
+    expect(await (await alice.request("/rpc/create")).json()).toMatchObject({
+      resultType: "input_required",
+    });
+
+    // Each user has their own level.
+    const bob = browser("bob");
+    await connect(bob, "102");
+    expect(await (await bob.request("/rpc/create")).json()).toMatchObject({ status: "connected" });
+  });
+
+  it("lets users choose their approval level on the app's page", async () => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    const page = await (await alice.request("/")).text();
+    expect(page).toContain('value="updates_and_deletions" checked');
+
+    const save = (level: string, requestOrigin = origin) =>
+      runtime.dispatchFetch(`${origin}/approval-level`, {
+        method: "POST",
+        body: new URLSearchParams({ level }).toString(),
+        headers: {
+          origin: requestOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+          "test-subject": "alice",
+        },
+      });
+
+    expect((await save("none", "https://other.example.test")).status).toBe(403);
+    expect((await save("sometimes")).status).toBe(400);
+    expect(await (await save("none")).json()).toEqual({ level: "none" });
+    expect(await (await alice.request("/rpc/level")).json()).toMatchObject({ level: "none" });
+    expect(await (await alice.request("/")).text()).toContain('value="none" checked');
+  });
+
+  it("asks only users who can run the change", async () => {
+    expect(await (await browser("alice").request("/rpc/delete")).json()).toMatchObject({
+      status: "connection_required",
+    });
+    expect(await (await runtime.dispatchFetch(`${origin}/rpc/level`)).json()).toEqual({
+      status: "authentication_required",
+    });
+  });
+
+  it("asks users who granted fewer scopes to reconnect", async () => {
+    upstream.state.scope = "openid profile email offline_access User.Read Files.Read";
+    const alice = browser("alice");
+    await connect(alice, "101");
+
+    for (const path of ["/rpc/list", "/rpc/status", "/rpc/delete"])
+      expect(await (await alice.request(path)).json()).toMatchObject({
+        status: "permission_required",
+      });
+    expect(upstream.calls).toEqual([]);
+    // Microsoft may name Graph's scopes with their resource prefix.
+    upstream.state.scope = "openid profile email https://graph.microsoft.com/Files.ReadWrite.All";
+    await connect(alice, "101");
+    expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
+      status: "connected",
+    });
+  });
+
   it("rejects changed callback identities, replay, cross-origin forms and public token endpoints", async () => {
     const alice = browser("alice");
     expect((await alice.request("/connect", "POST", "null")).status).toBe(403);
@@ -216,6 +365,58 @@ describe("OneDrive personal account app", () => {
     });
     expect(await (await bob.request("/rpc/status")).json()).toMatchObject({
       status: "connected",
+    });
+  });
+
+  it("reports Graph's errors, throttling and revoked tokens", async () => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    upstream.state.answer = {
+      status: 404,
+      body: { error: { code: "itemNotFound", message: "The resource could not be found." } },
+      headers: {},
+    };
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "graph_error",
+      error: { code: "itemNotFound", message: "The resource could not be found.", status: 404 },
+    });
+    upstream.state.answer = {
+      status: 429,
+      body: { error: { code: "TooManyRequests", message: "Throttled" } },
+      headers: { "retry-after": "20" },
+    };
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "rate_limited",
+      retryAfter: "20",
+    });
+    upstream.state.answer = { status: 503, body: null, headers: { "retry-after": "5" } };
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "rate_limited",
+      retryAfter: "5",
+    });
+    // Larger responses are not read.
+    upstream.state.answer = {
+      status: 200,
+      body: { value: [{ name: "x".repeat(9 * 1024 * 1024) }] },
+      headers: {},
+    };
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "too_large",
+      maximumBytes: 8 * 1024 * 1024,
+    });
+    upstream.state.answer = { status: 502, body: null, headers: {} };
+    expect((await alice.request("/rpc/list")).status).toBe(500);
+    // Requests that do not match the operation never reach Graph.
+    upstream.calls.length = 0;
+    expect((await alice.request("/rpc/invalid")).status).toBe(500);
+    expect(
+      (await alice.request(`/rpc/next?link=${encodeURIComponent("https://other.example.test/")}`))
+        .status,
+    ).toBe(500);
+    expect(upstream.calls).toEqual([]);
+    upstream.state.answer = { status: 401, body: null, headers: {} };
+    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+      status: "reconnect_required",
     });
   });
 });

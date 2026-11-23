@@ -12,6 +12,28 @@ const base64url = (value: Uint8Array) =>
 
 const encode = (value: string) => base64url(new TextEncoder().encode(value));
 
+type Answer = { status: number; body: object | null; headers: Record<string, string> };
+
+type State = {
+  refreshes: number;
+  unavailable: boolean;
+  downloads: number;
+  // The scopes a consent grants; tests narrow them to check reauthorization.
+  scope: string;
+  // An answer that replaces the next Graph response.
+  answer: Answer | null;
+};
+
+const graph = "https://graph.microsoft.com/v1.0";
+
+const item = (id: string, name: string) => ({
+  id,
+  name,
+  size: 12,
+  file: { mimeType: "text/plain" },
+  parentReference: { driveId: "drive-1", id: "root" },
+});
+
 export const provider = () => {
   const codes = new Map<
     string,
@@ -25,7 +47,16 @@ export const provider = () => {
 
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
-  const state = { refreshes: 0, unavailable: false, apiStatus: 200, downloads: 0 };
+  const calls: { method: string; url: string; body: string | null; type: string | null }[] = [];
+
+  const state: State = {
+    refreshes: 0,
+    unavailable: false,
+    downloads: 0,
+    scope: "openid profile email offline_access User.Read Files.ReadWrite.All",
+    answer: null,
+  };
+
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
   const jwk = {
@@ -70,12 +101,13 @@ export const provider = () => {
       id_token: `${unsigned}.${signature}`,
       expires_in: 3600,
       token_type: "Bearer",
-      scope: "openid profile email offline_access User.Read Files.Read",
+      scope: state.scope,
     });
   };
 
   return {
     state,
+    calls,
     authorize: (location: string, user: string) => {
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));
@@ -152,16 +184,48 @@ export const provider = () => {
 
       if (!user) return new Response(null, { status: 401 });
 
-      if (state.apiStatus !== 200) return new Response(null, { status: state.apiStatus });
+      calls.push({
+        method: request.method,
+        url: url.href,
+        body: (await request.text()) || null,
+        type: request.headers.get("content-type"),
+      });
 
-      if (url.href.startsWith("https://graph.microsoft.com/v1.0/me/drive/root/children?"))
-        return Response.json({ value: [{ id: `file-${user}`, name: "report.txt", size: 12 }] });
+      if (state.answer) {
+        const { status, body, headers } = state.answer;
+        state.answer = null;
 
-      if (url.href === "https://graph.microsoft.com/v1.0/me/drive/items/file/content")
+        return body === null
+          ? new Response(null, { status, headers })
+          : Response.json(body, { status, headers });
+      }
+
+      const path = `${url.origin}${url.pathname}`;
+
+      if (path === `${graph}/drives/drive-1/items/root/children` && request.method === "GET")
+        return Response.json(
+          url.searchParams.has("$skiptoken")
+            ? { value: [item("file-2", "notes.txt")] }
+            : {
+                value: [item(`file-${user}`, "report.txt")],
+                "@odata.nextLink": `${graph}/drives/drive-1/items/root/children?$skiptoken=page-2`,
+              },
+        );
+
+      if (path === `${graph}/drives/drive-1/items/root/children` && request.method === "POST")
+        return Response.json(item("folder-1", "Reports"), { status: 201 });
+
+      if (path === `${graph}/drives/drive-1/items/file-1/content` && request.method === "GET")
         return new Response(null, {
           status: 302,
           headers: { location: "https://download.example.test/file?token=synthetic" },
         });
+
+      if (path === `${graph}/drives/drive-1/items/file-1/content` && request.method === "PUT")
+        return Response.json(item("file-1", "report.txt"));
+
+      if (path === `${graph}/drives/drive-1/items/file-1` && request.method === "DELETE")
+        return new Response(null, { status: 204 });
 
       throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
     },

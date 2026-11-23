@@ -21,7 +21,7 @@ const clients = {
   github: { client: "github", scopes: ["read:user", "user:email", "repo"] },
   microsoft: {
     client: "microsoft",
-    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.Read"],
+    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.ReadWrite.All"],
   },
   linear: { client: "linear", scopes: ["read", "write"] },
 } as const;

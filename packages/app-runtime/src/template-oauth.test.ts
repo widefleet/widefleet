@@ -35,7 +35,7 @@ const clients = {
   },
   microsoft: {
     provider: "microsoft",
-    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.Read"],
+    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.ReadWrite.All"],
     hosts: ["https://graph.microsoft.com"],
     issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
   },

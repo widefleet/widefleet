@@ -21,7 +21,7 @@ import {
 } from "graphql";
 import { z } from "zod";
 import { checkTypeNames, comment } from "./emit.ts";
-import { reservedMethods } from "./reserved.ts";
+import { reservedMethod } from "./reserved.ts";
 import type { Change, GeneratedFiles, Hidden } from "./rules.ts";
 
 /** How a GraphQL template offers its operations. */
@@ -212,8 +212,6 @@ export const generateGraphql = (
     );
   }
 
-  const reserved = new Set(reservedMethods);
-
   const problems: string[] = [];
 
   const methods: string[] = [];
@@ -226,7 +224,7 @@ export const generateGraphql = (
     name: string,
     change: Change | null,
   ) => {
-    if (reserved.has(name) || names.has(name))
+    if (reservedMethod(name) || names.has(name))
       return problems.push(`${root}.${field.name} becomes method ${name}, which is taken`);
     names.add(name);
     graph[root] = {
