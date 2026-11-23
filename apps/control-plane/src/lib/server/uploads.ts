@@ -280,14 +280,9 @@ export const createUploadService = (
             });
           }
 
-          return enqueueDeployment(
-            transaction,
-            record,
-            artifactId,
-            requestId,
-            false,
-            Boolean(execution),
-          );
+          return enqueueDeployment(transaction, record, artifactId, requestId, {
+            hosted: Boolean(execution),
+          });
         }
 
         yield* Result.await(storeModules(storage, `apps/${appId}`, modules));
@@ -303,14 +298,9 @@ export const createUploadService = (
           documentation: encoded?.summary ?? null,
         });
 
-        return enqueueDeployment(
-          transaction,
-          record,
-          artifactId,
-          requestId,
-          false,
-          Boolean(execution),
-        );
+        return enqueueDeployment(transaction, record, artifactId, requestId, {
+          hosted: Boolean(execution),
+        });
       }),
     );
 
