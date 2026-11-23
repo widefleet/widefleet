@@ -28,6 +28,8 @@ enum Command {
     Publish { app: Uuid },
     /// Withdraw an app's catalog listing (owner or administrator only).
     Unpublish { app: Uuid },
+    /// Set the sentence that tells people what an app is for; an empty text removes it.
+    Describe { app: Uuid, description: String },
 }
 
 #[derive(Subcommand)]
@@ -97,6 +99,9 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
         Command::Publish { app } | Command::Unpublish { app } => api
             .authenticated(Method::PUT, &format!("/apps/{app}/catalog"), token)
             .json(&value!({ "listed": listed })),
+        Command::Describe { app, description } => api
+            .authenticated(Method::PUT, &format!("/apps/{app}/description"), token)
+            .json(&value!({ "description": description })),
     };
     let result = json::<Value>(request.send().await?).await?;
     super::print_json(&result)?;

@@ -2366,11 +2366,30 @@ test.describe(`app catalog`, () => {
       await expect(
         page.getByRole("button", { name: "Remove from catalog", exact: true }),
       ).toBeVisible();
+
+      // The owner writes the description under the app's name; it appears with the app on Home.
+      const describe = page.getByRole("button", { name: "Edit description" });
+      await describe.click();
+      const field = page.getByRole("textbox", { name: "Description", exact: true });
+      await expect(field).toBeFocused();
+      // Save and Discard appear once the text changes, and Discard returns to the saved text.
+      const save = page.getByRole("button", { name: "Save description", exact: true });
+      await expect(save).toHaveCount(0);
+      await field.fill("A draft");
+      await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+      await expect(describe).toBeFocused();
+      await expect(describe).toContainText("Add a description");
+      await page.keyboard.press("Enter");
+      await field.fill("Counts the stock.");
+      await save.click();
+      await expect(describe).toContainText("Counts the stock.");
+      await expect(describe).toBeFocused();
       await readerPage.reload();
       await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveAttribute(
         "href",
         record.url,
       );
+      await expect(readerPage.getByText("Counts the stock.", { exact: true })).toBeVisible();
       expect((await readerContext.request.get(`/widefleet/apps/${record.id}`)).status()).toBe(404);
       expect((await readerContext.request.get(`/api/v1/apps/${record.id}`)).status()).toBe(404);
       const catalog = await readerContext.request.get(queryUrl);

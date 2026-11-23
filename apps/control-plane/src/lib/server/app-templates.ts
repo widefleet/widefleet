@@ -1,5 +1,6 @@
 import {
   appDeclaration,
+  appDescriptionLength,
   appTemplate,
   appTemplateCatalog,
   appTemplateSummary,
@@ -29,6 +30,19 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const cli = (principal: Principal, configuration: Pick<Configuration, "PLATFORM_URL">) =>
   `widefleet --url ${shellQuote(configuration.PLATFORM_URL)} --organization ${shellQuote(principal.application.organizationId)}`;
 
+const templateDocument = (text: string, id: string) => {
+  const parts = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/u.exec(text);
+
+  if (!parts) throw new Error(`Missing frontmatter in ${id}/template.md`);
+
+  return {
+    metadata: appTemplateSummary
+      .omit({ id: true, installedAppId: true })
+      .parse(parse(parts[1] ?? "")),
+    markdown: parts[2] ?? "",
+  };
+};
+
 const loadTemplate = async (id: string) => {
   const response = await fetch(`${files}/${id}/template.md`, {
     signal: AbortSignal.timeout(10_000),
@@ -37,16 +51,20 @@ const loadTemplate = async (id: string) => {
   if (response.status === 404) return null;
 
   if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
-  const text = await response.text();
-  const parts = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/u.exec(text);
+  const { metadata, markdown } = templateDocument(await response.text(), id);
 
-  if (!parts) throw new Error(`Missing frontmatter in ${id}/template.md`);
+  return { id, ...metadata, source: `${repository}/${id}`, markdown };
+};
 
-  const metadata = appTemplateSummary
-    .omit({ id: true, installedAppId: true })
-    .parse(parse(parts[1] ?? ""));
+/** The description an app installed from these template files starts with. */
+export const templateDescription = (files: Readonly<Record<string, Uint8Array>>) => {
+  const document = files["template.md"];
 
-  return { id, ...metadata, source: `${repository}/${id}`, markdown: parts[2] ?? "" };
+  if (!document) return undefined;
+
+  return templateDocument(new TextDecoder().decode(document), "the template")
+    .metadata.description.trim()
+    .slice(0, appDescriptionLength);
 };
 
 // The origins a template declares in widefleet.jsonc, which an install grants.

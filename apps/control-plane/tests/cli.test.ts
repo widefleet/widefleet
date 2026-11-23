@@ -245,6 +245,18 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      if (request.method === "PUT" && request.url === `/api/v1/apps/${app.id}/description`) {
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          response.end(JSON.stringify(contract.appDescriptionChange.parse(JSON.parse(body))));
+        });
+
+        return;
+      }
+
       if (request.method === "POST" && request.url?.endsWith("/source/prepare")) {
         let body = "";
         request.setEncoding("utf8").on("data", (chunk: string) => {
@@ -1003,6 +1015,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         {
           id: app.id,
           displayName: app.displayName,
+          description: null,
           hostname: app.hostname,
           url: app.url,
           activeDeploymentId: queued.id,
@@ -1017,11 +1030,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         expect(contract.catalogListing.parse(JSON.parse(result.stdout))).toEqual({ listed });
       }
 
+      const described = await execute(
+        binary,
+        ["catalog", "describe", app.id, "Counts the stock."],
+        options,
+      );
+
+      expect(JSON.parse(described.stdout)).toEqual({ description: "Counts the stock." });
       expect(catalogUpdates).toEqual([{ listed: true }, { listed: false }]);
       expect(requests).toEqual([
         "GET /api/v1/catalog",
         `PUT /api/v1/apps/${app.id}/catalog`,
         `PUT /api/v1/apps/${app.id}/catalog`,
+        `PUT /api/v1/apps/${app.id}/description`,
       ]);
     });
 

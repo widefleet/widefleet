@@ -3,6 +3,7 @@ import { templateCatalog, readTemplate } from "#server/app-templates";
 import { form, getRequestEvent, query } from "$app/server";
 import { invalid, redirect } from "@sveltejs/kit";
 import {
+  appDescriptionChange,
   appPath,
   networkPolicy,
   organizationSelection,
@@ -43,6 +44,23 @@ export const setCatalogListing = form(
           `/apps/${appId}/settings?${new URLSearchParams({ q: search })}#catalog`,
         ),
       );
+
+    return { saved: true };
+  },
+);
+
+// The description appears with the app in the catalog, so both views reload.
+export const setAppDescription = form(
+  appPath.extend({
+    ...organizationSelection.shape,
+    ...appDescriptionChange.shape,
+    search: z.string().trim().max(200).default(""),
+  }),
+  async ({ appId, description, search, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.apps.setDescription(principal, appId, description));
+    await getAppDetails({ appId, search, organizationId }).refresh();
+    await getCatalog({ organizationId }).refresh();
 
     return { saved: true };
   },

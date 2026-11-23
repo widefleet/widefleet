@@ -154,6 +154,7 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     id: record.id,
     slug: record.slug,
     displayName: record.displayName,
+    description: record.description,
     catalogListed: record.catalogListed,
     web: record.webEnabled,
     parentId: record.parentId,
@@ -448,6 +449,7 @@ export const createAppService = (
         .select({
           id: apps.id,
           displayName: apps.displayName,
+          description: apps.description,
           hostname: apps.hostname,
           activeDeploymentId: apps.activeDeploymentId,
         })
@@ -471,6 +473,16 @@ export const createAppService = (
           url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
         })),
       );
+    }),
+  setDescription: (principal: Principal, appId: string, text: string) =>
+    transact(database, async (transaction) => {
+      const access = await managedApp(transaction, principal, appId);
+
+      if (access.isErr()) return access;
+      const description = text || null;
+      await transaction.update(apps).set({ description }).where(eq(apps.id, appId));
+
+      return Result.ok({ description });
     }),
   setCatalogListing: (principal: Principal, appId: string, listed: boolean) =>
     transact(database, async (transaction) => {
@@ -549,17 +561,22 @@ export const createAppService = (
   /**
    * Records the template an install deployed, once that deployment was
    * accepted. Only the app's first deployment installs a template, so an app
-   * someone else deployed meanwhile is not marked.
+   * someone else deployed meanwhile is not marked. The template describes the
+   * app unless someone already did; the result is the description it then has.
    */
   recordTemplateInstall: (
     appId: string,
     deploymentId: string,
-    template: { id: string; commit: string },
+    template: { id: string; commit: string; description?: string | undefined },
   ) =>
     transact(database, async (transaction) => {
-      await transaction
+      const [recorded] = await transaction
         .update(apps)
-        .set({ templateId: template.id, templateCommit: template.commit })
+        .set({
+          templateId: template.id,
+          templateCommit: template.commit,
+          description: sql`coalesce(${apps.description}, ${template.description ?? null})`,
+        })
         .where(
           and(
             eq(apps.id, appId),
@@ -571,9 +588,10 @@ export const createAppService = (
                 .where(and(eq(deployments.appId, appId), ne(deployments.id, deploymentId))),
             ),
           ),
-        );
+        )
+        .returning({ description: apps.description });
 
-      return Result.ok(undefined);
+      return Result.ok(recorded);
     }),
   /** The newest app the caller manages per catalog template it was installed from. */
   templateInstalls: (principal: Principal) =>

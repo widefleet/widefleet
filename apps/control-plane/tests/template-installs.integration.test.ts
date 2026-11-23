@@ -181,6 +181,14 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   expect(record).toMatchObject({ templateId: "gmail", templateCommit });
 
+  // The app starts with the template's description.
+  const guide = await readFile(
+    new URL("../../../templates/gmail/template.md", import.meta.url),
+    "utf8",
+  );
+
+  expect(result.app.description).toBe(/^description: (.*)$/mu.exec(guide)?.[1]);
+
   const api = createApi(runtime);
 
   const installedTemplate = contract.appTemplate.parse(
@@ -313,6 +321,34 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   expect(resumed.app.id).toBe(empty.id);
   expect(resumed.deployment).toMatchObject({ appId: empty.id, status: "queued" });
+  expect(resumed.app.description).toBe(result.app.description);
+
+  // A description someone already saved stays.
+  const named = contract.app.parse(
+    await (
+      await createApi(runtime)(
+        new Request("http://localhost/api/v1/apps", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ slug: "mail-described", displayName: "mail-described" }),
+        }),
+      )
+    ).json(),
+  );
+
+  await createApi(runtime)(
+    new Request(`http://localhost/api/v1/apps/${named.id}/description`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Reads the team inbox." }),
+    }),
+  );
+
+  const described = contract.templateInstall.parse(
+    await (await install(runtime, "gmail", { name: "mail-described" })).json(),
+  );
+
+  expect(described.app.description).toBe("Reads the team inbox.");
 });
 
 // A build of a template that declares one backend origin.
@@ -566,12 +602,12 @@ it("does not install over an app deployed while the template builds", async () =
   // Only the concurrent deployment exists.
   expect(deployments).toHaveLength(1);
 
-  // The other deployment's app is not marked as installed from the template.
+  // The other deployment's app is not marked as installed from the template or described by it.
   const record = await environment.database.db.query.apps.findFirst({
     where: (apps, { eq }) => eq(apps.id, app.id),
   });
 
-  expect(record).toMatchObject({ templateId: null, templateCommit: null });
+  expect(record).toMatchObject({ templateId: null, templateCommit: null, description: null });
 });
 
 it("keeps offering a template whose deployment was rejected", async () => {
@@ -612,6 +648,21 @@ it("reports build errors and missing templates", async () => {
   const missing = await install(runtime, "missing");
 
   expect(missing.status).toBe(404);
+  expect(builderRequests).toHaveLength(2);
+
+  // A template whose document cannot be read fails before anything is built or created.
+  vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+
+    return url.pathname.endsWith("/templates/github/template.md")
+      ? new Response("No frontmatter")
+      : ((await templateRepository(url)) ?? originalFetch(input, init));
+  });
+
+  const unreadable = await install(runtime, "github", { name: "repository-reader" });
+
+  expect(unreadable.status).toBe(400);
+  expect(await unreadable.text()).toContain("no readable description");
   expect(builderRequests).toHaveLength(2);
 
   // Failed builds create no app, so the name stays free.

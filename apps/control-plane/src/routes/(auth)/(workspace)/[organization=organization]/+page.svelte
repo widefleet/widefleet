@@ -19,7 +19,7 @@
 
   const matches = $derived(
     apps.filter((app) =>
-      `${app.displayName} ${app.hostname}`
+      `${app.displayName} ${app.description ?? ""} ${app.hostname}`
         .toLocaleLowerCase("en")
         .includes(search.toLocaleLowerCase("en")),
     ),
@@ -80,7 +80,9 @@
               ><ArrowUpRight class="text-muted-foreground group-hover:text-primary size-4" />
             </div>
             <span class="text-sm font-semibold wrap-anywhere">{app.displayName}</span>
-            <span class="text-muted-foreground mt-2 text-xs wrap-anywhere">{app.hostname}</span>
+            <span class="text-muted-foreground mt-2 text-xs wrap-anywhere"
+              >{app.description ?? app.hostname}</span
+            >
             <span class="sr-only">Opens in a new tab</span>
           </a>
         </li>

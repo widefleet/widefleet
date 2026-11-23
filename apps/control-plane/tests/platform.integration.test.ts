@@ -2418,6 +2418,15 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json(path, "PUT", { listed: true }, outsiderHeaders)).status).toBe(404);
     expect((await json(path, "PUT", { listed: "true" })).status).toBe(400);
     expect(await (await json(path, "PUT", { listed: true })).json()).toEqual({ listed: true });
+
+    // People who do not manage the app cannot describe it; its description shows in the catalog.
+    const description = `/apps/${app.id}/description`;
+    const text = { description: "Counts the stock." };
+    expect((await json(description, "PUT", text, outsiderHeaders)).status).toBe(404);
+    expect((await json(description, "PUT", { description: "x".repeat(201) })).status).toBe(400);
+    expect(
+      await (await json(description, "PUT", { description: " Counts the stock. " })).json(),
+    ).toEqual(text);
     expect(
       z
         .array(contract.catalogEntry)
@@ -2426,6 +2435,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       contract.catalogEntry.parse({
         id: app.id,
         displayName: app.displayName,
+        ...text,
         hostname: app.hostname,
         url: app.url,
         activeDeploymentId,
@@ -2436,6 +2446,15 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       granted: true,
     });
     expect((await json(path, "PUT", { listed: false }, outsiderHeaders)).status).toBe(403);
+    // Everyone who manages the app can change its description; an empty text removes it.
+    expect(
+      await (await json(description, "PUT", { description: "" }, outsiderHeaders)).json(),
+    ).toEqual({
+      description: null,
+    });
+    expect(
+      contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json()).description,
+    ).toBeNull();
     expect(await (await json(path, "PUT", { listed: false })).json()).toEqual({ listed: false });
     expect(await (await json("/catalog", "GET", undefined, outsiderHeaders)).json()).toEqual([]);
   });

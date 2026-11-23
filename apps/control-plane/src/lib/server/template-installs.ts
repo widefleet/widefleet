@@ -7,7 +7,7 @@ import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { z } from "zod";
 import type { AppBuilder } from "./app-builder.ts";
-import { templateSources } from "./app-templates.ts";
+import { templateDescription, templateSources } from "./app-templates.ts";
 import { templateProject } from "./template-project.ts";
 import type { createAppService } from "./apps.ts";
 import type { Configuration } from "./config.ts";
@@ -85,6 +85,16 @@ export const createTemplateInstalls = (
         templateSources(configuration, input.templateId),
       );
 
+      // Read before any write: failing once the deployment was accepted would leave
+      // a deployed app that the install can neither finish nor repeat.
+      const description = Result.try(() => templateDescription(files));
+
+      if (description.isErr())
+        return yield* new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "The template's template.md has no readable description",
+        });
+
       // The builder bundles the code; static assets are uploaded as the CLI does.
       const { sources, assets } = yield* templateProject(files);
       const built = yield* Result.await(builder.bundle(sources));
@@ -135,6 +145,7 @@ export const createTemplateInstalls = (
         return yield* nameTaken();
 
       const installed = yield* created;
+
       const session = yield* Result.await(uploads.start(principal, installed.id, assets.manifest));
 
       const missing = new Set(session.missing);
@@ -181,10 +192,11 @@ export const createTemplateInstalls = (
       const notes: string[] = [];
 
       // Recorded once the deployment was accepted, so a rejected install
-      // keeps offering Install in the catalog.
+      // keeps offering Install in the catalog and leaves the app's description.
       const recorded = await apps.recordTemplateInstall(installed.id, deployment.id, {
         id: input.templateId,
         commit,
+        description: description.value,
       });
 
       if (recorded.isErr())
@@ -210,7 +222,7 @@ export const createTemplateInstalls = (
 
       return Result.ok(
         contract.templateInstall.parse({
-          app: installed,
+          app: { ...installed, ...(recorded.isOk() ? recorded.value : undefined) },
           deployment,
           warnings: [...built.warnings, ...documented.warnings, ...notes],
           requestedNetwork:
