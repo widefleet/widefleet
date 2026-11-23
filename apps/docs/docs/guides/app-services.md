@@ -79,6 +79,31 @@ bind it explicitly. To publish an HTTP API, describe it in a TSDoc comment on th
 export or export it as a named `WorkerEntrypoint`.
 No Widefleet-specific properties belong in `wrangler.jsonc`.
 
+## Declare a connector
+
+A connector is an app that connects an external system, such as the inventory
+service above. Declare it in `widefleet.jsonc` beside `wrangler.jsonc`, so that
+Widefleet can tell connectors from other apps:
+
+```jsonc
+{
+  "connector": "shared",
+}
+```
+
+| Value      | Use it when                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `shared`   | Everyone reaches the system with credentials the app holds, such as the `API_TOKEN` secret above. |
+| `personal` | Each person signs in with their own account. The app exports a `UserConnection` entrypoint.       |
+
+Deploy the app again after changing the declaration. `widefleet deploy` rejects a
+`personal` connector without a `UserConnection` entrypoint and a `shared` connector
+that exports one. The app's `connector` field in the [API](/reference/api) then
+shows `personal` or `shared`; it is `null` for other apps. An app that exports
+`UserConnection` without a declaration counts as a personal connector.
+
+Declaring a connector requires platform and CLI **0.7.21 or newer**.
+
 ## Document service methods
 
 Add TSDoc comments to your exported `WorkerEntrypoint` classes and methods so
