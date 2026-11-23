@@ -8,6 +8,10 @@ type State = {
   tokenStatus: number | null;
   // An answer that replaces the next API response.
   answer: Answer | null;
+  // How long the token endpoint takes to answer, in milliseconds.
+  tokenDelay: number;
+  // Whether requests fail before reaching Garmin, as during a network outage.
+  offline: boolean;
 };
 
 const api = "https://personal.connectapi.garmin.com";
@@ -28,7 +32,13 @@ export const provider = () => {
   const access = new Map<string, string>();
   const calls: { method: string; url: string }[] = [];
 
-  const state: State = { issued: 0, tokenStatus: null, answer: null };
+  const state: State = {
+    issued: 0,
+    tokenStatus: null,
+    answer: null,
+    tokenDelay: 0,
+    offline: false,
+  };
 
   return {
     state,
@@ -53,8 +63,11 @@ export const provider = () => {
       const url = new URL(request.url);
       const path = `${url.origin}${url.pathname}`;
 
+      if (state.offline) throw new Error("Garmin cannot be reached");
+
       if (path === `${api}/personalapitoken-service/personal-api/personal-api-key/token`) {
         if (request.method !== "POST") throw new Error("The token endpoint takes POST");
+        await new Promise((resolve) => setTimeout(resolve, state.tokenDelay));
 
         if (state.tokenStatus) return new Response(null, { status: state.tokenStatus });
         const user = keys.get((request.headers.get("authorization") ?? "").replace(/^ApiKey /, ""));

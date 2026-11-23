@@ -58,3 +58,13 @@ ${
 ${key.status === "none" ? "" : '<form method="post" action="/disconnect"><button>Disconnect</button></form><p class="muted">Disconnect removes the saved key from this app. To revoke the key itself, delete it on Garmin Connect.</p>'}
 <p class="muted">Other users connect their own Garmin accounts. After connecting, return to your app and retry its action.</p>`,
   );
+
+/** Ends a saved connection on this app's page and navigates back to Widefleet. */
+export const returnPage = (destination: string) => {
+  const url = escapeHtml(destination);
+
+  return page(
+    "Garmin Connect",
+    `<meta http-equiv="refresh" content="0;url=${url}"><p>Your Garmin account is connected. <a href="${url}">Return to Widefleet</a></p>`,
+  );
+};

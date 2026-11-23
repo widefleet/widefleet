@@ -2,7 +2,7 @@ import { z } from "zod";
 import { connectionLaunch } from "./connection-launch.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
-import { connectionPage, type SaveError, type SavedKeyState } from "./page.ts";
+import { connectionPage, returnPage, type SaveError, type SavedKeyState } from "./page.ts";
 import { base } from "./schema.ts";
 
 // Garmin issues an access token for a Personal API key. A token lasts 24 hours,
@@ -13,6 +13,12 @@ const profileUrl = new URL("userprofile-service/userprofile/settings", base).hre
 
 // A saved token is replaced a minute before it expires, so it outlasts the request.
 const tokenMargin = 60_000;
+
+// One request at a time issues a user's new token and holds the row this long;
+// overlapping requests check every `renewalPoll` for the token it saves.
+const renewalLease = 10_000;
+
+const renewalPoll = 100;
 
 const savedKey = z.object({
   apiKey: z.string(),
@@ -43,12 +49,17 @@ const expiry = (token: string) => {
   }
 };
 
+// A request that reaches Garmin, or null when Garmin cannot be reached.
+const reach = (url: string, init: RequestInit) => fetch(url, init).catch(() => null);
+
 /** Issues an access token for a key. Garmin refuses keys that expired or were deleted. */
 const issue = async (key: string) => {
-  const response = await fetch(tokenUrl, {
+  const response = await reach(tokenUrl, {
     method: "POST",
     headers: { accept: "*/*", authorization: `ApiKey ${key}` },
   });
+
+  if (!response) return { status: "token_failed" } as const;
 
   if (response.status === 429)
     return { status: "rate_limited", retryAfter: response.headers.get("retry-after") } as const;
@@ -109,51 +120,78 @@ export const keyConnection = (environment: Environment, properties: Properties) 
   const decrypt = async (value: string) =>
     new TextDecoder().decode(await environment.WIDEFLEET_KEYS.decrypt("tokens", value));
 
-  // The saved token until shortly before it expires, or a new one for the key.
-  const token = async (renew: boolean) => {
-    if (!caller.safeParse(properties.caller).success)
-      return { status: "authentication_required" } as const;
-    const { id } = await context();
-    const key = await saved(id);
+  // Issues a new token for the key this request holds the renewal of. Only that
+  // key changes, in case the user saved another meanwhile.
+  const renew = async (id: string, key: string) => {
+    const issued = await issue(await decrypt(key));
 
-    if (!key) return { status: "connection_required", connectUrl } as const;
-
-    if (key.rejected) return { status: "reconnect_required", connectUrl } as const;
-
-    if (
-      !renew &&
-      key.accessToken !== null &&
-      key.accessTokenExpiresAt !== null &&
-      key.accessTokenExpiresAt - Date.now() > tokenMargin
-    )
-      return {
-        status: "connected",
-        accessToken: await decrypt(key.accessToken),
-        issued: false,
-      } as const;
-    const issued = await issue(await decrypt(key.apiKey));
-
-    // Only the key read above changes, in case the user saved another meanwhile.
     if (issued.status === "rejected") {
       await database
         .prepare(
-          "UPDATE api_key SET rejected = 1, accessToken = NULL, accessTokenExpiresAt = NULL WHERE userId = ? AND apiKey = ?",
+          "UPDATE api_key SET rejected = 1, accessToken = NULL, accessTokenExpiresAt = NULL, renewing = NULL WHERE userId = ? AND apiKey = ?",
         )
-        .bind(id, key.apiKey)
+        .bind(id, key)
         .run();
 
       return { status: "reconnect_required", connectUrl } as const;
     }
 
-    if (issued.status !== "issued") return issued;
+    if (issued.status !== "issued") {
+      await database
+        .prepare("UPDATE api_key SET renewing = NULL WHERE userId = ? AND apiKey = ?")
+        .bind(id, key)
+        .run();
+
+      return issued;
+    }
+
     await database
       .prepare(
-        "UPDATE api_key SET accessToken = ?, accessTokenExpiresAt = ? WHERE userId = ? AND apiKey = ?",
+        "UPDATE api_key SET accessToken = ?, accessTokenExpiresAt = ?, renewing = NULL WHERE userId = ? AND apiKey = ?",
       )
-      .bind(await encrypt(issued.accessToken), issued.expiresAt, id, key.apiKey)
+      .bind(await encrypt(issued.accessToken), issued.expiresAt, id, key)
       .run();
 
     return { status: "connected", accessToken: issued.accessToken, issued: true } as const;
+  };
+
+  // The saved token, unless it expires soon or Garmin refused it, or a new one
+  // for the key. Overlapping requests wait for the one that issues it, so
+  // parallel reads share one token request.
+  const token = async (refused: string | null) => {
+    if (!caller.safeParse(properties.caller).success)
+      return { status: "authentication_required" } as const;
+    const { id } = await context();
+
+    // A renewal whose request failed releases the row when its lease ends.
+    for (;;) {
+      const key = await saved(id);
+
+      if (!key) return { status: "connection_required", connectUrl } as const;
+
+      if (key.rejected) return { status: "reconnect_required", connectUrl } as const;
+
+      const current = key.accessToken === null ? null : await decrypt(key.accessToken);
+
+      if (
+        current !== null &&
+        current !== refused &&
+        key.accessTokenExpiresAt !== null &&
+        key.accessTokenExpiresAt - Date.now() > tokenMargin
+      )
+        return { status: "connected", accessToken: current, issued: false } as const;
+      const now = Date.now();
+
+      const claimed = await database
+        .prepare(
+          "UPDATE api_key SET renewing = ? WHERE userId = ? AND apiKey = ? AND (renewing IS NULL OR renewing <= ?)",
+        )
+        .bind(now + renewalLease, id, key.apiKey, now)
+        .run();
+
+      if (claimed.meta.changes === 1) return renew(id, key.apiKey);
+      await new Promise((resolve) => setTimeout(resolve, renewalPoll));
+    }
   };
 
   // Saves a key once Garmin issues a token for it and reads the user's profile
@@ -164,9 +202,11 @@ export const keyConnection = (environment: Environment, properties: Properties) 
     if (issued.status !== "issued")
       return issued.status === "rejected" ? "rejected" : "unavailable";
 
-    const response = await fetch(profileUrl, {
+    const response = await reach(profileUrl, {
       headers: { accept: "application/json", authorization: `Bearer ${issued.accessToken}` },
     });
+
+    if (!response) return "unavailable";
 
     if (!response.ok) {
       await response.body?.cancel();
@@ -182,7 +222,7 @@ export const keyConnection = (environment: Environment, properties: Properties) 
          VALUES (?, ?, ?, ?, ?, 0, ?)
          ON CONFLICT (userId) DO UPDATE SET apiKey = excluded.apiKey, displayName = excluded.displayName,
            accessToken = excluded.accessToken, accessTokenExpiresAt = excluded.accessTokenExpiresAt,
-           rejected = 0, savedAt = excluded.savedAt`,
+           rejected = 0, renewing = NULL, savedAt = excluded.savedAt`,
       )
       .bind(
         id,
@@ -248,7 +288,7 @@ export const keyConnection = (environment: Environment, properties: Properties) 
      * Garmin no longer accepts is replaced once.
      */
     send: async (url: string, init: RequestInit) => {
-      const first = await token(false);
+      const first = await token(null);
 
       if (first.status !== "connected") return first;
 
@@ -264,7 +304,7 @@ export const keyConnection = (environment: Environment, properties: Properties) 
       if (response.status !== 401 || first.issued)
         return { status: "connected", response } as const;
       await response.body?.cancel();
-      const renewed = await token(true);
+      const renewed = await token(first.accessToken);
 
       if (renewed.status !== "connected") return renewed;
 
@@ -340,7 +380,12 @@ export const keyConnection = (environment: Environment, properties: Properties) 
           return redirect(`/?${query.toString()}`);
         }
 
-        return redirect(returning.success ? `/connect/complete?ticket=${returning.data}` : "/");
+        if (!returning.success) return redirect("/");
+
+        // The app allows forms to send only to itself, and Chromium applies that
+        // to the redirects after a form too. The form ends on this app's page,
+        // which then navigates back to Widefleet.
+        return returnPage(`/connect/complete?ticket=${returning.data}`);
       }
 
       return new Response(null, { status: 404 });

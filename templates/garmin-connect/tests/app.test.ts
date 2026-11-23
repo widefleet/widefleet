@@ -239,6 +239,29 @@ describe("Garmin Connect personal API app", () => {
     expect(await alice.json("/rpc/activities")).toMatchObject({ status: "connected" });
   });
 
+  it("shares one new token between overlapping reads", async () => {
+    const alice = browser("alice");
+    await connect(alice, upstream.createKey("alice"));
+    upstream.state.tokenDelay = 200;
+
+    const overlapping = () =>
+      Promise.all(Array.from({ length: 5 }, async () => alice.json("/rpc/activities")));
+
+    // The saved token expired: one request issues a new one, the others wait for it.
+    await expireTokens();
+
+    for (const result of await overlapping()) expect(result).toMatchObject({ status: "connected" });
+
+    expect(upstream.state.issued).toBe(2);
+
+    // Garmin refuses the saved token: again one request replaces it for all.
+    upstream.expireTokens();
+
+    for (const result of await overlapping()) expect(result).toMatchObject({ status: "connected" });
+
+    expect(upstream.state.issued).toBe(3);
+  });
+
   it("asks for a new key once Garmin no longer accepts the saved one", async () => {
     const alice = browser("alice");
     const key = upstream.createKey("alice");
@@ -329,8 +352,21 @@ describe("Garmin Connect personal API app", () => {
     const refused = await alice.post("/connect", { key: "synthetic-unknown-key", ticket });
     expect(refused.headers.get("location")).toBe(`/?error=rejected&ticket=${ticket}`);
 
+    // A Garmin outage while checking the key asks again too.
+    upstream.state.offline = true;
+    const unreachable = await alice.post("/connect", { key: upstream.createKey("alice"), ticket });
+    expect(unreachable.headers.get("location")).toBe(`/?error=unavailable&ticket=${ticket}`);
+    upstream.state.offline = false;
+
+    // The form ends on the app's own page, as its form-action policy requires,
+    // which then navigates back to Widefleet.
     const saved = await alice.post("/connect", { key: upstream.createKey("alice"), ticket });
-    expect(saved.headers.get("location")).toBe(`/connect/complete?ticket=${ticket}`);
+    expect(saved.status).toBe(200);
+    expect(saved.headers.get("location")).toBeNull();
+    const back = `/connect/complete?ticket=${ticket}`;
+    expect(await saved.text()).toContain(
+      `<meta http-equiv="refresh" content="0;url=${back}"><p>Your Garmin account is connected. <a href="${back}">`,
+    );
     const completed = await alice.request(`/connect/complete?ticket=${ticket}`);
     expect(completed.headers.get("location")).toBe(completionUrl);
     expect((await alice.request(`/connect/complete?ticket=${ticket}`)).status).toBe(410);

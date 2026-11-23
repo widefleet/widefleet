@@ -1,10 +1,12 @@
-// Each user's Personal API key with the access token last issued for it, and
-// the single-use tickets of connections started from Widefleet. Each app
-// initializes its own tables on first use.
+// Each user's Personal API key, the access token last issued for it and until
+// when a request renewing that token holds its turn, and the single-use tickets
+// of connections started from Widefleet. Each app initializes its own tables on
+// first use.
 const schema = [
   `CREATE TABLE IF NOT EXISTS api_key (
     userId TEXT PRIMARY KEY NOT NULL, apiKey TEXT NOT NULL, displayName TEXT,
-    accessToken TEXT, accessTokenExpiresAt INTEGER, rejected INTEGER NOT NULL, savedAt INTEGER NOT NULL
+    accessToken TEXT, accessTokenExpiresAt INTEGER, renewing INTEGER, rejected INTEGER NOT NULL,
+    savedAt INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS verification (
     id TEXT PRIMARY KEY NOT NULL, identifier TEXT NOT NULL, value TEXT NOT NULL,
