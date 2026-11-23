@@ -630,6 +630,19 @@ export const createApi = (runtime: Runtime) => {
           runtime.settings.setExternalManagement(context.principal, input.enabled),
         ),
       ),
+    domainSso: write
+      .route({ method: "PUT", path: "/settings/domain-sso" })
+      .input(z.object({ enabled: z.boolean() }))
+      .output(contract.settingsView)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.settings.setDomainSso(
+            context.principal,
+            input.enabled,
+            !context.request.headers.has("authorization"),
+          ),
+        ),
+      ),
     domainVerification: write
       .route({ method: "POST", path: "/settings/domain-verification" })
       .output(contract.domainVerification)

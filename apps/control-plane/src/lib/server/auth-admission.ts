@@ -70,6 +70,35 @@ export const createAuthenticationAdmission = (
 
     return providers[0]?.providerId ?? null;
   },
+  domainSsoProvider: async (email: string) => {
+    const domain = email.trim().toLowerCase().split("@")[1];
+
+    if (!domain) return null;
+
+    const providers = await database
+      .select({ id: ssoProvider.organizationId, providerId: ssoProvider.providerId })
+      .from(ssoProvider)
+      .innerJoin(
+        organizationSettings,
+        eq(organizationSettings.organizationId, ssoProvider.organizationId),
+      )
+      .where(
+        and(
+          eq(ssoProvider.domainVerified, true),
+          eq(organizationSettings.ssoRequired, true),
+          eq(organizationSettings.domainSsoRequired, true),
+          sql`${domain} = any(string_to_array(${ssoProvider.domain}, ','))`,
+        ),
+      )
+      .orderBy(ssoProvider.organizationId);
+
+    // Domains verified by several organizations before verification became exclusive
+    // still require company SSO; the first admitted organization receives the sign-in.
+    const admitted = new Set(await access.filterOrganizations(providers));
+    const provider = providers.find((candidate) => admitted.has(candidate.id));
+
+    return provider ? { providerId: provider.providerId } : null;
+  },
   allowEmail: async (email: string) => {
     if (publicSignup && (await readInstallation(database)).ownerId) return true;
 

@@ -87,7 +87,7 @@ export const createOnboardingService = (
         throw new InvalidOperation({
           code: "FORBIDDEN",
           message:
-            "Sign in with a Google Workspace or Microsoft work account to let your colleagues join.",
+            "Sign in with Google Workspace, a Microsoft work account or your company SSO to let your colleagues join.",
         });
 
       if (joinDomain) await requireJoinDomain(database, person.userId, null, joinDomain);

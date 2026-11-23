@@ -184,6 +184,8 @@ export const settingsView = z.strictObject({
   settings: installationSettings,
   ssoDomains: z.array(ssoDomain),
   ssoRequired: z.boolean(),
+  // Addresses on the verified domains cannot sign in without this organization's SSO.
+  domainSsoRequired: z.boolean(),
   ssoPolicy: z.strictObject({
     domainVerificationRequired: z.boolean(),
     allowEmailAccountLinking: z.boolean(),

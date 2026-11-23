@@ -24,7 +24,9 @@ const readPerson = async (database: DatabaseExecutor, userId: string) => {
 };
 
 // A company domain proven by the person's own sign-ins: the domain of their verified address,
-// when a linked Google Workspace or Microsoft work account confirms that a company owns it.
+// when a linked Google Workspace or Microsoft work account confirms that a company owns it, or
+// when they signed in through the company SSO of an organization that verified the domain by
+// DNS. Such domains sign in only through that SSO, so Google and Microsoft cannot prove them.
 // An email code proves only the mailbox, so a mail provider's domain never qualifies.
 export const provenEmailDomain = async (database: DatabaseExecutor, userId: string) => {
   const person = await readPerson(database, userId);
@@ -42,9 +44,24 @@ export const provenEmailDomain = async (database: DatabaseExecutor, userId: stri
       ),
     );
 
-  return accounts.some((entry) => providerEmailDomain(entry.providerId, entry.idToken) === domain)
-    ? domain
-    : null;
+  if (accounts.some((entry) => providerEmailDomain(entry.providerId, entry.idToken) === domain))
+    return domain;
+
+  const [company] = await database
+    .select({ id: account.id })
+    .from(account)
+    .innerJoin(ssoProvider, eq(ssoProvider.providerId, account.providerId))
+    .where(
+      and(
+        eq(account.userId, userId),
+        eq(ssoProvider.domainVerified, true),
+        // sso_provider lists only verified domains once any domain is verified.
+        sql`${domain} = any(string_to_array(${ssoProvider.domain}, ','))`,
+      ),
+    )
+    .limit(1);
+
+  return company ? domain : null;
 };
 
 // Organizations that verified the domain by DNS and keep new organizations on it to their
@@ -127,7 +144,7 @@ export const requireJoinDomain = async (
   if ((await provenEmailDomain(database, userId)) !== domain)
     throw new InvalidOperation({
       code: "FORBIDDEN",
-      message: `Sign in with a Google Workspace or Microsoft work account on ${domain} to let its addresses join.`,
+      message: `Sign in with Google Workspace, a Microsoft work account or your company SSO on ${domain} to let its addresses join.`,
     });
 
   if ((await offeredJoinDomain(database, userId, organizationId)) !== domain)

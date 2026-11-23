@@ -254,6 +254,58 @@ describe("Joining organizations by company email domain", () => {
     expect((await runtime.onboarding.domains(signIn(unverified))).joinDomain).toBeNull();
   });
 
+  it("accepts company SSO of an organization that verified the domain as proof", async () => {
+    const owner = await person("owner@sso-proof.example.test");
+    const company = await organizationOf("SSO Proof", owner);
+    await verifyCompanyDomain(company, "sso-proof.example.test");
+
+    // Before company SSO links the account, nothing proves the domain.
+    expect((await runtime.onboarding.domains(signIn(owner))).joinDomain).toBeNull();
+
+    await linkProvider(owner, `company-${company}`, { email: "owner@sso-proof.example.test" });
+
+    expect((await runtime.onboarding.domains(signIn(owner))).joinDomain).toBe(
+      "sso-proof.example.test",
+    );
+
+    const read = await request(owner, "/settings/domain-access", { organizationId: company });
+    expect(contract.domainAccess.parse(await read.json()).provableDomains).toEqual([
+      "sso-proof.example.test",
+    ]);
+
+    const added = await request(owner, "/settings/join-domains", {
+      method: "POST",
+      organizationId: company,
+      body: { domain: "sso-proof.example.test" },
+    });
+
+    expect(added.status).toBe(200);
+
+    // A connection whose domain is not verified by DNS proves nothing.
+    const pending = await person("owner@sso-pending.example.test");
+    const unverified = await organizationOf("SSO Pending", pending);
+    await database()
+      .insert(ssoProvider)
+      .values({
+        id: crypto.randomUUID(),
+        providerId: `company-${unverified}`,
+        organizationId: unverified,
+        issuer: "https://sso.example.test",
+        domain: "sso-pending.example.test",
+        domainVerified: false,
+      });
+    await linkProvider(pending, `company-${unverified}`, {
+      email: "owner@sso-pending.example.test",
+    });
+
+    // Neither does a verified connection for another domain.
+    const guest = await person("guest@sso-guest.example.test");
+    await linkProvider(guest, `company-${company}`, { email: "guest@sso-guest.example.test" });
+
+    for (const userId of [pending, guest])
+      expect((await runtime.onboarding.domains(signIn(userId))).joinDomain).toBeNull();
+  });
+
   it("shows organizations only to verified addresses on their domains and keeps company sign-ins limited", async () => {
     const owner = await person("owner@team.example.test");
     const team = await organizationOf("Team Domain", owner);

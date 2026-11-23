@@ -15,8 +15,12 @@
     ssoInput,
     ssoProviders,
     startCompanySignIn,
+    failureMessage,
   } from "#lib/sso-setup.svelte";
   import { Button } from "@platform/ui/button";
+  import { Switch } from "@platform/ui/switch";
+  import { toast } from "@platform/ui/sonner";
+  import { getSettings, setDomainSso } from "#lib/settings.remote";
   import CopyValue from "../CopyValue.svelte";
   import Feedback from "../Feedback.svelte";
   import StatusBadge from "../StatusBadge.svelte";
@@ -106,6 +110,36 @@
       workspace.path("/settings/company-sign-in"),
     )) ?? "";
     testing = false;
+  };
+
+  const companyDomains = $derived(
+    view.ssoDomains.filter((entry) => entry.verified).map((entry) => entry.domain),
+  );
+
+  // The switch shows the latest choice at once. Saves run in order, so a slower earlier
+  // save cannot overwrite it. When the latest save fails, the saved state returns and the
+  // toast explains why without moving the page.
+  let domainSsoChoice = $state<boolean | null>(null);
+
+  let domainSsoSaves = Promise.resolve();
+
+  let domainSsoClicks = 0;
+
+  const changeDomainSso = (enabled: boolean) => {
+    const click = ++domainSsoClicks;
+    domainSsoChoice = enabled;
+    domainSsoSaves = domainSsoSaves.then(async () => {
+      try {
+        await setDomainSso({ organizationId, enabled }).updates(getSettings({ organizationId }));
+      } catch (cause) {
+        toast.error("Could not change sign-in for company addresses.", {
+          description: failureMessage(cause, "Try again."),
+        });
+      } finally {
+        // Only the latest click's save hands the switch back to the saved state.
+        if (click === domainSsoClicks) domainSsoChoice = null;
+      }
+    });
   };
 
   const remove = () =>
@@ -208,6 +242,33 @@
       verificationRequired={view.ssoPolicy.domainVerificationRequired}
       domainRequired={domainRequired(view, view.sso.appIdentityType)}
     />
+
+    {#if view.ssoRequired && companyDomains.length}
+      <section class="rounded-xl border p-6" aria-labelledby="domain-sso-title">
+        <div class="flex items-start justify-between gap-6">
+          <div>
+            <h3 id="domain-sso-title" class="text-base font-semibold">
+              Company addresses use SSO only
+            </h3>
+            <p
+              id="domain-sso-description"
+              class="text-muted-foreground mt-1 text-sm leading-6"
+            >
+              Addresses on <span class="wrap-anywhere">{companyDomains.join(", ")}</span> sign in
+              only with company SSO, also for other organizations. Signing in with an email code,
+              Google or Microsoft continues with company SSO.
+            </p>
+          </div>
+          <Switch
+            class="mt-1"
+            aria-labelledby="domain-sso-title"
+            aria-describedby="domain-sso-description"
+            disabled={readonly}
+            bind:checked={() => domainSsoChoice ?? view.domainSsoRequired, changeDomainSso}
+          />
+        </div>
+      </section>
+    {/if}
 
     {#if view.sso.appIdentityType === "entra"}
       <EmbeddingOrigins {view} {organizationId} {readonly} />

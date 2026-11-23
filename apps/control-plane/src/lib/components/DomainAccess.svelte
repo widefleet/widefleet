@@ -109,8 +109,8 @@
     {:else}
       {#if !access.joinDomains.length}
         <p class="text-muted-foreground mt-3 text-xs leading-5">
-          Sign in with Google Workspace or a Microsoft work account to let colleagues on your
-          company domain join.
+          Sign in with Google Workspace, a Microsoft work account or your company SSO to let
+          colleagues on your company domain join.
         </p>
       {/if}
     {/each}

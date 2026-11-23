@@ -12,7 +12,11 @@ import { changeSsoDomains } from "./sso-domains.ts";
 
 export const readSsoProvider = async (database: DatabaseExecutor, organizationId: string) => {
   const [record] = await database
-    .select({ provider: ssoProvider, required: organizationSettings.ssoRequired })
+    .select({
+      provider: ssoProvider,
+      required: organizationSettings.ssoRequired,
+      domainSsoRequired: organizationSettings.domainSsoRequired,
+    })
     .from(ssoProvider)
     .leftJoin(
       organizationSettings,
@@ -20,7 +24,13 @@ export const readSsoProvider = async (database: DatabaseExecutor, organizationId
     )
     .where(eq(ssoProvider.organizationId, organizationId));
 
-  return record ? { ...record.provider, required: record.required === true } : null;
+  return record
+    ? {
+        ...record.provider,
+        required: record.required === true,
+        domainSsoRequired: record.domainSsoRequired === true,
+      }
+    : null;
 };
 
 // The runtime reads the native provider. This is a published consumer view, never

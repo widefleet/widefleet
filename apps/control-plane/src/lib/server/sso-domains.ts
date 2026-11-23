@@ -1,5 +1,5 @@
 import dns from "node:dns/promises";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { maxCompanyDomains, parseCompanyDomains } from "@platform/contracts";
 import { ssoProvider } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
@@ -298,6 +298,30 @@ export const verifySsoDomains = async (
 
   if (found.length)
     await database.transaction(async (transaction) => {
+      // A domain's addresses sign in through a single organization's SSO. Organizations
+      // verifying the same domain at once wait here, so the second sees the first claim.
+      for (const domain of found.toSorted())
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`sso_domain:${domain}`}))`,
+        );
+
+      const [claimed] = await transaction
+        .select({ domain: ssoDomains.domain })
+        .from(ssoDomains)
+        .where(
+          and(
+            inArray(ssoDomains.domain, found),
+            ne(ssoDomains.organizationId, organizationId),
+            isNotNull(ssoDomains.verifiedAt),
+          ),
+        )
+        .limit(1);
+
+      if (claimed)
+        throw new InvalidOperation({
+          code: "CONFLICT",
+          message: `${claimed.domain} is already verified by another organization`,
+        });
       await lockProvider(transaction, organizationId);
       await adoptProviderDomains(transaction, organizationId);
       await transaction

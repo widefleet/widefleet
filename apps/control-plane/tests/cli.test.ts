@@ -468,6 +468,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       if (
         request.url === "/api/v1/settings" ||
         request.url === "/api/v1/settings/external-management" ||
+        request.url === "/api/v1/settings/domain-sso" ||
         request.url === "/api/v1/settings/activate-sso"
       ) {
         response.end(
@@ -1692,6 +1693,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(requests).toContain("PUT /api/v1/settings");
       await settingsCli("external-management", "true");
       expect(requests).toContain("PUT /api/v1/settings/external-management");
+      await settingsCli("domain-sso", "false");
+      expect(requests).toContain("PUT /api/v1/settings/domain-sso");
       expect(JSON.parse((await settingsCli("domain-verification")).stdout)).toEqual({
         name: "_better-auth-token-company.example.test",
         type: "TXT",
