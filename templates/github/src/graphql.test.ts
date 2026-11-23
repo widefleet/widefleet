@@ -120,4 +120,34 @@ describe("GitHub GraphQL requests", () => {
     );
     expect(invalid({ ...input, name: Number.NaN }, { id: true })).toThrow(InvalidRequest);
   });
+
+  it("leaves out undefined selection values and rejects fragments that select a field differently", () => {
+    expect(
+      graphqlRequest(
+        "Query",
+        "viewer",
+        {},
+        {
+          login: true,
+          bio: undefined,
+          repositories: { $args: { first: 2, after: undefined }, totalCount: true },
+        },
+      ).query,
+    ).toBe("query($v0: Int) { viewer { login repositories(first: $v0) { totalCount } } }");
+    expect(() =>
+      graphqlRequest(
+        "Query",
+        "repositoryOwner",
+        { login: "example" },
+        {
+          repository: { $args: { name: "one" }, name: true },
+          $on: { User: { repository: { $args: { name: "two" }, id: true } } },
+        },
+      ),
+    ).toThrow(
+      new InvalidRequest(
+        "RepositoryOwner.repository and User.repository in $on need the same $args",
+      ),
+    );
+  });
 });

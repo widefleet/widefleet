@@ -23,6 +23,17 @@ type Selection = z.infer<typeof selection>;
 
 const argumentValues = z.record(z.string(), definedJson.optional());
 
+// The `$args` a field's selection passes, if any.
+const argumentsSelected = (value: JsonValue | undefined) => {
+  const nested = selection.safeParse(value);
+
+  return nested.success ? (own(nested.data, "$args") ?? null) : null;
+};
+
+// Selections from callers may leave optional values undefined, as JSON does.
+const definedSelection = (select: FieldSelection | undefined) =>
+  selection.safeParse(select === undefined ? undefined : definedJson.safeParse(select).data);
+
 // A field's value in a selection: `true`, or the nested selection.
 const nestedSelection = (owner: string, value: JsonValue | undefined) => {
   if (value === true) return true;
@@ -134,7 +145,7 @@ export const graphqlResult = (
   value: JsonValue,
 ): JsonValue => {
   const [target = ""] = own<Field>(fieldsOf(root) ?? {}, field) ?? [];
-  const chosen = selection.safeParse(select);
+  const chosen = definedSelection(select);
 
   return fieldsOf(target) && chosen.success ? restored(target, chosen.data, value) : value;
 };
@@ -206,6 +217,23 @@ export const graphqlRequest = (
             )
               throw new InvalidRequest(`$on of ${type} names no type ${variant}`);
 
+            // The result holds both selections of a field in one object, so they
+            // must select the same thing.
+            for (const [field, fieldValue] of Object.entries(variantFields)) {
+              const shared = own(chosen, field);
+
+              if (
+                field !== "$args" &&
+                field !== "$on" &&
+                shared !== undefined &&
+                JSON.stringify(argumentsSelected(shared)) !==
+                  JSON.stringify(argumentsSelected(fieldValue))
+              )
+                throw new InvalidRequest(
+                  `${type}.${field} and ${variant}.${field} in $on need the same $args`,
+                );
+            }
+
             return `... on ${variant} { ${fields(variant, variantFields, variant)} }`;
           }),
         ];
@@ -244,7 +272,7 @@ export const graphqlRequest = (
   let body = call;
 
   if (fieldsOf(target)) {
-    const chosen = selection.safeParse(select);
+    const chosen = definedSelection(select);
 
     if (!chosen.success) throw new InvalidRequest(`${field} needs a selection of ${target} fields`);
     body = `${call} { ${fields(target, chosen.data)} }`;
