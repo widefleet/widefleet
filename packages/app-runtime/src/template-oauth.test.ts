@@ -30,7 +30,7 @@ const compile = async (file: string) => {
 const clients = {
   github: {
     provider: "github",
-    scopes: ["read:user", "user:email", "repo"],
+    scopes: ["read:user", "user:email", "repo", "workflow", "project", "read:org", "user"],
     hosts: ["https://api.github.com"],
   },
   microsoft: {

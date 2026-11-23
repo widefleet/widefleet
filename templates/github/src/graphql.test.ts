@@ -1,0 +1,165 @@
+import { describe, expect, it } from "vitest";
+import { graphqlRequest, graphqlResult } from "./graphql.ts";
+import { type Arguments, type FieldSelection, InvalidRequest } from "./input.ts";
+
+describe("GitHub GraphQL requests", () => {
+  it("passes every argument as a variable of its schema type", () => {
+    expect(
+      graphqlRequest(
+        "Query",
+        "repository",
+        { owner: "example", name: "project", followRenames: undefined },
+        {
+          issues: {
+            $args: { first: 3, states: ["OPEN"] },
+            nodes: {
+              number: true,
+              title: true,
+              labels: { $args: { first: 5 }, nodes: { name: true } },
+            },
+          },
+        },
+      ),
+    ).toEqual({
+      query:
+        "query($v0: String!, $v1: String!, $v2: Int, $v3: [IssueState!], $v4: Int) { repository(owner: $v0, name: $v1) { issues(first: $v2, states: $v3) { nodes { number title labels(first: $v4) { nodes { name } } } } } }",
+      variables: { v0: "example", v1: "project", v2: 3, v3: ["OPEN"], v4: 5 },
+    });
+  });
+
+  it("writes mutations, interfaces and unions", () => {
+    expect(
+      graphqlRequest(
+        "Mutation",
+        "createIssue",
+        { input: { repositoryId: "R_1", title: "Bug", body: undefined } },
+        { issue: { number: true, url: true } },
+      ),
+    ).toEqual({
+      query:
+        "mutation($v0: CreateIssueInput!) { createIssue(input: $v0) { issue { number url } } }",
+      variables: { v0: { repositoryId: "R_1", title: "Bug" } },
+    });
+    expect(
+      graphqlRequest("Query", "node", { id: "I_1" }, { id: true, $on: { Issue: { title: true } } })
+        .query,
+    ).toBe(
+      "query($v0: ID!) { node(id: $v0) { id __typename ... on Issue { title__on__Issue: title } } }",
+    );
+    // A union or interface result always carries its concrete type.
+    expect(
+      graphqlRequest(
+        "Query",
+        "search",
+        { query: "is:open", type: "ISSUE", first: 5 },
+        { nodes: { $on: { Issue: { state: true }, PullRequest: { state: true } } } },
+      ).query,
+    ).toBe(
+      // Issue.state and PullRequest.state have different types, so each fragment aliases its fields.
+      "query($v0: String!, $v1: SearchType!, $v2: Int) { search(query: $v0, type: $v1, first: $v2) { nodes { __typename ... on Issue { state__on__Issue: state } ... on PullRequest { state__on__PullRequest: state } } } }",
+    );
+    expect(
+      graphqlResult(
+        "Query",
+        "search",
+        { nodes: { $on: { Issue: { state: true }, PullRequest: { state: true } } } },
+        {
+          nodes: [
+            { __typename: "Issue", state__on__Issue: "OPEN" },
+            { __typename: "PullRequest", state__on__PullRequest: "MERGED" },
+          ],
+        },
+      ),
+    ).toEqual({
+      nodes: [
+        { __typename: "Issue", state: "OPEN" },
+        { __typename: "PullRequest", state: "MERGED" },
+      ],
+    });
+    // A field selected for every type and in a fragment holds the fields of both.
+    expect(
+      graphqlResult(
+        "Query",
+        "repository",
+        {
+          object: {
+            $args: { expression: "main:README.md" },
+            repository: { name: true },
+            $on: { Blob: { repository: { id: true }, text: true } },
+          },
+        },
+        {
+          object: {
+            repository: { name: "project" },
+            __typename: "Blob",
+            repository__on__Blob: { id: "R_1" },
+            text__on__Blob: "Hello",
+          },
+        },
+      ),
+    ).toEqual({
+      object: { repository: { name: "project", id: "R_1" }, __typename: "Blob", text: "Hello" },
+    });
+  });
+
+  it("rejects requests that do not match GitHub's schema before sending them", () => {
+    const invalid = (input: Arguments, select: FieldSelection | undefined) => () =>
+      graphqlRequest("Query", "repository", input, select);
+
+    const input = { owner: "example", name: "project" };
+
+    expect(invalid({ ...input, unknown: 1 }, { id: true })).toThrow(
+      new InvalidRequest("repository has no argument unknown"),
+    );
+    expect(invalid(input, undefined)).toThrow("repository needs a selection of Repository fields");
+    expect(invalid(input, { owner: true })).toThrow(
+      "Select fields of RepositoryOwner for Repository.owner",
+    );
+    expect(invalid(input, { issues: { $args: { constructor: 1 }, totalCount: true } })).toThrow(
+      "Repository.issues has no argument constructor",
+    );
+    expect(invalid({ ...input, name: Number.NaN }, { id: true })).toThrow(InvalidRequest);
+  });
+
+  it("leaves out undefined selection values and rejects fragments that select a field differently", () => {
+    expect(
+      graphqlRequest(
+        "Query",
+        "viewer",
+        {},
+        {
+          login: true,
+          bio: undefined,
+          repositories: { $args: { first: 2, after: undefined }, totalCount: true },
+        },
+      ).query,
+    ).toBe("query($v0: Int) { viewer { login repositories(first: $v0) { totalCount } } }");
+    expect(() =>
+      graphqlRequest(
+        "Query",
+        "repositoryOwner",
+        { login: "example" },
+        {
+          repository: { $args: { name: "one" }, name: true },
+          $on: { User: { repository: { $args: { name: "two" }, id: true } } },
+        },
+      ),
+    ).toThrow(
+      new InvalidRequest(
+        "RepositoryOwner.repository and User.repository in $on need the same $args",
+      ),
+    );
+    // Equal arguments in another order select the same thing.
+    expect(
+      graphqlRequest(
+        "Query",
+        "repositoryOwner",
+        { login: "example" },
+        {
+          repository: { $args: { name: "one", followRenames: true }, name: true },
+          $on: { User: { repository: { $args: { followRenames: true, name: "one" }, id: true } } },
+        },
+      ).query,
+    ).toContain("repository__on__User: repository(");
+  });
+});

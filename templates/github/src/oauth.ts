@@ -18,7 +18,10 @@ const clients = {
     client: "google",
     scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
   },
-  github: { client: "github", scopes: ["read:user", "user:email", "repo"] },
+  github: {
+    client: "github",
+    scopes: ["read:user", "user:email", "repo", "workflow", "project", "read:org", "user"],
+  },
   microsoft: {
     client: "microsoft",
     scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.Read"],

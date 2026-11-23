@@ -3,7 +3,7 @@
 // from the Widefleet repository:
 //   pnpm --filter @platform/template-generator generate gmail
 import { WorkerEntrypoint } from "cloudflare:workers";
-import type { Environment } from "./context.ts";
+import type { Environment as TemplateEnvironment } from "./context.ts";
 import type { GmailResult } from "./results.ts";
 import { type GmailProperties, run } from "./run.ts";
 import type { Exact, JsonObject, Selection, ValueResult } from "./selection.ts";
@@ -1055,7 +1055,7 @@ export type WatchResponse = {
  * that change data may ask the user first. Methods returning objects take a
  * selection of the fields to return.
  */
-export class GmailApi extends WorkerEntrypoint<Environment, GmailProperties> {
+export class GmailApi extends WorkerEntrypoint<TemplateEnvironment, GmailProperties> {
   /**
    * Set up or update a push notification watch on the given user mailbox. For more information, see [Configure push notifications in Gmail API](https://developers.google.com/workspace/gmail/api/guides/push).
    *

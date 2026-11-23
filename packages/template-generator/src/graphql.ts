@@ -20,7 +20,7 @@ import {
   isUnionType,
 } from "graphql";
 import { z } from "zod";
-import { comment } from "./emit.ts";
+import { checkTypeNames, comment } from "./emit.ts";
 import { reservedMethods } from "./reserved.ts";
 import type { Change, GeneratedFiles, Hidden } from "./rules.ts";
 
@@ -151,9 +151,15 @@ export const generateGraphql = (
     .filter((type) => !type.name.startsWith("__") && !isScalarType(type) && !roots.has(type))
     .toSorted((left, right) => left.name.localeCompare(right.name, "en"));
 
+  checkTypeNames(
+    named.map((type) => type.name),
+    service,
+  );
+
   for (const type of named) {
     if (isEnumType(type)) {
-      const values = offered(type.getValues()).map((entry) => JSON.stringify(entry.name));
+      // Deprecated values stay: results can still carry them.
+      const values = type.getValues().map((entry) => JSON.stringify(entry.name));
       models += `${comment(type.description)}export type ${type.name} = ${values.join(" | ") || "never"};\n\n`;
       continue;
     }
@@ -309,20 +315,27 @@ export const generateGraphql = (
     (rule) => hiddenRule.safeParse(rule).success,
   ).length;
 
+  // Types and method signatures both may use the JSON types.
+  const uses = (name: string) => new RegExp(`\\b${name}\\b`).test(models + methods.join(""));
+
   return {
     files: {
       "src/api.ts": `${header}import { WorkerEntrypoint } from "cloudflare:workers";
-import type { Environment } from "./context.ts";
+import type { Environment as TemplateEnvironment } from "./context.ts";
 import type { ${service.result} } from "./results.ts";
 import { type ${service.properties}, run } from "./run.ts";
-import type { Exact, JsonObject, JsonValue, Selection, ValueResult, Variants } from "./selection.ts";
+import type { Exact, ${["JsonObject", "JsonValue"]
+        .flatMap((used) => (uses(used) ? [`${used}, `] : []))
+        .join(
+          "",
+        )}Selection, ValueResult${uses("Variants") ? ", Variants" : ""} } from "./selection.ts";
 
 ${models}/**
  * Every query and mutation of ${service.name}'s GraphQL API that a user's token can use,
  * as a method. A query reads; a mutation changes data and may ask the user first.
  * Methods returning objects take a selection of the fields to return.
  */
-export class ${service.className} extends WorkerEntrypoint<Environment, ${service.properties}> {
+export class ${service.className} extends WorkerEntrypoint<TemplateEnvironment, ${service.properties}> {
 ${methods.join("\n")}}
 `,
       "src/schema.ts": `${header}

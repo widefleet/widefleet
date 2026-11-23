@@ -1,9 +1,12 @@
 import { connectionLaunch } from "./connection-launch.ts";
 import { oauthCredentials, revokeManagedGrant } from "./oauth.ts";
 import { z } from "zod";
-import { authentication } from "./auth.ts";
+import { approvals } from "./approval.ts";
+import { authentication, scopes } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
+import { boundedJson, maximumResponseBytes } from "./input.ts";
+import { type GraphQLError, type GraphQLRequest, graphqlResponse } from "./graphql.ts";
 import { authorizationPage, connectionPage } from "./page.ts";
 
 const linkedAccount = z.object({
@@ -12,6 +15,35 @@ const linkedAccount = z.object({
   scope: z.string().nullable(),
   providerEmail: z.string().nullable(),
 });
+
+/** GitHub's errors, with the type GitHub gives them, such as `NOT_FOUND` or `FORBIDDEN`. */
+const githubErrors = (errors: GraphQLError[]) =>
+  errors.map((error) => ({
+    message: error.message,
+    type: error.type ?? null,
+    path: error.path ?? null,
+  }));
+
+// Seconds until GitHub accepts requests again: its Retry-After header, or the
+// reset time of an exhausted rate limit.
+const retryAfter = (headers: Headers) => {
+  const reset = Number(headers.get("x-ratelimit-reset"));
+
+  if (headers.has("retry-after")) return headers.get("retry-after");
+
+  if (headers.get("x-ratelimit-remaining") !== "0" || !Number.isFinite(reset) || !reset)
+    return null;
+
+  return String(Math.max(0, Math.ceil(reset - Date.now() / 1000)));
+};
+
+// An account connected for fewer scopes than the methods need reconnects to
+// grant the others.
+const granted = (linked: z.infer<typeof linkedAccount>) => {
+  const scope = new Set(linked.scope?.split(/[,\s]+/));
+
+  return scopes.every((name) => scope.has(name));
+};
 
 const redirect = (location: string, cookies: string[] = []) => {
   const headers = new Headers({
@@ -100,6 +132,8 @@ export const accountConnection = (environment: Environment, properties: Properti
     if (!linked)
       return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
+    if (!granted(linked))
+      return { status: "permission_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
     const auth = authentication(environment, identity, id, config.credentials);
 
     const response = await auth.api.getAccessToken({
@@ -218,71 +252,72 @@ export const accountConnection = (environment: Environment, properties: Properti
       if (config.status !== "configured") return config;
       const linked = await account(id);
 
+      if (!linked)
+        return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
+      if (!granted(linked))
+        return { status: "permission_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
       return {
-        status: linked ? "connected" : "connection_required",
-        accountId: linked?.accountId ?? null,
+        status: "connected",
+        accountId: linked.accountId,
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
     },
-    request: async (url: string, headers = new Headers()) => {
+    /** Sends one GraphQL request with the user's token. */
+    graphql: async (body: GraphQLRequest) => {
       const result = await token();
 
       if (result.status !== "connected") return result;
-      headers.set("authorization", `Bearer ${result.accessToken}`);
-      let destination = new URL(url);
-      let response = await fetch(destination, { headers, redirect: "manual" });
 
-      for (let redirects = 0; [301, 302, 303, 307, 308].includes(response.status); redirects++) {
-        await response.body?.cancel();
-
-        if (redirects >= 5) throw new Error("GitHub redirect limit exceeded");
-        const location = response.headers.get("location");
-
-        if (!location) throw new Error("GitHub redirect has no location");
-        destination = new URL(location, destination);
-
-        // Keep the user's token and requests inside the approved GitHub API origin.
-        if (
-          destination.origin !== "https://api.github.com" ||
-          destination.username ||
-          destination.password
-        )
-          throw new Error("GitHub redirect target is not allowed");
-        response = await fetch(destination, { headers, redirect: "manual" });
-      }
+      const response = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${result.accessToken}`,
+          "content-type": "application/json",
+          "user-agent": "Widefleet-GitHub",
+        },
+        body: JSON.stringify(body),
+        redirect: "manual",
+      });
 
       if (response.status === 401)
         return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
-      // GitHub uses 403 for both permission failures and exhausted rate limits.
-      const retryAfter = response.headers.get("retry-after");
-      const exhausted = response.headers.get("x-ratelimit-remaining") === "0";
+      const limited = { status: "rate_limited", retryAfter: retryAfter(response.headers) } as const;
 
+      // GitHub answers exhausted and secondary rate limits with 403 or 429 and
+      // a REST error body; other request errors are GraphQL errors.
       if (
         response.status === 429 ||
-        (response.status === 403 && (exhausted || retryAfter !== null))
-      ) {
-        const reset = response.headers.get("x-ratelimit-reset");
+        (response.status === 403 &&
+          (response.headers.has("retry-after") ||
+            response.headers.get("x-ratelimit-remaining") === "0"))
+      )
+        return limited;
 
-        return {
-          status: "rate_limited",
-          retryAfter:
-            retryAfter ??
-            (exhausted && reset && Number.isFinite(Number(reset))
-              ? String(Math.max(0, Math.ceil(Number(reset) - Date.now() / 1000)))
-              : null),
-        } as const;
+      const read = await boundedJson(response);
+
+      if (read.status === "too_large")
+        return { status: "too_large", maximumBytes: maximumResponseBytes } as const;
+
+      const parsed = read.body === null ? null : graphqlResponse.safeParse(read.body);
+
+      // A failed response without GraphQL errors has no answer to read.
+      if (!parsed?.success || (!response.ok && !parsed.data.errors?.length)) {
+        if (response.status === 403) return { status: "access_denied" } as const;
+
+        throw new Error(`GitHub request failed (HTTP ${response.status})`);
       }
 
-      if (response.status === 403) return { status: "access_denied" } as const;
+      const errors = parsed.data.errors ?? [];
+      const types = new Set(errors.map((error) => error.type));
 
-      if (response.status === 404) return { status: "not_found" } as const;
+      if (types.has("RATE_LIMITED")) return limited;
 
-      if (!response.ok) throw new Error(`GitHub request failed (HTTP ${response.status})`);
+      if (errors.length) return { status: "github_error", errors: githubErrors(errors) } as const;
 
-      const connected = { status: "connected", response } as const;
-
-      return connected;
+      return { status: "connected", data: parsed.data.data ?? {} } as const;
     },
     fetch: async (request: Request) => {
       if (!caller.safeParse(properties.caller).success) return new Response(null, { status: 401 });
@@ -340,6 +375,7 @@ export const accountConnection = (environment: Environment, properties: Properti
           config.status === "setup_required" ? config.missing : [],
           url.origin,
           url.searchParams.has("error"),
+          await approvals(environment.DB, id).level(),
         );
       }
 

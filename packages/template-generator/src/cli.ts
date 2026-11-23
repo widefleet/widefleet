@@ -99,7 +99,7 @@ const runtime = [
   "approval-page.ts",
   "approval-methods.ts",
   "input.ts",
-  ...(rules.kind === "discovery" ? ["google.ts"] : []),
+  rules.kind === "discovery" ? "google.ts" : "graphql.ts",
 ];
 
 for (const file of runtime) copyFileSync(join(here, "runtime", file), join(directory, "src", file));

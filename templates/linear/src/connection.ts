@@ -5,7 +5,8 @@ import { approvals } from "./approval.ts";
 import { authentication } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
-import { type GraphQLRequest, graphqlResponse, linearApi, linearErrors } from "./graphql.ts";
+import { boundedJson, maximumResponseBytes } from "./input.ts";
+import { type GraphQLError, type GraphQLRequest, graphqlResponse } from "./graphql.ts";
 import { authorizationPage, connectionPage } from "./page.ts";
 
 const linkedAccount = z.object({
@@ -14,6 +15,24 @@ const linkedAccount = z.object({
   scope: z.string().nullable(),
   providerEmail: z.string().nullable(),
 });
+
+// Linear describes its errors in extensions, with a message written for people.
+const linearExtensions = z.object({
+  type: z.string().optional(),
+  userPresentableMessage: z.string().optional(),
+});
+
+/** Linear's errors, with the message Linear writes for people where it has one. */
+const linearErrors = (errors: GraphQLError[]) =>
+  errors.map((error) => {
+    const extensions = linearExtensions.safeParse(error.extensions).data;
+
+    return {
+      message: extensions?.userPresentableMessage ?? error.message,
+      type: extensions?.type ?? null,
+      path: error.path ?? null,
+    };
+  });
 
 const redirect = (location: string, cookies: string[] = []) => {
   const headers = new Headers({
@@ -235,7 +254,7 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       if (result.status !== "connected") return result;
 
-      const response = await fetch(linearApi, {
+      const response = await fetch("https://api.linear.app/graphql", {
         method: "POST",
         headers: {
           authorization: `Bearer ${result.accessToken}`,
@@ -260,18 +279,25 @@ export const accountConnection = (environment: Environment, properties: Properti
       if (response.status === 429) return limited;
 
       // Linear answers request errors with GraphQL errors, partly with HTTP 400.
-      const parsed = response.headers.get("content-type")?.startsWith("application/json")
-        ? graphqlResponse.safeParse(await response.json())
-        : null;
+      const read = await boundedJson(response);
 
-      if (!parsed?.success) {
+      if (read.status === "too_large")
+        return { status: "too_large", maximumBytes: maximumResponseBytes } as const;
+
+      const parsed = read.body === null ? null : graphqlResponse.safeParse(read.body);
+
+      // A failed response without GraphQL errors has no answer to read.
+      if (!parsed?.success || (!response.ok && !parsed.data.errors?.length)) {
         if (response.status === 403) return { status: "access_denied" } as const;
 
         throw new Error(`Linear request failed (HTTP ${response.status})`);
       }
 
       const errors = parsed.data.errors ?? [];
-      const types = new Set(errors.map((error) => error.extensions?.type));
+
+      const types = new Set(
+        errors.map((error) => linearExtensions.safeParse(error.extensions).data?.type),
+      );
 
       if (types.has("authentication error")) return reconnect;
 

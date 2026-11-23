@@ -65,7 +65,7 @@ const verifyRuntimeConnection = async (flow: "standalone" | "personal") => {
         refresh_token: refreshToken,
         expires_in: 3600,
         token_type: "Bearer",
-        scope: "repo read:user user:email",
+        scope: "read:user user:email repo workflow project read:org user",
       });
     }
 
@@ -82,7 +82,8 @@ const verifyRuntimeConnection = async (flow: "standalone" | "personal") => {
     if (url.href === "https://api.github.com/user/emails")
       return WorkerResponse.json([{ email: "alice@example.test", verified: true, primary: true }]);
 
-    if (url.pathname === "/user/repos") return WorkerResponse.json([]);
+    if (url.href === "https://api.github.com/graphql")
+      return WorkerResponse.json({ data: { viewer: { login: "alice" } } });
     throw new Error(`Unexpected provider request: ${url.href}`);
   };
 
@@ -106,7 +107,7 @@ export default class Consumer extends WorkerEntrypoint {
       controlToken: this.env.WIDEFLEET_CONTROL_TOKEN ?? null,
       encryptionKey: this.env.WIDEFLEET_SECRETS_KEY ?? null,
     });
-    return Response.json(await this.env.GITHUB.listRepositories());
+    return Response.json(await this.env.GITHUB.viewer({}, { login: true }));
   }
 }`;
 
@@ -150,7 +151,15 @@ export default class Consumer extends WorkerEntrypoint {
                     provider: "github",
                     clientId: "synthetic-github-client",
                     clientSecret: "synthetic-github-secret",
-                    scopes: ["read:user", "user:email", "repo"],
+                    scopes: [
+                      "read:user",
+                      "user:email",
+                      "repo",
+                      "workflow",
+                      "project",
+                      "read:org",
+                      "user",
+                    ],
                     hosts: ["https://api.github.com"],
                   },
                 },
@@ -257,7 +266,7 @@ export default class Consumer extends WorkerEntrypoint {
     expect(await config.json()).toEqual({
       provider: {
         clientId: "synthetic-github-client",
-        scopes: ["read:user", "user:email", "repo"],
+        scopes: ["read:user", "user:email", "repo", "workflow", "project", "read:org", "user"],
       },
       controlToken: null,
       encryptionKey: null,
@@ -383,7 +392,7 @@ export default class Consumer extends WorkerEntrypoint {
     });
     expect(await (await browser(consumerOrigin)).json()).toMatchObject({
       status: "connected",
-      repositories: [],
+      data: { login: "alice" },
     });
     const db = await runtime.getD1Database("NATIVE_DB");
 
@@ -394,7 +403,7 @@ export default class Consumer extends WorkerEntrypoint {
         .run();
       expect(await (await browser(consumerOrigin)).json()).toMatchObject({
         status: "connected",
-        repositories: [],
+        data: { login: "alice" },
       });
     }
 
