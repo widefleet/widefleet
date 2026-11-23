@@ -268,6 +268,18 @@ describe("OpenAPI template generator", () => {
     );
     expect(files["src/schema.ts"]).toContain('"headerParameters":{"sessionId":"session-id"}');
 
+    // A later page keeps the headers of the first.
+    const paged = generateOpenapi(
+      JSON.stringify(api),
+      { operations: { "folders.ListItems": { name: "listItems", headers: session } } },
+      service,
+      "",
+    ).files["src/api.ts"];
+
+    expect(paged).toMatch(
+      /nextLink: string;\n    \/\*\*\n     \* The session to work in\.\n     \*\/\n    sessionId\?: string;\n  \}\): Promise/,
+    );
+
     expect(() =>
       generateOpenapi(
         JSON.stringify(api),
@@ -343,8 +355,11 @@ describe("OpenAPI template generator", () => {
         {
           operations: {},
           undescribed: {
+            updateItem,
             putItem: { ...updateItem, method: "put" },
             goneItem: { ...updateItem, operation: "gone.Get" },
+            // Another name for the same request would replace updateItem.
+            patchItem: updateItem,
           },
         },
         service,
@@ -354,6 +369,7 @@ describe("OpenAPI template generator", () => {
       [
         "The API now describes PUT items.GetContent; offer its operation instead of putItem",
         "goneItem uses the path of gone.Get, which the API no longer offers",
+        "patchItem repeats the undescribed target PATCH items.GetContent",
       ].join("\n"),
     );
   });

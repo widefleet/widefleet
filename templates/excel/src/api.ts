@@ -1558,6 +1558,10 @@ export class ExcelApi extends WorkerEntrypoint<TemplateEnvironment, ExcelPropert
            * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
            */
           nextLink: string;
+          /**
+           * The `id` of a session from `createSession`. Without it, the call works on the workbook without a session.
+           */
+          sessionId?: string;
         },
   ): Promise<ExcelResult<WorkbookWorksheetCollectionResponse>> {
     return run(this.env, this.ctx.props, "listWorksheets", input);
@@ -1937,6 +1941,10 @@ export class ExcelApi extends WorkerEntrypoint<TemplateEnvironment, ExcelPropert
            * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
            */
           nextLink: string;
+          /**
+           * The `id` of a session from `createSession`. Without it, the call works on the workbook without a session.
+           */
+          sessionId?: string;
         },
   ): Promise<ExcelResult<WorkbookTableCollectionResponse>> {
     return run(this.env, this.ctx.props, "listTables", input);
@@ -2004,6 +2012,10 @@ export class ExcelApi extends WorkerEntrypoint<TemplateEnvironment, ExcelPropert
            * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
            */
           nextLink: string;
+          /**
+           * The `id` of a session from `createSession`. Without it, the call works on the workbook without a session.
+           */
+          sessionId?: string;
         },
   ): Promise<ExcelResult<WorkbookTableCollectionResponse>> {
     return run(this.env, this.ctx.props, "listWorksheetTables", input);
@@ -2186,6 +2198,10 @@ export class ExcelApi extends WorkerEntrypoint<TemplateEnvironment, ExcelPropert
            * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
            */
           nextLink: string;
+          /**
+           * The `id` of a session from `createSession`. Without it, the call works on the workbook without a session.
+           */
+          sessionId?: string;
         },
   ): Promise<ExcelResult<WorkbookTableRowCollectionResponse>> {
     return run(this.env, this.ctx.props, "listTableRows", input);
@@ -2350,6 +2366,10 @@ export class ExcelApi extends WorkerEntrypoint<TemplateEnvironment, ExcelPropert
            * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
            */
           nextLink: string;
+          /**
+           * The `id` of a session from `createSession`. Without it, the call works on the workbook without a session.
+           */
+          sessionId?: string;
         },
   ): Promise<ExcelResult<WorkbookTableColumnCollectionResponse>> {
     return run(this.env, this.ctx.props, "listTableColumns", input);
@@ -2477,6 +2497,10 @@ export class ExcelApi extends WorkerEntrypoint<TemplateEnvironment, ExcelPropert
            * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
            */
           nextLink: string;
+          /**
+           * The `id` of a session from `createSession`. Without it, the call works on the workbook without a session.
+           */
+          sessionId?: string;
         },
   ): Promise<ExcelResult<WorkbookNamedItemCollectionResponse>> {
     return run(this.env, this.ctx.props, "listNames", input);
@@ -2658,6 +2682,10 @@ export class ExcelApi extends WorkerEntrypoint<TemplateEnvironment, ExcelPropert
            * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
            */
           nextLink: string;
+          /**
+           * The `id` of a session from `createSession`. Without it, the call works on the workbook without a session.
+           */
+          sessionId?: string;
         },
   ): Promise<ExcelResult<WorkbookChartCollectionResponse>> {
     return run(this.env, this.ctx.props, "listCharts", input);

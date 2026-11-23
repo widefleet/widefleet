@@ -50,6 +50,10 @@ export const examples = async () => {
     if (rows.status === "connected")
       for (const row of rows.data.value ?? []) void [row.index, row.values];
 
+    // A later page stays in the session.
+    if (rows.status === "connected" && rows.data["@odata.nextLink"])
+      await excel.listTableRows({ nextLink: rows.data["@odata.nextLink"], sessionId });
+
     await excel.closeSession({ driveId: "d", driveItemId: "i", sessionId });
   }
 

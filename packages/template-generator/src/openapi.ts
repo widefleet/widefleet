@@ -530,6 +530,8 @@ export const generateOpenapi = (
       },
     });
     const { change, description, body, result, headers } = rule;
+
+    if (Object.hasOwn(added, id)) problems.push(`${name} repeats the undescribed target ${id}`);
     added[id] = { name, change, description, body, result, headers };
   }
 
@@ -698,8 +700,13 @@ export const generateOpenapi = (
       return `${comment(single(value.description), "    ")}    ${propertyName(inputOf(value))}${value.in === "path" || value.required ? "" : "?"}: ${type};`;
     });
 
-    for (const [input, { description }] of headers)
-      fields.push(`${comment(description, "    ")}    ${propertyName(input)}?: string;`);
+    // Header inputs, such as a session, apply to every page.
+    const headerFields = headers.map(
+      ([input, { description }]) =>
+        `${comment(description, "    ")}    ${propertyName(input)}?: string;`,
+    );
+
+    fields.push(...headerFields);
 
     if (bodyKind)
       fields.push(
@@ -734,9 +741,9 @@ export const generateOpenapi = (
 
     const firstPage = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
 
-    // A later page needs only its address.
+    // A later page needs only its address and the headers of the first.
     const input = pageable
-      ? `${firstPage} | {\n    /**\n     * The \`@odata.nextLink\` of an earlier answer, or its \`@odata.deltaLink\`.\n     */\n    nextLink: string;\n  }`
+      ? `${firstPage} | {\n    /**\n     * The \`@odata.nextLink\` of an earlier answer, or its \`@odata.deltaLink\`.\n     */\n    nextLink: string;\n${headerFields.map((field) => `${field}\n`).join("")}  }`
       : firstPage;
 
     const approval =
