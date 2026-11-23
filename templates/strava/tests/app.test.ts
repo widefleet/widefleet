@@ -64,10 +64,11 @@ describe("Strava personal account app", () => {
 
     return {
       identity,
-      request: async (path: string, method = "GET", requestOrigin = origin) => {
+      request: async (path: string, method = "GET", requestOrigin = origin, body?: string) => {
         const response = await runtime.dispatchFetch(new URL(path, origin).href, {
           method,
           redirect: "manual",
+          body: body ?? null,
           headers: {
             origin: requestOrigin,
             cookie: [...cookies.values()].join("; "),
@@ -303,6 +304,91 @@ describe("Strava personal account app", () => {
     await connect(alice, "101");
     expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
       status: "connected",
+    });
+  });
+
+  // Widefleet's My connections page opens a single-use launch link, and the
+  // connection returns to Widefleet through a single-use completion link.
+  it("connects from Widefleet's launch link and returns there, also when cancelled", async () => {
+    const alice = browser("alice");
+    const completionUrl = "https://widefleet.example.test/connections?completed=strava";
+
+    const prepare = async () =>
+      z
+        .object({ url: z.url(), expiresAt: z.iso.datetime() })
+        .parse(
+          await (
+            await alice.request(
+              "/rpc/personal/prepare",
+              "POST",
+              origin,
+              JSON.stringify({ completionUrl }),
+            )
+          ).json(),
+        );
+
+    const open = async (url: string) => {
+      const opened = await alice.request(url);
+      const html = await opened.text();
+      expect(opened.status, html).toBe(200);
+
+      return z
+        .string()
+        .parse(/<a href="([^"]+)">/.exec(html)?.[1])
+        .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)));
+    };
+
+    expect(await (await alice.request("/rpc/personal/status")).json()).toEqual({
+      setup: "ready",
+      connection: "disconnected",
+      account: null,
+    });
+    const launch = await prepare();
+    expect(Date.parse(launch.expiresAt)).toBeGreaterThan(Date.now());
+    // Launch links belong to the user who prepared them and work once.
+    expect((await browser("bob").request(launch.url)).status).toBe(410);
+    const destination = await open(launch.url);
+    expect((await alice.request(launch.url)).status).toBe(410);
+
+    const returned = z
+      .string()
+      .parse((await alice.request(upstream.authorize(destination, "101"))).headers.get("location"));
+
+    expect(new URL(returned).pathname).toBe("/connect/complete");
+    expect((await browser("bob").request(returned)).status).toBe(410);
+    const completed = await alice.request(returned);
+    expect(completed.status).toBe(303);
+    expect(completed.headers.get("location")).toBe(completionUrl);
+    expect((await alice.request(returned)).status).toBe(410);
+    expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+      connection: "connected",
+      account: { id: "101" },
+    });
+    expect(await (await alice.request("/rpc/personal/disconnect", "POST")).json()).toEqual({
+      disconnected: true,
+    });
+
+    // An expired launch link no longer opens.
+    const expired = await prepare();
+    const db = await runtime.getD1Database("DB");
+    await db
+      .prepare("UPDATE verification SET expiresAt = ? WHERE identifier LIKE 'widefleet:launch:%'")
+      .bind(new Date(Date.now() - 1).toISOString())
+      .run();
+    expect((await alice.request(expired.url)).status).toBe(410);
+
+    // A cancelled authorization returns to Widefleet with the error.
+    const cancelled = new URL(await open((await prepare()).url));
+    const denied = new URL(z.string().parse(cancelled.searchParams.get("redirect_uri")));
+    denied.searchParams.set("state", z.string().parse(cancelled.searchParams.get("state")));
+    denied.searchParams.set("error", "access_denied");
+    const relay = z.string().parse((await alice.request(denied.href)).headers.get("location"));
+    expect(new URL(relay).pathname).toBe("/connect/complete");
+    expect((await alice.request(relay)).headers.get("location")).toBe(
+      `${completionUrl}&connectionError=1`,
+    );
+    expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+      connection: "disconnected",
     });
   });
 
