@@ -130,6 +130,24 @@ describe("Discovery template generator", () => {
     ).toThrow(/^The rules list example\.users\.items\.gone, which the API no longer offers$/);
   });
 
+  it("offers methods that only read without asking", () => {
+    const { files } = generateDiscovery(
+      document,
+      {
+        operations: {
+          "example.users.items.send": "read",
+          "example.users.items.delete": "delete",
+        },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/schema.ts"]).toContain(
+      '"itemsSend":{"httpMethod":"POST","path":"v1/users/{userId}/items/send","pathParameters":{"userId":"me"},"queryParameters":[],"body":true,"response":true,"change":null}',
+    );
+  });
+
   it("leaves out hidden methods", () => {
     const { files } = generateDiscovery(
       document,
