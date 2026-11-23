@@ -54,12 +54,16 @@ export const iconCache = (requested: string | null, deploymentId: string) =>
   requested === deploymentId ? "private, max-age=31536000, immutable" : "private, no-cache";
 
 // Read only the selected app's active artifact, never fetch an app URL or bypass its login.
-// Members also see the icons of apps the catalog and My connections list for them.
+// Members also see the icons of apps the catalog and My connections list for them. `find`
+// selects another picture of the app, such as a screenshot, under the same rules.
 export const readAppIcon = async (
   database: Database,
   storage: ArtifactStorage,
   principal: Principal,
   appId: string,
+  find: (
+    manifest: z.infer<typeof assetManifest>,
+  ) => { hash: string; size: number; contentType: string } | null = findAppIcon,
 ): Promise<
   Result<
     { deploymentId: string; icon: { bytes: Uint8Array; contentType: string } | null },
@@ -101,7 +105,7 @@ export const readAppIcon = async (
     return record
       ? Result.ok({
           deploymentId: record.deploymentId,
-          icon: findAppIcon(assetManifest.parse(record.manifest)),
+          icon: find(assetManifest.parse(record.manifest)),
         })
       : Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App icon not found" }));
   });

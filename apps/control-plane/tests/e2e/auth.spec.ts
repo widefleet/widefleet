@@ -616,7 +616,10 @@ test("shows versioned service documentation through authenticated API and access
   });
 
   // Publishing keeps documentation in artifact storage and a summary on the artifact.
-  const activate = async (document?: z.infer<typeof serviceDocumentation>) => {
+  const activate = async (
+    document?: z.infer<typeof serviceDocumentation>,
+    entrypoints = ["Reader"],
+  ) => {
     const artifactId = crypto.randomUUID();
     const deploymentId = crypto.randomUUID();
     const encoded = document ? encodeDocumentation(document) : null;
@@ -628,7 +631,7 @@ test("shows versioned service documentation through authenticated API and access
       metadata: workerMetadata.parse({
         main_module: "worker.js",
         compatibility_date: "2026-10-01",
-        entrypoints: ["Reader"],
+        entrypoints,
         assets: { upload_session: artifactId },
       }),
       manifest: {},
@@ -650,7 +653,24 @@ test("shows versioned service documentation through authenticated API and access
     return deploymentId;
   };
 
+  // The app's own pages show the reference in a section, once the app is deployed.
+  await page.goto(`/widefleet/apps/${record.id}/api`);
+  await expect(
+    page.getByText("Deploy this app to see what it exposes.", { exact: true }),
+  ).toBeVisible();
   const deploymentId = await activate(documentation);
+  // The open section follows the deployment: the reference and its availability appear.
+  const availability = page.getByRole("link", { name: "Manage availability", exact: true });
+  await expect(availability).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+  await page.goto(`/widefleet/apps/${record.id}`);
+  await page
+    .getByRole("navigation", { name: "App sections" })
+    .getByRole("link", { name: "API", exact: true })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/api$`, "u"));
+  await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+
   const description = await context.request.get(`/api/v1/app-services/${record.slug}`);
   expect(description.ok()).toBe(true);
   expect(await description.json()).toMatchObject({
@@ -717,6 +737,12 @@ test("shows versioned service documentation through authenticated API and access
   });
   const missing = await page.goto(`/widefleet/services/${crypto.randomUUID()}`);
   expect(missing?.status()).toBe(404);
+
+  // An app without an API says so and has no availability to manage.
+  await activate(undefined, []);
+  await page.goto(`/widefleet/apps/${record.id}/api`);
+  await expect(page.getByText("This app does not expose an API.", { exact: true })).toBeVisible();
+  await expect(availability).toHaveCount(0);
 });
 
 test("completes app OAuth through the built server after signing in", async ({ page }) => {
@@ -1718,6 +1744,7 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   await expect(page.getByText("No deployments yet.", { exact: false })).toBeVisible();
   const appId = z.uuid().parse(new URL(page.url()).pathname.split("/").at(-1));
 
+  await page.getByRole("link", { name: "Status", exact: true }).click();
   await page.getByRole("link", { name: "Create preview", exact: true }).click();
   await page.getByLabel("App name", { exact: true }).fill("Notes Preview");
   await page.getByLabel("URL slug").fill("notes-preview");
@@ -2387,6 +2414,8 @@ test.describe(`app catalog`, () => {
       await readerPage.getByRole("link", { name: "Home", exact: true }).click();
       await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText("Home");
       await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveCount(0);
+      // An app that is not published has no page for people who do not manage it.
+      expect((await readerContext.request.get(`/widefleet/apps/${record.id}`)).status()).toBe(404);
 
       await page.goto(`/widefleet/apps/${record.id}/settings`);
 
@@ -2444,12 +2473,56 @@ test.describe(`app catalog`, () => {
       await expect(page.getByText("Counts the stock.", { exact: true })).toBeVisible();
       await expect(describe).toBeFocused();
       await readerPage.reload();
-      await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveAttribute(
+      await expect(readerPage.getByText("Counts the stock.", { exact: true })).toBeVisible();
+
+      // The owner's overview is the app's page: a longer text, written in place as Markdown.
+      await page.getByRole("link", { name: "Overview", exact: true }).click();
+      await page.getByRole("button", { name: "Edit about" }).click();
+      const more = page.getByRole("textbox", { name: "About", exact: true });
+      await expect(more).toBeFocused();
+      await more.fill(
+        "Tracks every shelf.\n\n- Counts per shelf\n\n![chart](https://example.test/chart.png)",
+      );
+      await page.getByRole("button", { name: "Save about", exact: true }).click();
+      await expect(
+        page.getByRole("listitem").filter({ hasText: /^Counts per shelf$/u }),
+      ).toBeVisible();
+      // The text loads nothing from other sites.
+      await expect(page.getByRole("main").getByRole("img", { name: "chart" })).toHaveCount(0);
+      await expect(page.getByText(/^Owned by \S/u)).toBeVisible();
+
+      // The tile opens the app with its button and leads to the app's page with its name.
+      const opens = { name: `Open app ${record.displayName} in a new tab`, exact: true };
+      await expect(readerPage.getByRole("link", opens)).toHaveAttribute("href", record.url);
+      await readerPage.getByRole("link", { name: record.displayName, exact: true }).click();
+      await expect(readerPage).toHaveURL(new RegExp(`/widefleet/catalog/apps/${record.id}$`, "u"));
+      // People who do not manage the app see what it is for and the way into it, nothing to manage.
+      await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText(record.displayName);
+      await expect(readerPage.getByText("Counts the stock.", { exact: true })).toBeVisible();
+      await expect(readerPage.getByRole("link", { name: "Open app", exact: true })).toHaveAttribute(
         "href",
         record.url,
       );
-      await expect(readerPage.getByText("Counts the stock.", { exact: true })).toBeVisible();
-      expect((await readerContext.request.get(`/widefleet/apps/${record.id}`)).status()).toBe(404);
+      await expect(
+        readerPage.getByRole("listitem").filter({ hasText: /^Counts per shelf$/u }),
+      ).toBeVisible();
+      await expect(readerPage.getByText(/^Owned by \S/u)).toBeVisible();
+      await expect(readerPage.getByRole("navigation", { name: "App sections" })).toHaveCount(0);
+      await expect(readerPage.getByRole("button", { name: "Edit name" })).toHaveCount(0);
+      await expect(readerPage.getByRole("button", { name: "Edit about" })).toHaveCount(0);
+
+      // The pages for managing the app lead them here too, so a link someone shares still works.
+      await readerPage.goto(`/widefleet/apps/${record.id}/secrets`);
+      await expect(readerPage).toHaveURL(new RegExp(`/widefleet/catalog/apps/${record.id}$`, "u"));
+      await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText(record.displayName);
+      // The owner's tile leads to the pages for managing the app.
+      await page.goto("/widefleet");
+      await expect(
+        page.getByRole("link", { name: record.displayName, exact: true }),
+      ).toHaveAttribute("href", `/widefleet/apps/${record.id}`);
+      await page.goto(`/widefleet/apps/${record.id}/settings`);
+      await readerPage.getByRole("main").getByRole("link", { name: "Home", exact: true }).click();
+      await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText("Home");
       expect((await readerContext.request.get(`/api/v1/apps/${record.id}`)).status()).toBe(404);
       const catalog = await readerContext.request.get(queryUrl);
       expect(catalog.headers()["cache-control"]).toBe("private, no-store");
@@ -2469,12 +2542,16 @@ test.describe(`app catalog`, () => {
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("Stock Counter");
       await expect(page).toHaveTitle("Stock Counter · Widefleet");
       await readerPage.reload();
-      await expect(readerPage.getByRole("link", { name: "Stock Counter" })).toBeVisible();
+      await expect(
+        readerPage.getByRole("link", { name: "Stock Counter", exact: true }),
+      ).toBeVisible();
 
       await page.getByRole("button", { name: "Remove from catalog", exact: true }).click();
       await expect(publish).toBeVisible();
       await readerPage.reload();
-      await expect(readerPage.getByRole("link", { name: "Stock Counter" })).toHaveCount(0);
+      await expect(
+        readerPage.getByRole("link", { name: "Stock Counter", exact: true }),
+      ).toHaveCount(0);
     } finally {
       await readerContext.close();
     }
@@ -3694,6 +3771,45 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await expect(page.getByRole("link", { name: "Refresh", exact: true })).toHaveCount(0);
     await expect(page.getByText("taylor@example.test", { exact: false })).toBeVisible();
 
+    await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
+
+    // An app's page shows the reader's accounts with the app itself and with the apps it calls.
+    await environment.database.db
+      .update(apps)
+      .set({ appliedCapabilities: { revision: 1, grants: { FILES: { app: files } } } })
+      .where(eq(apps.id, gmail));
+    // It also shows the screenshots that the app's deployment carries.
+    await environment.database.db
+      .update(artifacts)
+      .set({ manifest: { "/screenshots/2.png": { hash: "a".repeat(32), size: 68 } } })
+      .where(eq(artifacts.appId, gmail));
+    await page.route(`**/widefleet/apps/${gmail}/screenshots/2?*`, (route) =>
+      route.fulfill({
+        contentType: "image/png",
+        body: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      }),
+    );
+    await page.goto(`/widefleet/catalog/apps/${gmail}`);
+    const uses = page.getByRole("region", { name: "Connections", exact: true });
+    await expect(
+      page.getByRole("list", { name: "Screenshots" }).getByRole("img", {
+        name: "Screenshot 2 of Gmail",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(uses.getByRole("listitem")).toHaveCount(2);
+    await expect(uses.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
+    await expect(uses.getByText("taylor@example.test", { exact: false })).toBeVisible();
+    await expect(uses.getByRole("heading", { name: "GitHub", exact: true })).toHaveCount(0);
+
+    // A connector that calls no other app shows the reader's account with it alone.
+    await page.goto(`/widefleet/catalog/apps/${github}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("GitHub");
+    await expect(uses.getByRole("listitem")).toHaveCount(1);
+    await page.goto("/widefleet/connections");
     await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
 
     await mkdir("../../.local/personal-connections", { recursive: true });

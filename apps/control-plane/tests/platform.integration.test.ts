@@ -28,7 +28,7 @@ import { apiResource } from "../src/lib/server/auth-options.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
 import { createNetworkService } from "../src/lib/server/network.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
-import { organization } from "../src/lib/server/auth-schema.ts";
+import { organization, user } from "../src/lib/server/auth-schema.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
@@ -2411,11 +2411,24 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json("/catalog", "GET", undefined, new Headers())).status).toBe(401);
     expect((await json(path, "PUT", { listed: true }, new Headers())).status).toBe(401);
     expect((await json(path, "PUT", { listed: true })).status).toBe(409);
+    const used = crypto.randomUUID();
     await environment.database.db
       .update(apps)
-      .set({ state: "active", activeDeploymentId })
+      .set({
+        state: "active",
+        activeDeploymentId,
+        appliedCapabilities: {
+          revision: 1,
+          grants: { MAIL: { app: used }, DRAFTS: { app: used, entrypoint: "Drafts" } },
+        },
+      })
       .where(eq(apps.id, app.id));
     expect(await (await json("/catalog", "GET", undefined, outsiderHeaders)).json()).toEqual([]);
+    // An app has a page for everyone once it is published; its managers see the page before.
+    const page = `/catalog/apps/${app.id}`;
+    expect((await json(page, "GET", undefined, new Headers())).status).toBe(401);
+    expect((await json(page, "GET", undefined, outsiderHeaders)).status).toBe(404);
+    expect((await json(page, "GET")).status).toBe(200);
     expect((await json(path, "PUT", { listed: true }, outsiderHeaders)).status).toBe(404);
     expect((await json(path, "PUT", { listed: "true" })).status).toBe(400);
     expect(await (await json(path, "PUT", { listed: true })).json()).toEqual({ listed: true });
@@ -2428,6 +2441,13 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(
       await (await json(description, "PUT", { description: " Counts the stock. " })).json(),
     ).toEqual(text);
+
+    // A longer text for the app's page is set the same way.
+    const about = `/apps/${app.id}/about`;
+    const more = { about: "Counts the stock.\n\n- Per shelf" };
+    expect((await json(about, "PUT", more, outsiderHeaders)).status).toBe(404);
+    expect((await json(about, "PUT", { about: "x".repeat(2001) })).status).toBe(400);
+    expect(await (await json(about, "PUT", { about: ` ${more.about} ` })).json()).toEqual(more);
 
     // The name people see changes the same way; the app's address stays.
     const name = `/apps/${app.id}/name`;
@@ -2451,6 +2471,28 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         activeDeploymentId,
       }),
     ]);
+
+    // The page adds the longer text, the owner and the apps the deployment may call.
+    const [owner] = await environment.database.db
+      .select({ name: user.name })
+      .from(user)
+      .innerJoin(apps, eq(apps.ownerId, user.id))
+      .where(eq(apps.id, app.id));
+
+    expect(
+      contract.catalogApp.parse(await (await json(page, "GET", undefined, outsiderHeaders)).json()),
+    ).toEqual({
+      id: app.id,
+      ...renamed,
+      ...text,
+      ...more,
+      hostname: app.hostname,
+      url: app.url,
+      activeDeploymentId,
+      owner: owner?.name,
+      uses: [used],
+      screenshots: [],
+    });
     expect((await json(`/apps/${app.id}`, "GET", undefined, outsiderHeaders)).status).toBe(404);
     expect(await (await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).json()).toEqual({
       granted: true,
@@ -2462,9 +2504,13 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).toEqual({
       description: null,
     });
-    expect(
-      contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json()).description,
-    ).toBeNull();
+    expect(await (await json(about, "PUT", { about: "" }, outsiderHeaders)).json()).toEqual({
+      about: null,
+    });
+    expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toMatchObject({
+      description: null,
+      about: null,
+    });
     expect(await (await json(path, "PUT", { listed: false })).json()).toEqual({ listed: false });
     expect(await (await json("/catalog", "GET", undefined, outsiderHeaders)).json()).toEqual([]);
   });
@@ -2478,12 +2524,24 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     const hash = hashAsset("/favicon.svg", bytes);
-    const session = await start(app.id, { "/favicon.svg": { hash, size: bytes.length } });
-    expect(
-      (
-        await storage.put(`apps/${app.id}/assets/${hash}`, bytes, "application/octet-stream")
-      ).isOk(),
-    ).toBe(true);
+    // The app also carries a screenshot, which is served under the same rules.
+    const picture = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const pictureHash = hashAsset("/screenshots/2.png", picture);
+
+    const session = await start(app.id, {
+      "/favicon.svg": { hash, size: bytes.length },
+      "/screenshots/2.png": { hash: pictureHash, size: picture.length },
+    });
+
+    for (const [key, content] of [
+      [hash, bytes],
+      [pictureHash, picture],
+    ] as const)
+      expect(
+        (
+          await storage.put(`apps/${app.id}/assets/${key}`, content, "application/octet-stream")
+        ).isOk(),
+      ).toBe(true);
     const deployment = contract.deployment.parse(await (await publish(app.id, session.id)).json());
 
     expect((await json(path, "GET")).status).toBe(404);
@@ -2506,12 +2564,37 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       (await json(`${path}?deployment=${deployment.id}`, "GET")).headers.get("cache-control"),
     ).toBe("private, max-age=31536000, immutable");
 
+    const screenshots = `/apps/${app.id}/screenshots`;
+    const screenshot = await json(`${screenshots}/2`, "GET");
+    expect(screenshot.headers.get("content-type")).toBe("image/png");
+    expect(screenshot.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(new Uint8Array(await screenshot.arrayBuffer())).toEqual(picture);
+    expect((await json(`${screenshots}/1`, "GET")).status).toBe(404);
+    expect((await json(`${screenshots}/4`, "GET")).status).toBe(400);
+    expect((await json(`${screenshots}/2`, "GET", undefined, outsiderHeaders)).status).toBe(404);
+    expect(
+      contract.catalogApp.parse(await (await json(`/catalog/apps/${app.id}`, "GET")).json())
+        .screenshots,
+    ).toEqual([2]);
+    // An app without a browser address serves no pictures, so its page names none.
+    await environment.database.db
+      .update(apps)
+      .set({ webEnabled: false })
+      .where(eq(apps.id, app.id));
+    expect((await json(`${screenshots}/2`, "GET")).status).toBe(404);
+    expect(
+      contract.catalogApp.parse(await (await json(`/catalog/apps/${app.id}`, "GET")).json())
+        .screenshots,
+    ).toEqual([]);
+    await environment.database.db.update(apps).set({ webEnabled: true }).where(eq(apps.id, app.id));
+
     // Members see the icons of apps the catalog and My connections list for them.
     await environment.database.db
       .update(apps)
       .set({ catalogListed: true })
       .where(eq(apps.id, app.id));
     expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(200);
+    expect((await json(`${screenshots}/2`, "GET", undefined, outsiderHeaders)).status).toBe(200);
     await environment.database.db
       .update(apps)
       .set({ catalogListed: false })

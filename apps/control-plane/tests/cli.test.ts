@@ -47,6 +47,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       message: null,
     });
 
+    const catalogApp = contract.catalogApp.parse({
+      id: app.id,
+      displayName: app.displayName,
+      description: null,
+      about: "- Per shelf",
+      hostname: app.hostname,
+      url: app.url,
+      activeDeploymentId: queued.id,
+      owner: "Ada Example",
+      uses: [],
+      screenshots: [1],
+    });
+
     const finishedAt = "2026-10-01T00:00:01.000Z";
 
     const preview = contract.app.parse({
@@ -265,6 +278,24 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         request.on("end", () => {
           response.end(JSON.stringify(contract.appDescriptionChange.parse(JSON.parse(body))));
         });
+
+        return;
+      }
+
+      if (request.method === "PUT" && request.url === `/api/v1/apps/${app.id}/about`) {
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          response.end(JSON.stringify(contract.appAboutChange.parse(JSON.parse(body))));
+        });
+
+        return;
+      }
+
+      if (request.method === "GET" && request.url === `/api/v1/catalog/apps/${app.id}`) {
+        response.end(JSON.stringify(catalogApp));
 
         return;
       }
@@ -1050,12 +1081,18 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       );
 
       expect(JSON.parse(described.stdout)).toEqual({ description: "Counts the stock." });
+      const about = await execute(binary, ["catalog", "about", app.id, "- Per shelf"], options);
+      expect(JSON.parse(about.stdout)).toEqual({ about: "- Per shelf" });
+      const shown = await execute(binary, ["catalog", "show", app.id], options);
+      expect(JSON.parse(shown.stdout)).toEqual(catalogApp);
       expect(catalogUpdates).toEqual([{ listed: true }, { listed: false }]);
       expect(requests).toEqual([
         "GET /api/v1/catalog",
         `PUT /api/v1/apps/${app.id}/catalog`,
         `PUT /api/v1/apps/${app.id}/catalog`,
         `PUT /api/v1/apps/${app.id}/description`,
+        `PUT /api/v1/apps/${app.id}/about`,
+        `GET /api/v1/catalog/apps/${app.id}`,
       ]);
     });
 

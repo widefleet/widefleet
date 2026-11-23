@@ -19,6 +19,8 @@ pub struct Options {
 enum Command {
     /// List published apps and their launch URLs as JSON.
     List,
+    /// Show a published app's page as JSON: what it is for, its owner and the apps it calls.
+    Show { app: Uuid },
     /// Find app templates and their setup instructions.
     Templates {
         #[command(subcommand)]
@@ -30,6 +32,13 @@ enum Command {
     Unpublish { app: Uuid },
     /// Set the sentence that tells people what an app is for; an empty text removes it.
     Describe { app: Uuid, description: String },
+    /// Set the longer text on an app's page, as Markdown; an empty text removes it.
+    About {
+        app: Uuid,
+        /// A list may open the text, so a leading hyphen is no option.
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -99,6 +108,9 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
     );
     let request = match options.command {
         Command::List => api.authenticated(Method::GET, "/catalog", token),
+        Command::Show { app } => {
+            api.authenticated(Method::GET, &format!("/catalog/apps/{app}"), token)
+        }
         Command::Templates { command } => match command {
             TemplateCommand::List { search } => api
                 .authenticated(Method::GET, "/catalog/templates", token)
@@ -138,6 +150,9 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
         Command::Describe { app, description } => api
             .authenticated(Method::PUT, &format!("/apps/{app}/description"), token)
             .json(&value!({ "description": description })),
+        Command::About { app, text } => api
+            .authenticated(Method::PUT, &format!("/apps/{app}/about"), token)
+            .json(&value!({ "about": text })),
     };
     let result = json::<Value>(request.send().await?).await?;
     super::print_json(&result)?;

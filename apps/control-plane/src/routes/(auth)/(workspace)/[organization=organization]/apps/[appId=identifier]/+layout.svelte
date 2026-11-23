@@ -2,13 +2,14 @@
   import { page } from "$app/state";
   import { getAppDetails, getAppSource } from "#lib/apps.remote";
   import { getAppConnections } from "#lib/connections.remote";
+  import { getAppServices, getServiceDescription } from "#lib/services.remote";
   import type { manageWorkflow } from "#lib/workflows.remote";
   import { Button } from "@platform/ui/button";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import InlineText from "#shadcn/components/InlineText.svelte";
-  import { renameApp, setAppDescription } from "#lib/catalog.remote";
+  import { getAppListing, renameApp, setAppDescription } from "#lib/catalog.remote";
   import { appDescriptionLength, appNameLength } from "@platform/contracts";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
@@ -75,11 +76,28 @@
     try {
       await details.refresh();
 
+      // A deployment can change the apps this one calls, which its page shows.
+      if (activeTab === "overview")
+        await getAppListing({
+          organizationId: workspace.organizationId,
+          appId: route.appId,
+        }).refresh();
+
       if (activeTab === "source")
         await getAppSource({
           organizationId: workspace.organizationId,
           appId: route.appId,
         }).refresh();
+
+      // A deployment can add the app to the organization's APIs or change what it exposes.
+      if (activeTab === "api")
+        await Promise.all([
+          getAppServices({ organizationId: workspace.organizationId }).refresh(),
+          getServiceDescription({
+            organizationId: workspace.organizationId,
+            service: route.appId,
+          }).refresh(),
+        ]);
 
       if (activeTab === "connections")
         await getAppConnections({
@@ -131,8 +149,10 @@
 
   const tabs = $derived([
     { id: "overview", label: "Overview" },
+    { id: "status", label: "Status" },
     { id: "deployments", label: "Deployments" },
     ...(data.source.supported ? [{ id: "source", label: "Source" }] : []),
+    { id: "api", label: "API" },
     { id: "connections", label: "Connections" },
     { id: "workflows", label: "Workflows" },
     { id: "secrets", label: "Secrets" },

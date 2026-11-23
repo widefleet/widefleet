@@ -58,6 +58,40 @@ export const binaryPaths = {
       },
     },
   },
+  "/apps/{appId}/screenshots/{number}": {
+    get: {
+      operationId: "getAppScreenshot",
+      summary: "Read one of an app's screenshots from its active deployment",
+      description:
+        "Returns the PNG, JPEG or WebP image an app carries among its static assets at `/screenshots/1` to `/screenshots/3` with the extension `.png`, `.jpg` or `.webp`, up to 2 MiB. The app's page lists the numbers that exist. Access and caching follow the app's icon.",
+      parameters: [
+        { name: "appId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        {
+          name: "number",
+          in: "path",
+          required: true,
+          schema: { type: "integer", minimum: 1, maximum: 3 },
+        },
+        {
+          name: "deployment",
+          in: "query",
+          required: false,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Screenshot",
+          content: {
+            "image/png": { schema: { type: "string", format: "binary" } },
+            "image/jpeg": { schema: { type: "string", format: "binary" } },
+            "image/webp": { schema: { type: "string", format: "binary" } },
+          },
+        },
+        "404": { description: "No accessible active app or no such screenshot" },
+      },
+    },
+  },
   "/catalog/templates/{templateId}/icon": {
     get: {
       operationId: "getTemplateIcon",

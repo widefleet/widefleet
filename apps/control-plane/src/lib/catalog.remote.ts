@@ -3,6 +3,7 @@ import { templateCatalog, readTemplate } from "#server/app-templates";
 import { form, getRequestEvent, query } from "$app/server";
 import { invalid, redirect } from "@sveltejs/kit";
 import {
+  appAbout,
   appDescription,
   appDisplayName,
   appPath,
@@ -24,6 +25,20 @@ export const getCatalog = query(organizationSelection, async (selection) => {
 
   return queryValue(await runtime.apps.catalog(principal));
 });
+
+// A person's own text, so it renders without raw HTML or images from other sites.
+const markdown = new MarkdownIt({ html: false }).disable("image");
+
+export const getAppListing = query(
+  appPath.extend(organizationSelection.shape),
+  async ({ appId, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+
+    const listing = queryValue(await runtime.apps.listing(principal, appId));
+
+    return { ...listing, aboutHtml: listing.about ? markdown.render(listing.about) : "" };
+  },
+);
 
 export const setCatalogListing = form(
   appPath.extend({
@@ -67,6 +82,23 @@ export const setAppDescription = form(
     formValue(await runtime.apps.setDescription(principal, appId, value));
     await getAppDetails({ appId, search, organizationId }).refresh();
     await getCatalog({ organizationId }).refresh();
+
+    return { saved: true };
+  },
+);
+
+// A browser sends a field's line breaks as two characters, which would count against the limit.
+export const setAppAbout = form(
+  appText(
+    z
+      .string()
+      .transform((text) => text.replaceAll("\r\n", "\n"))
+      .pipe(appAbout),
+  ),
+  async ({ appId, value, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.apps.setAbout(principal, appId, value));
+    await getAppListing({ appId, organizationId }).refresh();
 
     return { saved: true };
   },
