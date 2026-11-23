@@ -1,17 +1,12 @@
 <script lang="ts">
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { getAppDetails, removeApp } from "#lib/apps.remote";
-  import { setCatalogListing } from "#lib/catalog.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Button } from "@platform/ui/button";
   import CopyValue from "./CopyValue.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
-  import { getWorkspaceContext } from "#lib/workspace-context";
 
-  const workspace = getWorkspaceContext();
-
-  let { data, search }: { data: Awaited<ReturnType<typeof getAppDetails>>; search: string } =
-    $props();
+  let { data }: { data: Awaited<ReturnType<typeof getAppDetails>> } = $props();
 
   const app = $derived(data.app);
 </script>
@@ -24,43 +19,6 @@
     </p>
     <CopyValue value={app.id} label="Copy app ID" />
   </section>
-  {#if !app.parentId}<section id="catalog" class="rounded-xl border p-5 sm:p-6">
-      <h2 class="text-base font-semibold">App catalog</h2>
-      <p class="text-muted-foreground mt-2 text-sm leading-6">
-        Make this app discoverable to everyone in the workspace. The app's access rules still apply.
-      </p>
-      {#if app.state === "active" && app.activeDeploymentId}
-        <p class="my-4 text-xs">
-          {app.catalogListed
-            ? "This app is visible in the catalog to all signed-in members."
-            : "This app is not listed in the catalog yet."}
-        </p>
-        {#if data.access.canManage}<form {...setCatalogListing} class="space-y-3">
-            <OrganizationField field={setCatalogListing.fields.organizationId} />
-            <input {...setCatalogListing.fields.appId.as("hidden", app.id)} />
-            <input {...setCatalogListing.fields.search.as("hidden", search)} />
-            <input
-              {...setCatalogListing.fields.listed.as(
-                "hidden",
-                app.catalogListed ? "false" : "true",
-              )}
-            />
-            <FormIssues issues={setCatalogListing.fields.allIssues()} />
-            <Button type="submit" variant="outline" disabled={setCatalogListing.pending > 0}
-              >{setCatalogListing.pending
-                ? "Saving catalog visibility …"
-                : app.catalogListed
-                  ? "Remove from catalog"
-                  : "Publish to catalog"}</Button
-            >
-          </form>{/if}
-      {:else}<p class="text-muted-foreground mt-4 text-xs leading-6">
-          You can publish this app to the catalog after its first successful deployment.
-        </p>{/if}
-      <a href={workspace.path("/")} class="text-primary mt-4 inline-block text-xs hover:underline"
-        >Open app catalog</a
-      >
-    </section>{/if}
   <section class="rounded-xl border border-destructive/25 p-5 sm:p-6">
     <h2 class="text-destructive flex items-center gap-2 text-sm font-semibold">
       <Trash2 class="size-4" />Remove app

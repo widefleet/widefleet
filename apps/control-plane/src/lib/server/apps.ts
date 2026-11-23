@@ -613,7 +613,7 @@ export const createAppService = (
         return Result.err(
           new InvalidOperation({
             code: "FORBIDDEN",
-            message: "Only owners and admins can change catalog visibility.",
+            message: "Only owners and admins can change whether an app shows on Home.",
           }),
         );
 
@@ -624,7 +624,7 @@ export const createAppService = (
         return Result.err(
           new InvalidOperation({
             code: "CONFLICT",
-            message: "Only active apps that are not previews can be published to the catalog.",
+            message: "Only active apps that are not previews can show on Home.",
           }),
         );
 
