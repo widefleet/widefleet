@@ -36,4 +36,4 @@
   </div>
   <Button href={workspace.path(`/services/${service.appId}/connect`)}>Set up connection</Button>
 </div>
-<div class="mt-8"><ServiceReference {service} admin={catalog.admin} /></div>
+<div class="mt-8"><ServiceReference {service} {catalog} /></div>

@@ -559,7 +559,10 @@ test("shows versioned service documentation through authenticated API and access
   });
 
   // Publishing keeps documentation in artifact storage and a summary on the artifact.
-  const activate = async (document?: z.infer<typeof serviceDocumentation>) => {
+  const activate = async (
+    document?: z.infer<typeof serviceDocumentation>,
+    entrypoints = ["Reader"],
+  ) => {
     const artifactId = crypto.randomUUID();
     const deploymentId = crypto.randomUUID();
     const encoded = document ? encodeDocumentation(document) : null;
@@ -571,7 +574,7 @@ test("shows versioned service documentation through authenticated API and access
       metadata: workerMetadata.parse({
         main_module: "worker.js",
         compatibility_date: "2026-10-01",
-        entrypoints: ["Reader"],
+        entrypoints,
         assets: { upload_session: artifactId },
       }),
       manifest: {},
@@ -606,6 +609,8 @@ test("shows versioned service documentation through authenticated API and access
     .click();
   await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/api$`, "u"));
   await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+  const availability = page.getByRole("link", { name: "Manage availability", exact: true });
+  await expect(availability).toBeVisible();
 
   const description = await context.request.get(`/api/v1/app-services/${record.slug}`);
   expect(description.ok()).toBe(true);
@@ -673,6 +678,12 @@ test("shows versioned service documentation through authenticated API and access
   });
   const missing = await page.goto(`/widefleet/services/${crypto.randomUUID()}`);
   expect(missing?.status()).toBe(404);
+
+  // An app without an API says so and has no availability to manage.
+  await activate(undefined, []);
+  await page.goto(`/widefleet/apps/${record.id}/api`);
+  await expect(page.getByText("This app does not expose an API.", { exact: true })).toBeVisible();
+  await expect(availability).toHaveCount(0);
 });
 
 test("completes app OAuth through the built server after signing in", async ({ page }) => {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import Markdown from "./Markdown.svelte";
-  import type { getServiceDescription } from "#lib/services.remote";
+  import type { getAppServices, getServiceDescription } from "#lib/services.remote";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
@@ -9,8 +9,16 @@
   // What an app exposes to other apps and agents, with the documentation of its deployment.
   let {
     service,
-    admin,
-  }: { service: Awaited<ReturnType<typeof getServiceDescription>>; admin: boolean } = $props();
+    catalog,
+  }: {
+    service: Awaited<ReturnType<typeof getServiceDescription>>;
+    catalog: Awaited<ReturnType<typeof getAppServices>>;
+  } = $props();
+
+  // Availability is managed for the APIs the organization lists, which an app without one is not.
+  const manageable = $derived(
+    catalog.admin && catalog.entries.some((entry) => entry.appId === service.appId),
+  );
 
   const reference = $derived(service.reference);
 
@@ -36,7 +44,7 @@
               aria-hidden="true"
             ></span>{open ? "Available to your organization" : "Requires administrator approval"}
           </span>
-          {#if admin}<a
+          {#if manageable}<a
               href={workspace.path(`/services/${service.appId}/availability`)}
               class="text-muted-foreground hover:text-foreground underline underline-offset-4"
               >Manage availability</a

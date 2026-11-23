@@ -24,7 +24,7 @@
 </script>
 
 {#if service}
-  <ServiceReference {service} admin={catalog.admin} />
+  <ServiceReference {service} {catalog} />
 {:else}
   <p class="text-muted-foreground text-sm">Deploy this app to see what it exposes.</p>
 {/if}
