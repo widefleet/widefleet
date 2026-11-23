@@ -52,10 +52,8 @@ type Media = z.infer<typeof media>;
 const bytesOf = (block: Media) =>
   block.type === "resource" ? block.resource.blob.length : block.data.length;
 
-const keyOf = (block: Media) =>
-  block.type === "resource"
-    ? `resource\0${block.resource.uri}\0${block.resource.mimeType ?? ""}\0${block.resource.blob}`
-    : `${block.type}\0${block.mimeType}\0${block.data}`;
+// The whole block, metadata included: only identical blocks share one content block.
+const keyOf = (block: Media) => JSON.stringify(block);
 
 // Shallow: the walk below visits each field itself.
 const record = z.record(z.string(), z.custom<Json>());

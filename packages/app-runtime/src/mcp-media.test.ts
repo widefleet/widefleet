@@ -106,6 +106,18 @@ describe("mcpResult", () => {
     ]);
   });
 
+  it("sends the same bytes with different metadata as separate blocks", () => {
+    const result = mcpResult([
+      { type: "image", mimeType: "image/png", data: png, annotations: { audience: ["user"] } },
+      { type: "image", mimeType: "image/png", data: png, annotations: { audience: ["assistant"] } },
+    ]);
+
+    expect(result.content.slice(1)).toEqual([
+      { type: "image", mimeType: "image/png", data: png, annotations: { audience: ["user"] } },
+      { type: "image", mimeType: "image/png", data: png, annotations: { audience: ["assistant"] } },
+    ]);
+  });
+
   it("turns base64url and unpadded data into standard base64", () => {
     const result = mcpResult({ type: "image", mimeType: "image/png", data: "-_8\n" });
 
