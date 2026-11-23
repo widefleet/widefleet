@@ -118,6 +118,15 @@ describe("mcpResult", () => {
     ]);
   });
 
+  it("sends equal blocks once whatever their key order", () => {
+    const result = mcpResult([
+      { type: "image", mimeType: "image/png", data: png, _meta: { a: 1, b: 2 } },
+      { _meta: { b: 2, a: 1 }, data: png, mimeType: "image/png", type: "image" },
+    ]);
+
+    expect(result.content).toHaveLength(2);
+  });
+
   it("turns base64url and unpadded data into standard base64", () => {
     const result = mcpResult({ type: "image", mimeType: "image/png", data: "-_8\n" });
 

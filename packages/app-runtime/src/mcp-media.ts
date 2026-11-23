@@ -52,11 +52,24 @@ type Media = z.infer<typeof media>;
 const bytesOf = (block: Media) =>
   block.type === "resource" ? block.resource.blob.length : block.data.length;
 
-// The whole block, metadata included: only identical blocks share one content block.
-const keyOf = (block: Media) => JSON.stringify(block);
-
 // Shallow: the walk below visits each field itself.
 const record = z.record(z.string(), z.custom<Json>());
+
+// Objects with their keys in order, so equal values serialize equally.
+const ordered = (_key: string, value: Json): Json => {
+  const object = record.safeParse(value);
+
+  if (Array.isArray(value) || !object.success) return value;
+
+  return Object.fromEntries(
+    Object.entries(object.data).toSorted(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    ),
+  );
+};
+
+// The whole block, metadata included, in key order: only equal blocks share one content block.
+const keyOf = (block: Media) => JSON.stringify(block, ordered);
 
 const without = (value: Record<string, Json>, field: string) =>
   Object.fromEntries(Object.entries(value).filter(([key]) => key !== field));
