@@ -20,7 +20,8 @@ const gmail = [
   "https://www.googleapis.com/auth/gmail.readonly",
 ] as const;
 
-// Google reports the email and profile permissions by their long names.
+// Google reports the email and profile permissions by their long names, which
+// the client's scopes do not list. Every token response below grants them.
 const googleAliases = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
@@ -35,7 +36,7 @@ const environment = {
         provider: "google",
         clientId: "test-client",
         clientSecret: "test-secret",
-        scopes: [...gmail, ...googleAliases],
+        scopes: [...gmail],
         hosts: ["https://gmail.googleapis.com"],
         options: { accessType: "offline", prompt: "select_account consent" },
         issuer: "https://accounts.google.com",
@@ -322,7 +323,7 @@ describe("managed OAuth broker", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("allows only the scopes the operator configured", async () => {
+  it("requests only the scopes the operator configured", async () => {
     const broker = managedOAuth(environment);
 
     await expect(
@@ -344,9 +345,16 @@ describe("managed OAuth broker", () => {
         scope: [...gmail, "https://mail.google.com/"].join(" "),
       });
 
-    await expect(broker.request(identity, exchange)).rejects.toThrow("does not allow");
-    expect(requests.at(-1)?.url).toBe("https://oauth2.googleapis.com/revoke");
-    expect(requests.at(-1)?.body.get("token")).toBe("wider-refresh");
+    // Earlier consent for the same client can widen the grant; only the user or
+    // an administrator can withdraw it, so the token is still issued.
+    const granted = z
+      .object({ scopes: z.array(z.string()) })
+      .parse(await broker.request(identity, exchange));
+
+    expect(granted.scopes).toContain("https://mail.google.com/");
+    expect(requests.map((request) => request.url)).not.toContain(
+      "https://oauth2.googleapis.com/revoke",
+    );
   });
 
   it("revokes grants at the provider when its client declares a revocation endpoint", async () => {
@@ -387,7 +395,7 @@ describe("managed OAuth broker", () => {
 
     expect(await broker.request(identity, { action: "configuration", client: "google" })).toEqual({
       clientId: "test-client",
-      scopes: [...gmail, ...googleAliases],
+      scopes: [...gmail],
     });
     expect(await broker.request(identity, { action: "configuration", client: "slack" })).toBeNull();
 
