@@ -55,6 +55,12 @@ const documentation = {
   types: [],
 };
 
+// The Gmail template requires the organization's Google OAuth client.
+const googleClient = {
+  GOOGLE_CLIENT_ID: "synthetic-client-id",
+  GOOGLE_CLIENT_SECRET: "synthetic-client-secret",
+};
+
 const builderRequests: { phase: "bundle" | "document"; body: string }[] = [];
 
 let bundleResponse = () =>
@@ -164,7 +170,7 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   expect(contract.appTemplate.parse(await template.json()).installable).toBe(true);
 
-  const response = await install(runtime, "gmail", { name: "mail-reader" });
+  const response = await install(runtime, "gmail", { name: "mail-reader", secrets: googleClient });
 
   expect(response.status).toBe(200);
   const result = contract.templateInstall.parse(await response.json());
@@ -180,6 +186,10 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   });
 
   expect(record).toMatchObject({ templateId: "gmail", templateCommit });
+  // The install saved the template's required secrets before deploying.
+  expect(Object.keys(z.record(z.string(), z.string()).parse(record?.secrets))).toEqual(
+    Object.keys(googleClient),
+  );
 
   // The app starts with the template's description.
   const guide = await readFile(
@@ -289,14 +299,16 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   // An install never replaces an app: a taken name ends it before the build.
   const requests = builderRequests.length;
-  const taken = await install(runtime, "gmail", { name: "mail-reader" });
+  const taken = await install(runtime, "gmail", { name: "mail-reader", secrets: googleClient });
 
   expect(taken.status).toBe(409);
   expect(await taken.text()).toContain("An app named mail-reader already exists");
   expect(builderRequests).toHaveLength(requests);
 
   const renamed = contract.templateInstall.parse(
-    await (await install(runtime, "gmail", { name: "mail-reader-2" })).json(),
+    await (
+      await install(runtime, "gmail", { name: "mail-reader-2", secrets: googleClient })
+    ).json(),
   );
 
   expect(renamed.app.id).not.toBe(result.app.id);
@@ -316,7 +328,7 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   const empty = contract.app.parse(await draft.json());
 
   const resumed = contract.templateInstall.parse(
-    await (await install(runtime, "gmail", { name: "mail-draft" })).json(),
+    await (await install(runtime, "gmail", { name: "mail-draft", secrets: googleClient })).json(),
   );
 
   expect(resumed.app.id).toBe(empty.id);
@@ -345,7 +357,9 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   );
 
   const described = contract.templateInstall.parse(
-    await (await install(runtime, "gmail", { name: "mail-described" })).json(),
+    await (
+      await install(runtime, "gmail", { name: "mail-described", secrets: googleClient })
+    ).json(),
   );
 
   expect(described.app.description).toBe("Reads the team inbox.");
@@ -584,7 +598,7 @@ it("does not install over an app deployed while the template builds", async () =
     // Installing from the page, whose consent must not reach the other app.
     const raced = await runtime.templates.install(
       principal,
-      { templateId: "gmail", name: "mail-race", secrets: {} },
+      { templateId: "gmail", name: "mail-race", secrets: googleClient },
       { consentedNetwork: github },
     );
 
@@ -602,12 +616,19 @@ it("does not install over an app deployed while the template builds", async () =
   // Only the concurrent deployment exists.
   expect(deployments).toHaveLength(1);
 
-  // The other deployment's app is not marked as installed from the template or described by it.
+  // The other deployment's app is not marked as installed from the template or described by
+  // it, and the template's secrets do not reach it.
   const record = await environment.database.db.query.apps.findFirst({
     where: (apps, { eq }) => eq(apps.id, app.id),
   });
 
-  expect(record).toMatchObject({ templateId: null, templateCommit: null, description: null });
+  expect(record).toMatchObject({
+    templateId: null,
+    templateCommit: null,
+    description: null,
+    secrets: {},
+    secretRevision: 0,
+  });
 });
 
 it("saves the secrets a template requires before its first deployment", async () => {
@@ -738,7 +759,10 @@ it("keeps offering a template whose deployment was rejected", async () => {
     Result.err(new InvalidOperation({ code: "BAD_REQUEST", message: "Deployment rejected" })),
   );
 
-  const response = await install(runtime, "gmail", { name: "mail-rejected" });
+  const response = await install(runtime, "gmail", {
+    name: "mail-rejected",
+    secrets: googleClient,
+  });
 
   expect(response.status).toBe(400);
 
