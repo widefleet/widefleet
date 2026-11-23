@@ -530,6 +530,15 @@ export const generateOpenapi = (
         ? schemas[value.schema.$ref.replace("#/components/schemas/", "")]
         : value.schema;
 
+      // A path holds one value.
+      if (
+        value.in === "path" &&
+        (target?.type === "array" || target?.type === "object" || target?.properties)
+      )
+        throw new Error(
+          `${id} has the path parameter ${value.name} with a list or object, which is not supported`,
+        );
+
       // Queries carry values and lists of them; the runtime sends no objects.
       if (value.in === "query" && (target?.type === "object" || target?.properties))
         throw new Error(

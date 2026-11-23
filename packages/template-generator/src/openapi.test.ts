@@ -319,6 +319,15 @@ paths:
       "items.GetContent has the object query parameter filter, which is not supported",
     );
 
+    const listPath = edited(
+      '"/items/{item-id}/content":{"get":{"operationId":"items.GetContent","parameters":[{"name":"item-id","in":"path","required":true,"schema":{"type":"string"}}',
+      '"/items/{item-id}/content":{"get":{"operationId":"items.GetContent","parameters":[{"name":"item-id","in":"path","required":true,"schema":{"type":"array","items":{"type":"string"}}}',
+    );
+
+    expect(() => generateOpenapi(listPath, getContent, service, "")).toThrow(
+      "items.GetContent has the path parameter item-id with a list or object, which is not supported",
+    );
+
     // Unused schemas may share a name.
     const unused = edited(
       '"example.unused":',
