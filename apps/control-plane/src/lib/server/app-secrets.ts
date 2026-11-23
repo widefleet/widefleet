@@ -96,14 +96,10 @@ export const createAppSecrets = (
 
       const deployment = active
         ? (
-            await enqueueDeployment(
-              transaction,
-              updated,
-              active.artifactId,
-              requestId,
-              false,
-              Boolean(execution),
-            )
+            await enqueueDeployment(transaction, updated, active.artifactId, requestId, {
+              hosted: Boolean(execution),
+              secretChange: true,
+            })
           ).unwrap()
         : null;
 
