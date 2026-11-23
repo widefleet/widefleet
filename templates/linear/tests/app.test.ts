@@ -271,6 +271,14 @@ describe("Linear personal account app", () => {
     expect((await save("none", "https://other.example.test")).status).toBe(403);
     expect((await save("sometimes")).status).toBe(400);
     expect(await (await save("none")).json()).toEqual({ level: "none" });
+    // The page reads the stored level again when a save fails.
+    expect(
+      await (
+        await runtime.dispatchFetch(`${origin}/approval-level`, {
+          headers: { "test-subject": "alice" },
+        })
+      ).json(),
+    ).toEqual({ level: "none" });
     expect(await (await alice.request("/rpc/level")).json()).toMatchObject({ level: "none" });
     expect(await (await alice.request("/")).text()).toContain('value="none" checked');
   });
