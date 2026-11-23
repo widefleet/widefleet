@@ -21,11 +21,18 @@ export const propertyName = (name: string) =>
  * Names the generated api.ts imports. The template's own `Environment` is
  * imported as `TemplateEnvironment`, since APIs have types of that name.
  */
-export const importedNames = (service: { result: string; properties: string }) => [
+export const importedNames = (service: {
+  className: string;
+  result: string;
+  properties: string;
+}) => [
   "WorkerEntrypoint",
   "TemplateEnvironment",
+  service.className,
   service.result,
   service.properties,
+  "BinaryContent",
+  "UploadContent",
   "run",
   "Exact",
   "JsonObject",
@@ -38,7 +45,7 @@ export const importedNames = (service: { result: string; properties: string }) =
 /** Stops when a type of the API would shadow a name the generated file imports. */
 export const checkTypeNames = (
   names: readonly string[],
-  service: { result: string; properties: string },
+  service: { className: string; result: string; properties: string },
 ) => {
   const imported = new Set(importedNames(service));
   const clashes = names.filter((name) => imported.has(name));

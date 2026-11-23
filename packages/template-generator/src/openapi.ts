@@ -218,7 +218,6 @@ export const generateOpenapi = (
   // Type names leave out the prefix the API gives every schema and join the
   // remaining parts: `microsoft.graph.driveItem` is `DriveItem`.
   const typeNames = new Map<string, string>();
-  const takenTypes = new Map<string, string>();
 
   for (const key of Object.keys(schemas)) {
     const stripped =
@@ -233,13 +232,12 @@ export const generateOpenapi = (
         .join(""),
     );
 
-    const other = takenTypes.get(name);
-
-    if (other) throw new Error(`Schemas ${other} and ${key} both become type ${name}`);
-    takenTypes.set(name, key);
     typeNames.set(key, name);
   }
 
+  // The schemas the offered methods reach, by type name. Only these must have
+  // distinct names, so unrelated parts of a large API cannot block generation.
+  const takenTypes = new Map<string, string>();
   const referenced = new Set<string>();
   const pending: string[] = [];
 
@@ -250,6 +248,10 @@ export const generateOpenapi = (
     if (!name) throw new Error(`${ref} is not described`);
 
     if (!referenced.has(key)) {
+      const other = takenTypes.get(name);
+
+      if (other) throw new Error(`Schemas ${other} and ${key} both become type ${name}`);
+      takenTypes.set(name, key);
       referenced.add(key);
       pending.push(key);
     }
@@ -446,7 +448,8 @@ export const generateOpenapi = (
       ? resolve(entry.requestBody, "requestBodies", requestBody)
       : null;
 
-    const jsonBody = body?.content?.["application/json"]?.schema;
+    // JSON is chosen by its media type; a JSON entry without a schema takes any JSON.
+    const jsonBody = body?.content?.["application/json"];
     const bodyKind = !body ? null : jsonBody ? "json" : "text";
 
     const success = Object.entries(entry.responses ?? {})
@@ -455,7 +458,7 @@ export const generateOpenapi = (
       )
       .find((value) => value.content);
 
-    const jsonResponse = success?.content?.["application/json"]?.schema;
+    const jsonResponse = success?.content?.["application/json"];
     const responseKind = !success ? null : jsonResponse ? "json" : "binary";
 
     // Pages are read again with GET; Graph also marks some actions pageable.
@@ -484,8 +487,29 @@ export const generateOpenapi = (
       change,
     };
 
+    const inputs = [
+      ...parameters.map((value) => inputName(value.name)),
+      ...(bodyKind ? ["body"] : []),
+      ...(bodyKind === "text" ? ["contentType"] : []),
+      ...(pageable ? ["nextLink"] : []),
+    ];
+
+    const repeated = inputs.find((name, index) => inputs.indexOf(name) !== index);
+
+    if (repeated) throw new Error(`${id} has two inputs named ${repeated}`);
+
     const fields = parameters.map((value) => {
       const declaredType = value.schema ?? { type: "string" };
+
+      const target = value.schema?.$ref
+        ? schemas[value.schema.$ref.replace("#/components/schemas/", "")]
+        : value.schema;
+
+      // Queries carry values and lists of them; the runtime sends no objects.
+      if (value.in === "query" && (target?.type === "object" || target?.properties))
+        throw new Error(
+          `${id} has the object query parameter ${value.name}, which is not supported`,
+        );
 
       // A path needs a value: path parameters are never null.
       const type = typeOf(
@@ -498,7 +522,7 @@ export const generateOpenapi = (
 
     if (bodyKind)
       fields.push(
-        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${jsonBody ? typeOf(jsonBody, "    ") : "string"};`,
+        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${jsonBody ? (jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue") : "string"};`,
       );
 
     if (bodyKind === "text")
@@ -506,15 +530,12 @@ export const generateOpenapi = (
         `    /** The body's media type, \`application/octet-stream\` unless given. */\n    contentType?: string;`,
       );
 
-    if (pageable)
-      fields.push(
-        `    /**\n     * The \`@odata.nextLink\` of an earlier answer, or its \`@odata.deltaLink\`. The\n     * method then reads that address and ignores the other arguments.\n     */\n    nextLink?: string;`,
-      );
-
     const result = !responseKind
       ? "null"
       : jsonResponse
-        ? typeOf(jsonResponse, "  ")
+        ? jsonResponse.schema
+          ? typeOf(jsonResponse.schema, "  ")
+          : "JsonValue"
         : "BinaryContent";
 
     if (responseKind === "binary") usesBinary = true;
@@ -522,7 +543,12 @@ export const generateOpenapi = (
     const required =
       parameters.some((value) => value.in === "path" || value.required) || body?.required === true;
 
-    const input = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
+    const firstPage = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
+
+    // A later page needs only its address.
+    const input = pageable
+      ? `${firstPage} | {\n    /**\n     * The \`@odata.nextLink\` of an earlier answer, or its \`@odata.deltaLink\`.\n     */\n    nextLink: string;\n  }`
+      : firstPage;
 
     const approval =
       change === null

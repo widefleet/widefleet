@@ -187,11 +187,7 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
 
     if (path === "/rpc/next")
       return Response.json(
-        await app.listChildren({
-          driveId: "drive-1",
-          driveItemId: "root",
-          nextLink: url.searchParams.get("link") ?? "",
-        }),
+        await app.listChildren({ nextLink: url.searchParams.get("link") ?? "" }),
       );
 
     if (path === "/rpc/invalid")

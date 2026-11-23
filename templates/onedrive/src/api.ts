@@ -1293,45 +1293,47 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    * Retrieve the list of Drive resources available for a target User, Group, or Site.
    */
   async listDrives(
-    input: {
-      /**
-       * Show only the first n items
-       */
-      $top?: number;
-      /**
-       * Skip the first n items
-       */
-      $skip?: number;
-      /**
-       * Search items by search phrases
-       */
-      $search?: string;
-      /**
-       * Filter items by property values
-       */
-      $filter?: string;
-      /**
-       * Include count of items
-       */
-      $count?: boolean;
-      /**
-       * Order items by property values
-       */
-      $orderby?: string[];
-      /**
-       * Select properties to be returned
-       */
-      $select?: string[];
-      /**
-       * Expand related entities
-       */
-      $expand?: string[];
-      /**
-       * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-       * method then reads that address and ignores the other arguments.
-       */
-      nextLink?: string;
-    } = {},
+    input:
+      | {
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        } = {},
   ): Promise<OneDriveResult<DriveCollectionResponse>> {
     return run(this.env, this.ctx.props, "listDrives", input);
   }
@@ -1362,49 +1364,53 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    * List a set of items recently used by the signed-in user.
    * This collection includes items that are in the user's drive and items they have access to from other drives.
    */
-  async recentItems(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<
+  async recentItems(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<
     OneDriveResult<
       BaseCollectionPaginationCountResponse & {
         value?: DriveItem[];
@@ -1420,53 +1426,57 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    * Search the hierarchy of items for items matching a query.
    * You can search within a folder hierarchy, a whole drive, or files shared with the current user.
    */
-  async search(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * Usage: q='{q}'
-     */
-    q: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<
+  async search(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * Usage: q='{q}'
+           */
+          q: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<
     OneDriveResult<
       BaseCollectionPaginationCountResponse & {
         value?: DriveItem[];
@@ -1481,49 +1491,53 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    *
    * Get a list of driveItem objects shared with the owner of a drive. The driveItems returned from the sharedWithMe method always include the remoteItem facet that indicates they are items from a different drive.
    */
-  async sharedWithMe(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<
+  async sharedWithMe(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<
     OneDriveResult<
       BaseCollectionPaginationCountResponse & {
         value?: DriveItem[];
@@ -1538,49 +1552,53 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    *
    * Collection of common folders available in OneDrive. Read-only. Nullable.
    */
-  async listSpecialFolders(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OneDriveResult<DriveItemCollectionResponse>> {
+  async listSpecialFolders(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OneDriveResult<DriveItemCollectionResponse>> {
     return run(this.env, this.ctx.props, "listSpecialFolders", input);
   }
 
@@ -1615,49 +1633,53 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    *
    * The list of items the user is following. Only in OneDrive for Business.
    */
-  async listFollowing(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OneDriveResult<DriveItemCollectionResponse>> {
+  async listFollowing(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OneDriveResult<DriveItemCollectionResponse>> {
     return run(this.env, this.ctx.props, "listFollowing", input);
   }
 
@@ -1714,53 +1736,57 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    *
    * Return a collection of DriveItems in the children relationship of a DriveItem. DriveItems with a non-null folder or package facet can have one or more child DriveItems.
    */
-  async listChildren(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * The unique identifier of driveItem
-     */
-    driveItemId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OneDriveResult<DriveItemCollectionResponse>> {
+  async listChildren(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * The unique identifier of driveItem
+           */
+          driveItemId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OneDriveResult<DriveItemCollectionResponse>> {
     return run(this.env, this.ctx.props, "listChildren", input);
   }
 
@@ -1770,57 +1796,61 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    * Search the hierarchy of items for items matching a query.
    * You can search within a folder hierarchy, a whole drive, or files shared with the current user.
    */
-  async searchFolder(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * The unique identifier of driveItem
-     */
-    driveItemId: string;
-    /**
-     * Usage: q='{q}'
-     */
-    q: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<
+  async searchFolder(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * The unique identifier of driveItem
+           */
+          driveItemId: string;
+          /**
+           * Usage: q='{q}'
+           */
+          q: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<
     OneDriveResult<
       BaseCollectionPaginationCountResponse & {
         value?: DriveItem[];
@@ -1839,53 +1869,57 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    * To check for changes in the future, call delta again with the @odata.deltaLink from the previous response. Deleted items are returned with the deleted facet.
    * Items with this property set should be removed from your local state.
    */
-  async delta(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * The unique identifier of driveItem
-     */
-    driveItemId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<
+  async delta(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * The unique identifier of driveItem
+           */
+          driveItemId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<
     OneDriveResult<
       BaseDeltaFunctionResponse & {
         value?: DriveItem[];
@@ -2106,53 +2140,57 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    *
    * Collection of thumbnailSet objects associated with the item. For more information, see getting thumbnails. Read-only. Nullable.
    */
-  async listThumbnails(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * The unique identifier of driveItem
-     */
-    driveItemId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OneDriveResult<ThumbnailSetCollectionResponse>> {
+  async listThumbnails(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * The unique identifier of driveItem
+           */
+          driveItemId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OneDriveResult<ThumbnailSetCollectionResponse>> {
     return run(this.env, this.ctx.props, "listThumbnails", input);
   }
 
@@ -2186,53 +2224,57 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    *
    * The list of previous versions of the item. For more info, see getting previous versions. Read-only. Nullable.
    */
-  async listVersions(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * The unique identifier of driveItem
-     */
-    driveItemId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OneDriveResult<DriveItemVersionCollectionResponse>> {
+  async listVersions(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * The unique identifier of driveItem
+           */
+          driveItemId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OneDriveResult<DriveItemVersionCollectionResponse>> {
     return run(this.env, this.ctx.props, "listVersions", input);
   }
 
@@ -2384,53 +2426,57 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
    *
    * The set of permissions for the item. Read-only. Nullable.
    */
-  async listPermissions(input: {
-    /**
-     * The unique identifier of drive
-     */
-    driveId: string;
-    /**
-     * The unique identifier of driveItem
-     */
-    driveItemId: string;
-    /**
-     * Show only the first n items
-     */
-    $top?: number;
-    /**
-     * Skip the first n items
-     */
-    $skip?: number;
-    /**
-     * Search items by search phrases
-     */
-    $search?: string;
-    /**
-     * Filter items by property values
-     */
-    $filter?: string;
-    /**
-     * Include count of items
-     */
-    $count?: boolean;
-    /**
-     * Order items by property values
-     */
-    $orderby?: string[];
-    /**
-     * Select properties to be returned
-     */
-    $select?: string[];
-    /**
-     * Expand related entities
-     */
-    $expand?: string[];
-    /**
-     * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`. The
-     * method then reads that address and ignores the other arguments.
-     */
-    nextLink?: string;
-  }): Promise<OneDriveResult<PermissionCollectionResponse>> {
+  async listPermissions(
+    input:
+      | {
+          /**
+           * The unique identifier of drive
+           */
+          driveId: string;
+          /**
+           * The unique identifier of driveItem
+           */
+          driveItemId: string;
+          /**
+           * Show only the first n items
+           */
+          $top?: number;
+          /**
+           * Skip the first n items
+           */
+          $skip?: number;
+          /**
+           * Search items by search phrases
+           */
+          $search?: string;
+          /**
+           * Filter items by property values
+           */
+          $filter?: string;
+          /**
+           * Include count of items
+           */
+          $count?: boolean;
+          /**
+           * Order items by property values
+           */
+          $orderby?: string[];
+          /**
+           * Select properties to be returned
+           */
+          $select?: string[];
+          /**
+           * Expand related entities
+           */
+          $expand?: string[];
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+        },
+  ): Promise<OneDriveResult<PermissionCollectionResponse>> {
     return run(this.env, this.ctx.props, "listPermissions", input);
   }
 

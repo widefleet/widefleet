@@ -155,6 +155,15 @@ const rules = {
   },
 } as const;
 
+// The description with one part of its JSON text replaced.
+const edited = (from: string, to: string) => {
+  const text = JSON.stringify(api);
+
+  if (!text.includes(from)) throw new Error(`The description has no ${from}`);
+
+  return text.replace(from, to);
+};
+
 describe("OpenAPI template generator", () => {
   it("writes the offered operations with the types they reach", () => {
     const { files, summary } = generateOpenapi(JSON.stringify(api), rules, service, "");
@@ -185,7 +194,10 @@ describe("OpenAPI template generator", () => {
     expect(generated).toContain("export type Parent = {");
     expect(generated).toMatch(/export type Parent = \{\n  id\?: string;\n\} \| null;/);
     expect(generated).toContain("$top?: number;");
-    expect(generated).toContain("nextLink?: string;");
+    // A later page needs only its address.
+    expect(generated).toMatch(
+      /\} \| \{\n(?:.*\n)*?\s+nextLink: string;\n  \}\): Promise<ExampleResult<Page/,
+    );
     expect(generated).not.toContain("ConsistencyLevel");
     expect(generated).toContain("async listItems(input: {");
     expect(generated).toContain("Promise<ExampleResult<Page & {");
@@ -247,6 +259,72 @@ paths:
         "The rules list gone.Get, which the API no longer offers",
         "items.GetContent becomes method fetch, which is taken",
       ].join("\n"),
+    );
+  });
+
+  it("takes any JSON where a JSON body or result has no schema", () => {
+    const item = '{"schema":{"$ref":"#/components/schemas/example.item"}}';
+
+    const loose = edited(
+      `"requestBody":{"required":true,"content":{"application/json":${item}}},"responses":{"201":{"content":{"application/json":${item}}}}`,
+      '"requestBody":{"required":true,"content":{"application/json":{}}},"responses":{"201":{"content":{"application/json":{}}}}',
+    );
+
+    const { files } = generateOpenapi(
+      loose,
+      { operations: { "folders.CreateItem": { name: "createItem", change: "create" } } },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain("body: JsonValue;");
+    expect(files["src/api.ts"]).toContain("Promise<ExampleResult<JsonValue>>");
+    expect(files["src/schema.ts"]).toContain('"body":"json","bodyRequired":true,"response":"json"');
+  });
+
+  it("stops on clashing inputs and object queries, but not on unused schema names", () => {
+    const contentParameters = '"operationId":"items.GetContent","parameters":[';
+    const getContent = { operations: { "items.GetContent": { name: "getContent" } } };
+
+    const clashing = edited(
+      contentParameters,
+      `${contentParameters}{"name":"itemId","in":"query","schema":{"type":"string"}},`,
+    );
+
+    expect(() => generateOpenapi(clashing, getContent, service, "")).toThrow(
+      "items.GetContent has two inputs named itemId",
+    );
+
+    const objectQuery = edited(
+      contentParameters,
+      `${contentParameters}{"name":"filter","in":"query","schema":{"type":"object","properties":{"owner":{"type":"string"}}}},`,
+    );
+
+    expect(() => generateOpenapi(objectQuery, getContent, service, "")).toThrow(
+      "items.GetContent has the object query parameter filter, which is not supported",
+    );
+
+    // Unused schemas may share a name.
+    const unused = edited(
+      '"example.unused":',
+      '"example.user":{"type":"object"},"example.User":{"type":"object"},"example.unused":',
+    );
+
+    expect(generateOpenapi(unused, rules, service, "").summary).toBe(
+      "4 methods of 5 operations, 5 types",
+    );
+
+    // Generated names stay free for the imports.
+    const shadowing = edited(
+      '"example.unused":',
+      '"example.BinaryContent":{"type":"object"},"example.unused":',
+    ).replace(
+      '"parent":{"anyOf":[{"$ref":"#/components/schemas/example.parent"},{"type":"object","nullable":true}]}',
+      '"parent":{"$ref":"#/components/schemas/example.BinaryContent"}',
+    );
+
+    expect(() => generateOpenapi(shadowing, rules, service, "")).toThrow(
+      "The API's types BinaryContent have the names of imports of the generated file",
     );
   });
 });
