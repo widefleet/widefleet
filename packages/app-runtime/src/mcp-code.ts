@@ -4,13 +4,21 @@ import { mcpServiceCall } from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 import { callMcpService } from "./mcp-services.ts";
+import { mcpPayloadLimit, mcpResultLimits } from "./mcp-media.ts";
 
-export const mcpJson = z.json().transform((result) => {
-  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 1024 * 1024)
-    throw new Error("MCP result exceeds 1 MiB; request a smaller page");
+const within = (limit: number, message: string) =>
+  z.json().transform((value) => {
+    if (new TextEncoder().encode(JSON.stringify(value)).byteLength > limit)
+      throw new Error(message);
 
-  return result;
-});
+    return value;
+  });
+
+const serviceInput = within(mcpResultLimits.json, "Service input exceeds 1 MiB");
+
+// A service result may carry media the program returns as blocks; the final result is checked
+// once they are lifted out.
+const serviceResult = within(mcpPayloadLimit, "Service result exceeds 6 MiB; request less data");
 
 export const executeMcpCode = async (
   environment: ParentEnvironment,
@@ -27,18 +35,18 @@ export const executeMcpCode = async (
         output: Schema.Unknown,
         execute: (input) =>
           Effect.tryPromise(async () =>
-            mcpJson.parse(
+            serviceResult.parse(
               (await callMcpService(
                 environment,
                 context,
                 token,
-                mcpServiceCall.parse(mcpJson.parse(input)),
+                mcpServiceCall.parse(serviceInput.parse(input)),
               )) ?? null,
             ),
           ),
       }),
     },
-    limits: { timeoutMs: 30_000, maxToolCalls: 32, maxOutputBytes: 1024 * 1024 },
+    limits: { timeoutMs: 30_000, maxToolCalls: 32, maxOutputBytes: mcpPayloadLimit },
   });
 
   const result = await Effect.runPromise(runtime.execute(code), { signal });
@@ -48,7 +56,7 @@ export const executeMcpCode = async (
       `${result.error.kind}: ${result.error.message}. Completed calls are not rolled back.`,
     );
 
-  if (result.truncated) throw new Error("MCP result exceeds 1 MiB; request a smaller page");
+  if (result.truncated) throw new Error("MCP result exceeds 6 MiB; return less data");
 
-  return mcpJson.parse(result.value);
+  return z.json().parse(result.value);
 };

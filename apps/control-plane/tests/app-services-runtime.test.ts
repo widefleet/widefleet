@@ -587,7 +587,7 @@ export default { async fetch(request, env, ctx) {
           .object({
             result: z.object({
               isError: z.boolean().optional(),
-              content: z.array(z.object({ text: z.string() })),
+              content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
             }),
           })
           .parse(await send("tools/call", { name, arguments: args }, bearer)).result;
@@ -916,7 +916,9 @@ export default { async fetch(request, env, ctx) {
 
       const relayedState = z
         .string()
-        .parse(JSON.parse(relayed.content[0]?.text.match(/requestState ("[^"]+")/)?.[1] ?? "null"));
+        .parse(
+          JSON.parse(relayed.content[0]?.text?.match(/requestState ("[^"]+")/)?.[1] ?? "null"),
+        );
 
       const apps = {
         extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } },
@@ -1005,6 +1007,25 @@ export default { async fetch(request, env, ctx) {
       expect(JSON.parse(executed.content[0]?.text ?? "null")).toEqual({
         version: "v1",
         credentials: "undefined",
+      });
+
+      // Media in a result reaches the client as MCP blocks, past the 1 MiB JSON limit.
+      const picture = await rpc("execute", {
+        code: `const first = await tools.call(${JSON.stringify(service)}); return {version:first.version, image:{type:"image", mimeType:"image/png", data:"A".repeat(2 * 1024 * 1024)}};`,
+      });
+
+      expect(picture.isError, picture.content[0]?.text).not.toBe(true);
+      expect(picture.content[0]).toEqual({
+        type: "text",
+        text: JSON.stringify({
+          version: "v1",
+          image: { type: "image", mimeType: "image/png", contentIndex: 1 },
+        }),
+      });
+      expect(picture.content[1]).toEqual({
+        type: "image",
+        mimeType: "image/png",
+        data: "A".repeat(2 * 1024 * 1024),
       });
 
       const outbound = await rpc("execute", {

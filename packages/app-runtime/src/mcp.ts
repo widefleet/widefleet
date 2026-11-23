@@ -33,13 +33,12 @@ import {
   searchMcpMethods,
 } from "./mcp-services.ts";
 import { inputFormMeta, inputFormUri } from "./mcp-input-form.ts";
-import { executeMcpCode, mcpJson } from "./mcp-code.ts";
+import { executeMcpCode } from "./mcp-code.ts";
+import { mcpResult } from "./mcp-media.ts";
 import { createMcpCliLogin } from "./mcp-cli-login.ts";
 import { mcpInstructions, mcpSkillCatalog } from "./mcp-skills.ts";
 
-const resultSchema = mcpJson.transform((value) => ({
-  content: [{ type: "text" as const, text: JSON.stringify(value) }],
-}));
+const resultSchema = z.json().transform(mcpResult);
 
 const result = resultSchema.parse.bind(resultSchema);
 
@@ -338,7 +337,7 @@ export const mcpRequest = async (
         "execute",
         {
           description:
-            "Run a supported JavaScript subset in a confined interpreter. Use await tools.call({hostname,entrypoint,method,arguments}) and return JSON. No network or credentials. Limits: 32 calls, 30 seconds elapsed, 1 MiB result. Completed calls survive errors; never replay blindly.",
+            "Run a supported JavaScript subset in a confined interpreter. Use await tools.call({hostname,entrypoint,method,arguments}) and return JSON. To show an image or hand over a file, return it as an MCP block anywhere in the result, with base64 data: {type:'image',mimeType,data} or {type:'resource',resource:{uri,mimeType,blob}}; return text files as text. No network or credentials. Limits: 32 calls, 30 seconds elapsed, 1 MiB JSON plus 5 MiB media. Completed calls survive errors; never replay blindly.",
           inputSchema: { code: z.string().min(1).max(32768) },
         },
         async ({ code }) =>
