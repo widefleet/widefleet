@@ -375,6 +375,24 @@ paths:
     );
 
     expect(files["src/api.ts"]).toContain("children?: (Item | Parent)[];");
+
+    // A kept navigation field must also fit the type of the other keys.
+    const open = edited(
+      '"properties":{"name":{"type":"string"',
+      '"additionalProperties":{"type":"string"},"properties":{"name":{"type":"string"',
+    );
+
+    const typed = generateOpenapi(
+      open,
+      {
+        ...rules,
+        navigation: { "example.item": { children: ["example.item", "example.parent"] } },
+      },
+      service,
+      "",
+    ).files["src/api.ts"];
+
+    expect(typed).toContain("} | Parent | (Item | Parent)[];");
   });
 
   it("takes any JSON where a JSON body or result has no schema", () => {

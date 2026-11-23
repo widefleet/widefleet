@@ -412,7 +412,8 @@ export const generateOpenapi = (
     const required = new Set(value.required?.filter((name) => !name.startsWith("@")));
     const kept = owner === undefined ? {} : (navigation[owner] ?? {});
 
-    const fields = Object.entries(value.properties ?? {})
+    // Navigation fields appear only when a rule keeps them, typed as it says.
+    const typed = Object.entries(value.properties ?? {})
       .filter(
         ([name, field]) =>
           !field.deprecated && (!field["x-ms-navigationProperty"] || Object.hasOwn(kept, name)),
@@ -426,8 +427,13 @@ export const generateOpenapi = (
             : schemaUnion(values)
           : typeOf(field, `${indent}  `);
 
-        return `${comment(describe(field), `${indent}  `)}${indent}  ${propertyName(name)}${required.has(name) ? "" : "?"}: ${type};`;
+        return { name, field, type };
       });
+
+    const fields = typed.map(
+      ({ name, field, type }) =>
+        `${comment(describe(field), `${indent}  `)}${indent}  ${propertyName(name)}${required.has(name) ? "" : "?"}: ${type};`,
+    );
 
     // Every named field must also fit the type of the other keys.
     if (value.additionalProperties) {
@@ -436,9 +442,7 @@ export const generateOpenapi = (
           ? "JsonValue"
           : typeOf(value.additionalProperties, `${indent}  `);
 
-      const named = Object.values(value.properties ?? {}).flatMap((field) =>
-        field.deprecated || field["x-ms-navigationProperty"] ? [] : [typeOf(field, `${indent}  `)],
-      );
+      const named = typed.map(({ type }) => type);
 
       const keys =
         others === "JsonValue"
