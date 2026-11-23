@@ -7,6 +7,7 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import AppDescription from "#shadcn/components/AppDescription.svelte";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { onMount } from "svelte";
@@ -152,7 +153,6 @@
       ><AppStatus state={data.app.state} />
     </div>
     <h1 class="text-2xl font-semibold tracking-tight wrap-anywhere">{data.app.displayName}</h1>
-    <p class="text-muted-foreground mt-2 text-sm wrap-anywhere">{data.app.hostname}</p>
   </div>
   <div class="flex items-center gap-2">
     <Button
@@ -170,6 +170,13 @@
       >{/if}
   </div>
 </div>
+<!-- Below the heading row, so editing the description does not move the actions beside it. -->
+{#if !data.app.parentId}<AppDescription
+    appId={data.app.id}
+    description={data.app.description}
+    search={route.search}
+  />{/if}
+<p class="text-muted-foreground mt-2 text-sm wrap-anywhere">{data.app.hostname}</p>
 <nav class="mt-7 mb-8 flex gap-5 overflow-x-auto border-b sm:gap-7" aria-label="App sections">
   {#each tabs as tab (tab.id)}<a
       href={workspace.path(`/apps/${data.app.id}${tab.id === "overview" ? "" : `/${tab.id}`}`)}

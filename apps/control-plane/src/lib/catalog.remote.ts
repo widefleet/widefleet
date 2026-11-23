@@ -57,19 +57,10 @@ export const setAppDescription = form(
     search: z.string().trim().max(200).default(""),
   }),
   async ({ appId, description, search, organizationId }) => {
-    const { runtime, principal, organization } = await remoteContext({ organizationId });
+    const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.apps.setDescription(principal, appId, description));
     await getAppDetails({ appId, search, organizationId }).refresh();
     await getCatalog({ organizationId }).refresh();
-
-    if (!getRequestEvent().isRemoteRequest)
-      redirect(
-        303,
-        workspacePath(
-          organization.slug,
-          `/apps/${appId}/settings?${new URLSearchParams({ q: search })}#description`,
-        ),
-      );
 
     return { saved: true };
   },

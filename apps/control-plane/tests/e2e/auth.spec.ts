@@ -2367,12 +2367,23 @@ test.describe(`app catalog`, () => {
         page.getByRole("button", { name: "Remove from catalog", exact: true }),
       ).toBeVisible();
 
-      // The description the owner saves appears with the app on Home.
-      await page
-        .getByRole("textbox", { name: "Description", exact: true })
-        .fill("Counts the stock.");
-      await page.getByRole("button", { name: "Save description", exact: true }).click();
-      await expect(page.getByText("Description saved.", { exact: true })).toBeVisible();
+      // The owner writes the description under the app's name; it appears with the app on Home.
+      const describe = page.getByRole("button", { name: "Edit description" });
+      await describe.click();
+      const field = page.getByRole("textbox", { name: "Description", exact: true });
+      await expect(field).toBeFocused();
+      // Save and Discard appear once the text changes, and Discard returns to the saved text.
+      const save = page.getByRole("button", { name: "Save description", exact: true });
+      await expect(save).toHaveCount(0);
+      await field.fill("A draft");
+      await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+      await expect(describe).toBeFocused();
+      await expect(describe).toContainText("Add a description");
+      await page.keyboard.press("Enter");
+      await field.fill("Counts the stock.");
+      await save.click();
+      await expect(describe).toContainText("Counts the stock.");
+      await expect(describe).toBeFocused();
       await readerPage.reload();
       await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveAttribute(
         "href",
