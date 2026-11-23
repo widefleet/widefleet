@@ -155,4 +155,5 @@ export const workerMetadata = (
     crons: configuration.triggers.crons,
     queue_consumers: configuration.queues.consumers,
     network: declaration.network,
+    connector: declaration.connector,
   });

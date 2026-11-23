@@ -531,11 +531,13 @@ async fn publish(
                 class_name: workflow.class_name,
             }),
     );
+    let declared = declaration(project)?;
     let metadata = WorkerMetadata {
         web: Some(web),
         entrypoints,
         source: saved,
-        network: declaration(project)?.network,
+        network: declared.network,
+        connector: declared.connector,
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         worker: worker_metadata,
@@ -579,6 +581,7 @@ struct Declaration {
     #[serde(rename = "$schema")]
     _schema: Option<String>,
     network: Option<platform_core::model::NetworkDeclaration>,
+    connector: Option<platform_core::model::ConnectorKind>,
 }
 
 // widefleet.jsonc beside wrangler.jsonc declares what the app needs from
@@ -589,6 +592,7 @@ fn declaration(project: &Path) -> Result<Declaration> {
         return Ok(Declaration {
             _schema: None,
             network: None,
+            connector: None,
         });
     }
     jsonc_parser::parse_to_serde_value(
@@ -885,14 +889,18 @@ mod tests {
         assert!(declaration(root)?.network.is_none());
         std::fs::write(
             root.join("widefleet.jsonc"),
-            "{\n  // Requested origins\n  \"network\": { \"backend\": [\"https://api.example.test\"], },\n}\n",
+            "{\n  // Requested origins\n  \"network\": { \"backend\": [\"https://api.example.test\"], },\n  \"connector\": \"shared\",\n}\n",
         )?;
-        let network = declaration(root)?
+        let declared = declaration(root)?;
+        assert_eq!(declared.connector, Some(platform_core::model::ConnectorKind::Shared));
+        let network = declared
             .network
             .ok_or_else(|| Error::invalid("Missing network declaration".into()))?;
         assert_eq!(network.backend, ["https://api.example.test"]);
         assert!(network.browser.is_empty());
         std::fs::write(root.join("widefleet.jsonc"), r#"{"networks":{}}"#)?;
+        assert!(declaration(root).is_err());
+        std::fs::write(root.join("widefleet.jsonc"), r#"{"connector":"both"}"#)?;
         assert!(declaration(root).is_err());
         Ok(())
     }

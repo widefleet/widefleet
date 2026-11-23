@@ -5,6 +5,8 @@ import {
   appSecretValue,
   appSecretPreparation,
   capabilityGrant,
+  connectorOf,
+  executionWorkerMetadata,
   runtimeVersion,
   workerMetadata,
 } from "./index.ts";
@@ -118,6 +120,33 @@ describe("deployment contracts", () => {
       }).success,
     ).toBe(false);
   });
+
+  it.each([
+    { connector: undefined, entrypoints: ["Reader"], kind: null },
+    // Deployments from before the declaration existed.
+    { connector: undefined, entrypoints: ["UserConnection"], kind: "personal" },
+    { connector: "personal", entrypoints: ["UserConnection"], kind: "personal" },
+    { connector: "shared", entrypoints: ["Reader"], kind: "shared" },
+    { connector: "personal", entrypoints: ["Reader"], kind: "rejected" },
+    { connector: "shared", entrypoints: ["UserConnection"], kind: "rejected" },
+  ])(
+    "reads $connector with $entrypoints as connector $kind",
+    ({ connector, entrypoints, kind }) => {
+      const parsed = workerMetadata.safeParse({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        connector,
+        entrypoints,
+        assets: { upload_session: "93d8fffd-d0ed-48cf-8fb7-570219c62a70" },
+      });
+
+      expect(parsed.success ? connectorOf(parsed.data) : "rejected").toBe(kind);
+
+      // Runtimes reject metadata fields they do not know.
+      if (parsed.success)
+        expect(executionWorkerMetadata(parsed.data)).not.toHaveProperty("connector");
+    },
+  );
 
   it("rejects undeclared binding types", () => {
     expect(

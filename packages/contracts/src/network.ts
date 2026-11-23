@@ -28,10 +28,17 @@ export const networkDeclaration = z.strictObject({
   browser: origins.default([]),
 });
 
+/**
+ * How a connector, an app that connects an external system, signs in there: each
+ * person with their own account, or everyone with credentials the app holds.
+ */
+export const connectorKind = z.enum(["personal", "shared"]);
+
 /** widefleet.jsonc: what an app needs from Widefleet beyond its Wrangler configuration. */
 export const appDeclaration = z.strictObject({
   $schema: z.string().optional(),
   network: networkDeclaration.optional(),
+  connector: connectorKind.optional(),
 });
 
 export const emptyNetworkPolicy = () => networkPolicy.parse({ backend: [], browser: [] });

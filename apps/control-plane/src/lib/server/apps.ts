@@ -156,6 +156,7 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     displayName: record.displayName,
     catalogListed: record.catalogListed,
     web: record.webEnabled,
+    connector: record.connector,
     parentId: record.parentId,
     organizationId: record.organizationId,
     hostname: record.hostname,

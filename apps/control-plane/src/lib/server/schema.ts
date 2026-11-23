@@ -92,6 +92,8 @@ export const apps = pgTable(
     templateId: text("template_id"),
     templateCommit: text("template_commit"),
     webEnabled: boolean("web_enabled").notNull().default(true),
+    // Whether the active deployment is a connector; see connectorOf.
+    connector: text({ enum: ["personal", "shared"] }),
     secrets: jsonb().notNull().default({}),
     secretRevision: integer("secret_revision").notNull().default(0),
     appliedSecretRevision: integer("applied_secret_revision"),

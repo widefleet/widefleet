@@ -472,6 +472,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 appliedSecretRevision: published.secretRevision ?? 0,
                 state: "active",
                 webEnabled: metadata.web !== false,
+                connector: contract.connectorOf(metadata),
                 appliedNetworkRevision: network.revision,
                 networkError: null,
                 appliedAccessRevision: access.revision,

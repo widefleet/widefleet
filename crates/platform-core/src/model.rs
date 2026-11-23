@@ -10,6 +10,9 @@ pub struct App {
     pub display_name: String,
     #[serde(default)]
     pub catalog_listed: bool,
+    /// Set when the app's active deployment is a connector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<ConnectorKind>,
     pub parent_id: Option<Uuid>,
     pub organization_id: String,
     pub hostname: String,
@@ -170,6 +173,9 @@ pub struct WorkerMetadata {
     /// the app's owner or an administrator grants them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<NetworkDeclaration>,
+    /// What widefleet.jsonc declares the app to be.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<ConnectorKind>,
     #[serde(flatten)]
     pub worker: WorkerConfiguration,
     #[serde(default)]
@@ -269,6 +275,15 @@ pub struct AppAccessSnapshot {
 pub struct NetworkPolicy {
     pub backend: Vec<String>,
     pub browser: Vec<String>,
+}
+
+/// How a connector signs in to the system it connects: each person with their
+/// own account, or everyone with credentials the app holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConnectorKind {
+    Personal,
+    Shared,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

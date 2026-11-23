@@ -549,23 +549,23 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
     expect(await failure(unknown)).toContain("network");
   });
 
-  it("adds the network origins widefleet.jsonc declares, as widefleet deploy does", async () => {
+  it("adds what widefleet.jsonc declares, as widefleet deploy does", async () => {
     const declared = await post("/bundle", {
       files: {
         ...project,
         "widefleet.jsonc": `{
   // Comments and trailing commas, as in wrangler.jsonc.
   "network": { "backend": ["https://api.example.test"], },
+  "connector": "shared",
 }
 `,
       },
     });
 
     expect(declared.status, await declared.clone().text()).toBe(200);
-    expect(bundleResult.parse(await declared.json()).metadata.network).toEqual({
-      backend: ["https://api.example.test"],
-      browser: [],
-    });
+    const metadata = bundleResult.parse(await declared.json()).metadata;
+    expect(metadata.network).toEqual({ backend: ["https://api.example.test"], browser: [] });
+    expect(metadata.connector).toBe("shared");
 
     const invalid = await post("/bundle", {
       files: {

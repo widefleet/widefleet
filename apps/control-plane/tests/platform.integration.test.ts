@@ -648,6 +648,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       entrypoints: [],
       types: [],
     },
+    declared: Pick<z.input<typeof contract.workerMetadata>, "connector"> = {},
   ) => {
     const form = new FormData();
     form.set(
@@ -657,6 +658,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         compatibility_date: "2026-10-01",
         assets: { upload_session: sessionId },
         bindings,
+        ...declared,
       }),
     );
     form.set(
@@ -1019,6 +1021,22 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       ],
     };
 
+    // A personal connector has to offer personal connections.
+    expect(
+      (
+        await publish(
+          app.id,
+          firstSession.id,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { connector: "personal" },
+        )
+      ).status,
+    ).toBe(400);
+
     const first = contract.deployment.parse(
       await (
         await publish(
@@ -1029,6 +1047,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
           undefined,
           undefined,
           extracted,
+          { connector: "shared" },
         )
       ).json(),
     );
@@ -1132,6 +1151,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         )
       ).status,
     ).toBe(200);
+    // Activation records what the deployment declares the app to be.
+    expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json()).connector).toBe(
+      "shared",
+    );
 
     const next = contract.job.parse(
       await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),

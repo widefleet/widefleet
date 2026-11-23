@@ -587,6 +587,7 @@ export const createJobService = (
               .where(eq(deployments.id, lease.deploymentId));
 
             if (!published) throw new Error("Published app artifact is missing");
+            const metadata = contract.workerMetadata.parse(published.metadata);
             await transaction
               .update(organizationRuntimes)
               .set({ appliedRuntime: lease.runtime })
@@ -595,7 +596,8 @@ export const createJobService = (
               .update(apps)
               .set({
                 activeDeploymentId: lease.deploymentId,
-                webEnabled: contract.workerMetadata.parse(published.metadata).web !== false,
+                webEnabled: metadata.web !== false,
+                connector: contract.connectorOf(metadata),
                 state: app.state === "deleting" ? "deleting" : "active",
               })
               .where(eq(apps.id, app.id));
