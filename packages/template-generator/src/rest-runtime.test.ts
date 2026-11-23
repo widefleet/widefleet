@@ -127,9 +127,35 @@ describe("REST requests", () => {
         new Response(null, { status: 302, headers: { location: "https://download.test/f" } }),
       ),
     ).toEqual({ downloadUrl: "https://download.test/f" });
+
+    const content = (body: BodyInit, contentType: string) =>
+      binaryContent(new Response(body, { headers: { "content-type": contentType } }));
+
+    // Text media types arrive as text, in their charset; other content as base64.
+    expect(await content("text", "text/plain")).toEqual({
+      contentType: "text/plain",
+      text: "text",
+    });
+    expect(await content("{}", "application/ld+json")).toEqual({
+      contentType: "application/ld+json",
+      text: "{}",
+    });
     expect(
-      await binaryContent(new Response("text", { headers: { "content-type": "text/plain" } })),
-    ).toEqual({ contentType: "text/plain", base64: btoa("text") });
+      await content(new Uint8Array([0x4b, 0xe4, 0x73, 0x65]), "text/csv; charset=windows-1252"),
+    ).toEqual({ contentType: "text/csv; charset=windows-1252", text: "Käse" });
+    expect(await content("text", "image/png")).toEqual({
+      contentType: "image/png",
+      base64: btoa("text"),
+    });
+    // Bytes that are not text in the named charset, or an unknown charset, stay bytes.
+    expect(await content(new Uint8Array([0xff, 0xfe, 0x00]), "text/plain")).toEqual({
+      contentType: "text/plain",
+      base64: btoa("\xff\xfe\x00"),
+    });
+    expect(await content("text", "text/plain; charset=unknown-charset")).toEqual({
+      contentType: "text/plain; charset=unknown-charset",
+      base64: btoa("text"),
+    });
     // Content larger than one chunk of the encoding stays whole, and results are JSON.
     const bytes = Uint8Array.from({ length: 100_000 }, (_, index) => index % 256);
     const large = await binaryContent(new Response(bytes));
