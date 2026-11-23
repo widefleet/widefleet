@@ -691,6 +691,37 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       },
     );
 
+    it("explains a missing Git installation before building", async () => {
+      sourceTarget.supported = true;
+      const withoutGit = join(state, "path without git");
+      await mkdir(withoutGit, { recursive: true });
+      // Windows names the variable Path; drop every spelling so only the empty directory remains.
+      const environment = Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PATH"),
+      );
+
+      const result = await failure(
+        executeCli(join(state, "installation", executableName), ["deploy", "--no-wait", "--json"], {
+          cwd: join(state, "project with spaces"),
+          timeout: 15_000,
+          env: {
+            ...environment,
+            PATH: withoutGit,
+            PLATFORM_URL: origin,
+            PLATFORM_ACCESS_TOKEN: accessToken,
+            XDG_STATE_HOME: state,
+            CI: undefined,
+          },
+        }),
+      );
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("Could not run Git");
+      expect(result.stderr).toContain("--no-source");
+      expect(result.stderr).not.toContain("I/O failed");
+      expect(result.stderr).not.toContain("Synthetic build output");
+      expect(requests).toEqual(["POST /api/v1/apps/source-target"]);
+    });
+
     it.each([
       { local: "main", target: "main", allow: false, detached: false },
       { local: "feature", target: "main", allow: true, detached: false },
