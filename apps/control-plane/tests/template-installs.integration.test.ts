@@ -639,6 +639,35 @@ it("reports build errors and missing templates", async () => {
   expect(failed.status).toBe(400);
   expect(await failed.text()).toContain("Could not resolve left-pad");
 
+  // A build the upload would reject fails before the app exists, here a
+  // required secret named like the default assets binding.
+  bundleResponse = () =>
+    Response.json(
+      bundleResult.parse({
+        worker,
+        map,
+        entry: "src/app.ts",
+        metadata: {
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          compatibility_flags: [],
+          bindings: [],
+          debug: { build_id: "f".repeat(64), source_maps: { "worker.js": mapName } },
+          web: true,
+          entrypoints: ["default"],
+          crons: [],
+          queue_consumers: [],
+          required_secrets: ["ASSETS"],
+        },
+        warnings: [],
+      }),
+    );
+
+  const undeployable = await install(runtime, "github", { name: "repository-reader" });
+
+  expect(undeployable.status).toBe(400);
+  expect(await undeployable.text()).toContain("The template's build is not deployable");
+
   bundleResponse = () => new Response("Internal error", { status: 500 });
 
   const unavailable = await install(runtime, "github", { name: "repository-reader" });
@@ -648,7 +677,7 @@ it("reports build errors and missing templates", async () => {
   const missing = await install(runtime, "missing");
 
   expect(missing.status).toBe(404);
-  expect(builderRequests).toHaveLength(2);
+  expect(builderRequests).toHaveLength(3);
 
   // A template whose document cannot be read fails before anything is built or created.
   vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
@@ -663,7 +692,7 @@ it("reports build errors and missing templates", async () => {
 
   expect(unreadable.status).toBe(400);
   expect(await unreadable.text()).toContain("no readable description");
-  expect(builderRequests).toHaveLength(2);
+  expect(builderRequests).toHaveLength(3);
 
   // Failed builds create no app, so the name stays free.
   const apps = await environment.database.db.query.apps.findMany({
@@ -675,7 +704,7 @@ it("reports build errors and missing templates", async () => {
   const reserved = await install(runtime, "github", { name: "auth" });
 
   expect(reserved.status).toBe(400);
-  expect(builderRequests).toHaveLength(2);
+  expect(builderRequests).toHaveLength(3);
 });
 
 it("ends a build that exceeds the deadline", async () => {
