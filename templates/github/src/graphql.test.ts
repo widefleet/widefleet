@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { graphqlRequest } from "./graphql.ts";
+import { graphqlRequest, restoreAliases } from "./graphql.ts";
 import { type Arguments, type FieldSelection, InvalidRequest } from "./input.ts";
 
 describe("GitHub GraphQL requests", () => {
@@ -43,18 +43,34 @@ describe("GitHub GraphQL requests", () => {
     expect(
       graphqlRequest("Query", "node", { id: "I_1" }, { id: true, $on: { Issue: { title: true } } })
         .query,
-    ).toBe("query($v0: ID!) { node(id: $v0) { id __typename ... on Issue { title } } }");
+    ).toBe(
+      "query($v0: ID!) { node(id: $v0) { id __typename ... on Issue { title__on__Issue: title } } }",
+    );
     // A union or interface result always carries its concrete type.
     expect(
       graphqlRequest(
         "Query",
         "search",
         { query: "is:open", type: "ISSUE", first: 5 },
-        { nodes: { $on: { PullRequest: { number: true } } } },
+        { nodes: { $on: { Issue: { state: true }, PullRequest: { state: true } } } },
       ).query,
     ).toBe(
-      "query($v0: String!, $v1: SearchType!, $v2: Int) { search(query: $v0, type: $v1, first: $v2) { nodes { __typename ... on PullRequest { number } } } }",
+      // Issue.state and PullRequest.state have different types, so each fragment aliases its fields.
+      "query($v0: String!, $v1: SearchType!, $v2: Int) { search(query: $v0, type: $v1, first: $v2) { nodes { __typename ... on Issue { state__on__Issue: state } ... on PullRequest { state__on__PullRequest: state } } } }",
     );
+    expect(
+      restoreAliases({
+        nodes: [
+          { __typename: "Issue", state__on__Issue: "OPEN" },
+          { __typename: "PullRequest", state__on__PullRequest: "MERGED", author: { login: "a" } },
+        ],
+      }),
+    ).toEqual({
+      nodes: [
+        { __typename: "Issue", state: "OPEN" },
+        { __typename: "PullRequest", state: "MERGED", author: { login: "a" } },
+      ],
+    });
   });
 
   it("rejects requests that do not match GitHub's schema before sending them", () => {

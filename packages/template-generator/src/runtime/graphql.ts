@@ -43,6 +43,25 @@ const own = <T>(record: Record<string, T>, key: string) =>
 
 const fieldsOf = (type: string) => own<Fields>(graph, type);
 
+const aliasSeparator = "__on__";
+
+const aliased = /^(.+)__on__([_A-Za-z][_0-9A-Za-z]*)$/;
+
+/** A result with the names its selection used: `state__on__Issue` is `state` again. */
+export const restoreAliases = (value: JsonValue): JsonValue => {
+  if (Array.isArray(value)) return value.map(restoreAliases);
+  const object = selection.safeParse(value);
+
+  if (!object.success) return value;
+
+  return Object.fromEntries(
+    Object.entries(object.data).map(([key, entry]) => [
+      aliased.exec(key)?.[1] ?? key,
+      restoreAliases(entry),
+    ]),
+  );
+};
+
 export type GraphQLRequest = { query: string; variables: Record<string, JsonValue> };
 
 /**
@@ -82,7 +101,13 @@ export const graphqlRequest = (
     return written.length ? `(${written.join(", ")})` : "";
   };
 
-  const fields = (type: string, chosen: Selection): string => {
+  // Fields inside `... on Variant` take the alias `field__on__Variant`: two
+  // variants may have a field of one name with different types, which GraphQL
+  // only accepts under different names. restoreAliases undoes it in the result.
+  const fields = (type: string, chosen: Selection, variant?: string): string => {
+    const named = (name: string) =>
+      variant ? `${name}${aliasSeparator}${variant}: ${name}` : name;
+
     const known = fieldsOf(type) ?? {};
 
     const written = Object.entries(chosen).flatMap(([name, value]) => {
@@ -104,7 +129,7 @@ export const graphqlRequest = (
             )
               throw new InvalidRequest(`$on of ${type} names no type ${variant}`);
 
-            return `... on ${variant} { ${fields(variant, variantFields)} }`;
+            return `... on ${variant} { ${fields(variant, variantFields, variant)} }`;
           }),
         ];
       }
@@ -115,16 +140,16 @@ export const graphqlRequest = (
 
       // Fields the schema does not know reach the provider, which names them in its error.
       if (target === undefined || !fieldsOf(target)) {
-        if (nested === true) return [name];
+        if (nested === true) return [named(name)];
 
-        return [`${name}${argumentsOf(`${type}.${name}`, types, nested["$args"])}`];
+        return [`${named(name)}${argumentsOf(`${type}.${name}`, types, nested["$args"])}`];
       }
 
       if (nested === true)
         throw new InvalidRequest(`Select fields of ${target} for ${type}.${name}`);
 
       return [
-        `${name}${argumentsOf(`${type}.${name}`, types, nested["$args"])} { ${fields(target, nested)} }`,
+        `${named(name)}${argumentsOf(`${type}.${name}`, types, nested["$args"])} { ${fields(target, nested)} }`,
       ];
     });
 

@@ -44,7 +44,7 @@ describe("Linear GraphQL requests", () => {
         },
       ).query,
     ).toBe(
-      "query($v0: String!) { notification(id: $v0) { id __typename ... on IssueNotification { issue { identifier } } } }",
+      "query($v0: String!) { notification(id: $v0) { id __typename ... on IssueNotification { issue__on__IssueNotification: issue { identifier } } } }",
     );
     // A union or interface result always carries its concrete type.
     expect(graphqlRequest("Query", "notification", { id: "n-1" }, { id: true }).query).toBe(
