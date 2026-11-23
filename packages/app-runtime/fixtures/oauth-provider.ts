@@ -219,6 +219,9 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
 
       if (url.pathname === "/v1.0/me/messages") return Response.json({ value: [] });
 
+      if (url.pathname === "/v1.0/drives/drive-1/items/book-1/workbook/worksheets")
+        return Response.json({ value: [] });
+
       // Linear's GraphQL API: the viewer for the account profile, otherwise issues.
       if (url.href === "https://api.linear.app/graphql") {
         const { query } = z.object({ query: z.string() }).parse(await request.json());

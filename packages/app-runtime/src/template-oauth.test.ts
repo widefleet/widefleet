@@ -72,6 +72,7 @@ for (const [template, kind, prefix] of [
   ["github", "github", "GITHUB"],
   ["onedrive", "microsoft", "MICROSOFT"],
   ["outlook", "microsoft", "MICROSOFT"],
+  ["excel", "microsoft", "MICROSOFT"],
   ["linear", "linear", "LINEAR"],
 ] as const)
   describe(`${template} managed OAuth`, () => {

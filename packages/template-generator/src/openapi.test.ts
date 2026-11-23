@@ -224,7 +224,7 @@ describe("OpenAPI template generator", () => {
 
     expect(files["src/schema.ts"]).toContain('export const base = "https://api.example.test/v1/";');
     expect(files["src/schema.ts"]).toContain(
-      '"listItems":{"httpMethod":"GET","path":"/folders/{folder-id}/items","pathParameters":{"folder-id":"folderId"},"queryParameters":{"$top":["$top",null,false],"$select":["$select",",",false],"view":["view",null,true],"ids":["ids","|",false]},"body":null,"bodyRequired":false,"response":"json","pageable":true,"change":null}',
+      '"listItems":{"httpMethod":"GET","path":"/folders/{folder-id}/items","pathParameters":{"folder-id":"folderId"},"queryParameters":{"$top":["$top",null,false],"$select":["$select",",",false],"view":["view",null,true],"ids":["ids","|",false]},"headerParameters":{},"body":null,"bodyRequired":false,"response":"json","pageable":true,"change":null}',
     );
     expect(files["src/schema.ts"]).toContain('"body":"text","bodyRequired":true,"response":null');
   });
@@ -251,6 +251,111 @@ describe("OpenAPI template generator", () => {
 
     expect(files["src/api.ts"]).toContain("   * Lists items.\n   */\n  async listItems");
     expect(files["src/api.ts"]).not.toContain("List items\n");
+  });
+
+  it("sends the headers the rules add as optional inputs", () => {
+    const session = { sessionId: { name: "session-id", description: "The session to work in." } };
+
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      { operations: { "items.GetContent": { name: "getContent", headers: session } } },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain(
+      "    /**\n     * The session to work in.\n     */\n    sessionId?: string;",
+    );
+    expect(files["src/schema.ts"]).toContain('"headerParameters":{"sessionId":"session-id"}');
+
+    expect(() =>
+      generateOpenapi(
+        JSON.stringify(api),
+        {
+          operations: {
+            "items.GetContent": {
+              name: "getContent",
+              headers: { itemId: { name: "item", description: "The item." } },
+            },
+          },
+        },
+        service,
+        "",
+      ),
+    ).toThrow("items.GetContent has two inputs named itemId");
+  });
+
+  it("adds operations the description leaves out at a described operation's path", () => {
+    const updateItem = {
+      operation: "items.GetContent",
+      method: "patch",
+      change: "update",
+      description: "Updates the item.",
+      body: ["example.item"],
+      result: ["example.item"],
+    } as const;
+
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      {
+        operations: {},
+        undescribed: {
+          updateItem,
+          clearItem: { ...updateItem, method: "post", result: undefined },
+        },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain(
+      "   * Updates the item.\n   *\n   * Asks the user first unless their approval level is `none`.\n   */\n  async updateItem(input: {\n    itemId: string;\n    /**\n     * The request body.\n     */\n    body: Item;\n  }): Promise<ExampleResult<Item>>",
+    );
+    expect(files["src/api.ts"]).toContain("async clearItem(input: {");
+    expect(files["src/api.ts"]).toContain("Promise<ExampleResult<null>>");
+    expect(files["src/schema.ts"]).toContain(
+      '"updateItem":{"httpMethod":"PATCH","path":"/items/{item-id}/content","pathParameters":{"item-id":"itemId"},"queryParameters":{},"headerParameters":{},"body":"json","bodyRequired":true,"response":"json","pageable":false,"change":"update"}',
+    );
+    expect(files["src/schema.ts"]).toContain(
+      '"clearItem":{"httpMethod":"POST","path":"/items/{item-id}/content","pathParameters":{"item-id":"itemId"},"queryParameters":{},"headerParameters":{},"body":"json","bodyRequired":true,"response":null',
+    );
+
+    // An added method follows the method whose path it shares.
+    const ordered = generateOpenapi(
+      JSON.stringify(api),
+      { operations: rules.operations, undescribed: { updateItem } },
+      service,
+      "",
+    ).files["src/api.ts"];
+
+    expect(ordered?.match(/async (\w+)/g)).toEqual([
+      "async listItems",
+      "async createItem",
+      "async getContent",
+      "async updateItem",
+      "async putContent",
+    ]);
+
+    // The generator stops once the API describes the operation, or no longer the path.
+    expect(() =>
+      generateOpenapi(
+        JSON.stringify(api),
+        {
+          operations: {},
+          undescribed: {
+            putItem: { ...updateItem, method: "put" },
+            goneItem: { ...updateItem, operation: "gone.Get" },
+          },
+        },
+        service,
+        "",
+      ),
+    ).toThrow(
+      [
+        "The API now describes PUT items.GetContent; offer its operation instead of putItem",
+        "goneItem uses the path of gone.Get, which the API no longer offers",
+      ].join("\n"),
+    );
   });
 
   it("reads YAML descriptions", () => {

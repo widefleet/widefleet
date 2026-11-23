@@ -43,6 +43,8 @@ const change = z.enum(["create", "update", "delete", "send"]);
 
 const hidden = z.object({ hidden: z.string() });
 
+const headers = z.record(z.string(), z.object({ name: z.string(), description: z.string() }));
+
 const configuration = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("graphql"),
@@ -73,9 +75,24 @@ const configuration = z.discriminatedUnion("kind", [
         description: z.string().optional(),
         body: z.array(z.string()).optional(),
         result: z.array(z.string()).optional(),
+        headers: headers.optional(),
       }),
     ),
     navigation: z.record(z.string(), z.record(z.string(), z.array(z.string()))).optional(),
+    undescribed: z
+      .record(
+        z.string(),
+        z.object({
+          operation: z.string(),
+          method: z.enum(["post", "put", "patch", "delete"]),
+          change,
+          description: z.string(),
+          body: z.array(z.string()),
+          result: z.array(z.string()).optional(),
+          headers: headers.optional(),
+        }),
+      )
+      .optional(),
   }),
 ]);
 

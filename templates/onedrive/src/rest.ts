@@ -15,6 +15,8 @@ export type RestOperation = {
    * list into one value, or null to repeat the parameter, and whether it is required.
    */
   queryParameters: Record<string, [string, string | null, boolean]>;
+  /** Header names by input name. */
+  headerParameters: Record<string, string>;
   body: "json" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
@@ -57,8 +59,9 @@ const pathPattern = (path: string) => {
 };
 
 /**
- * The HTTP request for one method. Path parameters fill the path, the others
- * become query parameters, and `body` is the request body. The request is
+ * The HTTP request for one method. Path parameters fill the path, header
+ * inputs become headers, the others query parameters, and `body` is the
+ * request body. The request is
  * checked against the method's parameters before anything is sent.
  */
 export const restRequest = (
@@ -74,6 +77,7 @@ export const restRequest = (
   const known = new Set([
     ...pathNames,
     ...Object.keys(operation.queryParameters),
+    ...Object.keys(operation.headerParameters),
     ...(operation.body ? ["body"] : []),
     ...(operation.body === "text" ? ["contentType"] : []),
     ...(operation.pageable ? ["nextLink"] : []),
@@ -84,6 +88,7 @@ export const restRequest = (
       throw new InvalidRequest(`${method} has no argument ${key}`);
 
   const init: RequestInit = { method: operation.httpMethod };
+  const headers: Record<string, string> = {};
   const body = own(values, "body");
 
   if (operation.bodyRequired && body === undefined)
@@ -91,7 +96,7 @@ export const restRequest = (
 
   if (operation.body === "json" && body !== undefined) {
     init.body = JSON.stringify(body);
-    init.headers = { "content-type": "application/json" };
+    headers["content-type"] = "application/json";
   }
 
   if (operation.body === "text" && body !== undefined) {
@@ -101,8 +106,20 @@ export const restRequest = (
     if (!text.success || !contentType.success)
       throw new InvalidRequest(`${method} takes the body and its contentType as text`);
     init.body = text.data;
-    init.headers = { "content-type": contentType.data ?? "application/octet-stream" };
+    headers["content-type"] = contentType.data ?? "application/octet-stream";
   }
+
+  for (const [key, name] of Object.entries(operation.headerParameters)) {
+    const value = own(values, key);
+
+    if (value === undefined) continue;
+    const text = z.string().safeParse(value);
+
+    if (!text.success) throw new InvalidRequest(`${method}'s ${key} takes text`);
+    headers[name] = text.data;
+  }
+
+  if (Object.keys(headers).length) init.headers = headers;
 
   // A later page continues at the address the API gave, on the API's origin.
   const nextLink = own(values, "nextLink");
