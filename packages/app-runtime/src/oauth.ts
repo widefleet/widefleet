@@ -36,13 +36,18 @@ const ownership = z.object({
   clientId: z.string(),
 });
 
+// The scopes an app requested stay with its transaction and refresh grant, so
+// every token the provider issues for the grant is for those scopes.
+const scopes = z.array(z.string()).min(1).max(64);
+
 const transaction = ownership.extend({
   state: z.string(),
   codeVerifier: z.string(),
   expiresAt: z.number(),
+  scopes,
 });
 
-const refreshGrant = ownership.extend({ token: z.string().min(1).max(3000) });
+const refreshGrant = ownership.extend({ token: z.string().min(1).max(3000), scopes });
 
 const accessGrant = z.object({
   appId: z.uuid(),
@@ -114,14 +119,28 @@ type Flow = Pick<
   "createAuthorizationURL" | "validateAuthorizationCode" | "refreshAccessToken"
 >;
 
-const provider = (client: z.infer<typeof registeredOAuthClient>): Flow =>
-  // SAFETY: Every social provider takes the shared provider options; provider-specific
-  // options come from the operator's configuration.
-  (socialProviders[client.provider] as (options: ProviderOptions) => OAuthProvider)({
+// Providers request exactly the app's scopes, without their default scopes.
+// Microsoft issues each access token for the one resource its scopes name, so a
+// default such as Graph's `User.Read` would make an app for another resource,
+// such as Business Central, receive a Graph token. Its refresh asks for the
+// scopes in `scope`, which are the grant's.
+const provider = (
+  client: z.infer<typeof registeredOAuthClient>,
+  granted: readonly string[] | undefined,
+): Flow => {
+  const options: ProviderOptions = {
     ...client.options,
     clientId: client.clientId,
     clientSecret: client.clientSecret,
-  });
+    disableDefaultScope: true,
+  };
+
+  if (granted) options.scope = [...granted];
+
+  // SAFETY: Every social provider takes the shared provider options; provider-specific
+  // options come from the operator's configuration.
+  return (socialProviders[client.provider] as (options: ProviderOptions) => OAuthProvider)(options);
+};
 
 // A public client identified by the installation's metadata document. PKCE
 // stands in for a client secret, and every request names the resource.
@@ -168,8 +187,11 @@ const metadataDocumentFlow = (config: Configuration, client: MetadataDocumentCli
   };
 };
 
-const flow = (config: Configuration, client: Client) =>
-  isMetadataDocumentClient(client) ? metadataDocumentFlow(config, client) : provider(client);
+// A refresh names the scopes of its grant; other requests carry their own.
+const flow = (config: Configuration, client: Client, granted?: readonly string[]) =>
+  isMetadataDocumentClient(client)
+    ? metadataDocumentFlow(config, client)
+    : provider(client, granted);
 
 // Authorization servers fetch this document to learn the client's name and the
 // redirect URIs they may send its users to. It names the callbacks of every
@@ -332,9 +354,12 @@ export const managedOAuth = (environment: Environment) => ({
     });
 
     const redirectURI = `${config.origin}${callbackPath(request.client)}`;
-    const oauth = flow(config, client);
 
-    const present = async (tokens: OAuth2Tokens | null, previousRefreshToken?: string) => {
+    const present = async (
+      tokens: OAuth2Tokens | null,
+      requested: readonly string[],
+      previousRefreshToken?: string,
+    ) => {
       if (!tokens?.accessToken) throw new Error("OAuth provider returned no usable token");
       // A token may carry more scopes than the client allows. Some providers,
       // such as Microsoft, include every scope the user consented to for the
@@ -362,7 +387,9 @@ export const managedOAuth = (environment: Environment) => ({
           ? await seal(
               environment,
               "refresh",
-              JSON.stringify(refreshGrant.parse({ ...owner, token: tokens.refreshToken })),
+              JSON.stringify(
+                refreshGrant.parse({ ...owner, token: tokens.refreshToken, scopes: requested }),
+              ),
             )
           : previousRefreshToken,
         idToken: tokens.idToken,
@@ -386,12 +413,13 @@ export const managedOAuth = (environment: Environment) => ({
             state: request.state,
             codeVerifier: request.codeVerifier,
             expiresAt: Date.now() + 600_000,
+            scopes: request.scopes,
           }),
         ),
       );
 
       const url = await quietly(async () =>
-        oauth.createAuthorizationURL({
+        flow(config, client).createAuthorizationURL({
           state: ticket,
           codeVerifier: request.codeVerifier,
           scopes: request.scopes,
@@ -399,7 +427,7 @@ export const managedOAuth = (environment: Environment) => ({
         }),
       );
 
-      // Providers add their default scopes; the operator must allow those too.
+      // A provider may still add scopes of its own; the operator must allow those too.
       if (disallowed(client, scopeList(url.searchParams.get("scope"))).length > 0)
         throw new Error("The provider requests scopes this client does not allow");
 
@@ -421,12 +449,13 @@ export const managedOAuth = (environment: Environment) => ({
 
       return present(
         await quietly(() =>
-          oauth.validateAuthorizationCode({
+          flow(config, client).validateAuthorizationCode({
             code: request.code,
             codeVerifier: pending.codeVerifier,
             redirectURI,
           }),
         ),
+        pending.scopes,
       );
     }
 
@@ -436,11 +465,11 @@ export const managedOAuth = (environment: Environment) => ({
       );
 
       requireOwner(grant, owner);
-      const refresh = oauth.refreshAccessToken;
+      const refresh = flow(config, client, grant.scopes).refreshAccessToken;
 
       if (!refresh) throw new Error("This OAuth provider does not refresh access tokens");
 
-      return present(await quietly(() => refresh(grant.token)), request.refreshToken);
+      return present(await quietly(() => refresh(grant.token)), grant.scopes, request.refreshToken);
     }
 
     if (isAccessTokenPlaceholder(request.token)) {

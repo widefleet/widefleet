@@ -140,6 +140,8 @@ describe("managed OAuth broker", () => {
       createHash("sha256").update(verifier).digest("base64url"),
     );
     expect(url.searchParams.get("access_type")).toBe("offline");
+    // The app's scopes, without the provider's defaults.
+    expect(url.searchParams.get("scope")).toBe(gmail.join(" "));
     expect(url.href).not.toContain("test-secret");
     expect(url.href).not.toContain(verifier);
 
@@ -355,6 +357,73 @@ describe("managed OAuth broker", () => {
     expect(requests.map((request) => request.url)).not.toContain(
       "https://oauth2.googleapis.com/revoke",
     );
+  });
+
+  it("asks Microsoft for every token of a grant with the scopes the app requested", async () => {
+    const businessCentral = [
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      "https://api.businesscentral.dynamics.com/Financials.ReadWrite.All",
+    ];
+
+    const broker = managedOAuth({
+      ...environment,
+      WIDEFLEET_OAUTH: JSON.stringify({
+        origin: "https://oauth.example.test",
+        clients: {
+          microsoft: {
+            provider: "microsoft",
+            clientId: "test-microsoft",
+            clientSecret: "test-microsoft-secret",
+            scopes: [...businessCentral, "User.Read", "Mail.ReadWrite"],
+            hosts: ["https://graph.microsoft.com", "https://api.businesscentral.dynamics.com"],
+          },
+        },
+      }),
+    });
+
+    const url = new URL(
+      z.object({ url: z.url() }).parse(
+        await broker.request(identity, {
+          action: "authorize",
+          client: "microsoft",
+          scopes: businessCentral,
+          state: "state",
+          codeVerifier: verifier,
+        }),
+      ).url,
+    );
+
+    // Microsoft issues a token for one resource. Graph's default `User.Read`
+    // would make the code's token one for Graph instead of Business Central.
+    expect(url.searchParams.get("scope")).toBe(businessCentral.join(" "));
+
+    const granted = tokens.parse(
+      await broker.request(identity, {
+        action: "exchange",
+        client: "microsoft",
+        ticket: z.string().parse(url.searchParams.get("state")),
+        code: "one-time-code",
+        codeVerifier: verifier,
+      }),
+    );
+
+    let refreshToken = granted.refreshToken;
+
+    // Each refresh, also with the refresh token issued by the one before, asks
+    // for the scopes of the grant rather than Microsoft's Graph defaults.
+    for (let refresh = 0; refresh < 2; refresh++) {
+      refreshToken = tokens.parse(
+        await broker.request(identity, { action: "refresh", client: "microsoft", refreshToken }),
+      ).refreshToken;
+
+      expect(requests.at(-1)?.url).toBe(
+        "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      );
+      expect(requests.at(-1)?.body.get("scope")).toBe(businessCentral.join(" "));
+    }
   });
 
   it("revokes grants at the provider when its client declares a revocation endpoint", async () => {
