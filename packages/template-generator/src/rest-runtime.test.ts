@@ -9,9 +9,10 @@ const list: RestOperation = {
   path: "/drives/{drive-id}/search(q='{q}')",
   pathParameters: { "drive-id": "driveId", q: "q" },
   queryParameters: {
-    $top: ["$top", true, false],
-    $select: ["$select", false, false],
-    tag: ["tag", true, false],
+    $top: ["$top", null, false],
+    $select: ["$select", ",", false],
+    tag: ["tag", null, false],
+    ids: ["ids", "|", false],
   },
   body: null,
   bodyRequired: false,
@@ -39,9 +40,10 @@ describe("REST requests", () => {
         $top: 5,
         $select: ["id", "name"],
         tag: ["x", "y"],
+        ids: ["1", "2"],
       }),
     ).toEqual({
-      url: "https://graph.example.test/v1.0/drives/a%2Fb/search(q='report')?%24top=5&%24select=id%2Cname&tag=x&tag=y",
+      url: "https://graph.example.test/v1.0/drives/a%2Fb/search(q='report')?%24top=5&%24select=id%2Cname&tag=x&tag=y&ids=1%7C2",
       init: { method: "GET" },
     });
 
@@ -89,7 +91,7 @@ describe("REST requests", () => {
       restRequest(
         base,
         "search",
-        { ...list, queryParameters: { view: ["view", true, true] } },
+        { ...list, queryParameters: { view: ["view", null, true] } },
         { driveId: "d", q: "x" },
       ),
     ).toThrow("search needs view");

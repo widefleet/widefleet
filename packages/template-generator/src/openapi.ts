@@ -135,8 +135,11 @@ export type OpenapiOperation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
-  /** Query parameters by input name: the API's name, whether a list repeats it, and whether it is required. */
-  queryParameters: Record<string, [string, boolean, boolean]>;
+  /**
+   * Query parameters by input name: the API's name, the separator that joins a
+   * list into one value, or null to repeat the parameter, and whether it is required.
+   */
+  queryParameters: Record<string, [string, string | null, boolean]>;
   body: "json" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
@@ -155,9 +158,9 @@ const inputName = (name: string) =>
 
 const queryParameter = (
   name: string,
-  explode: boolean,
+  separator: string | null,
   required: boolean,
-): [string, [string, boolean, boolean]] => [inputName(name), [name, explode, required]];
+): [string, [string, string | null, boolean]] => [inputName(name), [name, separator, required]];
 
 // The characters of a type, and whether each lies outside nested types and quoted values.
 const characters = (type: string) => {
@@ -179,6 +182,23 @@ const characters = (type: string) => {
   }
 
   return result;
+};
+
+const separators = { form: ",", spaceDelimited: " ", pipeDelimited: "|" } as const;
+
+const listStyle = z.enum(["form", "spaceDelimited", "pipeDelimited"]);
+
+// The separator that joins a query list into one value, or null to repeat it.
+const separator = (id: string, value: z.infer<typeof parameter>) => {
+  if (value.explode ?? true) return null;
+  const style = listStyle.safeParse(value.style ?? "form");
+
+  if (!style.success)
+    throw new Error(
+      `${id}'s query parameter ${value.name} has the unsupported style ${value.style}`,
+    );
+
+  return separators[style.data];
 };
 
 const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? "";
@@ -314,7 +334,11 @@ export const generateOpenapi = (
     if (variants) {
       const types = new Set(
         variants.flatMap((member) =>
-          member.type === "object" && !member.properties && !member.$ref && member.nullable
+          member.type === "object" &&
+          !member.properties &&
+          !member.additionalProperties &&
+          !member.$ref &&
+          member.nullable
             ? ["null"]
             : members(typeOf(member, indent)),
         ),
@@ -472,11 +496,12 @@ export const generateOpenapi = (
           value.in === "path" ? [[value.name, inputName(value.name)]] : [],
         ),
       ),
-      // Form style, the default for queries, repeats lists unless `explode` is false.
+      // Lists repeat the parameter unless `explode` is false; then form style, the
+      // default, joins them with commas, and the delimited styles with their delimiter.
       queryParameters: Object.fromEntries(
         parameters.flatMap((value) =>
           value.in === "query"
-            ? [queryParameter(value.name, value.explode ?? true, value.required === true)]
+            ? [queryParameter(value.name, separator(id, value), value.required === true)]
             : [],
         ),
       ),
@@ -621,8 +646,11 @@ export type Operation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
-  /** Query parameters by input name: the API's name, whether a list repeats it, and whether it is required. */
-  queryParameters: Record<string, [string, boolean, boolean]>;
+  /**
+   * Query parameters by input name: the API's name, the separator that joins a
+   * list into one value, or null to repeat the parameter, and whether it is required.
+   */
+  queryParameters: Record<string, [string, string | null, boolean]>;
   body: "json" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;

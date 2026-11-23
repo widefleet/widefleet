@@ -29,6 +29,13 @@ const api = {
           },
           { name: "ConsistencyLevel", in: "header", schema: { type: "string" } },
           { name: "view", in: "query", required: true, schema: { type: "string" } },
+          {
+            name: "ids",
+            in: "query",
+            style: "pipeDelimited",
+            explode: false,
+            schema: { type: "array", items: { type: "string" } },
+          },
         ],
         responses: { "2XX": { $ref: "#/components/responses/itemCollection" } },
         "x-ms-pageable": { nextLinkName: "@odata.nextLink" },
@@ -116,6 +123,12 @@ const api = {
               },
               mode: { anyOf: [{ $ref: "#/components/schemas/example.mode" }, { type: "string" }] },
               scope: { anyOf: [{ type: "string", enum: ["read|write"] }, { type: "integer" }] },
+              tags: {
+                anyOf: [
+                  { type: "object", nullable: true, additionalProperties: { type: "string" } },
+                  { type: "integer" },
+                ],
+              },
               parent: {
                 anyOf: [
                   { $ref: "#/components/schemas/example.parent" },
@@ -186,6 +199,8 @@ describe("OpenAPI template generator", () => {
     expect(generated).toContain("mode?: string | null;");
     expect(generated).toContain('export type Mode = "ok" | null;');
     expect(generated).toContain('scope?: "read|write" | number;');
+    // An object of other keys is an object, not null.
+    expect(generated).toMatch(/tags\?: \{\n\s+\[key: string\]: string;\n\s+\} \| number \| null;/);
     expect(generated).toContain("parent?: Parent | null;");
     expect(generated).toContain("folderId: string;");
     expect(generated.match(/folderId: string;/g)).toHaveLength(2);
@@ -209,7 +224,7 @@ describe("OpenAPI template generator", () => {
 
     expect(files["src/schema.ts"]).toContain('export const base = "https://api.example.test/v1/";');
     expect(files["src/schema.ts"]).toContain(
-      '"listItems":{"httpMethod":"GET","path":"/folders/{folder-id}/items","pathParameters":{"folder-id":"folderId"},"queryParameters":{"$top":["$top",true,false],"$select":["$select",false,false],"view":["view",true,true]},"body":null,"bodyRequired":false,"response":"json","pageable":true,"change":null}',
+      '"listItems":{"httpMethod":"GET","path":"/folders/{folder-id}/items","pathParameters":{"folder-id":"folderId"},"queryParameters":{"$top":["$top",null,false],"$select":["$select",",",false],"view":["view",null,true],"ids":["ids","|",false]},"body":null,"bodyRequired":false,"response":"json","pageable":true,"change":null}',
     );
     expect(files["src/schema.ts"]).toContain('"body":"text","bodyRequired":true,"response":null');
   });
