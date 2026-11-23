@@ -4,7 +4,7 @@
 // decide how each method is offered.
 import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
-import { reservedMethods } from "./reserved.ts";
+import { reservedMethod } from "./reserved.ts";
 import type { Change, GeneratedFiles, Hidden } from "./rules.ts";
 
 /** How a Discovery template offers its methods. */
@@ -253,11 +253,10 @@ export const generateDiscovery = (
   });
 
   const names = methodNames(offered);
-  const reserved = new Set(reservedMethods);
   const taken = new Set<string>();
 
   for (const [index, name] of names.entries()) {
-    if (reserved.has(name) || taken.has(name))
+    if (reservedMethod(name) || taken.has(name))
       problems.push(`${offered[index]?.id} becomes method ${name}, which is taken`);
     taken.add(name);
   }

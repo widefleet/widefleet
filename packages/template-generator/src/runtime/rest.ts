@@ -40,6 +40,32 @@ const scalar = z.union([z.string(), z.number(), z.boolean()]);
 const own = <T>(record: Record<string, T>, key: string) =>
   Object.hasOwn(record, key) ? record[key] : undefined;
 
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// An operation's path as a pattern of its pages' addresses: a parameter matches
+// one segment, and a function such as `delta()` may carry arguments, as Graph's
+// `delta(token='...')` links do. The address may be percent-encoded.
+const pathPattern = (path: string) => {
+  const pattern = path
+    .replace(/^\//, "")
+    .split(/(\{[^}]+\})/)
+    .map((part) => (/^\{[^}]+\}$/.test(part) ? "[^/]+" : literal(part)))
+    .join("")
+    .replace(/\\\(\\\)$/, "(?:\\([^/]*\\))?");
+
+  const matcher = new RegExp(`^${pattern}$`);
+
+  return {
+    test: (page: string) => {
+      try {
+        return matcher.test(page) || matcher.test(decodeURIComponent(page));
+      } catch {
+        return false;
+      }
+    },
+  };
+};
+
 /**
  * The HTTP request for one method. Path parameters fill the path, the others
  * become query parameters, and `body` is the request body. The request is
@@ -94,7 +120,12 @@ export const restRequest = (
   if (operation.pageable && nextLink !== undefined) {
     const next = z.url().safeParse(nextLink);
 
-    if (!next.success || !next.data.startsWith(base))
+    // A later page of this operation: its path, with any parameter values and
+    // query, so a link cannot read other data than the method does.
+    const relative = next.success && next.data.startsWith(base) ? next.data.slice(base.length) : "";
+    const page = /^[^?#]*/.exec(relative)?.[0] ?? "";
+
+    if (!next.success || !pathPattern(operation.path).test(page))
       throw new InvalidRequest(`${method}'s nextLink must be a page address the API returned`);
 
     return { url: next.data, init };

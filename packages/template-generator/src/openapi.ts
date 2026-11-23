@@ -6,7 +6,7 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
-import { reservedMethods } from "./reserved.ts";
+import { reservedMethod } from "./reserved.ts";
 import type { Change, GeneratedFiles } from "./rules.ts";
 
 /** How an OpenAPI template offers operations. */
@@ -423,7 +423,6 @@ export const generateOpenapi = (
 
   const byId = new Map(all.map((entry) => [entry.id, entry]));
   const problems: string[] = [];
-  const reserved = new Set(reservedMethods);
   const names = new Set<string>();
 
   for (const [id, rule] of Object.entries(operations)) {
@@ -437,7 +436,7 @@ export const generateOpenapi = (
     if (entry.method !== "get" && !rule.change)
       problems.push(`${entry.method.toUpperCase()} ${id} changes data; give it a change`);
 
-    if (reserved.has(rule.name) || names.has(rule.name))
+    if (reservedMethod(rule.name) || names.has(rule.name))
       problems.push(`${id} becomes method ${rule.name}, which is taken`);
     names.add(rule.name);
   }

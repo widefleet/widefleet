@@ -57,6 +57,22 @@ describe("REST requests", () => {
     expect(() => restRequest(base, "search", list, { nextLink: "https://other.test/" })).toThrow(
       InvalidRequest,
     );
+    // A link must lead to a page of the same operation.
+    expect(() => restRequest(base, "search", list, { nextLink: `${base}me` })).toThrow(
+      InvalidRequest,
+    );
+
+    const delta = { ...list, path: "/drives/{drive-id}/items/{item-id}/delta()" };
+
+    for (const link of [
+      `${base}drives/d/items/root/delta()?$skiptoken=1`,
+      `${base}drives/d/items/root/delta(token='abc')`,
+      `${base}drives/d/items/root/delta(token=%27abc%27)`,
+    ])
+      expect(restRequest(base, "delta", delta, { nextLink: link }).url).toBe(link);
+    expect(() =>
+      restRequest(base, "delta", delta, { nextLink: `${base}drives/d/items/root/children` }),
+    ).toThrow(InvalidRequest);
   });
 
   it("sends text bodies with their media type and rejects unknown arguments", () => {

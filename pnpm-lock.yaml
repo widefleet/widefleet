@@ -496,6 +496,9 @@ importers:
 
   packages/template-generator:
     dependencies:
+      '@platform/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       graphql:
         specifier: 17.0.2
         version: 17.0.2

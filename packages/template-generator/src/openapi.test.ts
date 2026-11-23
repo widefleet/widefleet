@@ -263,6 +263,8 @@ paths:
             "folders.CreateItem": { name: "createItem" },
             "gone.Get": { name: "gone" },
             "items.GetContent": { name: "fetch" },
+            // Widefleet refuses these as app methods.
+            "items.PutContent": { name: "catch", change: "update" },
           },
         },
         service,
@@ -273,6 +275,7 @@ paths:
         "POST folders.CreateItem changes data; give it a change",
         "The rules list gone.Get, which the API no longer offers",
         "items.GetContent becomes method fetch, which is taken",
+        "items.PutContent becomes method catch, which is taken",
       ].join("\n"),
     );
   });
