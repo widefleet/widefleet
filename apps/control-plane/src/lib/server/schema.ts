@@ -325,6 +325,22 @@ export const installation = pgTable("installation", {
   bootstrapPending: boolean("bootstrap_pending").notNull().default(false),
 });
 
+// The company groups a member had at their last company sign-in to Widefleet.
+export const memberGroups = pgTable(
+  "member_groups",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    groups: jsonb().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.organizationId] })],
+);
+
 export const organizationSettings = pgTable("organization_settings", {
   organizationId: text("organization_id")
     .primaryKey()

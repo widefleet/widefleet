@@ -16,7 +16,11 @@ import {
   session,
   ssoProvider,
 } from "../src/lib/server/auth-schema.ts";
-import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
+import {
+  memberGroups,
+  organizationRuntimes,
+  organizationSettings,
+} from "../src/lib/server/schema.ts";
 import { registerAppLogin, readAppLogin } from "../src/lib/server/app-login-client.ts";
 import {
   createInvitationService,
@@ -228,7 +232,11 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
             discoveryEndpoint: `${provider.origin}/.well-known/openid-configuration`,
             pkce: true,
             scopes: ["openid", "profile", "email"],
-            mapping: { email: "mail", name: "display_name" },
+            // Only the first company names its groups in a claim.
+            mapping:
+              index === 0
+                ? { email: "mail", name: "display_name", extraFields: { groups: "roles" } }
+                : { email: "mail", name: "display_name" },
           }),
         },
       });
@@ -249,6 +257,48 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     await firstProvider?.stop();
     await secondProvider?.stop();
     await environment?.close();
+  });
+
+  it("keeps the groups of a company sign-in for the pages that list apps", async () => {
+    const groups = (organizationId: string) =>
+      environment.database.db
+        .select({ groups: memberGroups.groups })
+        .from(memberGroups)
+        .where(
+          and(eq(memberGroups.userId, userId), eq(memberGroups.organizationId, organizationId)),
+        );
+
+    expect(await groups(firstOrg)).toEqual([{ groups: ["accounting"] }]);
+    // A provider that names no groups leaves the member without any.
+    expect(await groups(secondOrg)).toEqual([{ groups: [] }]);
+  });
+
+  it("asks Entra for the permission that names a person's groups", async () => {
+    const requested = async () =>
+      new URL(
+        await redirect(
+          await request("/sign-in/sso", {
+            providerId: "company-alpha",
+            callbackURL: `${origin}/`,
+          }),
+        ),
+      ).searchParams.get("scope");
+
+    expect(await requested()).toBe("openid profile email");
+
+    const identity = (appIdentityType: string) =>
+      environment.database.db
+        .update(ssoProvider)
+        .set({ appIdentityType })
+        .where(eq(ssoProvider.providerId, "company-alpha"));
+
+    await identity("entra");
+
+    try {
+      expect(await requested()).toBe("openid profile email User.Read");
+    } finally {
+      await identity("oidc");
+    }
   });
 
   it("preserves the authenticating organization through approval, another login, and refresh", async () => {

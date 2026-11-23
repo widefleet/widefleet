@@ -42,8 +42,7 @@
         {#if !deployed}
           Available after the app's first successful deployment.
         {:else if data.access.canManage}
-          Everyone in the organization finds this app on Home. The rules above still decide who can
-          open it.
+          The people who can use this app find it on Home. The rules above decide who that is.
         {:else}
           Only the app's owner and administrators can change this.
         {/if}

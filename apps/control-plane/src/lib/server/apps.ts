@@ -1,6 +1,7 @@
 import { requireAvailableHostname } from "./hostnames.ts";
 import { checkServiceConsumers } from "./app-services.ts";
 import { findAppScreenshot, screenshotNumbers } from "./app-screenshots.ts";
+import { readMemberGroups } from "./member-groups.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import {
@@ -60,6 +61,19 @@ const published = (principal: Pick<Principal, "application">) =>
     eq(apps.state, "active"),
     isNotNull(apps.activeDeploymentId),
   );
+
+// Whether the caller manages the app of a row, which shows it to them whatever its rules say.
+const managedBy = (
+  database: Database | Transaction,
+  principal: Pick<Principal, "id" | "application">,
+) => sql<boolean>`coalesce(${appVisibility(database, principal)}, false)`;
+
+// A published app is shown to the people who can open it. Groups are known from a member's
+// last company sign-in; while they are unknown, the app is shown, as it was before.
+const opens = (record: { accessGroups: unknown; managed: boolean }, groups: string[] | null) =>
+  record.managed ||
+  groups === null ||
+  contract.hasAppAccess(contract.appAccessGroups.parse(record.accessGroups), groups);
 
 // The apps whose APIs an app's active deployment may call.
 const usedApps = (record: { activeDeploymentId: string | null; appliedCapabilities: unknown }) =>
@@ -512,6 +526,8 @@ export const createAppService = (
           activeDeploymentId: apps.activeDeploymentId,
           appliedCapabilities: apps.appliedCapabilities,
           connector,
+          accessGroups: apps.accessGroups,
+          managed: managedBy(transaction, principal),
         })
         .from(apps)
         .leftJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
@@ -519,12 +535,16 @@ export const createAppService = (
         .where(published(principal))
         .orderBy(apps.displayName, apps.id);
 
+      const groups = await readMemberGroups(transaction, principal);
+
       return Result.ok(
-        records.map(({ appliedCapabilities, ...record }) => ({
-          ...record,
-          url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
-          uses: usedApps({ ...record, appliedCapabilities }),
-        })),
+        records
+          .filter((record) => opens(record, groups))
+          .map(({ appliedCapabilities, accessGroups: _groups, managed: _managed, ...record }) => ({
+            ...record,
+            url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
+            uses: usedApps({ ...record, appliedCapabilities }),
+          })),
       );
     }),
   /** An app's page for the people who use it. Those who manage the app see it before it is published. */
@@ -542,6 +562,8 @@ export const createAppService = (
           owner: user.name,
           manifest: artifacts.manifest,
           connector,
+          accessGroups: apps.accessGroups,
+          managed: managedBy(transaction, principal),
         })
         .from(apps)
         .leftJoin(user, eq(user.id, apps.ownerId))
@@ -559,10 +581,16 @@ export const createAppService = (
           and(eq(apps.id, appId), or(published(principal), appVisibility(transaction, principal))),
         );
 
-      if (!record)
+      if (!record || !opens(record, await readMemberGroups(transaction, principal)))
         return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
 
-      const { appliedCapabilities, manifest, ...listing } = record;
+      const {
+        appliedCapabilities,
+        manifest,
+        accessGroups: _groups,
+        managed: _managed,
+        ...listing
+      } = record;
 
       const assets = contract.assetManifest.parse(manifest ?? {});
 
