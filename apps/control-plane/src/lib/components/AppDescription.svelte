@@ -29,6 +29,9 @@
 
   const changed = $derived(draft.trim() !== saved);
 
+  // A save in flight ends the edit, so the text cannot change or be discarded meanwhile.
+  const saving = $derived(setAppDescription.pending > 0);
+
   const start = async () => {
     draft = saved;
     editing = true;
@@ -58,7 +61,7 @@
         editing = false;
     }}
     onkeydown={(event) => {
-      if (event.key === "Escape") void close();
+      if (event.key === "Escape" && !saving) void close();
     }}
   >
     <OrganizationField field={setAppDescription.fields.organizationId} />
@@ -69,6 +72,7 @@
       {...setAppDescription.fields.description.as("text", saved)}
       aria-label="Description"
       maxlength={appDescriptionLength}
+      readonly={saving}
       placeholder="What is this app for?"
       oninput={(event) => {
         draft = event.currentTarget.value;
@@ -82,13 +86,14 @@
         size="icon-sm"
         aria-label="Save description"
         title="Save"
-        disabled={setAppDescription.pending > 0}><Check /></Button
+        disabled={saving}><Check /></Button
       ><Button
         type="button"
         variant="ghost"
         size="icon-sm"
         aria-label="Discard changes"
         title="Discard"
+        disabled={saving}
         onclick={close}><X /></Button
       >
     {/if}
