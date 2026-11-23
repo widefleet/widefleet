@@ -5,7 +5,6 @@
   import { Button } from "@platform/ui/button";
   import { resetClientContext } from "#lib/analytics-client";
   import { createOrganization, joinOrganization } from "#lib/organizations.remote";
-  import { Badge } from "@platform/ui/badge";
   import { Switch } from "@platform/ui/switch";
   import BadgeCheck from "@lucide/svelte/icons/badge-check";
   import { Input } from "@platform/ui/input";
@@ -53,17 +52,28 @@
     Boolean(creationIssues?.length) || (data.canCreateOrganization && (creating || !hasChoices)),
   );
 
-  // Two colleagues' names make the organization recognizable without crowding the row.
-  const describeMembers = (organization: PageData["joinable"][number]) => {
-    const names = organization.colleagues.slice(0, 2);
-    const others = organization.memberCount - names.length;
+  // A colleague's name makes the organization recognizable at a glance.
+  // The heading already says what to do; a subtitle only adds scope or a reason.
+  const subtitle = $derived(
+    data.organizations.length
+      ? data.connecting
+        ? "Choose the organization whose apps you want to connect."
+        : null
+      : data.joinable.length
+        ? `Your colleagues at ${data.joinable[0]?.domain} already use Widefleet.`
+        : data.creationRestricted
+          ? `Your company manages Widefleet organizations for ${data.creationRestricted}. Ask one of its administrators for access.`
+          : "Your account has no available organizations. Ask your administrator to grant access.",
+  );
 
-    if (!names.length)
+  const describeMembers = (organization: PageData["joinable"][number]) => {
+    const [colleague] = organization.colleagues;
+    const others = organization.memberCount - 1;
+
+    if (!colleague)
       return `${organization.memberCount} ${organization.memberCount === 1 ? "member" : "members"}`;
 
-    if (!others) return names.join(" and ");
-
-    return `${names.join(", ")} and ${others} ${others === 1 ? "other" : "others"}`;
+    return others ? `${colleague} and ${others} ${others === 1 ? "other" : "others"}` : colleague;
   };
 
   const signOut = async () => {
@@ -106,9 +116,6 @@
       <h1 class="break-words text-2xl font-semibold leading-tight tracking-tight">
         Create your organization
       </h1>
-      <p class="text-muted-foreground mt-2 text-sm leading-6">
-        Your organization holds your team’s apps. You can invite colleagues later.
-      </p>
       <form {...createOrganization} class="mt-6 space-y-5">
         <FormIssues issues={creationIssues} />
         <input {...createOrganization.fields.next.as("hidden", data.next)} />
@@ -176,17 +183,7 @@
           ? "Choose an organization"
           : "Join your team"}
       </h1>
-      <p class="text-muted-foreground mt-2 text-sm leading-6">
-        {data.organizations.length
-          ? data.connecting
-            ? "Choose the organization whose apps you want to connect."
-            : "Choose where you want to work."
-          : data.joinable.length
-            ? `Your colleagues at ${data.joinable[0]?.domain} already use Widefleet.`
-            : data.creationRestricted
-              ? `Your company manages Widefleet organizations for ${data.creationRestricted}. Ask one of its administrators for access.`
-              : "Your account has no available organizations. Ask your administrator to grant access."}
-      </p>
+      {#if subtitle}<p class="text-muted-foreground mt-2 text-sm leading-6">{subtitle}</p>{/if}
       {#if data.organizations.length}
         <div class="mt-6 space-y-2.5">
           {#each data.organizations as organization (organization.id)}
@@ -227,26 +224,27 @@
                 <form {...join}>
                   <input {...join.fields.organizationId.as("hidden", organization.id)} />
                   <input {...join.fields.next.as("hidden", data.next)} />
-                  <Item.Root variant="outline" class="flex-nowrap gap-3 px-4 py-3">
+                  <Item.Root variant="outline" class="flex-nowrap gap-4 p-4">
                     <Item.Media
-                      class="bg-muted text-foreground size-10 shrink-0 rounded-lg text-sm font-semibold"
+                      class="bg-muted text-foreground hidden size-10 shrink-0 rounded-lg text-sm font-semibold sm:flex"
                       aria-hidden="true">{organization.name.slice(0, 1).toUpperCase()}</Item.Media
                     >
-                    <Item.Content class="min-w-0">
-                      <Item.Title class="flex min-w-0 items-center gap-2">
+                    <Item.Content class="min-w-0 gap-0.5">
+                      <Item.Title class="flex w-full min-w-0 items-center gap-1.5">
                         <span class="truncate">{organization.name}</span>
-                        {#if organization.verified}<Badge variant="secondary" class="shrink-0"
-                            ><BadgeCheck data-icon="inline-start" />Verified</Badge
-                          >{/if}
+                        {#if organization.verified}<BadgeCheck
+                            class="text-primary size-4 shrink-0"
+                            aria-label="Verified"
+                          />{/if}
                       </Item.Title>
-                      <Item.Description class="text-xs"
+                      <Item.Description class="truncate text-xs"
                         >{describeMembers(organization)}</Item.Description
                       >
                     </Item.Content>
-                    <Item.Actions class="shrink-0">
+                    <Item.Actions class="ml-auto shrink-0">
                       <Button
                         type="submit"
-                        class="bg-foreground text-background hover:bg-foreground/90 h-9 min-w-16"
+                        class="bg-foreground text-background hover:bg-foreground/90 h-9 px-4"
                         disabled={busy}>{join.pending ? "Joining …" : "Join"}</Button
                       >
                     </Item.Actions>
@@ -272,7 +270,6 @@
   <p
     class="bg-muted/20 text-muted-foreground rounded-b-xl border-t px-6 py-4 text-center text-sm sm:px-8"
   >
-    <span class="break-all">{data.email}</span> ·
     <button
       type="button"
       class="text-foreground font-medium underline-offset-4 hover:underline disabled:opacity-50"

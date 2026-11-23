@@ -25,7 +25,6 @@ export const load: PageServerLoad = async ({ url }) => {
     canCreateOrganization: await runtime.onboarding.available(signIn),
     joinDomain: creation.joinDomain,
     creationRestricted: creation.restricted,
-    email: user.email,
     // New organizations are addressed by their slug on this host.
     host: url.host,
     next,

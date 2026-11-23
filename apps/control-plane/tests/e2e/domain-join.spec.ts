@@ -147,9 +147,7 @@ test("joins an organization by email domain and manages its join domains", async
     // A new colleague signs in by email code and joins without an invitation.
     const newcomer = await signIn(browser, "new@team.example.test");
     await expect(newcomer.getByRole("heading", { name: "Join your team" })).toBeVisible();
-    await expect(
-      newcomer.getByText("Grace Owner and Ada Colleague", { exact: true }),
-    ).toBeVisible();
+    await expect(newcomer.getByText("Grace Owner and 1 other", { exact: true })).toBeVisible();
     await newcomer.getByRole("button", { name: "Join", exact: true }).click();
     await expect(newcomer).toHaveURL(/\/example-team(\/|$)/);
     expect(
