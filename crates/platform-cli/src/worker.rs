@@ -32,6 +32,15 @@ pub(crate) struct Namespace {
 }
 
 impl Configuration {
+    /// The names of the database, bucket and namespace bindings.
+    pub fn binding_names(&self) -> impl Iterator<Item = &str> {
+        self.d1_databases
+            .iter()
+            .map(|db| db.binding.as_str())
+            .chain(self.r2_buckets.iter().map(|bucket| bucket.binding.as_str()))
+            .chain(self.kv_namespaces.iter().map(|kv| kv.binding.as_str()))
+    }
+
     pub fn metadata(self, main_module: String, debug: DebugMetadata) -> WorkerConfiguration {
         let mut bindings = Vec::new();
         bindings.extend(

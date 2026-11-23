@@ -120,6 +120,19 @@ export const createTemplateInstalls = (
           message: templateNetworkChanged,
         });
 
+      // The upload validates the same metadata. Checking it before the app
+      // exists keeps a template the platform rejects from leaving an app behind.
+      const checked = contract.workerMetadata.safeParse({
+        ...built.metadata,
+        assets: { upload_session: crypto.randomUUID(), binding: assets.binding },
+      });
+
+      if (!checked.success)
+        return yield* new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: `The template's build is not deployable: ${z.prettifyError(checked.error)}`,
+        });
+
       const documented = yield* Result.await(
         builder.document({
           files: sources,
@@ -156,10 +169,10 @@ export const createTemplateInstalls = (
 
       const mapName = built.metadata.debug?.source_maps["worker.js"];
 
-      const metadata = contract.workerMetadata.parse({
-        ...built.metadata,
-        assets: { upload_session: session.id, binding: assets.binding },
-      });
+      const metadata = {
+        ...checked.data,
+        assets: { ...checked.data.assets, upload_session: session.id },
+      };
 
       const modules = [
         { name: "worker.js", type: "esm" as const, bytes: encoder.encode(built.worker) },
