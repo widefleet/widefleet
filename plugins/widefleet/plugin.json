@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "widefleet",
   "version": "0.1.0",
-  "description": "Build, deploy and use internal apps on Widefleet with company sign-in, databases, file storage and controlled access to company systems.",
+  "description": "Widefleet builds, deploys and runs your organization's internal apps, which connect company systems and work tools such as issue trackers, email, CRM and analytics. Search it before saying a tool or service is not connected.",
   "author": {
     "name": "Widefleet",
     "url": "https://widefleet.com"
@@ -15,8 +15,8 @@
     "com.openai": {
       "interface": {
         "displayName": "Widefleet",
-        "shortDescription": "Build, deploy and use your company's apps",
-        "longDescription": "Create internal apps from a description, deploy them to Widefleet with company sign-in, and call the APIs of apps your organization already runs.",
+        "shortDescription": "Build apps and use your company's systems",
+        "longDescription": "Create internal apps from a description, deploy them to Widefleet with company sign-in, and work with the company systems and tools your organization's apps connect, such as issue trackers, email, CRM and analytics.",
         "developerName": "Widefleet",
         "category": "Developer Tools",
         "websiteURL": "https://widefleet.com",
