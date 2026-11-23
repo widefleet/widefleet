@@ -35,6 +35,7 @@ export const createUserConnections = (
       .select({
         appId: apps.id,
         displayName: apps.displayName,
+        description: apps.description,
         hostname: apps.hostname,
         activeDeploymentId: deployments.id,
       })

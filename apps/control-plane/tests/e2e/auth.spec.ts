@@ -3671,6 +3671,7 @@ test(`personal connections account controls and workspace entry`, async ({ brows
         organizationId: "widefleet",
         state: "active",
         catalogListed: true,
+        description: slug === "personal-github" ? "Tracks your repositories." : null,
       });
       await environment.database.db.insert(artifacts).values({
         id: artifactId,
@@ -3772,6 +3773,14 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await expect(page.getByText("taylor@example.test", { exact: false })).toBeVisible();
 
     await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
+    // The connectors sort into those with an account and those without one.
+    const connectedGroup = page.getByRole("region", { name: "Connected", exact: true });
+    const openGroup = page.getByRole("region", { name: "Not connected yet", exact: true });
+    await expect(connectedGroup.getByRole("listitem")).toHaveCount(1);
+    await expect(connectedGroup.getByText("taylor@example.test", { exact: false })).toBeVisible();
+    await expect(openGroup.getByRole("listitem")).toHaveCount(2);
+    await expect(openGroup.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+    await expect(openGroup.getByText("Tracks your repositories.", { exact: true })).toBeVisible();
 
     // An app's page shows the reader's accounts with the app itself and with the apps it calls.
     await environment.database.db
@@ -3806,8 +3815,18 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await expect(uses.getByRole("heading", { name: "GitHub", exact: true })).toHaveCount(0);
 
     // A connector that calls no other app shows the reader's account with it alone.
+    // A screenshot that does not load is left out.
+    await environment.database.db
+      .update(artifacts)
+      .set({ manifest: { "/screenshots/1.png": { hash: "a".repeat(32), size: 68 } } })
+      .where(eq(artifacts.appId, github));
+    await page.route(`**/widefleet/apps/${github}/screenshots/1?*`, (route) =>
+      route.fulfill({ status: 404 }),
+    );
     await page.goto(`/widefleet/catalog/apps/${github}`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("GitHub");
+    await expect(page.getByRole("list", { name: "Screenshots" })).toBeAttached();
+    await expect(page.getByRole("img", { name: "Screenshot 1 of GitHub" })).toHaveCount(0);
     await expect(uses.getByRole("listitem")).toHaveCount(1);
     await page.goto("/widefleet/connections");
     await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
@@ -3882,6 +3901,12 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     unavailable = true;
     await page.reload();
     await expect(page.getByText("Could not check this account.")).toBeVisible();
+    // A connector that could not be checked is in neither group: its account may be connected.
+    await expect(
+      page
+        .getByRole("region", { name: "Could not check", exact: true })
+        .getByRole("heading", { name: "Microsoft OneDrive — Finance and Operations", exact: true }),
+    ).toBeVisible();
 
     await page.screenshot({
       path: "../../.local/personal-connections/mobile-unavailable.png",
