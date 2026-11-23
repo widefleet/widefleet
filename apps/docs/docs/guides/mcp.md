@@ -85,8 +85,9 @@ return { configured: status.configured };
 
 Scripts use `async`/`await`, loops and data transformations, and reach services
 through `tools.call`. A script can make up to 32 calls, run for 30 seconds and
-return up to 1 MiB of JSON plus 5 MiB of images and files. Calls that completed
-before an error keep their effects, so check them before running a script again.
+return up to 1 MiB of JSON plus 5 MiB of base64-encoded images and files, about
+3.7 MiB of file content. Calls that completed before an error keep their effects,
+so check them before running a script again.
 
 ### Return images and files
 
@@ -101,7 +102,8 @@ const file = await tools.call({
   method: "filesGetContent",
   arguments: [{ fileId: "1a2b3c" }],
 });
-return { type: "image", mimeType: file.contentType, data: file.base64 };
+if (file.status !== "connected") return file;
+return { type: "image", mimeType: file.data.contentType, data: file.data.base64 };
 ```
 
 Return other files as `{ type: "resource", resource: { uri, mimeType, blob } }`
