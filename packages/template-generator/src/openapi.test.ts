@@ -241,6 +241,18 @@ describe("OpenAPI template generator", () => {
     expect(files["src/schema.ts"]).toContain('"change":null');
   });
 
+  it("lists operations without an ID by method and path", () => {
+    const { files } = generateOpenapi(
+      edited('"operationId":"items.GetContent",', ""),
+      { operations: { "GET /items/{item-id}/content": { name: "getContent" } } },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain("async getContent(input: {");
+    expect(files["src/schema.ts"]).toContain('"path":"/items/{item-id}/content"');
+  });
+
   it("describes operations with the rules' text where it replaces the API's", () => {
     const { files } = generateOpenapi(
       JSON.stringify(api),
