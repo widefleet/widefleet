@@ -31,6 +31,11 @@ export const selections = async () => {
 
   const content = await drive.filesGetContent({ fileId: "f" });
 
+  if (content.status === "connected" && "text" in content.data) {
+    const text: string = content.data.text;
+    void text;
+  }
+
   if (content.status === "connected" && "base64" in content.data) {
     const base64: string = content.data.base64;
     void base64;

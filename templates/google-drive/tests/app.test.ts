@@ -133,15 +133,15 @@ describe("Google Drive personal account app", () => {
       status: "connected",
       data: { id: "abc", name: "report.txt", mimeType: "text/plain" },
     });
-    // Content is read with alt=media; exports return it directly. It arrives as
-    // base64, so results stay JSON, as MCP needs.
+    // Content is read with alt=media; exports return it directly. Results stay
+    // JSON, as MCP needs: text media types as text, others as base64.
     expect(await (await alice.request("/rpc/content")).json()).toEqual({
       status: "connected",
-      data: { contentType: "text/plain", base64: btoa("File content") },
+      data: { contentType: "text/plain", text: "File content" },
     });
     expect(await (await alice.request("/rpc/export")).json()).toEqual({
       status: "connected",
-      data: { contentType: "text/plain", base64: btoa("Exported text") },
+      data: { contentType: "text/plain", text: "Exported text" },
     });
     // The selection becomes Google's fields parameter; undefined arguments are left out.
     expect(upstream.calls.map(({ method, url }) => [method, decodeURIComponent(url)])).toEqual([
