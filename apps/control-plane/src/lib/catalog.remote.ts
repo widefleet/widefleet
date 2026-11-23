@@ -15,9 +15,10 @@ import { getAppDetails } from "#lib/apps.remote";
 import { InvalidOperation } from "#server/errors";
 import { templateNetworkChanged } from "#server/template-installs";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
+import { workspacePath } from "#lib/workspace-path";
 
-export const getCatalog = query(async () => {
-  const { runtime, principal } = await remoteContext();
+export const getCatalog = query(organizationSelection, async (selection) => {
+  const { runtime, principal } = await remoteContext(selection);
 
   return queryValue(await runtime.apps.catalog(principal));
 });
@@ -29,25 +30,34 @@ export const setCatalogListing = form(
     search: z.string().trim().max(200).default(""),
   }),
   async ({ appId, listed, search, organizationId }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal, organization } = await remoteContext({ organizationId });
     formValue(await runtime.apps.setCatalogListing(principal, appId, listed === "true"));
-    await getAppDetails({ appId, search }).refresh();
-    await getCatalog().refresh();
+    await getAppDetails({ appId, search, organizationId }).refresh();
+    await getCatalog({ organizationId }).refresh();
 
     if (!getRequestEvent().isRemoteRequest)
-      redirect(303, `/apps/${appId}/settings?${new URLSearchParams({ q: search })}#catalog`);
+      redirect(
+        303,
+        workspacePath(
+          organization.slug,
+          `/apps/${appId}/settings?${new URLSearchParams({ q: search })}#catalog`,
+        ),
+      );
 
     return { saved: true };
   },
 );
 
-export const getTemplates = query(templateSearch, async ({ search }) => {
-  const { runtime, principal } = await remoteContext();
+export const getTemplates = query(
+  templateSearch.extend(organizationSelection.shape),
+  async ({ search, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
 
-  const installed = queryValue(await runtime.apps.templateInstalls(principal));
+    const installed = queryValue(await runtime.apps.templateInstalls(principal));
 
-  return queryValue(await templateCatalog(principal, runtime.configuration, installed, search));
-});
+    return queryValue(await templateCatalog(principal, runtime.configuration, installed, search));
+  },
+);
 
 export const installTemplate = form(
   templateInstallInput.extend(organizationSelection.shape).extend({
@@ -68,7 +78,7 @@ export const installTemplate = form(
     }),
   }),
   async ({ organizationId, templateId, name, network }, issue) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal, organization } = await remoteContext({ organizationId });
 
     const installed = await runtime.templates.install(
       principal,
@@ -77,7 +87,7 @@ export const installTemplate = form(
     );
 
     if (installed.isErr() && installed.error.message === templateNetworkChanged) {
-      await getTemplate({ templateId }).refresh();
+      await getTemplate({ templateId, organizationId }).refresh();
       invalid(templateNetworkChanged);
     }
 
@@ -92,24 +102,27 @@ export const installTemplate = form(
     const result = formValue(installed);
 
     // The deployment page shows the build's progress through activation.
-    redirect(303, `/apps/${result.app.id}/deployments`);
+    redirect(303, workspacePath(organization.slug, `/apps/${result.app.id}/deployments`));
   },
 );
 
-export const getTemplate = query(templatePath, async ({ templateId }) => {
-  const { runtime, principal } = await remoteContext();
+export const getTemplate = query(
+  templatePath.extend(organizationSelection.shape),
+  async ({ templateId, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
 
-  const installed = queryValue(await runtime.apps.templateInstalls(principal));
+    const installed = queryValue(await runtime.apps.templateInstalls(principal));
 
-  const template = queryValue(
-    await readTemplate(
-      principal,
-      runtime.configuration,
-      templateId,
-      runtime.templates.available,
-      installed,
-    ),
-  );
+    const template = queryValue(
+      await readTemplate(
+        principal,
+        runtime.configuration,
+        templateId,
+        runtime.templates.available,
+        installed,
+      ),
+    );
 
-  return { ...template, html: new MarkdownIt({ html: false }).render(template.markdown) };
-});
+    return { ...template, html: new MarkdownIt({ html: false }).render(template.markdown) };
+  },
+);

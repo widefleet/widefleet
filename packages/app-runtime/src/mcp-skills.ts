@@ -2,8 +2,10 @@ import { memorySkillFiles, SkillsExtension } from "@modelcontextprotocol/server/
 import type { SkillCatalog } from "@modelcontextprotocol/server/ext/skills";
 
 export const mcpInstructions = [
-  "Widefleet runs your organization's internal apps.",
-  "Use search, describe, call and execute to use the APIs of running apps.",
+  "Widefleet builds, deploys and runs your organization's internal apps,",
+  "which connect company systems and work tools such as issue trackers, email, CRM and analytics.",
+  "Search it before saying a tool or service is not connected.",
+  "Use the APIs of running apps by finding methods with search, reading them with describe, then using call or execute.",
   "Apps are built and deployed with the Widefleet CLI in your shell.",
   "If the CLI has no session, run the command that cli_login returns instead of asking the user to sign in.",
   "Before building, changing or deploying an app, read the widefleet skill",

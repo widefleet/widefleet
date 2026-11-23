@@ -6,6 +6,7 @@ import { initializeRuntime } from "./runtime-initialization.ts";
 import { createReporting } from "./reporting.ts";
 import { createRuntime, type Runtime } from "./runtime-services.ts";
 import { httpAppBuilder } from "./app-builder.ts";
+import { loadBundledRuntime } from "./bundled-runtime.ts";
 import { createStorage } from "./storage.ts";
 import { createProductAnalytics } from "./analytics.ts";
 import { analyticsEnvironmentSchema } from "../analytics-config.ts";
@@ -55,6 +56,7 @@ const startRuntime = async () => {
         signal,
       ),
     authCookies: sveltekitCookies(getRequestEvent),
+    bundledRuntime: loadBundledRuntime,
   };
 
   if (configuration.PLATFORM_APP_BUILDER_URL)

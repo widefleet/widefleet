@@ -103,6 +103,16 @@ docker compose -f infra/test/compose.yaml down
 
 These containers have no durable volumes. Stopping them discards their databases and object storage.
 
+### MCP discovery
+
+Agents decide whether to open the Widefleet MCP server from a single line before they see its tools. After changing the [server instructions](../packages/app-runtime/src/mcp-skills.ts), check that agents still find it for prompts that never name Widefleet, and leave it alone for unrelated ones:
+
+```sh
+node packages/app-runtime/mcp-discovery-eval.ts --runs 3
+```
+
+The check needs the Codex CLI signed in with a ChatGPT account. It asks real models, so a single miss can be noise; rerun before changing the text.
+
 ## Run management from source
 
 Use [`apps/control-plane/.env.example`](../apps/control-plane/.env.example) with local PostgreSQL, a private test artifact bucket and writable local state. Open the browser after startup to create the first administrator. Identity setup, configuration and recovery are documented in the [self-hosting guide](https://widefleet.com/docs/self-hosting/installation).

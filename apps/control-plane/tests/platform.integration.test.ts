@@ -110,7 +110,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       appAccess: createAppAccessService(environment.database.db),
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
-      connections: createConnectionService(environment.database.db),
+      connections: createConnectionService(environment.database.db, storage),
       appSecrets: createAppSecrets(
         environment.database.db,
         environment.environment.PLATFORM_ENCRYPTION_KEY,
@@ -643,6 +643,11 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     code = "export default { fetch() { return new Response('ok'); } }",
     credentials = adminHeaders,
     bindings: z.infer<typeof contract.workerMetadata>["bindings"] = [],
+    documentation: z.input<typeof contract.serviceDocumentation> = {
+      format: 3,
+      entrypoints: [],
+      types: [],
+    },
   ) => {
     const form = new FormData();
     form.set(
@@ -652,8 +657,12 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         compatibility_date: "2026-10-01",
         assets: { upload_session: sessionId },
         bindings,
-        service_documentation: { format: 1, entrypoints: [], types: [] },
       }),
+    );
+    form.set(
+      contract.serviceDocumentationPart,
+      new Blob([JSON.stringify(documentation)], { type: "application/json" }),
+      "documentation.json",
     );
     form.set("worker.js", new Blob([code], { type: "application/javascript+module" }), "worker.js");
     const headers = new Headers(credentials);
@@ -734,6 +743,19 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await put(bytes)).status).toBe(200);
     expect((await start(app.id, manifest)).missing).toEqual([]);
     const requestId = crypto.randomUUID();
+
+    // Documentation may only describe entrypoints the worker publishes.
+    expect(
+      (
+        await publish(app.id, session.id, crypto.randomUUID(), undefined, undefined, undefined, {
+          format: 3,
+          entrypoints: [
+            { name: "Other", summary: "", remarks: "", examples: [], http: false, methods: [] },
+          ],
+          types: [],
+        })
+      ).status,
+    ).toBe(400);
     const first = await publish(app.id, session.id, requestId);
     expect(first.status).toBe(200);
     const deployment = contract.deployment.parse(await first.json());
@@ -957,7 +979,60 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const app = await createApp("jobs");
     const firstSession = await start(app.id);
-    const first = contract.deployment.parse(await (await publish(app.id, firstSession.id)).json());
+
+    // Extracted names carry module paths; the stored document names types without them.
+    const extracted: z.input<typeof contract.serviceDocumentation> = {
+      format: 3,
+      entrypoints: [],
+      types: [
+        {
+          name: 'import("./src/model").Item',
+          kind: "type",
+          definition: '{ next?: import("./src/model").Item; page: import("./src/model").Page }',
+          summary: "",
+          remarks: "",
+          examples: [],
+          uses: ['import("./src/model").Page'],
+        },
+        {
+          name: 'import("./src/model").Page',
+          kind: "type",
+          definition: "{ size: number }",
+          summary: "",
+          remarks: "",
+          examples: [],
+          uses: [],
+        },
+      ],
+    } as const;
+
+    const stored = {
+      ...extracted,
+      types: [
+        {
+          ...extracted.types[0],
+          name: "Item",
+          definition: "{ next?: Item; page: Page }",
+          uses: ["Page"],
+        },
+        { ...extracted.types[1], name: "Page" },
+      ],
+    };
+
+    const first = contract.deployment.parse(
+      await (
+        await publish(
+          app.id,
+          firstSession.id,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          extracted,
+        )
+      ).json(),
+    );
+
     const secondSession = await start(app.id);
 
     const second = contract.deployment.parse(
@@ -1025,7 +1100,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect(packages.serviceDocumentation).toEqual({
       artifactId: first.artifactId,
-      documentation: { format: 1, entrypoints: [], types: [] },
+      documentation: stored,
     });
 
     const [storedArtifact] = await environment.database.db
@@ -1033,9 +1108,20 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .from(artifacts)
       .where(eq(artifacts.id, first.artifactId));
 
+    // The database keeps a summary; the document itself lives in artifact storage.
+    expect(storedArtifact?.metadata).not.toHaveProperty("service_documentation");
+    expect(storedArtifact?.documentation).toMatchObject({ entrypoints: [] });
     expect(
-      contract.workerMetadata.parse(storedArtifact?.metadata).service_documentation,
-    ).toMatchObject({ format: 1 });
+      JSON.parse(
+        new TextDecoder().decode(
+          (
+            await storage.get(
+              `apps/${storedArtifact?.appId}/service-documentation/${first.artifactId}.json`,
+            )
+          ).unwrap(),
+        ),
+      ),
+    ).toEqual(stored);
     expect(
       (
         await json(
@@ -2438,7 +2524,17 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .update(apps)
       .set({ activeDeploymentId: next.id })
       .where(eq(apps.id, app.id));
-    expect((await json(path, "GET")).status).toBe(404);
+    const uncachedMiss = await json(path, "GET");
+    expect(uncachedMiss.status).toBe(404);
+    expect(uncachedMiss.headers.get("cache-control")).toBe("private, no-cache");
+
+    // A deployment without an icon keeps its miss as long as an icon; inaccessible apps do not.
+    const missing = await json(`${path}?deployment=${next.id}`, "GET");
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    const hidden = await json(`${path}?deployment=${next.id}`, "GET", undefined, outsiderHeaders);
+    expect(hidden.status).toBe(404);
+    expect(hidden.headers.get("cache-control") ?? "").not.toContain("immutable");
     await environment.database.db
       .update(apps)
       .set({ activeDeploymentId: deployment.id, webEnabled: false })

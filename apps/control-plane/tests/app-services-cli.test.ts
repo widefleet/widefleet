@@ -2,7 +2,7 @@ import { esbuildBinary } from "../../../tools/cli-tools.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,13 @@ const execute = promisify(execFile);
 const describeCli = describe.runIf(process.env["RUN_CLI_TESTS"] === "1");
 
 // Allow multiple native commands, each with its own 10-second process deadline.
+
+// The CLI sends API documentation as its own upload part.
+const uploadedDocumentation = async (form: FormData) =>
+  contract.serviceDocumentation.parse(
+    JSON.parse(await z.instanceof(File).parse(form.get(contract.serviceDocumentationPart)).text()),
+  );
+
 describeCli("App services CLI", { timeout: 30_000 }, () => {
   const app = contract.app.parse({
     id: "00000000-0000-4000-8000-000000000001",
@@ -62,6 +69,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
   let superseded = false;
   let secretDeployment: z.infer<typeof contract.deployment> | null = null;
   let secretHistory: z.infer<typeof contract.deployment>[] = [];
+  let declarations = "export interface INVENTORY {}";
 
   const server = createServer((request, response) => {
     let body = "";
@@ -80,11 +88,23 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       response.setHeader("content-type", "application/json");
 
       if (request.url === "/api/v1/apps/by-name/inventory") response.end(JSON.stringify(app));
-      else if (request.url === "/api/v1/app-services") {
+      else if (request.url?.startsWith("/api/v1/app-services/erp-app/types?")) {
+        const query = new URL(request.url, "http://cli.test").searchParams;
+        response.end(
+          JSON.stringify({
+            ...service,
+            deploymentId: app.activeDeploymentId,
+            entrypoint: query.get("entrypoint"),
+            binding: query.get("binding"),
+            declarations,
+          }),
+        );
+      } else if (request.url === "/api/v1/app-services") {
         response.end(JSON.stringify(catalog));
       } else if (request.method === "GET" && request.url?.startsWith("/api/v1/app-services/")) {
         // Mirror the service description lookup: an app ID wins over a UUID-shaped slug.
-        const target = decodeURIComponent(request.url.slice("/api/v1/app-services/".length));
+        const url = new URL(request.url, "http://cli.test");
+        const target = decodeURIComponent(url.pathname.slice("/api/v1/app-services/".length));
         const deployed = [...catalog, ...unlisted];
 
         const entry =
@@ -99,11 +119,15 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
             JSON.stringify({
               ...entry,
               deploymentId: app.activeDeploymentId,
-              documentation: {
-                format: 1,
-                entrypoints: [{ name: "Reader", summary: "Read inventory" }],
-                types: [],
-              },
+              documented: true,
+              methods: [{ entrypoint: "Reader", name: "read", summary: "Read inventory" }],
+              documentation: url.searchParams.has("methods[]")
+                ? {
+                    entrypoint: { name: "Reader", summary: "Read inventory" },
+                    types: [],
+                    omittedTypes: [],
+                  }
+                : null,
             }),
           );
       } else if (
@@ -481,14 +505,15 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       JSON.parse(z.string().parse(form.get("metadata"))),
     );
 
+    const documentation = await uploadedDocumentation(form);
+
     expect(metadata.entrypoints ?? []).toEqual(fixture.entrypoints);
     expect(metadata.web).toBe(fixture.web);
-    expect(metadata.service_documentation?.format).toBe(1);
+    expect(documentation.format).toBe(3);
 
     if (fixture.entrypoints.includes("Reader"))
       expect(
-        metadata.service_documentation?.entrypoints.find((entry) => entry.name === "Reader")
-          ?.methods[0]?.name,
+        documentation.entrypoints.find((entry) => entry.name === "Reader")?.methods[0]?.name,
       ).toBe("read");
   });
 
@@ -501,7 +526,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     },
     {
       name: "oversized comment",
-      source: `/** ${"x".repeat(32769)} */ read() { return 1; }`,
+      source: `/** ${"x".repeat(262145)} */ read() { return 1; }`,
       warning: "API documentation was omitted",
       signatures: 0,
     },
@@ -528,22 +553,93 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
 
     expect(metadata.entrypoints).toEqual(["Reader"]);
     expect(result.stderr).toContain(fixture.warning);
-    expect(metadata.service_documentation?.entrypoints[0]?.methods[0]?.signatures.length ?? 0).toBe(
-      fixture.signatures,
-    );
+    expect(
+      (await uploadedDocumentation(form)).entrypoints[0]?.methods[0]?.signatures.length ?? 0,
+    ).toBe(fixture.signatures);
   });
 
   it("reads API documentation through the authenticated service endpoint", async () => {
     const result = await command("services", "describe", "erp-app");
     expect(JSON.parse(result.stdout)).toMatchObject({
       slug: "erp-app",
-      documentation: { format: 1 },
+      methods: [{ entrypoint: "Reader", name: "read" }],
+      documentation: null,
     });
     expect(requests[0]).toMatchObject({
       path: "/api/v1/app-services/erp-app",
       method: "GET",
       authorization: "Bearer normal-credential",
     });
+
+    const selected = await command(
+      "services",
+      "describe",
+      "erp-app",
+      "--entrypoint",
+      "Reader",
+      "--method",
+      "read",
+      "--method",
+      "count",
+      "--type",
+      "Page<T, U>",
+    );
+
+    expect(JSON.parse(selected.stdout)).toMatchObject({
+      documentation: { entrypoint: { name: "Reader" } },
+    });
+    const query = new URL(requests[1]?.path ?? "", "http://cli.test").searchParams;
+    expect(query.get("entrypoint")).toBe("Reader");
+    expect(query.getAll("methods[]")).toEqual(["read", "count"]);
+    // Type names can contain commas, so each is its own parameter.
+    expect(query.getAll("types[]")).toEqual(["Page<T, U>"]);
+  });
+
+  it("writes binding types and checks them against the active deployment", async () => {
+    declarations = "export interface INVENTORY {}";
+    const printed = await command("services", "types", "erp-app", "--as", "INVENTORY");
+    expect(printed.stdout).toBe(`${declarations}\n`);
+    const query = new URL(requests[0]?.path ?? "", "http://cli.test");
+    expect(query.pathname).toBe("/api/v1/app-services/erp-app/types");
+    expect(query.searchParams.get("binding")).toBe("INVENTORY");
+    expect(query.searchParams.get("entrypoint")).toBe("default");
+
+    const file = join(directory, "inventory.d.ts");
+
+    const types = (...args: string[]) =>
+      command(
+        "services",
+        "types",
+        "erp-app",
+        "--entrypoint",
+        "Reader",
+        "--as",
+        "INVENTORY",
+        ...args,
+      );
+
+    await rm(file, { force: true });
+    await expect(types("--output", file, "--check")).rejects.toHaveProperty(
+      "stderr",
+      expect.stringContaining("does not match the API of erp-app's active deployment"),
+    );
+    await types("--output", file);
+    expect(await readFile(file, "utf8")).toBe(`${declarations}\n`);
+    await types("--output", file, "--check");
+    // A checkout that converts line endings still matches.
+    await writeFile(file, `${declarations}\r\n`);
+    await types("--output", file, "--check");
+
+    // A provider change, such as a renamed type, makes the file stale.
+    declarations = "export interface INVENTORY { read(): Promise<string>; }";
+    await expect(types("--output", file, "--check")).rejects.toHaveProperty(
+      "stderr",
+      expect.stringContaining("run the command without --check to update it"),
+    );
+    expect(await readFile(file, "utf8")).toBe("export interface INVENTORY {}\r\n");
+    await expect(
+      command("services", "types", "erp-app", "--as", "INVENTORY", "--check"),
+    ).rejects.toHaveProperty("stderr", expect.stringContaining("--output"));
   });
 
   it("rejects the nonstandard widefleet Wrangler property", async () => {

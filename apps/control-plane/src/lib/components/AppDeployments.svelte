@@ -9,6 +9,9 @@
   import Feedback from "./Feedback.svelte";
   import DeploymentStatus from "./DeploymentStatus.svelte";
   import EmptyState from "./EmptyState.svelte";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   let {
     data,
@@ -41,8 +44,9 @@
     <EmptyState
       title="No deployments yet"
       description="Publish your first version with the CLI. Find the steps for this app in the overview."
-      >{#snippet icon()}<History />{/snippet}<Button href={`/apps/${data.app.id}`} variant="outline"
-        >View deployment instructions</Button
+      >{#snippet icon()}<History />{/snippet}<Button
+        href={workspace.path(`/apps/${data.app.id}`)}
+        variant="outline">View deployment instructions</Button
       ></EmptyState
     >
   {:else}

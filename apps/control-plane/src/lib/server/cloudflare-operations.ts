@@ -1,5 +1,5 @@
 import { applyCapabilityChange } from "./capability-changes.ts";
-import { lockOrganizationRuntime } from "./organization-runtime.ts";
+import { installationRuntime, lockOrganizationRuntime } from "./organization-runtime.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, desc, eq } from "drizzle-orm";
@@ -10,7 +10,7 @@ import type { Database } from "./database.ts";
 import { deploymentCommand } from "./deployment-execution.ts";
 import { InvalidOperation } from "./errors.ts";
 import { applyNetworkChange } from "./network.ts";
-import { ensureOrganizationRuntime, runtimeReference } from "./runtime-releases.ts";
+import { runtimeReference } from "./runtime-releases.ts";
 import {
   apps,
   artifacts,
@@ -19,7 +19,6 @@ import {
   deployments,
   organizationRuntimes,
 } from "./schema.ts";
-import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
 
 export const operationTarget = z.object({
@@ -35,7 +34,6 @@ export const operationTarget = z.object({
 // this history immediately; the Workflow repeats it safely if the request disconnects.
 export const registerCloudflareOperation = (
   database: Database,
-  storage: ArtifactStorage,
   requested: z.infer<typeof deploymentCommand>,
 ) =>
   transact(database, (transaction) =>
@@ -177,9 +175,16 @@ export const registerCloudflareOperation = (
         targetIds = [app.id, ...access.previews.map((preview) => preview.appId)];
       }
 
-      const runtime = execution.appliedRuntime
-        ? runtimeReference.parse(execution.appliedRuntime)
-        : await ensureOrganizationRuntime(transaction, storage, execution.organizationId);
+      // One runtime Worker serves every organization of a Cloudflare installation.
+      const installation = await installationRuntime(transaction);
+
+      if (!installation.appliedRuntime)
+        return yield* new InvalidOperation({
+          code: "CONFLICT",
+          message: "Deploy the installation runtime before deploying apps",
+        });
+
+      const runtime = runtimeReference.parse(installation.appliedRuntime);
 
       const targets: z.infer<typeof operationTarget>[] = [];
 

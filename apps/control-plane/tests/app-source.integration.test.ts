@@ -8,6 +8,7 @@ import { createAppService } from "../src/lib/server/apps.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
+import { loadBundledRuntime } from "../src/lib/server/bundled-runtime.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
 import { apps, artifacts, deployments } from "../src/lib/server/schema.ts";
@@ -329,7 +330,7 @@ describe("App source repositories", () => {
       });
 
       expect(
-        await uploads.publish(creator, target.id, metadata, [], crypto.randomUUID()),
+        await uploads.publish(creator, target.id, metadata, null, [], crypto.randomUUID()),
       ).toMatchObject({
         error: {
           code: "BAD_REQUEST",
@@ -579,6 +580,7 @@ describe("App source repositories", () => {
       reporting: environment.reporting,
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       source: backend,
+      bundledRuntime: loadBundledRuntime,
     })();
 
     const app = await create();
@@ -650,7 +652,7 @@ describe("App source repositories", () => {
       source: { branch: "main", commit: "f".repeat(40), directory: "." },
     });
 
-    const result = await uploads.publish(creator, app.id, metadata, [], crypto.randomUUID());
+    const result = await uploads.publish(creator, app.id, metadata, null, [], crypto.randomUUID());
     expect(result).toMatchObject({
       error: {
         code: "BAD_REQUEST",

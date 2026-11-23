@@ -1,5 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["vitest.config.ts", "tools/*.ts", "packages/app-runtime/build.ts"],
+  "include": [
+    "vitest.config.ts",
+    "tools/*.ts",
+    "packages/app-runtime/build.ts",
+    "packages/app-runtime/mcp-discovery-eval.ts"
+  ],
   "exclude": ["tools/oxlint/anti-slop"]
 }

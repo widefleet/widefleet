@@ -11,6 +11,7 @@ import {
   type APIRequestContext,
 } from "@playwright/test";
 import * as contract from "@platform/contracts";
+import { Result } from "better-result";
 import { z } from "zod";
 import { createAuthentication } from "../../src/lib/server/auth.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
@@ -24,6 +25,7 @@ import { eq, sql } from "drizzle-orm";
 import { installation } from "../../src/lib/server/schema.ts";
 import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
 import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
+import { recordInstallationRuntime } from "../cloudflare-deployment.fixture.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { editableSettings } from "../settings-input.ts";
 import { observeOAuthResourceWrites } from "../oauth-resource-writes.ts";
@@ -42,6 +44,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     await environment.database.db.update(ssoProvider).set({ domainVerified: true });
     resourceWrites = await observeOAuthResourceWrites(environment.database.db);
     (await initializeCloudflareRuntime(environment.database.db)).unwrap();
+    // The Worker records this reference for deployments and never reads the package here.
+    await recordInstallationRuntime(environment.database.db, { put: async () => Result.ok() });
     directory = await mkdtemp(join(tmpdir(), "widefleet-cloudflare-"));
     const { unstable_dev, unstable_readConfig } = await import("wrangler");
 
@@ -662,7 +666,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     expect(await resourceWrites()).toBe(0);
   });
 
-  it("validates asset hashes, deduplicates R2 uploads, and saves the bundled runtime without filesystem access", async () => {
+  it("validates asset hashes, deduplicates R2 uploads, and queues deployments on the installation runtime", async () => {
     const created = await administrator.post("/api/v1/apps", {
       data: { slug: "cloudflare-upload", displayName: "Cloudflare Upload" },
     });
@@ -740,8 +744,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
       await page.getByRole("button", { name: "Continue with email", exact: true }).click();
       await page.getByRole("button", { name: /sso@example.test/ }).click();
-      await browserExpect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+      await browserExpect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
       await browserExpect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "My apps", exact: true }).click();
       await page.getByRole("link", { name: "Create app", exact: true }).click();
       await page.getByLabel("App name", { exact: true }).fill("Worker Browser App");
       await page.getByLabel("URL slug").fill("worker-browser-app");

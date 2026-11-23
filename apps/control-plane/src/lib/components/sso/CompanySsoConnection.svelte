@@ -3,7 +3,7 @@
   import { untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { settingsInput, type settingsView } from "@platform/contracts";
+  import { settingsInput, type settingsOverview } from "@platform/contracts";
   import type { z } from "zod";
   import { warnBeforeLeaving } from "#lib/unsaved-changes";
   import {
@@ -24,6 +24,9 @@
   import RestartDialog from "./RestartDialog.svelte";
   import SsoConnectionFields from "./SsoConnectionFields.svelte";
   import EmbeddingOrigins from "./EmbeddingOrigins.svelte";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   let {
     view,
@@ -33,14 +36,17 @@
     tested,
     emailSignIn,
     loginFailed,
+    activationMessage,
   }: {
-    view: z.infer<typeof settingsView>;
+    view: z.infer<typeof settingsOverview>;
     organizationId: string;
     platformUrl: string;
     linked: boolean;
     tested: boolean;
     emailSignIn: boolean;
     loginFailed: boolean;
+    /** What the sign-in service reports about applying the configuration. */
+    activationMessage: string;
   } = $props();
 
   const readonly = $derived(view.settings.externallyManaged);
@@ -60,7 +66,7 @@
     () => organizationId,
     async () => {
       baseline = JSON.stringify(draft);
-      await goto("/settings", { reset: false });
+      await goto(workspace.path("/settings/company-sign-in"), { reset: false });
       saved = true;
     },
   );
@@ -84,7 +90,7 @@
     draft = ssoDraft(view, organizationId);
     baseline = JSON.stringify(draft);
     saved = false;
-    void goto("/settings?edit", { reset: false });
+    void goto(workspace.path("/settings/company-sign-in?edit"), { reset: false });
   };
 
   const save = (event: SubmitEvent) => {
@@ -95,7 +101,10 @@
   const test = async () => {
     if (!view.sso) return;
     testing = true;
-    testError = (await startCompanySignIn(view.sso.providerId, "/settings")) ?? "";
+    testError = (await startCompanySignIn(
+      view.sso.providerId,
+      workspace.path("/settings/company-sign-in"),
+    )) ?? "";
     testing = false;
   };
 
@@ -132,7 +141,7 @@
             Members keep their current sign-in until you activate company SSO.
           </p>
         </div>
-        <Button href={`/settings/sso/setup?step=${nextSetupStep(view, linked)}`}
+        <Button href={workspace.path(`/settings/company-sign-in/setup?step=${nextSetupStep(view, linked)}`)}
           >Continue setup</Button
         >
       </section>
@@ -160,7 +169,7 @@
             <Button
               variant="outline"
               disabled={edits.busy}
-              onclick={() => goto("/settings", { reset: false })}>Cancel</Button
+              onclick={() => goto(workspace.path("/settings/company-sign-in"), { reset: false })}>Cancel</Button
             >
             <Button id="identity-save" type="submit" disabled={edits.busy}
               >{edits.busy ? "Saving …" : "Save"}</Button
@@ -189,7 +198,7 @@
           </div>
         </div>
       {/if}
-      <p class="text-muted-foreground mt-6 text-xs">{view.activation.message}</p>
+      <p class="text-muted-foreground mt-6 text-xs">{activationMessage}</p>
     </section>
 
     <CompanyDomains

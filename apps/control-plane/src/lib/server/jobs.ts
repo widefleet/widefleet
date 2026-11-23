@@ -20,9 +20,15 @@ import {
   jobReceipts,
   jobs,
 } from "./schema.ts";
-import { ensureOrganizationRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
+import {
+  ensureOrganizationRuntime,
+  loadRuntime,
+  runtimeReference,
+  type BundledRuntime,
+} from "./runtime-releases.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
+import { readDocumentation } from "./artifact-documentation.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import type { SourceBackend } from "./source-backend.ts";
 import { transact, type Transaction } from "./transactions.ts";
@@ -62,6 +68,7 @@ export const createJobService = (
   report: (event: z.infer<typeof contract.reportingOperation>) => void = () => {},
   appHttpsPort = 443,
   source?: SourceBackend,
+  bundledRuntime?: BundledRuntime,
 ) => ({
   authenticate: (token: string) =>
     transact(database, async (transaction) => {
@@ -197,7 +204,12 @@ export const createJobService = (
           ? runtimeReference.parse(candidate.job.runtime)
           : execution.appliedRuntime
             ? runtimeReference.parse(execution.appliedRuntime)
-            : await ensureOrganizationRuntime(transaction, storage, execution.organizationId);
+            : await ensureOrganizationRuntime(
+                transaction,
+                storage,
+                execution.organizationId,
+                bundledRuntime,
+              );
 
       const [claimed] = await transaction
         .update(jobs)
@@ -321,15 +333,19 @@ export const createJobService = (
 
       const [artifact] = lease.value.deploymentId
         ? await transaction
-            .select({ id: artifacts.id, metadata: artifacts.metadata })
+            .select({
+              id: artifacts.id,
+              appId: artifacts.appId,
+              documentation: artifacts.documentation,
+            })
             .from(deployments)
             .innerJoin(artifacts, eq(deployments.artifactId, artifacts.id))
             .where(eq(deployments.id, lease.value.deploymentId))
         : [];
 
-      const documentation = artifact
-        ? contract.workerMetadata.parse(artifact.metadata).service_documentation
-        : undefined;
+      const documentation = artifact?.documentation
+        ? (await readDocumentation(storage, artifact.appId, artifact.id)).unwrap()
+        : null;
 
       return Result.ok({
         ...runtime,

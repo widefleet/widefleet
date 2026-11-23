@@ -8,11 +8,8 @@ import { z } from "zod";
 import { user, member, organization, session } from "../../src/lib/server/auth-schema.ts";
 import { createTestEnvironment } from "../environment.ts";
 
-for (const entry of ["registration", "sign-in", "plain-form"] as const)
-  test(`creates an organization and completes onboarding from ${entry}`, async ({
-    page,
-    browser,
-  }) => {
+for (const entry of ["registration", "sign-in"] as const)
+  test(`creates an organization and completes onboarding from ${entry}`, async ({ page }) => {
     test.setTimeout(120_000);
     const environment = await createTestEnvironment();
     const message = z.object({ to: z.email(), subject: z.string(), text: z.string() });
@@ -128,23 +125,11 @@ for (const entry of ["registration", "sign-in", "plain-form"] as const)
       await page.getByRole("button", { name: verifyLabel }).click();
       await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
 
-      if (entry === "plain-form") {
-        const context = await browser.newContext({
-          baseURL: environment.configuration.PLATFORM_URL,
-          javaScriptEnabled: false,
-        });
-
-        await context.addCookies(await page.context().cookies());
-        const url = page.url();
-        page = await context.newPage();
-        await page.goto(url);
-      }
-
       expect(new URL(page.url()).searchParams.get("next")).toBe(
-        entry === "registration" ? "/welcome" : "/",
+        entry === "registration" ? "/[organization]/welcome" : "/[organization]",
       );
-      await page.getByLabel("Organization name", { exact: true }).fill("Example Builders");
-      await page.getByLabel("Organization URL name", { exact: true }).fill("example-builders");
+      await page.getByLabel("Name", { exact: true }).fill("Example Builders");
+      await expect(page.getByLabel("URL", { exact: true })).toHaveValue("example-builders");
       environment.authControl.available(false);
       await page.getByRole("button", { name: "Create organization", exact: true }).click();
       await expect(
@@ -155,12 +140,8 @@ for (const entry of ["registration", "sign-in", "plain-form"] as const)
           },
         ),
       ).toBeVisible();
-      await expect(page.getByLabel("Organization name", { exact: true })).toHaveValue(
-        "Example Builders",
-      );
-      await expect(page.getByLabel("Organization URL name", { exact: true })).toHaveValue(
-        "example-builders",
-      );
+      await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Example Builders");
+      await expect(page.getByLabel("URL", { exact: true })).toHaveValue("example-builders");
       environment.authControl.available(true);
       await page.getByRole("button", { name: "Create organization", exact: true }).click();
       await expect(page).toHaveURL(/\/welcome$/);
@@ -190,23 +171,19 @@ for (const entry of ["registration", "sign-in", "plain-form"] as const)
 
       expect(other.status()).toBe(403);
       await page.goto("/organizations");
-      await expect(page.getByRole("button", { name: "Set up your own organization" })).toHaveCount(
-        0,
-      );
+      await expect(page.getByRole("button", { name: "Create a new organization" })).toHaveCount(0);
 
-      // A form left open while its session expires must use a normal page redirect.
+      // A choice made after the session expires signs in again and returns to that organization.
       await environment.database.db.delete(session);
-      await page.getByRole("button", { name: /Example Builders/ }).click();
+      await page.getByRole("link", { name: /Example Builders/ }).click();
       await expect(page).toHaveURL(/\/sign-in\?/);
       const destination = new URL(page.url()).searchParams.get("next");
-      expect(destination).toBe("/organizations");
+      expect(destination).toBe("/example-builders");
       expect(page.url()).not.toContain("__data.json");
     } finally {
       await test
         .info()
         .attach("public-onboarding-server", { body: logs, contentType: "text/plain" });
-
-      if (entry === "plain-form") await page.context().close();
 
       if (server.pid) process.kill(-server.pid, "SIGTERM");
       await new Promise<void>((resolve) => mailbox.close(() => resolve()));

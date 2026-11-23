@@ -6,6 +6,7 @@ import { createAuthenticationAdmission } from "../src/lib/server/auth-admission.
 import { discoverPlatform } from "../src/lib/server/platform-discovery.ts";
 import { createCliLogin } from "../src/lib/server/cli-login.ts";
 import { createOnboardingService } from "../src/lib/server/onboarding.ts";
+import { createDomainAccess } from "../src/lib/server/domain-access.ts";
 import { createInvitationService } from "../src/lib/server/members.ts";
 import { createAuthControl } from "./auth-control.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
@@ -235,6 +236,11 @@ export const createTestEnvironment = async (
     emailSignIn: false,
     publicSignup: false,
     onboarding: createOnboardingService(database.db, settings),
+    domainAccess: createDomainAccess(
+      database.db,
+      { filterOrganizations: async () => ["widefleet"] },
+      false,
+    ),
     signInProvider: createAuthenticationAdmission(database.db, undefined, false, configuration)
       .signInProvider,
     discoverPlatform,

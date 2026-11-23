@@ -45,15 +45,13 @@ beforeAll(async () => {
   if (!current) throw new Error("Missing fixture session");
   requestLocals = {
     ...current,
-    session: { ...current.session, activeOrganizationId: environment.application.organizationId },
     analytics: null,
     runtime: async () => runtime,
+    workspace: { id: environment.application.organizationId, slug: "widefleet" },
   };
 });
 
 beforeEach(() => {
-  if (requestLocals.session)
-    requestLocals.session.activeOrganizationId = environment.application.organizationId;
   exception.mockClear();
   vi.spyOn(runtimeModule, "getRuntime").mockResolvedValue(runtime);
   vi.spyOn(runtimeModule, "reportRequestException").mockImplementation((error) =>
@@ -249,29 +247,11 @@ it("does not retain a page identity after its session is gone", async () => {
   expect(exception).toHaveBeenCalledExactlyOnceWith(error, undefined, { $groups: undefined });
 });
 
-it("uses the session's persisted automatic organization selection", async () => {
-  const credential = await environment.users.login({ userId: environment.owner.id });
-  const current = await runtime.auth.api.getSession({ headers: credential.headers });
-
-  if (!current) throw new Error("Missing fixture session");
-  expect(current.session.activeOrganizationId).toBeNull();
-
-  const principal = await runtime.identity.principal(
-    current.user.id,
-    null,
-    null,
-    current.session.id,
-  );
-
-  if (principal.isErr()) throw principal.error;
-  const selected = await runtime.auth.api.getSession({ headers: credential.headers });
-
-  if (!selected) throw new Error("Missing fixture session");
-  expect(selected.session.activeOrganizationId).toBe(environment.application.organizationId);
-  const cause = new Error("Failure after organization selection");
-  await reportRequestException(cause, { ...requestLocals, ...selected });
+it("groups errors only by the organization a page names", async () => {
+  const cause = new Error("Failure outside a workspace page");
+  await reportRequestException(cause, { ...requestLocals, workspace: null });
   expect(exception).toHaveBeenCalledExactlyOnceWith(cause, `user:${environment.owner.id}`, {
-    $groups: { organization: environment.application.organizationId },
+    $groups: undefined,
   });
 });
 

@@ -5,6 +5,11 @@ import * as contract from "@platform/contracts";
 import type { z } from "zod";
 import { createTestEnvironment } from "./environment.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
+import {
+  encodeDocumentation,
+  storeDocumentation,
+} from "../src/lib/server/artifact-documentation.ts";
+import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { member } from "../src/lib/server/auth-schema.ts";
@@ -17,6 +22,7 @@ import {
 } from "../src/lib/server/schema.ts";
 import { decryptSecret } from "../src/lib/server/secret-encryption.ts";
 import type { Principal } from "../src/lib/server/identity.ts";
+import { memoryStorage } from "./memory-storage.fixture.ts";
 
 describe("App service connections", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -37,7 +43,21 @@ describe("App service connections", () => {
     await environment.close();
   });
 
-  const services = () => createConnectionService(environment.database.db);
+  const storage = createArtifactStorage(memoryStorage());
+
+  const services = () => createConnectionService(environment.database.db, storage);
+
+  // Publishing keeps documentation in artifact storage and a summary in the database.
+  const documented = async (
+    appId: string,
+    artifactId: string,
+    documentation: z.input<typeof contract.serviceDocumentation>,
+  ) => {
+    const encoded = encodeDocumentation(contract.serviceDocumentation.parse(documentation));
+    (await storeDocumentation(storage, appId, artifactId, encoded)).unwrap();
+
+    return encoded.summary;
+  };
 
   const applications = () => createAppService(environment.database.db, environment.configuration);
 
@@ -66,7 +86,6 @@ describe("App service connections", () => {
       web: false,
       entrypoints,
       assets: { upload_session: artifactId, binding: "ASSETS" },
-      service_documentation: documentation,
     });
 
     await environment.database.db.insert(artifacts).values({
@@ -75,6 +94,7 @@ describe("App service connections", () => {
       metadata,
       manifest: {},
       modules: [{ name: "worker.js", type: "esm", size: 1, sha256: "a".repeat(64) }],
+      documentation: documentation ? await documented(app.id, artifactId, documentation) : null,
     });
     await environment.database.db.insert(deployments).values({
       id: deploymentId,
@@ -109,7 +129,7 @@ describe("App service connections", () => {
     });
 
     const documented = (...entrypoints: ReturnType<typeof entry>[]) => ({
-      format: 1 as const,
+      format: 3 as const,
       entrypoints,
       types: [],
     });
@@ -148,7 +168,7 @@ describe("App service connections", () => {
 
   it("describes deployed apps that the catalog omits by slug or ID", async () => {
     const target = await app(["default"], principal, {
-      format: 1,
+      format: 3,
       entrypoints: [
         { name: "default", summary: "", remarks: "", examples: [], http: true, methods: [] },
       ],
@@ -444,7 +464,7 @@ describe("App service connections", () => {
 
   it("describes only the active provider version in the selected organization, including rollback and legacy artifacts", async () => {
     const target = await app(["Reader"]);
-    const legacy = (await services().describe(principal, target.id)).unwrap();
+    const legacy = (await services().reference(principal, target.id)).unwrap();
     expect(legacy.documentation).toBeNull();
 
     const first = contract.workerMetadata.parse(
@@ -458,7 +478,7 @@ describe("App service connections", () => {
 
     const documentation = (summary: string) =>
       contract.serviceDocumentation.parse({
-        format: 1,
+        format: 3,
         entrypoints: [
           { name: "Reader", summary, remarks: "", examples: [], methods: [], http: false },
         ],
@@ -467,16 +487,23 @@ describe("App service connections", () => {
 
     await environment.database.db
       .update(artifacts)
-      .set({ metadata: { ...first, service_documentation: documentation("First version") } })
+      .set({
+        documentation: await documented(
+          target.id,
+          target.artifactId,
+          documentation("First version"),
+        ),
+      })
       .where(eq(artifacts.id, target.artifactId));
     const nextArtifact = crypto.randomUUID();
     const nextDeployment = crypto.randomUUID();
     await environment.database.db.insert(artifacts).values({
       id: nextArtifact,
       appId: target.id,
-      metadata: { ...first, service_documentation: documentation("Next version") },
+      metadata: first,
       manifest: {},
       modules: [],
+      documentation: await documented(target.id, nextArtifact, documentation("Next version")),
     });
     await environment.database.db.insert(deployments).values({
       id: nextDeployment,
@@ -485,11 +512,11 @@ describe("App service connections", () => {
       status: "queued",
       requestId: crypto.randomUUID(),
     });
-    expect((await services().describe(principal, target.slug)).unwrap().documentation).toEqual(
+    expect((await services().reference(principal, target.slug)).unwrap().documentation).toEqual(
       documentation("First version"),
     );
     expect(
-      await services().describe(
+      await services().reference(
         { ...principal, application: { organizationId: "foreign", admin: true } },
         target.id,
       ),
@@ -498,7 +525,7 @@ describe("App service connections", () => {
       .update(apps)
       .set({ activeDeploymentId: nextDeployment })
       .where(eq(apps.id, target.id));
-    expect((await services().describe(principal, target.id)).unwrap()).toMatchObject({
+    expect((await services().reference(principal, target.id)).unwrap()).toMatchObject({
       deploymentId: nextDeployment,
       documentation: documentation("Next version"),
     });
@@ -506,9 +533,227 @@ describe("App service connections", () => {
       .update(apps)
       .set({ activeDeploymentId: legacy.deploymentId })
       .where(eq(apps.id, target.id));
-    expect((await services().describe(principal, target.id)).unwrap().documentation).toEqual(
+    expect((await services().reference(principal, target.id)).unwrap().documentation).toEqual(
       documentation("First version"),
     );
+  });
+
+  it("lists an API's methods and describes selected methods with the types they use", async () => {
+    const method = (
+      name: string,
+      summary: string,
+      parameter: string,
+      returns: string,
+      uses: string[],
+    ) => ({
+      name,
+      summary,
+      remarks: "",
+      examples: [],
+      throws: [],
+      signatures: [
+        {
+          parameters: [
+            { name: "input", type: parameter, description: "", optional: false, rest: false },
+          ],
+          returns: { type: returns, description: "" },
+          uses,
+        },
+      ],
+    });
+
+    const type = (name: string, definition: string, uses: string[] = []) => ({
+      name,
+      kind: "type" as const,
+      definition,
+      summary: "",
+      remarks: "",
+      examples: [],
+      uses,
+    });
+
+    const target = await app(["Reader"], principal, {
+      format: 3,
+      entrypoints: [
+        {
+          name: "Reader",
+          summary: "Read inventory.\nRemarks for every method.",
+          remarks: "Pages hold up to 50 items.",
+          examples: [],
+          http: false,
+          methods: [
+            method("findItems", "Find items.\nMatches names.", "Query", "Promise<Page>", [
+              "Page",
+              "Query",
+            ]),
+            method("countItems", "Count items.", "string", "Promise<number>", []),
+          ],
+        },
+      ],
+      types: [
+        type("Query", "type Query = { text: string };"),
+        type("Page", "type Page = { items: Item[] };", ["Item"]),
+        type("Item", "type Item = { id: string };"),
+        type("Unused", "type Unused = { id: string };"),
+      ],
+    });
+
+    const overview = (await services().describe(principal, target.id)).unwrap();
+    expect(overview).toMatchObject({
+      documented: true,
+      methods: [
+        { entrypoint: "Reader", name: "findItems", summary: "Find items." },
+        { entrypoint: "Reader", name: "countItems", summary: "Count items." },
+      ],
+      documentation: null,
+    });
+
+    const selected = (
+      await services().describe(principal, target.id, {
+        entrypoint: "Reader",
+        methods: ["findItems"],
+        types: [],
+      })
+    ).unwrap().documentation;
+
+    expect(selected?.entrypoint).toMatchObject({
+      name: "Reader",
+      remarks: "Pages hold up to 50 items.",
+      methods: [{ name: "findItems" }],
+    });
+    // Types reached through other types are included; unrelated ones are not.
+    expect(selected?.types.map((entry) => entry.name)).toEqual(["Query", "Page", "Item"]);
+    expect(selected?.omittedTypes).toEqual([]);
+
+    const named = (
+      await services().describe(principal, target.id, {
+        entrypoint: "Reader",
+        methods: [],
+        types: ["Page"],
+      })
+    ).unwrap().documentation;
+
+    expect(named?.entrypoint.methods).toEqual([]);
+    expect(named?.types.map((entry) => entry.name)).toEqual(["Page", "Item"]);
+
+    const unknown = await services().describe(principal, target.id, {
+      entrypoint: "Reader",
+      methods: ["findItems", "deleteItems"],
+      types: ["Missing"],
+    });
+
+    expect(unknown).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(unknown.isErr() ? unknown.error.message : "").toBe(
+      "Reader has no documented method deleteItems, type Missing",
+    );
+
+    const entrypoint = await services().describe(principal, target.id, {
+      entrypoint: "Writer",
+      methods: [],
+      types: ["Page"],
+    });
+
+    expect(entrypoint).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(entrypoint.isErr() ? entrypoint.error.message : "").toBe(
+      "Writer is not a documented entrypoint",
+    );
+  });
+
+  it("generates binding types from the active deployment for members of its organization", async () => {
+    const undocumented = await app(["Reader"]);
+
+    const missing = await services().types(principal, undocumented.slug, {
+      entrypoint: "Reader",
+      binding: "INVENTORY",
+    });
+
+    expect(missing).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(missing.isErr() ? missing.error.message : "").toBe(
+      `${undocumented.slug} has no API documentation; redeploy it to publish its types`,
+    );
+
+    const target = await app(["Reader"], principal, {
+      format: 3,
+      entrypoints: [
+        {
+          name: "Reader",
+          summary: "Read inventory.",
+          remarks: "",
+          examples: [],
+          http: false,
+          methods: [
+            {
+              name: "count",
+              summary: "Count items.",
+              remarks: "",
+              examples: [],
+              throws: [],
+              signatures: [
+                {
+                  parameters: [],
+                  returns: { type: "Promise<Count>", description: "" },
+                  uses: ["Count"],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      types: [
+        {
+          name: "Count",
+          kind: "interface",
+          definition: "{\n    total: number;\n}",
+          summary: "",
+          remarks: "",
+          examples: [],
+        },
+      ],
+    });
+
+    const generated = (
+      await services().types(principal, target.id, { entrypoint: "Reader", binding: "INVENTORY" })
+    ).unwrap();
+
+    expect(generated).toMatchObject({
+      appId: target.id,
+      slug: target.slug,
+      entrypoint: "Reader",
+      binding: "INVENTORY",
+    });
+    expect(generated.declarations).toContain(
+      `// Generated by \`widefleet services types ${target.slug} --entrypoint Reader --as INVENTORY\``,
+    );
+    expect(generated.declarations).toContain("  count(): Promise<INVENTORY.Result<Count>>;");
+    expect(generated.declarations).toContain("export interface Count {\n    total: number;\n}");
+
+    const entrypoint = await services().types(principal, target.id, {
+      entrypoint: "Writer",
+      binding: "INVENTORY",
+    });
+
+    expect(entrypoint).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(entrypoint.isErr() ? entrypoint.error.message : "").toBe(
+      "Writer is not a documented entrypoint",
+    );
+
+    const taken = await services().types(principal, target.id, {
+      entrypoint: "Reader",
+      binding: "Count",
+    });
+
+    expect(taken).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    expect(taken.isErr() ? taken.error.message : "").toBe(
+      "The API documents a type named Count; choose another binding name",
+    );
+
+    const foreign = await services().types(
+      { ...principal, application: { organizationId: "foreign", admin: true } },
+      target.id,
+      { entrypoint: "Reader", binding: "INVENTORY" },
+    );
+
+    expect(foreign).toMatchObject({ error: { code: "NOT_FOUND" } });
   });
 
   it("resolves UUID-shaped slugs with app IDs taking precedence within the selected organization", async () => {

@@ -1,5 +1,6 @@
 import { command, getRequestEvent, query } from "$app/server";
-import { error } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
+import { eq } from "drizzle-orm";
 import {
   settingsInput,
   settingsUpdate,
@@ -8,22 +9,66 @@ import {
   ssoDomainInput,
 } from "@platform/contracts";
 import { z } from "zod";
-import { remoteContext, remoteOperation } from "#server/remote-support";
+import { commandContext, remoteContext, remoteOperation } from "#server/remote-support";
 import { getRuntime } from "#server/runtime";
 import { readSettingsAccount } from "#server/settings-account";
+import { organizationRuntimes } from "#server/schema";
+import { workspacePath } from "#lib/workspace-path";
 
-export const getSettings = query(async () => {
-  const { runtime, principal } = await remoteContext();
+export const getSettings = query(organizationSelection, async (selection) => {
+  const { runtime, principal } = await remoteContext(selection);
 
   return remoteOperation(() =>
     readSettingsAccount(runtime, principal, getRequestEvent().locals.session),
   );
 });
 
+// The sign-in service reports whether it applies the saved configuration.
+export const getSettingsActivation = query(organizationSelection, async (selection) => {
+  const { runtime, principal } = await remoteContext(selection);
+
+  return remoteOperation(() => runtime.settings.activation(principal));
+});
+
+// An active connection is managed on its own page, so its setup page sends people there.
+export const checkSsoSetup = query(organizationSelection, async (selection) => {
+  const { runtime, principal, organization } = await remoteContext(selection);
+  const view = await runtime.settings.overview(principal);
+
+  if (view.ssoRequired)
+    redirect(303, workspacePath(organization.slug, "/settings/company-sign-in"));
+
+  return null;
+});
+
+// Administrators finish company sign-in before the getting started page.
+export const getWelcome = query(organizationSelection, async (selection) => {
+  const { runtime, principal, organization } = await remoteContext(selection);
+
+  if (principal.application.admin) {
+    const settings = await runtime.settings.read(principal);
+
+    if (settings.error || settings.activation.state !== "active")
+      redirect(303, workspacePath(organization.slug, "/settings/company-sign-in"));
+  }
+
+  const [execution] = await runtime.database.db
+    .select()
+    .from(organizationRuntimes)
+    .where(eq(organizationRuntimes.organizationId, principal.application.organizationId));
+
+  return {
+    platformUrl: runtime.configuration.PLATFORM_URL,
+    organizationId: principal.application.organizationId,
+    usesAgent: execution?.executor === "agent",
+    installationAdmin: principal.admin,
+  };
+});
+
 export const planSettings = command(
   settingsInput.extend(organizationSelection.shape),
   async ({ organizationId, ...input }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
 
     return remoteOperation(() => runtime.settings.plan(principal, input));
   },
@@ -32,7 +77,7 @@ export const planSettings = command(
 export const updateSettings = command(
   settingsUpdate.extend(organizationSelection.shape),
   async ({ organizationId, ...input }) => {
-    const { runtime, principal, request } = await remoteContext({ organizationId });
+    const { runtime, principal, request } = await commandContext({ organizationId });
     await remoteOperation(() =>
       runtime.settings.update(principal, input, true, {
         auth: runtime.auth,
@@ -42,7 +87,10 @@ export const updateSettings = command(
 
     if (!(await runtime.auth.api.getSession({ headers: request.headers })))
       return { signedOut: true };
-    await getSettings().refresh();
+    await Promise.all([
+      getSettings({ organizationId }).refresh(),
+      getSettingsActivation({ organizationId }).refresh(),
+    ]);
 
     return { signedOut: false };
   },
@@ -51,9 +99,12 @@ export const updateSettings = command(
 export const setExternalManagement = command(
   organizationSelection.extend({ enabled: z.boolean() }),
   async ({ enabled, organizationId }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.setExternalManagement(principal, enabled));
-    await getSettings().refresh();
+    await Promise.all([
+      getSettings({ organizationId }).refresh(),
+      getSettingsActivation({ organizationId }).refresh(),
+    ]);
   },
 );
 
@@ -70,35 +121,44 @@ export const createOwner = command(setupOwner, async (input) => {
 export const addCompanyDomain = command(
   ssoDomainInput.extend(organizationSelection.shape),
   async ({ organizationId, domain }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.addDomain(principal, domain, true));
-    await getSettings().refresh();
+    await Promise.all([
+      getSettings({ organizationId }).refresh(),
+      getSettingsActivation({ organizationId }).refresh(),
+    ]);
   },
 );
 
 export const removeCompanyDomain = command(
   ssoDomainInput.extend(organizationSelection.shape),
   async ({ organizationId, domain }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
     await remoteOperation(() => runtime.settings.removeDomain(principal, domain, true));
-    await getSettings().refresh();
+    await Promise.all([
+      getSettings({ organizationId }).refresh(),
+      getSettingsActivation({ organizationId }).refresh(),
+    ]);
   },
 );
 
 export const verifyCompanyDomain = command(
   ssoDomainInput.extend(organizationSelection.shape),
   async ({ organizationId, domain }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
+    const { runtime, principal } = await commandContext({ organizationId });
 
     try {
       await remoteOperation(() => runtime.settings.verifyDomain(principal, domain));
     } finally {
-      await getSettings().refresh();
+      await Promise.all([
+        getSettings({ organizationId }).refresh(),
+        getSettingsActivation({ organizationId }).refresh(),
+      ]);
     }
   },
 );
 
 export const activateCompanySso = command(organizationSelection, async (input) => {
-  const { runtime, principal } = await remoteContext(input);
+  const { runtime, principal } = await commandContext(input);
   await remoteOperation(() => runtime.settings.activateSso(principal));
 });

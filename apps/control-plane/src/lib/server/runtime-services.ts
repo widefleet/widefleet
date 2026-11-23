@@ -14,7 +14,7 @@ import { createAuthentication } from "./auth.ts";
 import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
 import { createAgentService } from "./agents.ts";
-import { createRuntimeReleaseService } from "./runtime-releases.ts";
+import { createRuntimeReleaseService, type BundledRuntime } from "./runtime-releases.ts";
 import { createAppAccessService } from "./app-access.ts";
 import { createNetworkService } from "./network.ts";
 import { createWorkflowService } from "./workflows.ts";
@@ -38,6 +38,8 @@ import { createAuthenticationAdmission } from "./auth-admission.ts";
 import { discoverPlatform } from "./platform-discovery.ts";
 import { createCliLogin } from "./cli-login.ts";
 import { createOnboardingService, type CreateOrganization } from "./onboarding.ts";
+import { createDomainAccess } from "./domain-access.ts";
+import { installationOrganizationId } from "../organization.ts";
 
 export const createRuntime = ({
   configuration,
@@ -54,12 +56,14 @@ export const createRuntime = ({
   sendEmail,
   authRateLimit,
   authIpAddressHeaders,
+  authValidateSchema,
   authCookies,
   createOrganization,
   authentication,
   source,
   discoveryTransport = "node",
   builder,
+  bundledRuntime,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -76,11 +80,13 @@ export const createRuntime = ({
   source?: SourceBackend;
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
+  authValidateSchema?: boolean;
   authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
   userConnectionRequest?: UserConnectionRequest;
   discoveryTransport?: "node" | "cloudflare";
   builder?: AppBuilder;
+  bundledRuntime?: BundledRuntime;
 }) => {
   const publicSignup = Boolean(createOrganization);
 
@@ -114,6 +120,8 @@ export const createRuntime = ({
 
   if (authIpAddressHeaders) authOptions.ipAddressHeaders = authIpAddressHeaders;
 
+  if (authValidateSchema !== undefined) authOptions.validateSchema = authValidateSchema;
+
   if (authCookies) authOptions.cookies = authCookies;
 
   if (organizationAccess) authOptions.organizationAccess = organizationAccess;
@@ -142,6 +150,13 @@ export const createRuntime = ({
     ),
     publicSignup,
     onboarding: createOnboardingService(database.db, settings, createOrganization, observation),
+    domainAccess: createDomainAccess(
+      database.db,
+      organizationAccess ?? {
+        filterOrganizations: async () => [installationOrganizationId],
+      },
+      publicSignup,
+    ),
     identity: createIdentityService(
       auth,
       database.db,
@@ -180,12 +195,13 @@ export const createRuntime = ({
       reporting.operation,
       configuration.APP_HTTPS_PORT,
       source,
+      bundledRuntime,
     ),
     network,
     appAccess: createAppAccessService(database.db, execution),
     workflows: createWorkflowService(database.db, execution),
     migrations: createMigrationService(database.db, storage, execution),
-    connections: createConnectionService(database.db, execution),
+    connections: createConnectionService(database.db, storage, execution),
     appSecrets: createAppSecrets(database.db, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads,

@@ -1,8 +1,20 @@
 import { and, eq } from "drizzle-orm";
-import { createOrganizationInput, onboardingOrganization } from "@platform/contracts";
+import {
+  createOrganizationInput,
+  onboardingOrganization,
+  organizationCreation,
+} from "@platform/contracts";
 import type { z } from "zod";
 import type { Database } from "./database.ts";
-import type { AuthenticatedUser } from "./identity.ts";
+import { companySignInLimit, type SignIn } from "./sso-policy.ts";
+import {
+  addJoinDomain,
+  offeredJoinDomain,
+  organizationCreationRestriction,
+  provenEmailDomain,
+  requireJoinDomain,
+  requireOrganizationCreation,
+} from "./domain-access.ts";
 import type { createSettingsService } from "./settings.ts";
 import { member, user } from "./auth-schema.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -19,18 +31,23 @@ export const createOnboardingService = (
   createOrganization?: CreateOrganization,
   observation?: Observation,
 ) => {
-  const verifiedUser = async (
-    person: Pick<AuthenticatedUser, "userId" | "identityOrganizationId">,
-  ) => {
-    if (person.identityOrganizationId !== null) return false;
+  // Organizations created here belong to the person, so company sign-ins that are limited to
+  // their organization cannot create them.
+  const verifiedUser = async (person: SignIn) => {
+    if ((await companySignInLimit(database, person)) !== null) return false;
     const [current] = await database.select().from(user).where(eq(user.id, person.userId));
 
     return current?.emailVerified === true;
   };
 
   return {
-    available: async (person: Pick<AuthenticatedUser, "userId" | "identityOrganizationId">) => {
-      if (!createOrganization || !(await verifiedUser(person))) return false;
+    available: async (person: SignIn) => {
+      if (
+        !createOrganization ||
+        !(await verifiedUser(person)) ||
+        (await organizationCreationRestriction(database, person.userId)) !== null
+      )
+        return false;
 
       const [owned] = await database
         .select({ id: member.id })
@@ -40,10 +57,16 @@ export const createOnboardingService = (
 
       return !owned;
     },
-    create: async (
-      person: Pick<AuthenticatedUser, "userId" | "identityOrganizationId">,
-      input: z.infer<typeof createOrganizationInput>,
-    ) => {
+    // The domain a new organization can let join, or the domain whose company reserves new
+    // organizations for its administrators.
+    domains: async (person: SignIn) =>
+      createOrganization
+        ? {
+            joinDomain: await offeredJoinDomain(database, person.userId, null),
+            restricted: await organizationCreationRestriction(database, person.userId),
+          }
+        : { joinDomain: null, restricted: null },
+    create: async (person: SignIn, input: z.input<typeof organizationCreation>) => {
       if (!createOrganization)
         throw new InvalidOperation({
           code: "FORBIDDEN",
@@ -56,10 +79,25 @@ export const createOnboardingService = (
           message: "Sign in with a verified email code to create an organization",
         });
 
+      const { allowDomainJoin, ...organizationInput } = organizationCreation.parse(input);
+      await requireOrganizationCreation(database, person.userId);
+      const joinDomain = allowDomainJoin ? await provenEmailDomain(database, person.userId) : null;
+
+      if (allowDomainJoin && !joinDomain)
+        throw new InvalidOperation({
+          code: "FORBIDDEN",
+          message:
+            "Sign in with a Google Workspace or Microsoft work account to let your colleagues join.",
+        });
+
+      if (joinDomain) await requireJoinDomain(database, person.userId, null, joinDomain);
+
       const organization = await createOrganization(
         person.userId,
-        createOrganizationInput.parse(input),
+        createOrganizationInput.parse(organizationInput),
       );
+
+      if (joinDomain) await addJoinDomain(database, organization.id, joinDomain);
 
       observe(observation, {
         event: "organization_created",

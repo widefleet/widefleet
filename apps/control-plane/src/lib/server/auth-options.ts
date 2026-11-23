@@ -12,7 +12,9 @@ import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { createSignInEmail, sendOrganizationInvitation, type SendEmail } from "./email.ts";
 import { hashAppClientSecret } from "./app-login-client.ts";
 import { authenticationReference } from "./authentication-context.ts";
+import type { SignIn } from "./sso-policy.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
+import { organizationMemberLimit } from "./organization.ts";
 import { personalSocialAccounts, socialProviders, validateSocialUser } from "./social-sign-in.ts";
 
 export const cliClientId = "platform-cli";
@@ -41,21 +43,26 @@ export const authenticationOptions = (
     sendEmail,
     allowEmail,
     allowUser,
+    signInLimit,
     tokenClaims,
     rateLimit,
     ipAddressHeaders,
     publicSignup = false,
+    validateSchema,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
     allowEmail?: (email: string) => Promise<boolean>;
     allowUser?: AuthenticationExtension["allowUser"];
+    signInLimit?: (signIn: SignIn) => Promise<string | null>;
     tokenClaims?: (
       input: OAuthClaimExtensionInput,
     ) => Promise<{ reference_id: string; organization_id?: string }>;
     rateLimit?: BetterAuthOptions["rateLimit"];
     ipAddressHeaders?: string[];
     publicSignup?: boolean;
+    /** Better Auth checks the schema the first time each instance is used. */
+    validateSchema?: boolean;
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
@@ -119,13 +126,12 @@ export const authenticationOptions = (
         ];
 
         const current =
-          (allowUser && ["/get-session", "/token"].includes(context.path)) ||
+          // Session lookups are not checked on each request: an extension that blocks a user ends
+          // their sessions, and new sessions are checked when they are created.
+          (allowUser && context.path === "/token") ||
           ["/device/approve", "/device/deny"].includes(context.path) ||
           accountPaths.includes(context.path)
-            ? await getSessionFromCtx(context, {
-                // Leave renewal to the endpoint so its response owns the refreshed cookie.
-                disableRefresh: context.path === "/get-session",
-              })
+            ? await getSessionFromCtx(context)
             : null;
 
         if (current && allowUser && !(await allowUser(current.user.id)))
@@ -149,7 +155,7 @@ export const authenticationOptions = (
           .nullable()
           .parse(current?.session["identityOrganizationId"] ?? null);
 
-        if (identityOrganizationId !== null) {
+        if (current && identityOrganizationId !== null) {
           if (
             ["/link-social", "/unlink-account", "/get-access-token", "/refresh-token"].includes(
               context.path,
@@ -169,10 +175,27 @@ export const authenticationOptions = (
               "/delete-user",
               "/change-email",
             ].includes(context.path)
-          )
-            throw new APIError("FORBIDDEN", {
-              message: "Sign in with your Widefleet email to manage your global account",
-            });
+          ) {
+            // Only a sign-in that reaches every membership manages the global account.
+            const limit = signInLimit
+              ? await signInLimit({
+                  userId: current.user.id,
+                  identityOrganizationId,
+                  recovery: current.session["recovery"] === true,
+                })
+              : identityOrganizationId;
+
+            if (limit !== null)
+              throw new APIError("FORBIDDEN", {
+                message: "Sign in with your Widefleet email to manage your global account",
+              });
+
+            // The organization owns addresses on its domains, so this sign-in cannot move one away.
+            if (context.path === "/change-email")
+              throw new APIError("FORBIDDEN", {
+                message: "Your organization manages this email address",
+              });
+          }
         }
 
         if (
@@ -244,7 +267,12 @@ export const authenticationOptions = (
       },
     },
     advanced: {
-      database: { generateId: () => crypto.randomUUID() },
+      // Leave Better Auth's default when validation stays on: an explicit `true` turns its
+      // note about adapters it cannot validate into a warning.
+      database:
+        validateSchema === false
+          ? { generateId: () => crypto.randomUUID(), validateSchema }
+          : { generateId: () => crypto.randomUUID() },
       ipAddress: { ipAddressHeaders: ipAddressHeaders ?? ["x-forwarded-for"] },
       cookiePrefix: "platform",
       crossSubDomainCookies: { enabled: false },
@@ -295,6 +323,7 @@ export const authenticationOptions = (
       organization({
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
+        membershipLimit: organizationMemberLimit,
         requireEmailVerificationOnInvitation: true,
         ac: organizationAccess,
         roles: organizationRoles,
@@ -305,7 +334,12 @@ export const authenticationOptions = (
             organizationName: organization.name,
           }),
       }),
-      jwt({ jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` } }),
+      // The OAuth provider signs its tokens with these keys. Nothing reads the session JWT
+      // header, and signing it would read the keys on every session lookup.
+      jwt({
+        jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` },
+        disableSettingJwtHeader: true,
+      }),
       oauthProvider({
         loginPage: "/sign-in",
         consentPage: "/device",

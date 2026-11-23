@@ -13,10 +13,13 @@
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Search from "@lucide/svelte/icons/search";
+  import { getWorkspaceContext } from "#lib/workspace-context";
 
-  let { appId, initialSaved = false }: { appId: string; initialSaved?: boolean } = $props();
+  const workspace = getWorkspaceContext();
 
-  const access = $derived(getAppAccess({ appId }));
+  let { appId }: { appId: string } = $props();
+
+  const access = $derived(getAppAccess({ organizationId: workspace.organizationId, appId }));
 
   const data = $derived(
     await access.catch((cause: unknown) => {
@@ -118,7 +121,7 @@
       >{status[data.state]}</Badge
     >
     <Button
-      href={`/apps/${appId}/access`}
+      href={workspace.path(`/apps/${appId}/access`)}
       variant="ghost"
       size="sm"
       data-sveltekit-reload
@@ -140,9 +143,6 @@
   {#if data.state === "pending" || data.state === "failed"}<Feedback
       >Activation has not been confirmed yet. Saved changes may already be in effect.</Feedback
     >{/if}
-  {#if initialSaved}<Feedback kind="success"
-      >Access rules saved. Check the status for activation progress.</Feedback
-    >{/if}
 
   {#if data.inheritedFrom}
     <div class="rounded-xl border p-5">
@@ -150,8 +150,10 @@
         This preview automatically inherits the original app's access rules. You cannot set separate
         rules.
       </p>
-      <Button href={`/apps/${data.inheritedFrom}/access`} variant="outline" class="mt-4"
-        >Original app rules</Button
+      <Button
+        href={workspace.path(`/apps/${data.inheritedFrom}/access`)}
+        variant="outline"
+        class="mt-4">Original app rules</Button
       >
     </div>
   {/if}
@@ -193,7 +195,7 @@
             >{editor.pending ? "Saving …" : "Save app rules"}</Button
           >
           <a
-            href={`/apps/${appId}/access`}
+            href={workspace.path(`/apps/${appId}/access`)}
             data-sveltekit-reload
             class="text-muted-foreground text-xs hover:underline">Discard draft and reload rules</a
           >
@@ -207,6 +209,7 @@
       <summary class="text-sm font-medium">Search the Microsoft Entra directory for groups</summary>
       <form {...search} class="mt-5 max-w-lg space-y-3">
         <input {...search.fields.appId.as("hidden", appId)} />
+        <OrganizationField field={search.fields.organizationId} />
         <Label for="group-search">Group name</Label>
         <div class="flex gap-2">
           <Input
@@ -265,7 +268,7 @@
         {#each data.previews as preview (preview.appId)}<li class="py-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <a
-                href={`/apps/${preview.appId}/access`}
+                href={workspace.path(`/apps/${preview.appId}/access`)}
                 class="text-sm font-medium wrap-anywhere hover:underline">{preview.hostname}</a
               ><Badge variant="secondary">{status[preview.state]}</Badge>
             </div>

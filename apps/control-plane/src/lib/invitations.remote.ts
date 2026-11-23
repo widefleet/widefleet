@@ -2,7 +2,9 @@ import { form, getRequestEvent } from "$app/server";
 import { redirect } from "@sveltejs/kit";
 import { invitationAcceptance } from "@platform/contracts";
 import { getRuntime } from "#server/runtime";
-import { pageFailure, invitationIdentity } from "#server/page-auth";
+import { invitationIdentity } from "#server/page-auth";
+import { readOrganizationSlug } from "#server/organization";
+import { workspacePath } from "#lib/workspace-path";
 import { remoteOperation } from "#server/remote-support";
 
 export const acceptInvitation = form(invitationAcceptance, async ({ invitationId }) => {
@@ -17,8 +19,7 @@ export const acceptInvitation = form(invitationAcceptance, async ({ invitationId
     }),
   );
 
-  const selected = await runtime.identity.selectOrganization(request, result.organizationId);
+  const slug = await readOrganizationSlug(runtime.database.db, result.organizationId);
 
-  if (selected.isErr()) pageFailure(selected.error);
-  redirect(303, "/");
+  redirect(303, workspacePath(slug));
 });

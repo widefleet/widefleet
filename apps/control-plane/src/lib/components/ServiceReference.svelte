@@ -2,6 +2,9 @@
   import Markdown from "./Markdown.svelte";
   import type { getServiceDescription } from "#lib/services.remote";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   // What an app exposes to other apps and agents, with the documentation of its deployment.
   let {
@@ -34,7 +37,7 @@
             ></span>{open ? "Available to your organization" : "Requires administrator approval"}
           </span>
           {#if admin}<a
-              href={`/services/${service.appId}/availability`}
+              href={workspace.path(`/services/${service.appId}/availability`)}
               class="text-muted-foreground hover:text-foreground underline underline-offset-4"
               >Manage availability</a
             >{/if}

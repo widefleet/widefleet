@@ -1,38 +1,61 @@
 import { APIError } from "better-auth/api";
 import { getRequestEvent } from "$app/server";
-import { error, invalid } from "@sveltejs/kit";
+import { error, invalid, redirect } from "@sveltejs/kit";
 import type { Result } from "better-result";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { getUserSession, pageFailure } from "./page-auth.ts";
+import { sessionSignIn } from "./identity.ts";
+import { pageFailure } from "./page-auth.ts";
 import { getRuntime, reportRequestException } from "./runtime.ts";
 
-export const remoteContext = async (write?: { organizationId: string }) => {
-  const { request } = getRequestEvent();
-  const { user, session } = getUserSession();
+type Denial = { location: string; status: number; message: string };
+
+// Remote functions receive their page's organization as an argument. A query is cached by its
+// arguments, so it cannot read the organization from the page URL, and the session's
+// organization may belong to another tab.
+const authorize = async (
+  deny: (denial: Denial) => never,
+  { organizationId }: { organizationId: string },
+) => {
+  const { request, locals } = getRequestEvent();
+  const { user, session } = locals;
+
+  if (!user || !session)
+    return deny({ location: "/sign-in", status: 401, message: "Sign in to continue" });
   const runtime = await getRuntime();
 
-  const principal = await runtime.identity.principal(
-    user.id,
-    session.activeOrganizationId ?? null,
-    session.identityOrganizationId ?? null,
-    session.id,
-  );
+  const member = await runtime.identity.member(sessionSignIn(user, session), { organizationId });
 
-  if (principal.isErr()) {
-    if (principal.error instanceof DatabaseUnavailable) return pageFailure(principal.error);
+  if (member.isErr()) {
+    if (member.error instanceof DatabaseUnavailable) return pageFailure(member.error);
 
-    if (principal.error.code === "CONFLICT") error(409, principal.error.message);
-    error(principal.error.code === "UNAUTHORIZED" ? 401 : 403, principal.error.message);
+    const { code, message, organizationSlug } = member.error;
+
+    if (code === "UNAUTHORIZED") return deny({ location: "/sign-in", status: 401, message });
+
+    if (code === "SSO_REQUIRED")
+      return deny({
+        location: `/sign-in?${new URLSearchParams({ organization: organizationSlug ?? "" })}`,
+        status: 403,
+        message,
+      });
+
+    // Membership can end while a page is open. Choosing another organization repairs it.
+    return deny({ location: "/organizations", status: 403, message });
   }
 
-  if (write && write.organizationId !== principal.value.application.organizationId)
-    error(409, "Your organization selection changed. Reload this page before making changes.");
+  runtime.reporting.active(member.value.principal.id);
 
-  runtime.reporting.active(principal.value.id);
-  session.activeOrganizationId = principal.value.application.organizationId;
-
-  return { runtime, principal: principal.value, request };
+  return { runtime, ...member.value, request };
 };
+
+// Queries and forms send a caller without access to where the page hook would send them. A query
+// request does not name its page, so these destinations carry no return path.
+export const remoteContext = (selection: { organizationId: string }) =>
+  authorize(({ location }) => redirect(303, location), selection);
+
+// Commands cannot redirect, so they report the same denial as an error.
+export const commandContext = (selection: { organizationId: string }) =>
+  authorize(({ status, message }) => error(status, message), selection);
 
 export const queryValue = <T>(
   result: Result<T, InvalidOperation | DatabaseUnavailable | StorageUnavailable | APIError>,

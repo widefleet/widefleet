@@ -270,7 +270,16 @@ describe("Public account registration and organization onboarding", () => {
         properties: { source: "self_service" },
       },
     ]);
-    const selected = await runtime.identity.selectOrganization(request(headers), record.id);
+
+    const inOrganization = (organizationId: string) => {
+      const selection = new Headers(headers);
+      selection.set("x-widefleet-organization", organizationId);
+
+      return runtime.identity.authenticate(request(selection), "platform:write");
+    };
+
+    const selected = await inOrganization(record.id);
+
     expect(selected.isOk()).toBe(true);
 
     const app = (
@@ -282,9 +291,7 @@ describe("Public account registration and organization onboarding", () => {
     ).unwrap();
 
     expect(app.hostname.split(".")[0]).toHaveLength(63);
-    expect(await runtime.identity.selectOrganization(request(headers), "widefleet")).toMatchObject({
-      error: { code: "FORBIDDEN" },
-    });
+    expect(await inOrganization("widefleet")).toMatchObject({ error: { code: "FORBIDDEN" } });
     await environment.database.db
       .update(session)
       .set({ identityOrganizationId: "widefleet" })

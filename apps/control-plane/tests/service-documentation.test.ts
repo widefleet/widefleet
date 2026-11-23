@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { executionWorkerMetadata, serviceDocumentation, workerMetadata } from "@platform/contracts";
+import {
+  executionWorkerMetadata,
+  selectServiceMethods,
+  serviceDescriptionBudget,
+  serviceDocumentation,
+  shortenTypeNames,
+  workerMetadata,
+} from "@platform/contracts";
 import { extractServiceDocumentation } from "./service-documentation-fixture.ts";
 import { presentServiceDocumentation } from "../src/lib/server/service-documentation.ts";
 
@@ -187,9 +194,10 @@ native(
 native(
   "describes object-handler client signatures without injected env and ctx parameters",
   async () => {
-    const root = await project(`export default {
+    const root = await project(`interface InternalEnv { secret: string }
+    export default {
     /** Echo the input. @param input - Text to echo. */
-    echo(input: string, env: object, ctx: object) { return input; },
+    echo(input: string, env: InternalEnv, ctx: object) { return input; },
     fetch(request: Request) { return new Response(request.url); }
   };`);
 
@@ -206,8 +214,11 @@ native(
           },
         ],
         returns: { type: "Promise<string>", description: "" },
+        uses: [],
       },
     ]);
+    // Injected parameters are not part of the client's API, nor are their types.
+    expect(result.documentation.types).toEqual([]);
   },
 );
 
@@ -245,11 +256,11 @@ native("resolves Zod input types without requiring an app documentation dependen
 });
 
 native(
-  "includes types nested in containers and distinguishes generic interface instances",
+  "includes types nested in containers and documents a generic interface once with its type parameters",
   async () => {
     const root = await project(`import * as Workers from "cloudflare:workers";
     interface Item { id: string }
-    interface Page<T> { items: T[]; cursor?: string }
+    interface Page<T extends Item | string = Item> { items: T[]; cursor?: string }
     export default class extends Workers.WorkerEntrypoint {
       read(input: [string, number?], lookup: Map<string, Item>): Page<Item> { return {items: []}; }
       names(): Page<string> { return {items: []}; }
@@ -257,27 +268,84 @@ native(
 
     const result = await extractServiceDocumentation(root, await bundle(root), ["default"]);
     expect(result.warnings).toEqual([]);
-    expect(result.documentation.types.find((type) => type.name === "Item")?.definition).toContain(
-      "id: string",
-    );
+    const item = result.documentation.types.find((type) => type.name === "Item");
+    expect(item?.kind).toBe("interface");
+    expect(item?.definition).toContain("id: string");
     const methods = result.documentation.entrypoints[0]?.methods;
     expect(methods?.find((method) => method.name === "read")?.signatures[0]?.returns.type).toBe(
       "Promise<Page<Item>>",
     );
-    expect(
-      result.documentation.types.find((type) => type.name === "Page<Item>")?.definition,
-    ).toContain("items: Item[]");
     expect(methods?.find((method) => method.name === "names")?.signatures[0]?.returns.type).toBe(
       "Promise<Page<string>>",
     );
-    expect(
-      result.documentation.types.find((type) => type.name === "Page<string>")?.definition,
-    ).toContain("items: string[]");
+    expect(result.documentation.types.map((type) => type.name).toSorted()).toEqual([
+      "Item",
+      "Page<T>",
+    ]);
+    const page = result.documentation.types.find((type) => type.name === "Page<T>");
+    expect(page?.kind).toBe("interface");
+    expect(page?.definition).toContain("items: T[]");
+    expect(page?.typeParameters).toEqual(["T extends string | Item = Item"]);
+    expect(page?.uses).toEqual(["Item"]);
     expect(
       methods?.find((method) => method.name === "read")?.signatures[0]?.parameters[1]?.type,
     ).toBe("Map<string, Item>");
+    expect(
+      selectServiceMethods(result.documentation, "default", {
+        methods: ["read"],
+        types: [],
+      }).selection?.types.map((type) => type.name),
+    ).toEqual(expect.arrayContaining(["Item", "Page<T>"]));
+    expect(
+      selectServiceMethods(result.documentation, "default", {
+        methods: ["names"],
+        types: [],
+      }).selection?.types.map((type) => type.name),
+    ).toEqual(["Item", "Page<T>"]);
   },
 );
+
+native("keeps the names of aliases an alias refers to", async () => {
+  const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    type Comparator = { eq?: string; in?: string[] };
+    type Filter = { title?: Comparator | null; and?: Filter[] };
+    export class Reader extends WorkerEntrypoint {
+      find(filter: Filter) { return filter; }
+    }`);
+
+  const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+  expect(result.warnings).toEqual([]);
+  const filter = result.documentation.types.find((type) => type.name === "Filter");
+  expect(filter?.definition).toContain("title?: Comparator | null");
+  expect(filter?.definition).not.toContain("eq?: string");
+  expect(filter?.uses).toEqual(["Comparator"]);
+  expect(
+    result.documentation.types.find((type) => type.name === "Comparator")?.definition,
+  ).toContain("eq?: string");
+});
+
+native("documents generic type aliases with their own structure", async () => {
+  const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    interface Role { name: string }
+    type Tree<T> = { value: T; children: Tree<T>[] };
+    export class Reader extends WorkerEntrypoint {
+      tree(): Tree<number> { return {value: 1, children: []}; }
+      role(): Role | null { return null; }
+    }`);
+
+  const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+  expect(result.warnings).toEqual([]);
+  const tree = result.documentation.types.find((type) => type.name === "Tree<T>");
+  expect(tree?.kind).toBe("type");
+  expect(tree?.definition).toMatch(/value: T;[\s\S]*children: Tree<T>\[\]/);
+  // The alias inside a nullable union stays a documented reference.
+  expect(
+    selectServiceMethods(result.documentation, "Reader", {
+      methods: ["role"],
+      types: [],
+    }).selection?.types.map((type) => type.name),
+  ).toEqual(["Role"]);
+});
 
 native("limits documented overloads without rejecting the app", async () => {
   const signatures = Array.from(
@@ -299,9 +367,8 @@ native("limits documented overloads without rejecting the app", async () => {
 });
 
 native.each([
-  { summary: "x".repeat(32769), count: 1 },
-  { summary: "é".repeat(10000), count: 14 },
-  { summary: "Read a value.", count: 129 },
+  { summary: "x".repeat(262145), count: 1 },
+  { summary: "Read a value.", count: 1025 },
 ])(
   "omits oversized documentation with a warning while keeping extraction successful ($count methods)",
   async ({ summary, count }) => {
@@ -314,7 +381,7 @@ native.each([
       export class Reader extends WorkerEntrypoint {\n${methods}\n}`);
 
     const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
-    expect(result.documentation).toEqual({ format: 1, entrypoints: [], types: [] });
+    expect(result.documentation).toEqual({ format: 3, entrypoints: [], types: [] });
     expect(result.warnings).toContainEqual(
       expect.stringContaining("API documentation was omitted because it exceeds supported limits"),
     );
@@ -348,6 +415,24 @@ native(
   },
 );
 
+native("records types named only by a nested signature's type parameters", async () => {
+  const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    interface Item { id: string }
+    interface Callback { <T extends Item = Item>(value: T): void }
+    export class Reader extends WorkerEntrypoint {
+      subscribe(callback: Callback) { return true; }
+    }`);
+
+  const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+  expect(result.warnings).toEqual([]);
+  expect(
+    selectServiceMethods(result.documentation, "Reader", {
+      methods: ["subscribe"],
+      types: [],
+    }).selection?.types.map((type) => type.name),
+  ).toEqual(expect.arrayContaining(["Callback", "Item"]));
+});
+
 native("qualifies conflicting names without discarding either type", async () => {
   const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
     namespace One { export interface Item { id: string } }
@@ -372,11 +457,18 @@ native("qualifies conflicting names without discarding either type", async () =>
     ["first", "One.Item"],
     ["second", "Two.Item"],
     ["repeated", "One.Item"],
-  ])
+  ] as const) {
     expect(
       result.documentation.entrypoints[0]?.methods.find((item) => item.name === method)
         ?.signatures[0]?.returns.type,
     ).toBe(`Promise<${type}>`);
+    expect(
+      selectServiceMethods(result.documentation, "Reader", {
+        methods: [method],
+        types: [],
+      }).selection?.types.map((entry) => entry.name),
+    ).toEqual([type]);
+  }
 });
 
 native.each([false, true])(
@@ -396,12 +488,12 @@ native.each([false, true])(
 
     const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
     expect(result.warnings).toEqual([]);
-    expect(
-      result.documentation.types.find((type) => type.name === "A<string>")?.definition,
-    ).toMatch(/a: string;[\s\S]*next: B<string>/);
-    expect(
-      result.documentation.types.find((type) => type.name === "B<string>")?.definition,
-    ).toMatch(/b: string;[\s\S]*next: A<string>/);
+    expect(result.documentation.types.find((type) => type.name === "A<T>")?.definition).toMatch(
+      /a: T;[\s\S]*next: B<T>/,
+    );
+    expect(result.documentation.types.find((type) => type.name === "B<T>")?.definition).toMatch(
+      /b: T;[\s\S]*next: A<T>/,
+    );
 
     for (const [method, type] of [
       ["readA", "A<string>"],
@@ -412,6 +504,13 @@ native.each([false, true])(
       ).toMatchObject({
         signatures: [{ parameters: [{ type }], returns: { type: `Promise<${type}>` } }],
       });
+
+    for (const method of ["readA", "readB"])
+      expect(
+        selectServiceMethods(result.documentation, "Reader", { methods: [method], types: [] })
+          .selection?.types.map((type) => type.name)
+          .toSorted(),
+      ).toEqual(["A<T>", "B<T>"]);
   },
 );
 
@@ -453,8 +552,8 @@ native.each([
     if (recursive) {
       expect(definition).toContain("loop: Loop<string>");
       expect(
-        result.documentation.types.find((type) => type.name === "Loop<string>")?.definition,
-      ).toMatch(/value: string;[\s\S]*next: Loop<string>/);
+        result.documentation.types.find((type) => type.name === "Loop<T>")?.definition,
+      ).toMatch(/value: T;[\s\S]*next: Loop<T>/);
     }
 
     expect(result.warnings.some((warning) => warning.includes("Conflicting API type name"))).toBe(
@@ -701,13 +800,157 @@ native(
   },
 );
 
-it("renders replacement advice, examples and short names on referenced types", () => {
+it("selects the types a method uses by following recorded uses", () => {
+  const type = (name: string, uses: string[] = [], definition = `interface ${name} {}`) => ({
+    name,
+    kind: "interface",
+    definition,
+    summary: "",
+    remarks: "",
+    examples: [],
+    uses,
+  });
+
+  const method = (name: string, uses: string[]) => ({
+    name,
+    summary: "",
+    remarks: "",
+    examples: [],
+    throws: [],
+    signatures: [{ parameters: [], returns: { type: "Promise<void>", description: "" }, uses }],
+  });
+
+  const documentation = serviceDocumentation.parse({
+    format: 3,
+    entrypoints: [
+      {
+        name: "Reader",
+        summary: "",
+        remarks: "",
+        examples: [],
+        http: false,
+        methods: [method("first", ["One.Item", "Page<Item>"]), method("other", ["Unused"])],
+      },
+    ],
+    types: [
+      type("One.Item"),
+      type("Page<Item>", ["Item"]),
+      // Types that use each other are each included once.
+      type("Item", ["Owner"]),
+      type("Owner", ["Item"]),
+      type("One.ItemDetails"),
+      type("Unused"),
+    ],
+  });
+
+  expect(
+    selectServiceMethods(documentation, "Reader", { methods: ["first"], types: [] }).selection,
+  ).toMatchObject({ omittedTypes: [] });
+  expect(
+    selectServiceMethods(documentation, "Reader", {
+      methods: ["first"],
+      types: [],
+    }).selection?.types.map((entry) => entry.name),
+  ).toEqual(["One.Item", "Page<Item>", "Item", "Owner"]);
+  expect(
+    selectServiceMethods(documentation, "Reader", {
+      methods: [],
+      types: ["Item"],
+    }).selection?.types.map((entry) => entry.name),
+  ).toEqual(["Item", "Owner"]);
+  expect(
+    selectServiceMethods(documentation, "Reader", {
+      methods: ["first", "missing"],
+      types: ["Gone"],
+    }),
+  ).toEqual({
+    unknown: { entrypoint: false, methods: ["missing"], types: ["Gone"] },
+    selection: null,
+  });
+  expect(selectServiceMethods(documentation, "Writer", { methods: [], types: ["Item"] })).toEqual({
+    unknown: { entrypoint: true, methods: [], types: [] },
+    selection: null,
+  });
+});
+
+it("includes the types a selection names and further types within the budget", () => {
+  const type = (name: string, bytes: number, uses: string[] = []) => ({
+    name,
+    kind: "type",
+    definition: "x".repeat(bytes),
+    summary: "",
+    remarks: "",
+    examples: [],
+    uses,
+  });
+
+  const documentation = serviceDocumentation.parse({
+    format: 3,
+    entrypoints: [
+      {
+        name: "Reader",
+        summary: "",
+        remarks: "",
+        examples: [],
+        http: false,
+        methods: [
+          {
+            name: "read",
+            summary: "",
+            remarks: "",
+            examples: [],
+            throws: [],
+            signatures: [
+              {
+                parameters: [],
+                returns: { type: "Promise<Large>", description: "" },
+                uses: ["Large", "Small"],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    types: [
+      // Named directly by the signature, so always included.
+      type("Large", serviceDescriptionBudget - 1500, ["Big", "Near"]),
+      type("Small", 100, ["Tiny"]),
+      // Reached through other types: Big does not fit, the smaller ones do.
+      type("Big", 1000, ["Hidden"]),
+      type("Near", 10),
+      type("Tiny", 10),
+      type("Hidden", 10),
+    ],
+  });
+
+  const selection = (types: string[]) =>
+    selectServiceMethods(documentation, "Reader", { methods: types.length ? [] : ["read"], types })
+      .selection;
+
+  expect(selection([])?.types.map((entry) => entry.name)).toEqual([
+    "Large",
+    "Small",
+    "Near",
+    "Tiny",
+  ]);
+  expect(selection([])?.omittedTypes).toEqual(["Big"]);
+  // An omitted type is described by name with the types it leads to.
+  expect(selection(["Big", "Tiny"])?.types.map((entry) => entry.name)).toEqual([
+    "Big",
+    "Tiny",
+    "Hidden",
+  ]);
+  expect(selection(["Big", "Tiny"])?.omittedTypes).toEqual([]);
+});
+
+it("renders replacement advice, examples and short names of referenced types", () => {
   const docs = serviceDocumentation.parse({
-    format: 1,
+    format: 3,
     entrypoints: [],
     types: [
       {
         name: 'import("./src/query").Query',
+        kind: "type",
         definition: 'type Query = { id: string; next?: import("./src/query").Query };',
         summary: "Select one item.",
         remarks: "Identifiers are case-sensitive.",
@@ -717,7 +960,7 @@ it("renders replacement advice, examples and short names on referenced types", (
     ],
   });
 
-  const [type] = presentServiceDocumentation(docs).types;
+  const [type] = presentServiceDocumentation(shortenTypeNames(docs)).types;
   expect(type?.name).toBe("Query");
   expect(type?.definition).toBe("type Query = { id: string; next?: Query };");
   expect(type?.description).toContain("Deprecated: Use ItemQuery for new integrations.");
@@ -726,7 +969,7 @@ it("renders replacement advice, examples and short names on referenced types", (
 
 it("shortens only unambiguous documented type references", () => {
   const docs = serviceDocumentation.parse({
-    format: 1,
+    format: 3,
     entrypoints: [
       {
         name: "Reader",
@@ -759,6 +1002,11 @@ it("shortens only unambiguous documented type references", () => {
                   type: 'Promise<[import("./app/model").Item, import("./shared/model").Item, import("./app/page").Page<import("./app/query").Query>]>',
                   description: "Matching items.\n\n```ts\nconst [item] = result;\n```",
                 },
+                uses: [
+                  'import("./app/query").Query',
+                  'import("./app/page").Page<import("./app/query").Query>',
+                  'import("./app/model").Item',
+                ],
               },
             ],
           },
@@ -768,6 +1016,7 @@ it("shortens only unambiguous documented type references", () => {
     types: [
       {
         name: 'import("./app/query").Query',
+        kind: "type",
         definition:
           '{ /** Use "import(\\"./x\\").Y" literally. */ id: "import(\\"./app/query\\").Query" }',
         summary: "",
@@ -776,13 +1025,16 @@ it("shortens only unambiguous documented type references", () => {
       },
       {
         name: 'import("./app/page").Page<import("./app/query").Query>',
+        kind: "type",
         definition: '{ items: import("./app/query").Query[] }',
+        uses: ['import("./app/query").Query'],
         summary: "",
         remarks: "",
         examples: [],
       },
       ...["app", "shared"].map((folder) => ({
         name: `import("./${folder}/model").Item`,
+        kind: "type",
         definition: "{ id: string }",
         summary: "",
         remarks: "",
@@ -791,9 +1043,18 @@ it("shortens only unambiguous documented type references", () => {
     ],
   });
 
-  const reference = presentServiceDocumentation(docs);
+  const shortened = shortenTypeNames(docs);
+  const reference = presentServiceDocumentation(shortened);
   const [signature] = reference.entrypoints[0]?.methods[0]?.signatures ?? [];
 
+  // Names, references and uses change together; a second pass changes nothing.
+  expect(shortenTypeNames(shortened)).toEqual(shortened);
+  expect(shortened.entrypoints[0]?.methods[0]?.signatures[0]?.uses).toEqual([
+    "Query",
+    "Page<Query>",
+    'import("./app/model").Item',
+  ]);
+  expect(shortened.types[1]?.uses).toEqual(["Query"]);
   expect(reference.types.map((type) => type.name)).toEqual([
     "Query",
     "Page<Query>",
@@ -810,9 +1071,9 @@ it("shortens only unambiguous documented type references", () => {
   expect(reference.entrypoints[0]?.methods[0]?.throws).toHaveLength(2);
 });
 
-it("rejects oversized and mismatched artifact documentation and renders authored HTML as text", () => {
+it("rejects oversized artifact documentation and renders authored HTML as text", () => {
   const docs = {
-    format: 1,
+    format: 3,
     entrypoints: [
       {
         name: "Reader",
@@ -827,20 +1088,32 @@ it("rejects oversized and mismatched artifact documentation and renders authored
   };
 
   expect(
-    workerMetadata.safeParse({
-      main_module: "worker.js",
-      compatibility_date: "2026-10-01",
-      entrypoints: ["Other"],
-      service_documentation: docs,
-      assets: { upload_session: crypto.randomUUID() },
-    }).success,
-  ).toBe(false);
-  expect(
     serviceDocumentation.safeParse({
       ...docs,
       types: [
-        { name: "Huge", definition: "x".repeat(32769), summary: "", remarks: "", examples: [] },
+        {
+          name: "Huge",
+          kind: "type",
+          definition: "x".repeat(262145),
+          summary: "",
+          remarks: "",
+          examples: [],
+        },
       ],
+    }).success,
+  ).toBe(false);
+  // Each definition is within bounds; together they exceed 8 MiB.
+  expect(
+    serviceDocumentation.safeParse({
+      ...docs,
+      types: Array.from({ length: 33 }, (_, index) => ({
+        name: `Large${index}`,
+        kind: "type",
+        definition: "x".repeat(262144),
+        summary: "",
+        remarks: "",
+        examples: [],
+      })),
     }).success,
   ).toBe(false);
   expect(
@@ -851,14 +1124,11 @@ it("rejects oversized and mismatched artifact documentation and renders authored
     main_module: "worker.js",
     compatibility_date: "2026-10-01",
     entrypoints: ["Reader"],
-    service_documentation: docs,
     network: { backend: ["https://api.example.test"] },
     assets: { upload_session: crypto.randomUUID() },
   });
 
-  expect(executionWorkerMetadata(metadata)).not.toHaveProperty("service_documentation");
   // Runtimes of earlier releases accept no declared origins in their snapshots.
   expect(executionWorkerMetadata(metadata)).not.toHaveProperty("network");
-  expect(metadata.service_documentation).toEqual(docs);
   expect(metadata.network).toEqual({ backend: ["https://api.example.test"], browser: [] });
 });

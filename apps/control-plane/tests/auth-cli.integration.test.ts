@@ -167,7 +167,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         appAccess: createAppAccessService(database),
         workflows: createWorkflowService(database),
         migrations: createMigrationService(database, storage),
-        connections: createConnectionService(environment.database.db),
+        connections: createConnectionService(environment.database.db, storage),
         appSecrets: createAppSecrets(
           environment.database.db,
           environment.environment.PLATFORM_ENCRYPTION_KEY,

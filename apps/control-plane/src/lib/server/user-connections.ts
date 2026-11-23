@@ -9,6 +9,8 @@ import {
   type userConnectionEntry,
 } from "@platform/contracts";
 import { apps, artifacts, deployments } from "./schema.ts";
+import { readOrganizationSlug } from "./organization.ts";
+import { workspacePath } from "../workspace-path.ts";
 import type { Database } from "./database.ts";
 import type { Configuration } from "./config.ts";
 import type { Principal } from "./identity.ts";
@@ -103,77 +105,102 @@ export const createUserConnections = (
     return { record, identity: await identify(principal) };
   };
 
+  // A failed check leaves the connector listed as unavailable. A connector that no
+  // longer offers personal connections is left out.
+  const check = async (
+    principal: Principal,
+    record: Awaited<ReturnType<typeof candidates>>[number],
+    identity: Awaited<ReturnType<typeof identify>>,
+    deadline: AbortSignal,
+  ): Promise<z.infer<typeof userConnectionEntry> | null> => {
+    try {
+      const result = await call(principal, record, identity, { action: "status" }, deadline);
+
+      return result === null
+        ? null
+        : { ...record, status: userConnectionStatus.parse(result), unavailable: false };
+    } catch (cause) {
+      // Report unexpected failures by kind only: connector responses can contain provider data.
+      if (!deadline.aborted)
+        void reportException?.(new Error("A personal connection status check failed"), undefined, {
+          appId: record.appId,
+          organizationId: principal.application.organizationId,
+          failure:
+            cause instanceof APIError
+              ? "runtime"
+              : cause instanceof z.ZodError || cause instanceof SyntaxError
+                ? "response"
+                : "request",
+        });
+
+      return { ...record, status: null, unavailable: true };
+    }
+  };
+
+  // Each check runs customer code. Bound both concurrency and the total wait; records not
+  // reached before the deadline remain explicitly unavailable.
+  const checkAll = async (
+    principal: Principal,
+    records: Awaited<ReturnType<typeof candidates>>,
+  ): Promise<(z.infer<typeof userConnectionEntry> | null)[]> => {
+    if (!records.length) return [];
+    const identity = await identify(principal);
+
+    const results: (z.infer<typeof userConnectionEntry> | null)[] = records.map((record) => ({
+      ...record,
+      status: null,
+      unavailable: true,
+    }));
+
+    const deadline = AbortSignal.timeout(5_000);
+    let next = 0;
+
+    await Promise.all(
+      Array.from({ length: Math.min(4, records.length) }, async () => {
+        while (!deadline.aborted) {
+          const index = next++;
+          const record = records[index];
+
+          if (!record) return;
+          results[index] = await check(principal, record, identity, deadline);
+        }
+      }),
+    );
+
+    return results;
+  };
+
   return {
-    list: async (principal: Principal) => {
+    list: async (principal: Principal) =>
+      (await checkAll(principal, await candidates(principal))).filter((result) => result !== null),
+    // The page lists connectors right away and loads their statuses together afterwards,
+    // because a status runs the connector's code.
+    records: async (principal: Principal) => {
       const records = await candidates(principal);
 
-      if (!records.length) return [];
-      const identity = await identify(principal);
+      // A refused identity applies to every connector, so the list reports it once.
+      if (records.length) await identify(principal);
 
-      const results: (z.infer<typeof userConnectionEntry> | null)[] = records.map((record) => ({
-        ...record,
-        status: null,
-        unavailable: true,
-      }));
-
-      const deadline = AbortSignal.timeout(5_000);
-      let next = 0;
-
-      // Each request executes customer code. Bound both concurrency and the total
-      // wait; records not reached before the deadline remain explicitly unavailable.
-      await Promise.all(
-        Array.from({ length: Math.min(4, records.length) }, async () => {
-          while (!deadline.aborted) {
-            const index = next++;
-            const record = records[index];
-
-            if (!record) return;
-
-            try {
-              const result = await call(
-                principal,
-                record,
-                identity,
-                { action: "status" },
-                deadline,
-              );
-
-              results[index] =
-                result === null
-                  ? null
-                  : {
-                      ...record,
-                      status: userConnectionStatus.parse(result),
-                      unavailable: false,
-                    };
-            } catch (cause) {
-              // The row stays unavailable. Report unexpected failures by kind only:
-              // connector responses can contain provider data.
-              if (!deadline.aborted)
-                void reportException?.(
-                  new Error("A personal connection status check failed"),
-                  undefined,
-                  {
-                    appId: record.appId,
-                    organizationId: principal.application.organizationId,
-                    failure:
-                      cause instanceof APIError
-                        ? "runtime"
-                        : cause instanceof z.ZodError || cause instanceof SyntaxError
-                          ? "response"
-                          : "request",
-                  },
-                );
-            }
-          }
-        }),
+      return records;
+    },
+    // A connector missing from the result no longer offers personal connections.
+    statuses: async (principal: Principal, appIds: string[]) => {
+      const records = (await candidates(principal)).filter((record) =>
+        appIds.includes(record.appId),
       );
 
-      return results.filter((result) => result !== null);
+      const results = await checkAll(principal, records);
+
+      return new Map(records.map((record, index) => [record.appId, results[index] ?? null]));
     },
     prepare: async (principal: Principal, appId: string) => {
       const { record, identity } = await target(principal, appId);
-      const completion = new URL("/connections", configuration.PLATFORM_URL);
+
+      const slug = await readOrganizationSlug(database, principal.application.organizationId);
+
+      // The connector returns the person to the page listing their connections.
+      const completion = new URL(workspacePath(slug, "/connections"), configuration.PLATFORM_URL);
+
       completion.searchParams.set("completed", appId);
 
       const result = await call(principal, record, identity, {

@@ -2578,7 +2578,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         })),
       );
 
-      const appUrl = `${environment.configuration.PLATFORM_URL}/apps/${app.id}`;
+      const appUrl = `${environment.configuration.PLATFORM_URL}/widefleet/apps/${app.id}`;
       const response = await page.goto(appUrl);
       expect(response?.status()).toBe(200);
       expect(page.url()).toBe(appUrl);

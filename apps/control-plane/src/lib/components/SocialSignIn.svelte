@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { authClient } from "#lib/auth-client";
+  import { organizationPlaceholder, workspacePath } from "#lib/workspace-path";
   import SocialButton from "@platform/ui/social-button";
   import Feedback from "#shadcn/components/Feedback.svelte";
 
@@ -39,7 +40,7 @@
         callbackURL: next,
         newUserCallbackURL: register
           ? next
-          : `/organizations?${new URLSearchParams({ next: next === "/" ? "/welcome" : next })}`,
+          : `/organizations?${new URLSearchParams({ next: next === "/" ? workspacePath(organizationPlaceholder, "/welcome") : next })}`,
         errorCallbackURL: `/sign-in/connect?${new URLSearchParams({ provider, next })}`,
       });
 

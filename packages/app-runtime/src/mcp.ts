@@ -10,7 +10,16 @@ import {
   registerAppResource,
   registerAppTool,
 } from "@modelcontextprotocol/ext-apps/server";
-import { inputAnswer, mcpServiceCall, mcpScopes, sealedInputRequired } from "@platform/contracts";
+import {
+  inputAnswer,
+  mcpServiceCall,
+  mcpScopes,
+  sealedInputRequired,
+  serviceDescriptionBudget,
+  serviceDescriptionMaxMethods,
+  serviceDescriptionMaxTypes,
+  serviceTypeName,
+} from "@platform/contracts";
 import { inputFormHtml } from "#mcp-input-form";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
@@ -19,9 +28,9 @@ import { verifyMcpToken } from "./mcp-authorization.ts";
 import { readMcpConfiguration } from "./mcp-oauth.ts";
 import {
   callMcpService,
-  describeMcpService,
+  describeMcpMethods,
   formMcpInput,
-  searchMcpServices,
+  searchMcpMethods,
 } from "./mcp-services.ts";
 import { inputFormMeta, inputFormUri } from "./mcp-input-form.ts";
 import { executeMcpCode, mcpJson } from "./mcp-code.ts";
@@ -125,39 +134,66 @@ export const mcpRequest = async (
         "search",
         {
           description:
-            "Find permitted app services by words in their hostnames, entrypoints and documentation. Returns the best matches first. Pass an exact hostname to list its entrypoints, or omit query to list every service. To read the following page, call search again with the returned next object as the whole input; next is null on the last page. complete is false while the service list is being rebuilt; search again to include the remaining services.",
+            "Find methods of permitted app services by words in their names, parameters and documentation. Returns each method's hostname, entrypoint, name and summary, best matches first. Pass hostname and entrypoint without query to list every method of a service. To read the following page, call search again with the returned next object as the whole input; next is null on the last page. complete is false while the service list is being rebuilt; search again to include the remaining services.",
           inputSchema: {
             query: z
               .string()
               .max(200)
               .default("")
-              .describe("Words matched against hostnames, entrypoints and documentation."),
+              .describe("Words matched against method names, parameters and documentation."),
+            hostname: mcpServiceCall.shape.hostname
+              .optional()
+              .describe("Only methods of the service at this hostname."),
+            entrypoint: mcpServiceCall.shape.entrypoint
+              .optional()
+              .describe("Only methods of this entrypoint."),
             limit: z
               .number()
               .int()
               .min(1)
               .max(50)
               .default(10)
-              .describe("Most services to return, 10 by default."),
+              .describe("Most methods to return, 10 by default."),
             offset: z.number().int().min(0).default(0),
           },
           annotations: { readOnlyHint: true },
         },
-        async (input) => result(await searchMcpServices(environment, principal, input)),
+        async (input) => result(await searchMcpMethods(environment, principal, input)),
       );
       server.registerTool(
         "describe",
         {
-          description: "Read the signature and documentation before calling a service.",
+          description:
+            "Read the documentation, signatures and types of methods found with search before calling them. " +
+            `Types the methods use directly are always included, further types up to about ${serviceDescriptionBudget / 1024} KB. ` +
+            "omittedTypes names the types left out; describe them with types.",
           inputSchema: {
             hostname: mcpServiceCall.shape.hostname,
             entrypoint: mcpServiceCall.shape.entrypoint,
+            methods: z
+              .array(mcpServiceCall.shape.method)
+              .max(serviceDescriptionMaxMethods)
+              .default([])
+              .describe("Names of the methods to describe."),
+            types: z
+              .array(serviceTypeName)
+              .max(serviceDescriptionMaxTypes)
+              .default([])
+              .describe(
+                "Names of documented types, as types, uses and omittedTypes list them, such as Page<T>.",
+              ),
           },
           annotations: { readOnlyHint: true },
         },
-        async (input) => {
+        async ({ hostname, entrypoint, methods, types }) => {
+          if (!methods.length && !types.length)
+            throw new Error("Name at least one method or type to describe.");
+
           return result(
-            await describeMcpService(environment, principal, input.hostname, input.entrypoint),
+            await describeMcpMethods(environment, principal, hostname, entrypoint, {
+              methods,
+              types,
+            }),
           );
         },
       );

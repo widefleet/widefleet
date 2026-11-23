@@ -35,7 +35,7 @@ impl From<serde_json::Error> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn empty() -> Value {
-    json!({"format": 1, "entrypoints": [], "types": []})
+    json!({"format": 3, "entrypoints": [], "types": []})
 }
 
 /// Documents the service entrypoints of a bundled Worker.
@@ -168,14 +168,17 @@ pub fn extract(
             let doc = documentation(member);
             let mut signatures = Vec::new();
             for &signature in callable.iter().take(16) {
+                types.start_signature();
+                // Object handlers document only their input; the runtime passes the rest.
+                let documented_parameters = if class { usize::MAX } else { 1 };
+                types.declaration_references(
+                    &mut checker,
+                    signature.declaration().unwrap_or(member),
+                    documented_parameters,
+                );
                 let signature_doc = documentation(signature.declaration().unwrap_or(member));
                 let mut parameters = Vec::new();
-                for &parameter in
-                    signature
-                        .parameters()
-                        .iter()
-                        .take(if class { usize::MAX } else { 1 })
-                {
+                for &parameter in signature.parameters().iter().take(documented_parameters) {
                     let param = parameter.value_declaration().unwrap_or(member);
                     let parameter_type = checker
                         .get_type_of_symbol_at_location(parameter, Some(param))
@@ -215,14 +218,23 @@ pub fn extract(
             entries.push(entry);
         }
     }
-    let Some(types) = types.definitions(&mut checker) else {
+    let Some(definitions) = types.definitions(&mut checker) else {
         eprintln!(
             "Warning: API documentation was omitted because it exceeds supported limits. Deployment continues."
         );
         return Ok(empty());
     };
-    let result = json!({"format": 1, "entrypoints": entries, "types": types});
-    if !within_limits("", &result) || serde_json::to_vec(&result)?.len() > 262144 {
+    // Signatures were started in this order, so their uses line up.
+    let mut uses = types.signature_uses().iter();
+    for entry in &mut entries {
+        for method in entry["methods"].as_array_mut().into_iter().flatten() {
+            for signature in method["signatures"].as_array_mut().into_iter().flatten() {
+                signature["uses"] = json!(uses.next().cloned().unwrap_or_default());
+            }
+        }
+    }
+    let result = json!({"format": 3, "entrypoints": entries, "types": definitions});
+    if !within_limits("", &result) || serde_json::to_vec(&result)?.len() > MAX_BYTES {
         eprintln!(
             "Warning: API documentation was omitted because it exceeds supported limits. Deployment continues."
         );
@@ -393,16 +405,22 @@ fn rpc_method(name: &str) -> bool {
         )
 }
 
+// Keep these bounds equal to the service documentation contract the control plane enforces.
+pub(crate) const MAX_TEXT: usize = 262144;
+pub(crate) const MAX_TYPES: usize = 4096;
+const MAX_BYTES: usize = 8 * 1024 * 1024;
+
 fn within_limits(key: &str, value: &Value) -> bool {
     match value {
         Value::String(text) => {
-            text.encode_utf16().count() <= if key == "name" { 128 } else { 32768 }
+            text.encode_utf16().count() <= if key == "name" { 128 } else { MAX_TEXT }
         }
         Value::Array(values) => {
             values.len()
                 <= match key {
                     "entrypoints" | "parameters" | "typeParameters" => 32,
-                    "methods" | "types" => 128,
+                    "methods" => 1024,
+                    "types" | "uses" => MAX_TYPES,
                     _ => 16,
                 }
                 && values.iter().all(|value| within_limits("", value))

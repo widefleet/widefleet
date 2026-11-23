@@ -120,7 +120,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("routes an email to its company before requesting a Cloud sign-in code", async ({ page }) => {
-  await page.goto(`${cloud}/sign-in?next=/settings`);
+  await page.goto(`${cloud}/sign-in?next=/widefleet/settings/company-sign-in`);
   await page.getByLabel("Email", { exact: true }).fill("employee@company.test");
   await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect(page).toHaveURL(

@@ -5,12 +5,13 @@ import { organizationSelection, userConnectionInput } from "@platform/contracts"
 import { z } from "zod";
 import { InvalidOperation } from "#server/errors";
 import { remoteContext } from "#server/remote-support";
+import { workspacePath } from "#lib/workspace-path";
 
-export const getUserConnections = query(async () => {
-  const { runtime, principal } = await remoteContext();
+export const getUserConnections = query(organizationSelection, async (selection) => {
+  const { runtime, principal } = await remoteContext(selection);
 
   try {
-    return { connections: await runtime.userConnections.list(principal), error: null };
+    return { connections: await runtime.userConnections.records(principal), error: null };
   } catch (cause) {
     // A refused identity, such as a recovery session without a company account,
     // explains itself; other failures are temporary.
@@ -25,6 +26,29 @@ export const getUserConnections = query(async () => {
     throw cause;
   }
 });
+
+// A status runs the connector's code, so the page shows its rows first. Rows ask together, so
+// the server checks each connector once, with its usual limits on concurrency and time.
+export const getUserConnectionStatus = query.batch(
+  userConnectionInput.extend(organizationSelection.shape),
+  async (inputs) => {
+    const organizations = await Promise.all(
+      [...new Set(inputs.map((input) => input.organizationId))].map(async (organizationId) => {
+        const { runtime, principal } = await remoteContext({ organizationId });
+
+        const appIds = inputs.flatMap((input) =>
+          input.organizationId === organizationId ? [input.appId] : [],
+        );
+
+        return [organizationId, await runtime.userConnections.statuses(principal, appIds)] as const;
+      }),
+    );
+
+    const statuses = new Map(organizations);
+
+    return ({ organizationId, appId }) => statuses.get(organizationId)?.get(appId) ?? null;
+  },
+);
 
 const input = userConnectionInput.extend({
   ...organizationSelection.shape,
@@ -47,7 +71,7 @@ export const prepareUserConnection = form(input, async ({ appId, organizationId 
 });
 
 export const disconnectUserConnection = form(input, async ({ appId, organizationId }) => {
-  const { runtime, principal } = await remoteContext({ organizationId });
+  const { runtime, principal, organization } = await remoteContext({ organizationId });
 
   try {
     await runtime.userConnections.disconnect(principal, appId);
@@ -56,5 +80,5 @@ export const disconnectUserConnection = form(input, async ({ appId, organization
     throw cause;
   }
 
-  redirect(303, "/connections");
+  redirect(303, workspacePath(organization.slug, "/connections"));
 });

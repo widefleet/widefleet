@@ -2,13 +2,13 @@ import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, ne, sql } from "drizzle-orm";
 import type { z } from "zod";
-import { lockAppDescendants, managedApp } from "./apps.ts";
-import type { Database } from "./database.ts";
+import { lockAppDescendants, managedApp, readableApp } from "./apps.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { apps, jobs } from "./schema.ts";
-import { transact, type Transaction } from "./transactions.ts";
+import { readOnly, transact, type Transaction } from "./transactions.ts";
 
 // Include legacy descendants too. New previews can only belong to original apps.
 const descendants = (appId: string, organizationId: string) => sql`${apps.id} in (
@@ -35,7 +35,7 @@ const status = (app: typeof apps.$inferSelect) =>
   });
 
 const present = async (
-  transaction: Transaction,
+  transaction: DatabaseExecutor,
   principal: Pick<Principal, "id" | "admin" | "application">,
   app: typeof apps.$inferSelect,
 ) => {
@@ -154,8 +154,8 @@ export const applyAccessChange = async (
 
 export const createAppAccessService = (database: Database, execution?: HostedExecution) => ({
   read: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
 

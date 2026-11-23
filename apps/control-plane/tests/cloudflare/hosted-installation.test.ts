@@ -314,6 +314,24 @@ describe("Hosted resource provisioning", () => {
     expect(configs.runtime.vars).not.toHaveProperty("EXTENSION_LABEL");
   });
 
+  it("runs the control plane next to the configured database region", async () => {
+    const placed = hostedInstallation.parse({
+      ...installation,
+      placementRegion: "aws:eu-central-1",
+    });
+
+    const configs = await hostedConfigurations(placed, ids);
+
+    expect(configs.controlPlane.placement).toEqual({ region: "aws:eu-central-1" });
+    expect(configs.runtime).not.toHaveProperty("placement");
+    expect((await hostedConfigurations(installation, ids)).controlPlane).not.toHaveProperty(
+      "placement",
+    );
+    expect(() =>
+      hostedInstallation.parse({ ...installation, placementRegion: "frankfurt" }),
+    ).toThrow();
+  });
+
   it("bundles extra runtime variables while retaining event configuration, logging and app bindings", async () => {
     const configs = await hostedConfigurations(installation, ids, "email", {
       vars: { OBSERVER_LABEL: "installation-fixture" },

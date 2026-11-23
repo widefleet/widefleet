@@ -14,7 +14,7 @@ import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { readInstallation } from "./installation-store.ts";
 import { templateCatalog, readTemplate, readTemplateIcon } from "./app-templates.ts";
-import { readAppIcon } from "./app-icons.ts";
+import { iconCache, iconResponse, missingIconResponse, readAppIcon } from "./app-icons.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
 import { readCompanyAccount } from "./settings-account.ts";
@@ -88,18 +88,6 @@ const idempotencyKey = (request: Request) => {
   return parsed.data;
 };
 
-// Icons are SVG, ICO or PNG from apps and templates: never sniffed, scripted or embedded elsewhere.
-const iconResponse = (icon: { bytes: Uint8Array; contentType: string }, cacheControl: string) =>
-  new Response(Buffer.from(icon.bytes), {
-    headers: {
-      "content-type": icon.contentType,
-      "cache-control": cacheControl,
-      "x-content-type-options": "nosniff",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-      "cross-origin-resource-policy": "same-origin",
-    },
-  });
-
 export const createApi = (runtime: Runtime) => {
   const principals = new WeakMap<Request, Principal>();
 
@@ -136,8 +124,7 @@ export const createApi = (runtime: Runtime) => {
     const principal = unwrap(await runtime.identity.authenticate(context.request, "platform:read"));
     principals.set(context.request, principal);
 
-    if (new URL(context.request.url).pathname !== "/api/v1/reporting/status")
-      runtime.reporting.active(principal.id);
+    runtime.reporting.active(principal.id);
 
     return next({ context: { principal } });
   });
@@ -146,6 +133,24 @@ export const createApi = (runtime: Runtime) => {
     const principal = await authenticateWrite(context.request);
 
     return next({ context: { principal } });
+  });
+
+  // Installation-wide endpoints only need a signed-in person, so browsers can call them
+  // without naming an organization.
+  const signedInRead = base.use(async ({ context, next }) => {
+    unwrap(await runtime.identity.authenticateUser(context.request, "platform:read"));
+
+    return next();
+  });
+
+  const signedInWrite = base.use(async ({ context, next }) => {
+    const verified = unwrap(
+      await runtime.identity.authenticateUser(context.request, "platform:write"),
+    );
+
+    runtime.reporting.active(verified.userId);
+
+    return next();
   });
 
   const agent = base.use(async ({ context, next }) => {
@@ -194,7 +199,7 @@ export const createApi = (runtime: Runtime) => {
       ),
     createOrganization: base
       .route({ method: "POST", path: "/organizations" })
-      .input(contract.createOrganizationInput)
+      .input(contract.organizationCreation)
       .output(contract.onboardingOrganization)
       .handler(async ({ context, input }) =>
         apiOperation(async () =>
@@ -204,12 +209,29 @@ export const createApi = (runtime: Runtime) => {
           ),
         ),
       ),
-    selectOrganization: base
-      .route({ method: "PUT", path: "/organization" })
+    joinableOrganizations: base
+      .route({ method: "GET", path: "/organizations/joinable" })
+      .output(z.array(contract.joinableOrganization))
+      .handler(async ({ context }) =>
+        apiOperation(async () =>
+          runtime.domainAccess.joinable(
+            unwrap(await runtime.identity.authenticateUser(context.request, "platform:read")),
+          ),
+        ),
+      ),
+    joinOrganization: base
+      .route({ method: "POST", path: "/organizations/{organizationId}/join" })
       .input(contract.organizationSelection)
-      .output(contract.currentUser)
+      .output(contract.organizationSelection)
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.identity.selectOrganization(context.request, input.organizationId)),
+        apiOperation(async () => {
+          const joined = await runtime.domainAccess.join(
+            unwrap(await runtime.identity.authenticateUser(context.request, "platform:write")),
+            input.organizationId,
+          );
+
+          return { organizationId: joined.organizationId };
+        }),
       ),
     members: read
       .route({ method: "GET", path: "/members" })
@@ -307,7 +329,7 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "GET", path: "/reporting" })
       .output(contract.reportingStatus)
       .handler(({ context }) => apiOperation(() => runtime.reporting.read(context.principal))),
-    reportingStatus: read
+    reportingStatus: signedInRead
       .route({ method: "GET", path: "/reporting/status" })
       .output(contract.reportingPreferences)
       .handler(async () => (await runtime.reporting.status()).effective),
@@ -322,7 +344,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(({ context, input }) =>
         apiOperation(() => runtime.reporting.update(context.principal, input)),
       ),
-    browserError: write
+    browserError: signedInWrite
       .route({ method: "POST", path: "/reporting/errors" })
       .input(contract.browserReporting)
       .output(z.object({ accepted: z.boolean() }))
@@ -380,10 +402,28 @@ export const createApi = (runtime: Runtime) => {
       ),
     serviceDescription: read
       .route({ method: "GET", path: "/app-services/{service}" })
-      .input(contract.servicePath)
+      .input(contract.serviceDescriptionQuery)
       .output(contract.serviceDescription)
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.connections.describe(context.principal, input.service)),
+        unwrap(
+          await runtime.connections.describe(context.principal, input.service, {
+            entrypoint: input.entrypoint,
+            methods: input.methods,
+            types: input.types,
+          }),
+        ),
+      ),
+    serviceBindingTypes: read
+      .route({ method: "GET", path: "/app-services/{service}/types" })
+      .input(contract.serviceBindingTypesQuery)
+      .output(contract.serviceBindingTypesResult)
+      .handler(async ({ context, input }) =>
+        unwrap(
+          await runtime.connections.types(context.principal, input.service, {
+            entrypoint: input.entrypoint,
+            binding: input.binding,
+          }),
+        ),
       ),
     serviceAccess: write
       .route({ method: "PUT", path: "/app-services/{appId}/access" })
@@ -634,6 +674,33 @@ export const createApi = (runtime: Runtime) => {
       .output(contract.settingsView)
       .handler(({ context }) =>
         apiOperation(() => runtime.settings.activateSso(context.principal)),
+      ),
+    domainAccess: read
+      .route({ method: "GET", path: "/settings/domain-access" })
+      .output(contract.domainAccess)
+      .handler(({ context }) => apiOperation(() => runtime.domainAccess.read(context.principal))),
+    addJoinDomain: write
+      .route({ method: "POST", path: "/settings/join-domains" })
+      .input(contract.joinDomainInput)
+      .output(contract.domainAccess)
+      .handler(({ context, input }) =>
+        apiOperation(() => runtime.domainAccess.addJoinDomain(context.principal, input.domain)),
+      ),
+    removeJoinDomain: write
+      .route({ method: "DELETE", path: "/settings/join-domains/{domain}" })
+      .input(contract.joinDomainInput)
+      .output(contract.domainAccess)
+      .handler(({ context, input }) =>
+        apiOperation(() => runtime.domainAccess.removeJoinDomain(context.principal, input.domain)),
+      ),
+    restrictOrganizationCreation: write
+      .route({ method: "PUT", path: "/settings/organization-creation" })
+      .input(contract.organizationCreationRestriction)
+      .output(contract.domainAccess)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.domainAccess.restrictOrganizationCreation(context.principal, input.restricted),
+        ),
       ),
     searchGroups: read
       .route({ method: "GET", path: "/groups" })
@@ -1054,20 +1121,18 @@ export const createApi = (runtime: Runtime) => {
         await readAppIcon(runtime.database.db, runtime.storage, principal, appId),
       );
 
-      // An icon URL that names the active deployment never changes; others revalidate.
-      return iconResponse(
-        result,
-        url.searchParams.get("deployment") === result.deploymentId
-          ? "private, max-age=31536000, immutable"
-          : "private, no-cache",
-      );
+      const cacheControl = iconCache(url.searchParams.get("deployment"), result.deploymentId);
+
+      return result.icon
+        ? iconResponse(result.icon, cacheControl)
+        : missingIconResponse(cacheControl);
     }
 
     const templateIcon = /^\/api\/v1\/catalog\/templates\/([^/]+)\/icon$/.exec(url.pathname);
 
     if (templateIcon && request.method === "GET") {
-      const principal = unwrap(await runtime.identity.authenticate(request, "platform:read"));
-      principals.set(request, principal);
+      // The template catalog is the same for every organization.
+      unwrap(await runtime.identity.authenticateUser(request, "platform:read"));
       const id = contract.templateId.parse(templateIcon[1]);
 
       // Templates change on GitHub without a version in the URL.
@@ -1085,12 +1150,14 @@ export const createApi = (runtime: Runtime) => {
       if (upload[2] === "worker") {
         const key = idempotencyKey(request);
 
-        const { metadata, modules } = unwrap(
+        const { metadata, documentation, modules } = unwrap(
           await parseWorkerUpload(request, contract.workerMetadata),
         );
 
         return Response.json(
-          unwrap(await runtime.uploads.publish(principal, appId, metadata, modules, key)),
+          unwrap(
+            await runtime.uploads.publish(principal, appId, metadata, documentation, modules, key),
+          ),
         );
       }
 

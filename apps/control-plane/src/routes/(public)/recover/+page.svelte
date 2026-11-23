@@ -4,6 +4,9 @@
   import { goto } from "$app/navigation";
   import { onMount } from "svelte";
   import { authClient } from "#lib/auth-client";
+  import type { PageProps } from "./$types";
+
+  let { data }: PageProps = $props();
 
   let message = $state("Checking recovery access …");
 
@@ -23,7 +26,7 @@
         if (result.error)
           message =
             "This link has expired or has already been used. Generate a new link on the server.";
-        else await goto("/settings");
+        else await goto(data.destination);
       })
       .catch(() => {
         message = "Recovery access is temporarily unavailable.";

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { installationOrganizationId } from "../organization.ts";
 import { member, organization } from "./auth-schema.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
+import { InvalidOperation } from "./errors.ts";
 
 export const initializeOrganization = async (database: Database) => {
   await database
@@ -14,6 +15,24 @@ export const initializeOrganization = async (database: Database) => {
     })
     .onConflictDoNothing();
 };
+
+// Links to workspace pages from outside them, such as CLI output or connector returns, need the
+// slug that starts the page's address.
+export const readOrganizationSlug = async (database: DatabaseExecutor, organizationId: string) => {
+  const [current] = await database
+    .select({ slug: organization.slug })
+    .from(organization)
+    .where(eq(organization.id, organizationId));
+
+  if (!current)
+    throw new InvalidOperation({ code: "NOT_FOUND", message: "Organization not found" });
+
+  return current.slug;
+};
+
+// Better Auth enforces this for invitations and additions; domain joining checks it under the
+// organization's settings lock.
+export const organizationMemberLimit = 100;
 
 export const enrollCompanyUser = async (database: DatabaseExecutor, userId: string) => {
   const [installation] = await database

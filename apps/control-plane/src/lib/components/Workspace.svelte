@@ -1,7 +1,8 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import type { Component, Snippet } from "svelte";
   import { page } from "$app/state";
   import { afterNavigate } from "$app/navigation";
+  import { getWorkspace } from "#lib/workspace.remote";
   import House from "@lucide/svelte/icons/house";
   import Layers2 from "@lucide/svelte/icons/layers-2";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -12,36 +13,55 @@
   import LogOut from "@lucide/svelte/icons/log-out";
   import Menu from "@lucide/svelte/icons/menu";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Plus from "@lucide/svelte/icons/plus";
   import type { z } from "zod";
   import type { organizationChoice } from "@platform/contracts";
   import type { Principal } from "#server/identity";
-  import { resetClientContext } from "#lib/analytics-client";
+  import { resetClientContext, updateClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
   import { setWorkspaceContext } from "#lib/workspace-context";
+  import { workspacePath } from "#lib/workspace-path";
   import { Button } from "@platform/ui/button";
+  import * as Collapsible from "@platform/ui/collapsible";
   import * as DropdownMenu from "@platform/ui/dropdown-menu";
+  import * as Sidebar from "@platform/ui/sidebar";
+  import { mergeProps } from "bits-ui";
   import Feedback from "./Feedback.svelte";
 
   let {
     principal,
+    organization,
     organizations,
     children,
   }: {
     principal: Principal;
+    organization: { id: string; name: string; slug: string };
     organizations: z.infer<typeof organizationChoice>[];
     children: Snippet;
   } = $props();
 
   setWorkspaceContext({
     get organizationId() {
-      return principal.application.organizationId;
+      return organization.id;
     },
+    path: (path) => workspacePath(organization.slug, path),
   });
 
-  const organizationName = $derived(
-    organizations.find((organization) => organization.id === principal.application.organizationId)
-      ?.name ?? "Organization",
-  );
+  const path = (target: string) => workspacePath(organization.slug, target);
+
+  const organizationName = $derived(organization.name);
+
+  $effect(() => {
+    updateClientContext({
+      user: principal,
+      organization: { id: organization.id, name: organization.name },
+      role: principal.role,
+      analytics: page.data.analytics ?? null,
+    });
+  });
+
+  const roleLabel = (role: string) =>
+    role === "owner" ? "Owner" : principal.application.admin ? "Administrator" : "Member";
 
   let signingOut = $state(false);
 
@@ -55,8 +75,16 @@
 
   let error = $state("");
 
+  type NavigationItem = {
+    href: string;
+    label: string;
+    icon: Component;
+    paths: string[];
+    items?: { href: string; label: string; current: (path: string) => boolean }[];
+  };
+
   // Each item also covers the pages reached from it, so the sidebar keeps showing where they belong.
-  const navigation = $derived([
+  const navigation = $derived<NavigationItem[]>([
     { href: "/", label: "Home", icon: House, paths: [] },
     { href: "/connections", label: "My connections", icon: Link2, paths: ["/connections"] },
     {
@@ -68,19 +96,49 @@
     ...(principal.application.admin
       ? [
           {
-            href: "/settings",
+            href: "/settings/company-sign-in",
             label: "Settings",
             icon: Settings2,
-            paths: ["/settings", "/members", "/agents"],
+            paths: ["/settings"],
+            items: [
+              {
+                href: "/settings/company-sign-in",
+                label: "Company sign-in",
+                current: (current: string) => current.startsWith("/settings/company-sign-in"),
+              },
+              {
+                href: "/settings/members",
+                label: "Members",
+                current: (current: string) => current.startsWith("/settings/members"),
+              },
+              // Deployment agents belong to the installation, so only its administrators see them.
+              ...(principal.admin
+                ? [
+                    {
+                      href: "/settings/agents",
+                      label: "Deployment agents",
+                      current: (current: string) => current.startsWith("/settings/agents"),
+                    },
+                  ]
+                : []),
+              {
+                href: "/settings/administration",
+                label: "Administration",
+                current: (current: string) => current.startsWith("/settings/administration"),
+              },
+            ],
           },
         ]
       : []),
   ]);
 
+  // Navigation paths are relative to the organization, like the pages they describe.
+  const currentPath = $derived(page.url.pathname.slice(path("/").length) || "/");
+
   const active = (item: { href: string; paths: string[] }) =>
     item.href === "/"
-      ? page.url.pathname === "/"
-      : item.paths.some((path) => page.url.pathname.startsWith(path));
+      ? currentPath === "/"
+      : item.paths.some((prefix) => currentPath.startsWith(prefix));
 
   const section = $derived(navigation.find((item) => active(item))?.label ?? "Workspace");
 
@@ -111,7 +169,22 @@
       signingOut = false;
     }
   };
+
+  // The member's role can change while the tab is in the background. Recheck when it returns.
+  // The member's role or the session can change while this tab is hidden, and the workspace
+  // query does not rerun on navigation. Recheck when the tab returns.
+  const recheckWorkspace = async () => {
+    if (document.visibilityState !== "visible") return;
+
+    try {
+      await getWorkspace({ organization: organization.slug }).refresh();
+    } catch {
+      // The query keeps its last confirmed value and exposes the failure.
+    }
+  };
 </script>
+
+<svelte:document onvisibilitychange={recheckWorkspace} />
 
 <svelte:window
   onkeydown={(event) => {
@@ -123,15 +196,55 @@
 />
 
 {#snippet navigationLinks()}
-  <nav aria-label="Main navigation" class="space-y-1">
-    {#each navigation as item (item.href)}
-      <a
-        href={item.href}
-        aria-current={active(item) ? "page" : undefined}
-        class={`flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] transition-colors ${active(item) ? "bg-sidebar-accent text-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground"}`}
-        ><item.icon class="size-4 shrink-0" />{item.label}</a
-      >
-    {/each}
+  <nav aria-label="Main navigation">
+    <Sidebar.Menu class="gap-1">
+      {#each navigation as item (item.href)}
+        {#if item.items}
+          <Collapsible.Root open={active(item)} class="group/collapsible">
+            {#snippet child({ props })}
+              <Sidebar.MenuItem {...props}>
+                <Collapsible.Trigger>
+                  {#snippet child({ props })}
+                    <Sidebar.MenuButton {...props}
+                      ><item.icon /><span>{item.label}</span><ChevronRight
+                        class="text-muted-foreground ms-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none"
+                      /></Sidebar.MenuButton
+                    >
+                  {/snippet}
+                </Collapsible.Trigger>
+                <Collapsible.Content>
+                  <Sidebar.MenuSub class="mt-1">
+                    {#each item.items as subItem (subItem.href)}
+                      {@const current = subItem.current(currentPath)}
+                      <Sidebar.MenuSubItem>
+                        <Sidebar.MenuSubButton
+                          href={path(subItem.href)}
+                          isActive={current}
+                          aria-current={current ? "page" : undefined}
+                          ><span>{subItem.label}</span></Sidebar.MenuSubButton
+                        >
+                      </Sidebar.MenuSubItem>
+                    {/each}
+                  </Sidebar.MenuSub>
+                </Collapsible.Content>
+              </Sidebar.MenuItem>
+            {/snippet}
+          </Collapsible.Root>
+        {:else}
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton isActive={active(item)}>
+              {#snippet child({ props })}
+                <a
+                  href={path(item.href)}
+                  aria-current={active(item) ? "page" : undefined}
+                  {...props}><item.icon /><span>{item.label}</span></a
+                >
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+        {/if}
+      {/each}
+    </Sidebar.Menu>
   </nav>
 {/snippet}
 
@@ -144,18 +257,83 @@
   class="bg-sidebar min-h-svh md:grid md:grid-cols-[224px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]"
 >
   <aside class="sticky top-0 hidden h-svh flex-col px-3 py-5 md:flex">
-    <a
-      href="/organizations"
-      aria-label={`Choose organization: ${organizationName}`}
-      class="hover:bg-sidebar-accent mb-6 flex items-center gap-2.5 rounded-md p-2"
-    >
-      <span
-        class="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg text-xs font-medium"
-        aria-hidden="true">{organizationName.charAt(0).toUpperCase()}</span
+    <DropdownMenu.Root>
+      <!-- A link keeps the organization chooser reachable before hydration and without JavaScript. -->
+      <DropdownMenu.Trigger>
+        {#snippet child({ props })}<a
+            {...mergeProps(props, { onclick: (event: MouseEvent) => event.preventDefault() })}
+            href="/organizations"
+            aria-label={`Choose organization: ${organizationName}`}
+            class="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent mb-6 flex w-full items-center gap-2.5 rounded-md p-2 text-left"
+          >
+            <span
+              class="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg text-xs font-medium"
+              aria-hidden="true">{organizationName.charAt(0).toUpperCase()}</span
+            >
+            <span class="min-w-0 flex-1"
+              ><span class="block truncate text-[13px] font-medium">{organizationName}</span><span
+                class="text-muted-foreground block truncate text-[11px]"
+                >{roleLabel(principal.role)}</span
+              ></span
+            >
+            <ChevronsUpDown class="text-muted-foreground size-3.5" />
+          </a>{/snippet}
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content
+        side="right"
+        align="start"
+        sideOffset={4}
+        class="w-60"
+        onkeydown={(event: KeyboardEvent) => {
+          // Browsers reserve Ctrl/⌘ with digits for tabs, so plain digits work inside the open menu.
+          if (event.metaKey || event.ctrlKey || event.altKey || !/^[1-9]$/.test(event.key)) return;
+          const target = event.currentTarget;
+
+          if (!(target instanceof HTMLElement)) return;
+          event.preventDefault();
+          target.querySelector<HTMLElement>(`[data-organization-shortcut="${event.key}"]`)?.click();
+        }}
       >
-      <span class="min-w-0 flex-1 truncate text-[13px] font-medium">{organizationName}</span>
-      <ChevronsUpDown class="text-muted-foreground size-3.5" />
-    </a>
+        <DropdownMenu.Group>
+          <DropdownMenu.Label class="text-muted-foreground text-xs"
+            >Organizations</DropdownMenu.Label
+          >
+          {#each organizations as entry, index (entry.id)}
+            {@const shortcut = index < 9 ? String(index + 1) : undefined}
+            {#snippet row()}<span
+                class="grid size-6 shrink-0 place-items-center rounded-md border text-[11px] font-medium"
+                aria-hidden="true">{entry.name.charAt(0).toUpperCase()}</span
+              ><span class="min-w-0 flex-1 truncate">{entry.name}</span
+              >{#if shortcut}<DropdownMenu.Shortcut>{shortcut}</DropdownMenu.Shortcut
+                >{/if}{/snippet}
+            {#if entry.id === organization.id}
+              <DropdownMenu.Item class="gap-2 p-2" data-organization-shortcut={shortcut}
+                >{@render row()}</DropdownMenu.Item
+              >
+            {:else}
+              <DropdownMenu.Item class="gap-2 p-2">
+                {#snippet child({ props })}<a
+                    {...props}
+                    href={entry.ssoRequired
+                      ? `/sign-in?${new URLSearchParams({ organization: entry.slug, next: workspacePath(entry.slug) })}`
+                      : workspacePath(entry.slug)}
+                    data-organization-shortcut={shortcut}>{@render row()}</a
+                  >{/snippet}
+              </DropdownMenu.Item>
+            {/if}
+          {/each}
+        </DropdownMenu.Group>
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item class="gap-2 p-2">
+          {#snippet child({ props })}<a {...props} href="/organizations"
+              ><span
+                class="bg-background grid size-6 place-items-center rounded-md border"
+                aria-hidden="true"><Plus class="size-4" /></span
+              ><span class="text-muted-foreground font-medium">Add organization</span></a
+            >{/snippet}
+        </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
     {@render navigationLinks()}
     <div class="mt-auto space-y-3 pt-8">
       <a
@@ -175,12 +353,7 @@
             >
             <span class="min-w-0 flex-1"
               ><span class="block truncate text-xs font-medium">{principal.name}</span><span
-                class="text-muted-foreground block text-[11px]"
-                >{principal.role === "owner"
-                  ? "Owner"
-                  : principal.application.admin
-                    ? "Administrator"
-                    : "Member"}</span
+                class="text-muted-foreground block text-[11px]">{roleLabel(principal.role)}</span
               ></span
             ><ChevronsUpDown class="text-muted-foreground size-3.5" />
           </DropdownMenu.Trigger>
@@ -190,7 +363,8 @@
               ></DropdownMenu.Group
             >
             <DropdownMenu.Item>
-              {#snippet child({ props })}<a {...props} href="/account"><Users />Your account</a
+              {#snippet child({ props })}<a {...props} href={path("/account")}
+                  ><Users />Your account</a
                 >{/snippet}
             </DropdownMenu.Item>
             <DropdownMenu.Separator /><DropdownMenu.Item disabled={signingOut} onclick={signOut}
@@ -223,7 +397,7 @@
         <div class="bg-popover absolute top-11 right-0 z-40 w-64 rounded-xl border p-3 shadow-lg">
           {@render navigationLinks()}
           <div class="mt-3 space-y-1 border-t pt-3">
-            <Button href="/account" variant="ghost" class="w-full justify-start"
+            <Button href={path("/account")} variant="ghost" class="w-full justify-start"
               ><Users />Your account</Button
             >
             <Button href="/device" variant="ghost" class="w-full justify-start"

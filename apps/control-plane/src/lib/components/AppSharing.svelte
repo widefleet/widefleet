@@ -10,15 +10,23 @@
   import Search from "@lucide/svelte/icons/search";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Feedback from "./Feedback.svelte";
+  import { getWorkspaceContext } from "#lib/workspace-context";
 
-  let {
-    data,
-    search,
-    initialSaved,
-  }: { data: Awaited<ReturnType<typeof getAppDetails>>; search: string; initialSaved: boolean } =
+  const workspace = getWorkspaceContext();
+
+  let { data, search }: { data: Awaited<ReturnType<typeof getAppDetails>>; search: string } =
     $props();
 
-  let saved = $derived(initialSaved);
+  // A form without JavaScript renders this page with its result instead of redirecting.
+  let saved = $derived(
+    [...data.access.grants, ...data.access.candidates].some((person) => {
+      const key = `${data.app.id}:${person.userId}`;
+
+      return (
+        grantAccess.for(key).result?.saved === true || revokeAccess.for(key).result?.saved === true
+      );
+    }),
+  );
 </script>
 
 <section id="access" aria-labelledby="access-heading" class="space-y-6">
@@ -34,7 +42,7 @@
     <p>
       Manage <strong class="font-medium">management access</strong> here. Access to the published
       app is controlled by its
-      <a href={`/apps/${data.app.id}/access`} class="underline underline-offset-4"
+      <a href={workspace.path(`/apps/${data.app.id}/access`)} class="underline underline-offset-4"
         >app usage rules</a
       >. Workspace owners and admins have access to all apps.
     </p>

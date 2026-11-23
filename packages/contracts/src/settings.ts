@@ -197,6 +197,9 @@ export const settingsView = z.strictObject({
     .nullable(),
 });
 
+// The settings without the sign-in service's activation status, which pages load separately.
+export const settingsOverview = settingsView.omit({ activation: true });
+
 // Lists pending domains. The top-level record is the first one's, kept for clients
 // that predate `records`.
 export const domainVerification = domainVerificationRecord.omit({ domain: true }).extend({

@@ -1,58 +1,54 @@
-import { form, getRequestEvent } from "$app/server";
-import { organizationSelection, createOrganizationInput } from "@platform/contracts";
-import { error, invalid, redirect } from "@sveltejs/kit";
+import { form } from "$app/server";
+import { organizationCreation, organizationSelection } from "@platform/contracts";
+import { invalid, redirect } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
-import { requireLogin, pageFailure } from "#server/page-auth";
+import { requireLogin } from "#server/page-auth";
+import { sessionSignIn } from "#server/identity";
 import { localDestination } from "#server/navigation";
+import { chosenDestination, organizationPlaceholder, workspacePath } from "#lib/workspace-path";
 import { z } from "zod";
 import { InvalidOperation } from "#server/errors";
 
 export const createOrganization = form(
-  createOrganizationInput.extend({ next: z.string().optional() }),
+  organizationCreation.extend({ next: z.string().optional() }),
   async ({ next, ...input }) => {
-    const { request } = getRequestEvent();
     const { user, session } = requireLogin("/organizations");
     const runtime = await getRuntime();
 
     const organization = await runtime.onboarding
-      .create(
-        {
-          userId: user.id,
-          identityOrganizationId: session.identityOrganizationId ?? null,
-        },
-        input,
-      )
+      .create(sessionSignIn(user, session), input)
       .catch((cause: unknown) => {
         if (cause instanceof InvalidOperation) invalid(cause.message);
         throw cause;
       });
 
-    const selection = await runtime.identity.selectOrganization(request, organization.id);
-
-    if (selection.isErr()) pageFailure(selection.error);
     const destination = localDestination(next);
-    redirect(303, destination === "/" ? "/welcome" : destination);
+
+    // A new organization starts on its welcome page unless the chooser was opened for a page.
+    redirect(
+      303,
+      destination === "/" || destination === workspacePath(organizationPlaceholder)
+        ? workspacePath(organization.slug, "/welcome")
+        : chosenDestination(destination, organization.slug),
+    );
   },
 );
 
-export const selectOrganization = form(
+// Joining by email domain adds the person as a member, then opens the organization like the
+// chooser does. Organizations with required company SSO continue through their sign-in.
+export const joinOrganization = form(
   organizationSelection.extend({ next: z.string().optional() }),
   async ({ organizationId, next }) => {
-    const { request } = getRequestEvent();
-
-    // Organization choice is a browser-session preference. API tokens select per request.
-    if (request.headers.has("authorization"))
-      error(400, "Use a browser session to select an organization");
-    requireLogin("/organizations");
+    const { user, session } = requireLogin("/organizations");
     const runtime = await getRuntime();
-    const result = await runtime.identity.selectOrganization(request, organizationId);
 
-    if (result.isErr()) return pageFailure(result.error);
+    const joined = await runtime.domainAccess
+      .join(sessionSignIn(user, session), organizationId)
+      .catch((cause: unknown) => {
+        if (cause instanceof InvalidOperation) invalid(cause.message);
+        throw cause;
+      });
 
-    const destination = localDestination(next);
-
-    if (!getRequestEvent().isRemoteRequest) redirect(303, destination);
-
-    return { selected: true, next: destination };
+    redirect(303, chosenDestination(localDestination(next), joined.slug));
   },
 );

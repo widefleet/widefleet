@@ -24,8 +24,8 @@ CLI authorization must let the user compare the device code and understand wheth
 
 See the [setup tests](../apps/control-plane/tests/e2e/setup.spec.ts) and [authentication tests](../apps/control-plane/tests/e2e/auth.spec.ts) when changing these boundaries.
 
-## Preserve native navigation and forms
+## Keep server checks authoritative
 
-Addressable app tabs and native form submissions must continue working without JavaScript. Enhancement may improve feedback, but authorization, validation and recovery cannot depend on client state. Authentication redirects and HTTP errors need to work on the initial page request as well as subsequent remote calls.
+Authorization, validation and recovery cannot depend on client state. Authentication redirects and HTTP errors need to work on the initial page request as well as subsequent remote calls.
 
-Verify changed journeys with and without JavaScript, including keyboard use, narrow layouts and recoverable failures. Use local services and synthetic identities; the browser tests are the maintained record of supported cases.
+Verify changed journeys, including keyboard use, narrow layouts and recoverable failures. Use local services and synthetic identities; the browser tests are the maintained record of supported cases.

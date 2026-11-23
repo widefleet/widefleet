@@ -44,6 +44,20 @@ enum Command {
         #[arg(action = clap::ArgAction::Set)]
         enabled: bool,
     },
+    /// Show which email domains can join without an invitation and whether new organizations
+    /// on the verified company domains are reserved for administrators.
+    DomainAccess,
+    /// Let verified addresses on a domain join as members. Your own Google Workspace or
+    /// Microsoft work sign-in must prove the domain.
+    AddJoinDomain { domain: String },
+    /// Stop letting a domain join. Members who already joined stay.
+    RemoveJoinDomain { domain: String },
+    /// Reserve new organizations on the verified company domains for this organization's
+    /// owners and admins.
+    RestrictOrganizationCreation {
+        #[arg(action = clap::ArgAction::Set)]
+        enabled: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -122,6 +136,48 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
             let view: Value = json(
                 api.authenticated(Method::PUT, "/settings", token)
                     .json(&input)
+                    .send()
+                    .await?,
+            )
+            .await?;
+            super::print_json(&view)
+        }
+        Command::DomainAccess => {
+            let view: Value = json(
+                api.authenticated(Method::GET, "/settings/domain-access", token)
+                    .send()
+                    .await?,
+            )
+            .await?;
+            super::print_json(&view)
+        }
+        Command::AddJoinDomain { domain } => {
+            let view: Value = json(
+                api.authenticated(Method::POST, "/settings/join-domains", token)
+                    .json(&value!({ "domain": domain }))
+                    .send()
+                    .await?,
+            )
+            .await?;
+            super::print_json(&view)
+        }
+        Command::RemoveJoinDomain { domain } => {
+            let view: Value = json(
+                api.authenticated(
+                    Method::DELETE,
+                    &format!("/settings/join-domains/{}", domain.trim().to_lowercase()),
+                    token,
+                )
+                .send()
+                .await?,
+            )
+            .await?;
+            super::print_json(&view)
+        }
+        Command::RestrictOrganizationCreation { enabled } => {
+            let view: Value = json(
+                api.authenticated(Method::PUT, "/settings/organization-creation", token)
+                    .json(&value!({ "restricted": enabled }))
                     .send()
                     .await?,
             )

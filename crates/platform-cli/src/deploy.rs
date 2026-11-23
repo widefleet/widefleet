@@ -534,7 +534,6 @@ async fn publish(
     let metadata = WorkerMetadata {
         web: Some(web),
         entrypoints,
-        service_documentation: Some(service_documentation),
         source: saved,
         network: declaration(project)?.network,
         crons: configuration.triggers.crons,
@@ -558,6 +557,7 @@ async fn publish(
         credentials,
         &format!("/apps/{app}/worker"),
         &metadata,
+        Some(&service_documentation),
         &modules,
     )
     .await?;

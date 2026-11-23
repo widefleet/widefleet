@@ -198,6 +198,8 @@ export const artifacts = pgTable("artifact", {
   metadata: jsonb().notNull(),
   manifest: jsonb().notNull(),
   modules: jsonb().notNull(),
+  // A summary of the API documentation kept in artifact storage, or null without any.
+  documentation: jsonb(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -329,6 +331,8 @@ export const organizationSettings = pgTable("organization_settings", {
   appClientSecret: text("app_client_secret"),
   directorySecret: text("directory_secret"),
   ssoRequired: boolean("sso_required").notNull().default(false),
+  joinDomains: jsonb("join_domains").notNull().default([]),
+  restrictOrganizationCreation: boolean("restrict_organization_creation").notNull().default(false),
 });
 
 // Each company email domain is proven separately. Verified domains are mirrored into

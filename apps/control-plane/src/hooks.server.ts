@@ -26,8 +26,14 @@ export const handle: Handle = async ({ event, resolve }) => {
   // The control plane is a signed-in management UI; keep all of its pages out of search results.
   event.setHeaders({ "x-robots-tag": "noindex" });
   event.locals.runtime = createRequestRuntime(getRuntime);
+  const response = await handleSession({ event, resolve });
 
-  return handleSession({ event, resolve });
+  // Pages show private data. Without no-store, the browser's Back button can show a page again
+  // after sign-out. SvelteKit already sends no-store for page data and remote function responses.
+  if (response.headers.get("content-type")?.startsWith("text/html"))
+    response.headers.set("cache-control", "private, no-store");
+
+  return response;
 };
 
 export const handleError: HandleServerError = async ({ error, kind, event }) => {

@@ -6,6 +6,9 @@
   import { Button } from "@platform/ui/button";
   import CopyValue from "./CopyValue.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import { getWorkspaceContext } from "#lib/workspace-context";
+
+  const workspace = getWorkspaceContext();
 
   let { data, search }: { data: Awaited<ReturnType<typeof getAppDetails>>; search: string } =
     $props();
@@ -54,7 +57,8 @@
       {:else}<p class="text-muted-foreground mt-4 text-xs leading-6">
           You can publish this app to the catalog after its first successful deployment.
         </p>{/if}
-      <a href="/" class="text-primary mt-4 inline-block text-xs hover:underline">Open app catalog</a
+      <a href={workspace.path("/")} class="text-primary mt-4 inline-block text-xs hover:underline"
+        >Open app catalog</a
       >
     </section>{/if}
   <section class="rounded-xl border border-destructive/25 p-5 sm:p-6">

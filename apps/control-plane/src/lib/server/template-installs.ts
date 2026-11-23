@@ -147,7 +147,6 @@ export const createTemplateInstalls = (
 
       const metadata = contract.workerMetadata.parse({
         ...built.metadata,
-        service_documentation: documented.documentation,
         assets: { upload_session: session.id, binding: assets.binding },
       });
 
@@ -164,6 +163,7 @@ export const createTemplateInstalls = (
         principal,
         installed.id,
         metadata,
+        documented.documentation,
         modules,
         crypto.randomUUID(),
         { firstDeployment: true },

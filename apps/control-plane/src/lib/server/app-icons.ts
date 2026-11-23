@@ -4,11 +4,11 @@ import { and, eq, isNull, or, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { appVisibility } from "./apps.ts";
 import type { Database } from "./database.ts";
-import { InvalidOperation } from "./errors.ts";
+import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { apps, artifacts, deployments } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
-import { transact } from "./transactions.ts";
+import { readOnly } from "./transactions.ts";
 
 export const iconPaths = new Map([
   ["/favicon.svg", "image/svg+xml"],
@@ -29,6 +29,30 @@ export const findAppIcon = (manifest: z.infer<typeof assetManifest>) => {
   return null;
 };
 
+// Icons are SVG, ICO or PNG from apps and templates: never sniffed, scripted or embedded elsewhere.
+export const iconResponse = (
+  icon: { bytes: Uint8Array; contentType: string },
+  cacheControl: string,
+) =>
+  new Response(Buffer.from(icon.bytes), {
+    headers: {
+      "content-type": icon.contentType,
+      "cache-control": cacheControl,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "cross-origin-resource-policy": "same-origin",
+    },
+  });
+
+// A visible app whose deployment has no icon. Its URL may cache the miss like an icon, so pages
+// do not ask again for each app without one; only a new deployment changes the answer.
+export const missingIconResponse = (cacheControl: string) =>
+  new Response(null, { status: 404, headers: { "cache-control": cacheControl } });
+
+// An icon URL that names the active deployment never changes; others revalidate.
+export const iconCache = (requested: string | null, deploymentId: string) =>
+  requested === deploymentId ? "private, max-age=31536000, immutable" : "private, no-cache";
+
 // Read only the selected app's active artifact, never fetch an app URL or bypass its login.
 // Members also see the icons of apps the catalog and My connections list for them.
 export const readAppIcon = async (
@@ -36,8 +60,13 @@ export const readAppIcon = async (
   storage: ArtifactStorage,
   principal: Principal,
   appId: string,
-) => {
-  const selected = await transact(database, async (transaction) => {
+): Promise<
+  Result<
+    { deploymentId: string; icon: { bytes: Uint8Array; contentType: string } | null },
+    DatabaseUnavailable | InvalidOperation | StorageUnavailable
+  >
+> => {
+  const selected = await readOnly(database, async (transaction) => {
     const [record] = await transaction
       .select({ manifest: artifacts.manifest, deploymentId: deployments.id })
       .from(apps)
@@ -69,15 +98,18 @@ export const readAppIcon = async (
         ),
       );
 
-    const icon = record ? findAppIcon(assetManifest.parse(record.manifest)) : null;
-
-    return icon && record
-      ? Result.ok({ ...icon, deploymentId: record.deploymentId })
+    return record
+      ? Result.ok({
+          deploymentId: record.deploymentId,
+          icon: findAppIcon(assetManifest.parse(record.manifest)),
+        })
       : Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App icon not found" }));
   });
 
   if (selected.isErr()) return selected;
-  const icon = selected.value;
+  const { deploymentId, icon } = selected.value;
+
+  if (!icon) return Result.ok({ deploymentId, icon: null });
   const downloaded = await storage.get(`apps/${appId}/assets/${icon.hash}`);
 
   if (downloaded.isErr()) return downloaded;
@@ -86,8 +118,7 @@ export const readAppIcon = async (
     return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App icon not found" }));
 
   return Result.ok({
-    bytes: downloaded.value,
-    contentType: icon.contentType,
-    deploymentId: icon.deploymentId,
+    deploymentId,
+    icon: { bytes: downloaded.value, contentType: icon.contentType },
   });
 };

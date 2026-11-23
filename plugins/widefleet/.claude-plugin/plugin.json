@@ -1,7 +1,7 @@
 {
   "name": "widefleet",
   "version": "0.1.0",
-  "description": "Build, deploy and use internal apps on Widefleet with company sign-in, databases, file storage and controlled access to company systems.",
+  "description": "Widefleet builds, deploys and runs your organization's internal apps, which connect company systems and work tools such as issue trackers, email, CRM and analytics. Search it before saying a tool or service is not connected.",
   "author": {
     "name": "Widefleet",
     "url": "https://widefleet.com"

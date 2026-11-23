@@ -57,7 +57,7 @@ async function handle(request, env, ctx) {
   if(path==='/proof') return new Response(ctx.props.appCaller);
   if(path==='/forge') return Response.json(await env.WIDEFLEET_SERVICE_RELAY.invoke('who',[],request.headers.get('test-proof') ?? 'forged'));
   if(path==='/fake-caller') ctx.props.caller={issuer:'https://forged.invalid',subject:'bob',name:'Forged'};
-  if(path==='/fetch') return env.RELAY.fetch(new Request('https://relay.invalid/',{headers:{'x-auth-request-user':'forged','x-widefleet-app-caller':'forged'}}));
+  if(path==='/fetch') return env.RELAY.fetch(new Request('https://relay.invalid/',{headers:{'x-auth-request-user':'forged','x-widefleet-app-caller':'forged',origin:'https://target.apps.example.test','sec-fetch-site':'same-origin'}}));
   return Response.json(await env.RELAY.who());
 }
 ${handler === "object" ? "export default {fetch:handle};" : "export default class Source extends WorkerEntrypoint {fetch(request){return handle(request,this.env,this.ctx);}}"}`;
@@ -73,7 +73,7 @@ const identityTarget = `import {WorkerEntrypoint} from 'cloudflare:workers';
 export class Identity extends WorkerEntrypoint {
   #marker='private-field';
   async who() { await new Promise(resolve=>setTimeout(resolve,10)); return {caller:this.ctx.props.caller,marker:this.#marker}; }
-  fetch(request) { return Response.json({caller:this.ctx.props.caller,claimed:request.headers.get('x-auth-request-user'),transported:request.headers.get('x-widefleet-app-caller')}); }
+  fetch(request) { return Response.json({caller:this.ctx.props.caller,claimed:request.headers.get('x-auth-request-user'),transported:request.headers.get('x-widefleet-app-caller'),origin:request.headers.get('origin'),site:request.headers.get('sec-fetch-site')}); }
 }`;
 
 const token = "app-service-test-management-token-never-deploy";
@@ -168,7 +168,12 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     const request = (
       path: string,
       body?:
-        | { app: z.infer<typeof publishedApp>; source: string; assets: Record<string, string> }
+        | {
+            app: z.infer<typeof publishedApp>;
+            source: string;
+            assets: Record<string, string>;
+            documentation?: z.input<typeof serviceDocumentation> | undefined;
+          }
         | z.infer<typeof appSecretPreparation>
         | { key: string }
         | { identity: { appId: string; organizationId: string; hostname: string } }
@@ -199,9 +204,10 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
       version = "v1",
       changes: Partial<z.infer<typeof publishedApp>> = {},
       assets: Record<string, string> = {},
+      documentation?: z.input<typeof serviceDocumentation>,
     ) => {
       const app = { ...snapshot(appId, code, version), ...changes };
-      const response = await request("/seed", { app, source: code, assets });
+      const response = await request("/seed", { app, source: code, assets, documentation });
       expect(response.status, await response.clone().text()).toBe(200);
 
       return app;
@@ -293,11 +299,10 @@ export default { async fetch(request, env, ctx) {
     if(url.pathname.startsWith('/workload/')) return runtime.fetch(new Request((url.searchParams.get('origin') ?? 'https://auth.apps.example.test')+url.pathname),env,ctx);
     if(url.pathname === '/executions') return Response.json(executions);
     if(url.pathname === '/seed') {
-      const {app,source,assets} = await request.json();
+      const {app,source,assets,documentation} = await request.json();
       await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/modules/'+app.modules[0].sha256,source);
       for(const [path,content] of Object.entries(assets)) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/assets/'+app.manifest[path].hash,content);
-      if(app.metadata.service_documentation) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/service-documentation/'+app.id+'.json',JSON.stringify(app.metadata.service_documentation));
-      delete app.metadata.service_documentation;
+      if(documentation) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/service-documentation/'+app.id+'.json',JSON.stringify(documentation));
       await env.WIDEFLEET_PACKAGES.put('hosts/'+app.hostname+'.json',JSON.stringify(app));
       await env.AUTH_CONFIG.put('organizations/widefleet/configuration',${JSON.stringify(encrypted)});
       await env.AUTH_CONFIG.put('apps/'+app.hostname, JSON.stringify({organizationId:'widefleet',appId:app.appId,access:{revision:1,groups:[]}}));
@@ -664,7 +669,7 @@ export default { async fetch(request, env, ctx) {
       };
 
       const docs = serviceDocumentation.parse({
-        format: 1,
+        format: 3,
         entrypoints: [
           {
             name: "Reader",
@@ -691,6 +696,7 @@ export default { async fetch(request, env, ctx) {
                       },
                     ],
                     returns: { type: "InventoryRecord", description: "The record" },
+                    uses: ["InventoryRecord"],
                   },
                 ],
               },
@@ -700,6 +706,7 @@ export default { async fetch(request, env, ctx) {
         types: [
           {
             name: "InventoryRecord",
+            kind: "type",
             definition: "{ version: string; secret: string }",
             summary: "A record",
             remarks: "",
@@ -708,49 +715,73 @@ export default { async fetch(request, env, ctx) {
         ],
       });
 
+      const selection = {
+        hostname: service.hostname,
+        entrypoint: service.entrypoint,
+        methods: [service.method],
+      };
+
       const described = async () => {
-        const response = await rpc("describe", {
-          hostname: service.hostname,
-          entrypoint: service.entrypoint,
-        });
+        const response = await rpc("describe", selection);
 
         expect(response.isError, response.content[0]?.text).not.toBe(true);
 
         return z.json().parse(JSON.parse(response.content[0]?.text ?? "null"));
       };
 
-      expect(await described()).toMatchObject({ documentation: null, types: [] });
+      const undocumented = await rpc("describe", selection);
+      expect(undocumented.isError).toBe(true);
+      expect(undocumented.content[0]?.text).toContain("no API documentation");
 
-      const documented = await publish(targetId, target("v1"), "v1", {
-        metadata: {
-          ...snapshot(targetId, target("v1")).metadata,
-          service_documentation: docs,
-        },
-      });
+      const documented = await publish(targetId, target("v1"), "v1", {}, {}, docs);
 
       await setup();
       expect(await described()).toMatchObject({
         documentation: docs.entrypoints[0],
         types: docs.types,
-      });
-      const search = await rpc("search", { query: "inventory records" });
-      expect(JSON.parse(search.content[0]?.text ?? "null")).toMatchObject({
-        services: [{ hostname: service.hostname, summary: "Read inventory records" }],
+        omittedTypes: [],
       });
 
-      const denied = await rpc(
-        "describe",
-        { hostname: service.hostname, entrypoint: service.entrypoint },
-        await issue("bob"),
-      );
+      const named = await rpc("describe", {
+        hostname: service.hostname,
+        entrypoint: service.entrypoint,
+        types: ["InventoryRecord"],
+      });
+
+      expect(JSON.parse(named.content[0]?.text ?? "null")).toMatchObject({
+        documentation: { name: "Reader", methods: [] },
+        types: docs.types,
+      });
+      const missing = await rpc("describe", { ...selection, types: ["Missing"] });
+      expect(missing.isError).toBe(true);
+      expect(missing.content[0]?.text).toContain("no documented type Missing");
+      const empty = await rpc("describe", { ...selection, methods: [] });
+      expect(empty.isError).toBe(true);
+      expect(empty.content[0]?.text).toContain("Name at least one method or type");
+      const search = await rpc("search", { query: "inventory records" });
+      expect(JSON.parse(search.content[0]?.text ?? "null")).toMatchObject({
+        methods: [
+          {
+            hostname: service.hostname,
+            entrypoint: "Reader",
+            method: "read",
+            summary: "Read one record",
+          },
+        ],
+      });
+      const unknown = await rpc("describe", { ...selection, methods: ["write"] });
+      expect(unknown.isError).toBe(true);
+      expect(unknown.content[0]?.text).toContain("Search with this hostname and entrypoint");
+
+      const denied = await rpc("describe", selection, await issue("bob"));
 
       expect(denied.isError).toBe(true);
       const hidden = await rpc("search", { limit: 50 }, await issue("bob"));
       expect(
         z
-          .object({ services: z.array(z.object({ hostname: z.string() })) })
+          .object({ methods: z.array(z.object({ hostname: z.string() })) })
           .parse(JSON.parse(hidden.content[0]?.text ?? "null"))
-          .services.map((entry) => entry.hostname),
+          .methods.map((entry) => entry.hostname),
       ).not.toContain(service.hostname);
       expect(
         (
@@ -769,16 +800,20 @@ export default { async fetch(request, env, ctx) {
         entrypoints: docs.entrypoints.map((entry) => ({ ...entry, summary: "New inventory API" })),
       };
 
-      await publish(targetId, target("v1"), "v1", {
-        metadata: { ...documented.metadata, service_documentation: nextDocs },
-      });
+      await publish(targetId, target("v1"), "v1", {}, {}, nextDocs);
       await setup();
       expect(await described()).toMatchObject({ documentation: { summary: "New inventory API" } });
-      await request("/seed", { app: documented, source: target("v1"), assets: {} });
+      await request("/seed", {
+        app: documented,
+        source: target("v1"),
+        assets: {},
+        documentation: docs,
+      });
       await setup();
       expect(await described()).toMatchObject({
         documentation: docs.entrypoints[0],
         types: docs.types,
+        omittedTypes: [],
       });
 
       const called = await rpc("call", service);
@@ -1007,32 +1042,47 @@ export default { async fetch(request, env, ctx) {
       const entrypoints = Array.from({ length: 32 }, (_, index) => `Service${index}`);
 
       const largeDocs = serviceDocumentation.parse({
-        format: 1,
+        format: 3,
         entrypoints: entrypoints.map((name) => ({
           name,
-          summary: "x".repeat(7000) + "search-pagination-marker",
+          summary: "",
           remarks: "",
           examples: [],
           http: false,
-          methods: [],
+          methods: [
+            {
+              name: "read",
+              summary: "x".repeat(7000) + "search-pagination-marker",
+              remarks: "",
+              examples: [],
+              throws: [],
+              signatures: [{ parameters: [], returns: { type: "void", description: "" } }],
+            },
+          ],
         })),
         types: [],
       });
 
       for (let index = 0; index < 12; index++) {
         const id = crypto.randomUUID();
-        await publish(id, target("v1"), "v1", {
-          metadata: {
-            ...snapshot(id, target("v1")).metadata,
-            entrypoints,
-            service_documentation: largeDocs,
-          },
-        });
+        await publish(
+          id,
+          target("v1"),
+          "v1",
+          { metadata: { ...snapshot(id, target("v1")).metadata, entrypoints } },
+          {},
+          largeDocs,
+        );
       }
 
       const searchPage = z.object({
-        services: z.array(
-          z.object({ hostname: z.string(), entrypoint: z.string(), summary: z.string() }),
+        methods: z.array(
+          z.object({
+            hostname: z.string(),
+            entrypoint: z.string(),
+            method: z.string(),
+            summary: z.string(),
+          }),
         ),
         remaining: z.number(),
         next: z.object({ query: z.string(), limit: z.number(), offset: z.number() }).nullable(),
@@ -1054,7 +1104,7 @@ export default { async fetch(request, env, ctx) {
         expect(pageResult.isError, pageResult.content[0]?.text).not.toBe(true);
         const page = searchPage.parse(JSON.parse(pageResult.content[0]?.text ?? "null"));
 
-        for (const entry of page.services) {
+        for (const entry of page.methods) {
           expect(entry.summary).toHaveLength(256);
           found.add(`${entry.hostname}/${entry.entrypoint}`);
         }
@@ -1080,7 +1130,7 @@ export default { async fetch(request, env, ctx) {
       // A publisher that could not refresh the index must not expose a removed route.
       await request("/unpublish", { hostname: removed, refresh: false });
       const unrefreshed = await marker();
-      expect(unrefreshed.services.map((entry) => entry.hostname)).not.toContain(removed);
+      expect(unrefreshed.methods.map((entry) => entry.hostname)).not.toContain(removed);
       expect(unrefreshed.remaining).toBe(12 * 32 - 50);
 
       await request("/unpublish", { hostname: removed, refresh: true });
@@ -1089,7 +1139,7 @@ export default { async fetch(request, env, ctx) {
       // Other services must not push a distinctive match off the first page.
       const inventory = await rpc("search", { query: "inventory" });
       expect(JSON.parse(inventory.content[0]?.text ?? "null")).toMatchObject({
-        services: [{ hostname: service.hostname, entrypoint: service.entrypoint }],
+        methods: [{ hostname: service.hostname, entrypoint: service.entrypoint, method: "read" }],
         remaining: 0,
         next: null,
       });
@@ -1111,7 +1161,7 @@ export default { async fetch(request, env, ctx) {
       const inventorySearch = async () =>
         z
           .object({
-            services: z.array(z.object({ hostname: z.string() })),
+            methods: z.array(z.object({ hostname: z.string() })),
             complete: z.boolean(),
           })
           .parse(
@@ -1122,11 +1172,11 @@ export default { async fetch(request, env, ctx) {
       // organizations sort first, so the first rebuild spans several searches.
       await request("/foreign-routes", { count: 450 });
       await request("/drop-index");
-      expect(await inventorySearch()).toEqual({ services: [], complete: false });
-      expect(await inventorySearch()).toEqual({ services: [], complete: false });
+      expect(await inventorySearch()).toEqual({ methods: [], complete: false });
+      expect(await inventorySearch()).toEqual({ methods: [], complete: false });
 
       expect(await inventorySearch()).toEqual({
-        services: [{ hostname: service.hostname }],
+        methods: [{ hostname: service.hostname }],
         complete: true,
       });
 
@@ -1135,12 +1185,12 @@ export default { async fetch(request, env, ctx) {
       // A daily rebuild keeps serving the previous index but is not complete
       // until it has read every route.
       await request("/expire-index");
-      const rebuilding = { services: [{ hostname: service.hostname }], complete: false };
+      const rebuilding = { methods: [{ hostname: service.hostname }], complete: false };
       expect(await inventorySearch()).toEqual(rebuilding);
       expect(await inventorySearch()).toEqual(rebuilding);
 
       expect(await inventorySearch()).toEqual({
-        services: [{ hostname: service.hostname }],
+        methods: [{ hostname: service.hostname }],
         complete: true,
       });
 
@@ -1575,7 +1625,8 @@ export default { async fetch(request, env, ctx) {
           });
         expect(await (await request("/identity/fetch")).json()).toEqual({
           relay: alice,
-          final: { caller: alice, claimed: null, transported: null },
+          // A consuming app cannot present its call as the user's form.
+          final: { caller: alice, claimed: null, transported: null, origin: null, site: null },
         });
         expect(await (await request("/identity/fake-caller")).json()).toEqual({
           relay: alice,

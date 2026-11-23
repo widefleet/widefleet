@@ -2,25 +2,39 @@ import { appAccessSnapshot, organizationIdentifier } from "@platform/contracts";
 import { z } from "zod";
 import { readApp, readServiceDocumentation } from "./catalog.ts";
 import { serviceRoute } from "./mcp-authorization.ts";
-import { serviceTerms } from "./mcp-search.ts";
+import { summaryLine } from "@platform/contracts";
+import { methodTerms } from "./mcp-search.ts";
 import type { ParentEnvironment } from "./types.ts";
 
 // One object per organization holds what search needs, so a search reads one
-// object instead of every app's route, publication and documentation.
+// object instead of every app's route, publication and documentation. Each
+// entry is a documented method; entrypoints without methods are not callable.
 // Publishers refresh a host after committing its route and publication; a
 // missing or expired index is rebuilt from the published state.
 const indexedService = z.strictObject({
   appId: z.string(),
   access: appAccessSnapshot,
   entrypoints: z.array(
-    z.strictObject({ name: z.string(), summary: z.string().max(256), terms: z.string() }),
+    z.strictObject({
+      name: z.string(),
+      methods: z.array(
+        z.strictObject({
+          name: z.string(),
+          summary: z.string().max(256),
+          nameTerms: z.string(),
+          terms: z.string(),
+        }),
+      ),
+    }),
   ),
 });
 
 const indexedServices = z.record(z.string(), indexedService);
 
+// The format changes with every change to which documentation the index accepts
+// or how it keeps search terms, so indexes of an earlier format are rebuilt.
 const serviceIndex = z.strictObject({
-  format: z.literal(1),
+  format: z.literal(4),
   // Start of the last completed scan; 0 until a scan completes.
   builtAt: z.number().int().nonnegative(),
   services: indexedServices,
@@ -77,14 +91,21 @@ const indexedState = async (
   return indexedService.parse({
     appId: app.appId,
     access: route.access,
-    entrypoints: entrypoints.map((name) => {
+    entrypoints: entrypoints.flatMap((name) => {
       const entry = documentation?.entrypoints.find((candidate) => candidate.name === name);
 
-      return {
-        name,
-        summary: (entry?.summary ?? "").slice(0, 256),
-        terms: serviceTerms(hostname, name, entry),
-      };
+      return entry?.methods.length
+        ? [
+            {
+              name,
+              methods: entry.methods.map((method) => ({
+                name: method.name,
+                summary: summaryLine(method.summary),
+                ...methodTerms(hostname, entry, method),
+              })),
+            },
+          ]
+        : [];
     }),
   });
 };
@@ -92,7 +113,11 @@ const indexedState = async (
 const read = async (environment: ParentEnvironment, organizationId: string) => {
   const object = await environment.WIDEFLEET_PACKAGES.get(indexKey(organizationId));
 
-  return object ? { etag: object.etag, index: serviceIndex.parse(await object.json()) } : null;
+  if (!object) return null;
+  // An index of an earlier format is rebuilt like an expired one; its etag lets the rebuild replace it.
+  const parsed = serviceIndex.safeParse(await object.json());
+
+  return { etag: object.etag, index: parsed.success ? parsed.data : null };
 };
 
 // Conditional on the object read before the work started, so a concurrent
@@ -145,7 +170,7 @@ export const readServiceIndex = async (
   organizationId: string,
 ): Promise<{ services: IndexedServices; complete: boolean }> => {
   const current = await read(environment, organizationId);
-  const index = current?.index ?? { format: 1 as const, builtAt: 0, services: {} };
+  const index = current?.index ?? { format: 4 as const, builtAt: 0, services: {} };
 
   if (!index.scan && index.builtAt && Date.now() - index.builtAt < maximumAge)
     return { services: index.services, complete: true };
@@ -164,7 +189,7 @@ export const readServiceIndex = async (
   ).reduce((services, { hostname, state }) => withState(services, hostname, state), scan.services);
 
   const next: ServiceIndex = page.list_complete
-    ? { format: 1, builtAt: scan.startedAt, services: scanned }
+    ? { format: 4, builtAt: scan.startedAt, services: scanned }
     : {
         ...index,
         scan: { startedAt: scan.startedAt, cursor: page.cursor, services: scanned },
@@ -191,7 +216,7 @@ export const refreshServiceIndex = async (
     // Without an index, this creates an expired one, so the next search scans
     // the installation and a search that scanned before this refresh cannot
     // save its older result.
-    const index = current?.index ?? { format: 1 as const, builtAt: 0, services: {} };
+    const index = current?.index ?? { format: 4 as const, builtAt: 0, services: {} };
 
     const next: ServiceIndex = {
       ...index,

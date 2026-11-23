@@ -85,7 +85,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       }),
     );
 
-    return { organizationId, email, invitationId: prepared.invitation.id };
+    return { organizationId, slug, email, invitationId: prepared.invitation.id };
   };
 
   const first = await createCompany("browser-alpha");
@@ -243,7 +243,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await operator.getByRole("button", { name: "Create account and continue" }).click();
     await expect(operator).toHaveURL(/\/sign-in\?/);
     await signIn(operator, "email-setup@example.test");
-    await expect(operator).toHaveURL(/\/settings$/);
+    await expect(operator).toHaveURL(/\/settings\/company-sign-in$/);
     await expect(
       operator.getByRole("status").filter({ hasText: "The auth proxy is unavailable" }),
     ).toBeVisible();
@@ -261,7 +261,9 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       await operator.getByRole("button", { name: /^Microsoft Entra/ }).click();
       await operator.getByRole("heading", { name: "Register Widefleet" }).waitFor();
       // The chosen provider is part of the URL, so a reload keeps its instructions.
-      await expect(operator).toHaveURL(/\/settings\/sso\/setup\?provider=entra&step=register$/);
+      await expect(operator).toHaveURL(
+        /\/settings\/company-sign-in\/setup\?provider=entra&step=register$/,
+      );
       await operator.reload();
       await operator.waitForLoadState("networkidle");
       await expect(
@@ -290,7 +292,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await configure();
     await expect(operator.getByText(recordName("example.test"), { exact: true })).toBeVisible();
     await operator.getByRole("link", { name: "Manage connection", exact: true }).click();
-    await expect(operator).toHaveURL(/\/settings$/);
+    await expect(operator).toHaveURL(/\/settings\/company-sign-in$/);
     await operator.waitForLoadState("networkidle");
     const domains = operator.getByRole("list", { name: "Email domains" });
     await expect(domains.getByText("example.test", { exact: true })).toBeVisible();
@@ -313,7 +315,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await operator.waitForLoadState("networkidle");
     await expect(dialog.getByText(recordName("alias.example.test"), { exact: true })).toBeVisible();
     await dialog.getByRole("button", { name: "Verify later", exact: true }).click();
-    await expect(operator).toHaveURL(/\/settings$/);
+    await expect(operator).toHaveURL(/\/settings\/company-sign-in$/);
     await expect(domains.getByText("Pending", { exact: true })).toHaveCount(2);
 
     await operator.getByRole("button", { name: "Remove example.test", exact: true }).click();
@@ -322,20 +324,20 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       operator.getByRole("button", { name: "Remove alias.example.test", exact: true }),
     ).toHaveCount(0);
 
-    await operator.goto("/settings");
+    await operator.goto("/widefleet/settings/company-sign-in");
     await operator.waitForLoadState("networkidle");
     await operator.getByText("Remove this connection", { exact: true }).click();
     await operator.getByRole("button", { name: "Remove company SSO", exact: true }).click();
-    await expect(operator).toHaveURL(/\/settings$/);
+    await expect(operator).toHaveURL(/\/settings\/company-sign-in$/);
     await expect(
       operator.getByRole("link", { name: "Set up company SSO", exact: true }),
     ).toBeVisible();
     await configure();
-    await operator.goto("/settings");
+    await operator.goto("/widefleet/settings/company-sign-in");
     await operator.waitForLoadState("networkidle");
     await expect(domains.getByText("example.test", { exact: true })).toBeVisible();
     await expect(domains.getByText("alias.example.test", { exact: true })).toHaveCount(0);
-    await operator.goto("/settings");
+    await operator.goto("/widefleet/settings/company-sign-in");
     await operator.waitForLoadState("networkidle");
 
     // A recipient may already have an email session when their company enables SSO.
@@ -418,7 +420,9 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await expect(companyPage.getByLabel("Your name")).toHaveCount(0);
 
     await companyPage.getByRole("button", { name: "Accept invitation" }).click();
-    await expect(companyPage).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
+    await expect(companyPage).toHaveURL(
+      `${environment.configuration.PLATFORM_URL}/${company.slug}`,
+    );
     const accepted = await companyContext.request.get("/api/v1/me");
     expect(accepted.status(), await accepted.text()).toBe(200);
     expect(await accepted.json()).toMatchObject({
@@ -439,7 +443,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       ).toBeVisible();
       await expect(page.getByLabel("Your name")).toHaveCount(0);
       await page.getByRole("button", { name: "Accept invitation" }).click();
-      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
+      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/${company.slug}`);
 
       const created = await context.request.post("/api/v1/apps", {
         headers: { origin: environment.configuration.PLATFORM_URL },
@@ -451,7 +455,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       expect(app.hostname).toBe(
         `notes-${company.email.split("@")[0]}.${environment.configuration.APP_DOMAIN}`,
       );
-      await page.goto("/members");
+      await page.goto(`/${company.slug}/settings/members`);
       await page.getByText("Invite a member", { exact: true }).click();
       await page.getByLabel("Email", { exact: true }).fill(`member-${company.email}`);
       failedRecipients.add(`member-${company.email}`);
@@ -484,7 +488,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
             ).length,
         )
         .toBe(1);
-      await page.goto("/settings");
+      await page.goto(`/${company.slug}/settings/company-sign-in`);
       await page.waitForLoadState("networkidle");
       await expect(
         page.getByText(
@@ -507,12 +511,12 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       .update(ssoProvider)
       .set({ domainVerified: true })
       .where(eq(ssoProvider.organizationId, "widefleet"));
-    await operator.goto("/settings/sso/setup?step=test");
+    await operator.goto("/widefleet/settings/company-sign-in/setup?step=test");
     await operator.waitForLoadState("networkidle");
     await expect(operator.getByRole("button", { name: "Test company sign-in" })).toBeVisible();
     // Activation needs the administrator's account linked to the provider; until then the
     // flow stays on the sign-in test.
-    await operator.goto("/settings/sso/setup?step=activate");
+    await operator.goto("/widefleet/settings/company-sign-in/setup?step=activate");
     await operator.waitForLoadState("networkidle");
     await expect(operator.getByRole("heading", { name: "Test sign-in" })).toBeVisible();
 
@@ -529,18 +533,18 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     ).toBeEnabled();
     expect((await operatorContext.request.get("/api/v1/me")).status()).toBe(200);
     const loginPage = await firstContext.newPage();
-    await loginPage.goto("/sign-in?organization=widefleet&next=%2Fsettings");
+    await loginPage.goto("/sign-in?organization=widefleet&next=%2Fwidefleet%2Fsettings");
     await expect(
       loginPage.getByRole("button", { name: "Continue with email", exact: true }),
     ).toBeVisible();
     await signIn(loginPage, "email-setup@example.test");
-    await expect(loginPage).toHaveURL(/\/settings$/);
+    await expect(loginPage).toHaveURL(/\/settings\/company-sign-in$/);
     // Both operator sessions were verified by OTP. Activating SSO must deny
     // organization access to each of them without deleting the global account.
-    await loginPage.goto("/settings/sso/setup?step=activate");
+    await loginPage.goto("/widefleet/settings/company-sign-in/setup?step=activate");
     await loginPage.waitForLoadState("networkidle");
     await loginPage.getByRole("button", { name: "Activate company SSO", exact: true }).click();
-    await expect(loginPage).not.toHaveURL(/\/settings\/sso\/setup/);
+    await expect(loginPage).not.toHaveURL(/\/settings\/company-sign-in\/setup/);
     expect((await firstContext.request.get("/api/v1/me")).status()).toBe(403);
     expect((await operatorContext.request.get("/api/v1/me")).status()).toBe(403);
 

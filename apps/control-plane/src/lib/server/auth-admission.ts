@@ -1,4 +1,9 @@
-import { companySsoAvailableSql, operatorTrustedSso } from "./sso-policy.ts";
+import {
+  companySignInLimit,
+  companySsoAvailableSql,
+  operatorTrustedSso,
+  type SignIn,
+} from "./sso-policy.ts";
 import type { OAuthClaimExtensionInput } from "@better-auth/oauth-provider";
 import { readAuthenticationReference } from "./authentication-context.ts";
 import type { Configuration } from "./config.ts";
@@ -90,6 +95,7 @@ export const createAuthenticationAdmission = (
 
     return candidates.some((candidate) => allowed.has(candidate.id));
   },
+  signInLimit: (signIn: SignIn) => companySignInLimit(database, signIn),
   tokenClaims: async ({ user: subject, metadata, referenceId }: OAuthClaimExtensionInput) => {
     const authority = subject ? readAuthenticationReference(subject.id, referenceId) : null;
 
@@ -112,9 +118,16 @@ export const createAuthenticationAdmission = (
       .innerJoin(user, eq(user.id, member.userId))
       .where(and(eq(member.userId, userId), eq(member.organizationId, organizationId)));
 
+    // Recovery cannot authorize long-lived access, so a reference never comes from it.
+    const limit = await companySignInLimit(database, {
+      userId,
+      identityOrganizationId: authority.organizationId,
+      recovery: false,
+    });
+
     if (
       !current?.emailVerified ||
-      (authority.organizationId !== null && authority.organizationId !== organizationId) ||
+      (limit !== null && limit !== organizationId) ||
       !(await access.filterOrganizations([{ id: organizationId }])).includes(organizationId) ||
       (
         await database

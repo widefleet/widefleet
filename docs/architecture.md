@@ -22,6 +22,8 @@ The control plane owns desired configuration and deployment jobs; serving apps u
 
 Resources belong directly to their organization. Each organization has one execution configuration, using either a private celld runtime or Cloudflare; it cannot combine both. Agent replacement must reuse that organization's storage, persistent node state and routes. Neither an agent registration nor an individual node owns these resources. See [execution configuration](../apps/control-plane/src/lib/server/organization-runtime.ts) and [runtime storage](../crates/platform-agent/src/execution.rs).
 
+Each agent-backed organization selects its own runtime release; the Node distribution installs its bundled release for the first app job. A Cloudflare installation has one runtime Worker for all organizations, so app operations record the installation organization's applied runtime and other organizations keep no runtime selection. The Cloudflare Worker therefore does not bundle a runtime release; a Hosted deployment installs it before apps deploy.
+
 App SSO also preserves validated configuration for restart without management. Changes to identity setup must retain this separation; the [SSO restart tests](../apps/control-plane/tests/installation/sso-supervisor.test.ts) exercise it.
 
 Apps run in separate V8 isolates with app-scoped resource bindings. The reference installation uses one managed node and shared storage credentials. Multiple managed nodes and automatic load balancing are not implemented.
@@ -29,6 +31,8 @@ Apps run in separate V8 isolates with app-scoped resource bindings. The referenc
 ## Shared authorization, separate identities
 
 The UI's remote functions and the CLI's HTTP API call shared server operations directly. Resource authorization belongs in those operations so both interfaces apply the same policy. A protected page loader is not sufficient: remote functions are independently callable and must authenticate each request. See [remote request authentication](../apps/control-plane/src/lib/server/remote-support.ts) and [API wiring](../apps/control-plane/src/lib/server/api.ts).
+
+Workspace pages name their organization in the URL, and their remote functions receive that organization as an argument. Tabs of one browser session can show different organizations, and queries are cached by their arguments, so neither may read the organization from the session. The session stores no organization at all: addresses without one, such as `/`, open the member's only organization or the chooser, which fills the choice into the destination's `[organization]` placeholder. API requests name their organization with `X-Widefleet-Organization`. Browsers cannot send that header for images, so workspace pages load app icons from their own address, `/<slug>/apps/<id>/icon`, which the request hook authorizes like the page. See [page authorization](../apps/control-plane/src/lib/server/page-auth.ts).
 
 Management membership and app usage are separate. Signing into a published app must not enroll a management member; management access must not implicitly grant app usage. App access rules also apply to previews through their parent. Keep these boundaries when changing [membership](../apps/control-plane/src/lib/server/organization.ts) or [app access](../apps/control-plane/src/lib/server/app-access.ts); the public [app access reference](https://widefleet.com/docs/reference/app-access) owns the user-facing rules.
 

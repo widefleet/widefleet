@@ -1,4 +1,6 @@
+import type { DatabaseExecutor } from "./database.ts";
 import * as contract from "@platform/contracts";
+import { documentationSummary } from "./artifact-documentation.ts";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
 import type { Transaction } from "./transactions.ts";
@@ -75,11 +77,14 @@ export const checkServiceConsumers = async (
       );
 };
 
-const deployedEntrypoints = async (transaction: Transaction, app: typeof apps.$inferSelect) => {
+const deployedEntrypoints = async (
+  transaction: DatabaseExecutor,
+  app: typeof apps.$inferSelect,
+) => {
   if (!app.activeDeploymentId || app.state === "deleting") return null;
 
   const [active] = await transaction
-    .select({ metadata: artifacts.metadata })
+    .select({ metadata: artifacts.metadata, documentation: artifacts.documentation })
     .from(deployments)
     .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
     .where(and(eq(deployments.appId, app.id), eq(deployments.id, app.activeDeploymentId)));
@@ -95,7 +100,8 @@ const deployedEntrypoints = async (transaction: Transaction, app: typeof apps.$i
   const metadata = contract.workerMetadata.parse(active.metadata);
 
   return {
-    metadata,
+    documentation:
+      active.documentation === null ? null : documentationSummary.parse(active.documentation),
     entrypoints: (metadata.entrypoints ?? []).filter((name) =>
       pending.every((record) =>
         contract.workerMetadata.parse(record.metadata).entrypoints?.includes(name),
@@ -113,25 +119,18 @@ export const serviceEntrypoints = async (transaction: Transaction, app: typeof a
  * TSDoc comment that documents it as an API. Callers can still bind any entrypoint explicitly.
  */
 export const catalogEntrypoints = async (
-  transaction: Transaction,
+  transaction: DatabaseExecutor,
   app: typeof apps.$inferSelect,
 ) => {
   const deployed = await deployedEntrypoints(transaction, app);
 
   if (!deployed) return [];
-  const documented = deployed.metadata.service_documentation?.entrypoints;
 
   return deployed.entrypoints.filter(
     (name) =>
       name !== "default" ||
-      !documented?.some(
-        (entry) =>
-          entry.name === name &&
-          entry.methods.length === 0 &&
-          !entry.summary &&
-          !entry.remarks &&
-          entry.examples.length === 0 &&
-          !entry.deprecated,
+      !deployed.documentation?.entrypoints.some(
+        (entry) => entry.name === name && !entry.documented,
       ),
   );
 };

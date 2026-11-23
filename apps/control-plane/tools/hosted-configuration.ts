@@ -18,6 +18,12 @@ export const hostedInstallation = z
     executionLimits: executionLimits.optional(),
     emailFrom: z.email().optional(),
     hyperdriveId: z.string().regex(/^[a-f0-9]{32}$/),
+    // The database's cloud region, such as `aws:eu-central-1`. Each request makes several
+    // queries in a row, so the control plane runs next to the database instead of the visitor.
+    placementRegion: z
+      .string()
+      .regex(/^(aws|gcp|azure):[a-z0-9-]+$/)
+      .optional(),
   })
   .refine(
     (value) => value.appDomain === value.appZone || value.appDomain.endsWith(`.${value.appZone}`),
@@ -232,6 +238,7 @@ export const hostedConfigurations = async (
       hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
       kv_namespaces: [{ binding: "AUTH_CONFIG", id: ids.auth }],
       r2_buckets: [{ binding: "ARTIFACTS", bucket_name: names.artifacts }],
+      ...(installation.placementRegion && { placement: { region: installation.placementRegion } }),
       ...controlOverrides,
       vars: {
         ...control.vars,

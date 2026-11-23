@@ -1,7 +1,9 @@
 import { eq, sql } from "drizzle-orm";
+import { parseCompanyDomains } from "@platform/contracts";
 import { installationOrganizationId } from "../organization.ts";
 import type { Configuration } from "./config.ts";
-import { ssoProvider } from "./auth-schema.ts";
+import type { DatabaseExecutor } from "./database.ts";
+import { ssoProvider, user } from "./auth-schema.ts";
 
 type ConfigurationPolicy = Pick<
   Configuration,
@@ -40,3 +42,35 @@ export const ssoPolicy = (configuration: ConfigurationPolicy, organizationId: st
     operatorTrustedSso(configuration, organizationId) &&
     configuration.PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING,
 });
+
+// Who signed in, and which organization's company SSO or recovery authenticated it.
+export type SignIn = { userId: string; identityOrganizationId: string | null; recovery: boolean };
+
+// A company sign-in reaches only its organization, whose administrators control the
+// SSO identities of external guests but not their addresses or other memberships. For an
+// address on one of its DNS-verified domains, the organization already controls the
+// mailbox and could sign the person in by email code, so that sign-in also reaches the
+// person's other memberships. The proof is read on every use: losing it limits existing
+// sessions and tokens again. Recovery always stays in its organization.
+export const companySignInLimit = async (database: DatabaseExecutor, signIn: SignIn) => {
+  if (signIn.identityOrganizationId === null) return null;
+
+  if (signIn.recovery) return signIn.identityOrganizationId;
+
+  const [identity] = await database
+    .select({
+      email: user.email,
+      emailVerified: user.emailVerified,
+      domain: ssoProvider.domain,
+      domainVerified: ssoProvider.domainVerified,
+    })
+    .from(user)
+    .innerJoin(ssoProvider, eq(ssoProvider.organizationId, signIn.identityOrganizationId))
+    .where(eq(user.id, signIn.userId));
+
+  return identity?.emailVerified &&
+    identity.domainVerified &&
+    parseCompanyDomains(identity.domain).includes(identity.email.toLowerCase().split("@")[1] ?? "")
+    ? null
+    : signIn.identityOrganizationId;
+};

@@ -1,6 +1,7 @@
 import { redirect, error } from "@sveltejs/kit";
 import { z } from "zod";
-import { pageOrganizations, pagePrincipal, requireLogin } from "#server/page-auth";
+import { organizationMember, pageOrganizations, requireLogin } from "#server/page-auth";
+import { organizationPlaceholder } from "#lib/workspace-path";
 import { getRuntime } from "#server/runtime";
 import type { RequestHandler } from "./$types";
 
@@ -15,14 +16,23 @@ export const GET: RequestHandler = async ({ url }) => {
   if (!state.success) error(400, "Start sign-in from your connected app.");
   requireLogin(url.pathname + url.search);
 
-  // The active organization may be a leftover from earlier work. A person with
-  // several organizations chooses which one the client connects, then returns.
-  if (url.searchParams.get("chosen") !== "1" && (await pageOrganizations()).length > 1) {
-    const next = `${url.pathname}?${new URLSearchParams({ state: state.data, chosen: "1" })}`;
+  // A person with several organizations chooses which one the client connects. The chooser
+  // returns here with that organization in the address.
+  const organizations = await pageOrganizations();
+  const requested = url.searchParams.get("organization");
+
+  const chosen = requested
+    ? organizations.find((organization) => organization.slug === requested)
+    : organizations.length === 1
+      ? organizations[0]
+      : undefined;
+
+  if (!chosen) {
+    const next = `${url.pathname}?${new URLSearchParams({ state: state.data })}&organization=${organizationPlaceholder}`;
     redirect(303, `/organizations?${new URLSearchParams({ next })}`);
   }
 
-  const principal = await pagePrincipal();
+  const { principal } = await organizationMember(chosen.slug);
   const { configuration } = await getRuntime();
   const port = configuration.APP_HTTPS_PORT === 443 ? "" : `:${configuration.APP_HTTPS_PORT}`;
   const target = new URL(`https://mcp.${configuration.APP_DOMAIN}${port}/oauth/organization`);

@@ -2,19 +2,19 @@ import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { managedApp, enqueueDeployment, presentDeployment } from "./apps.ts";
-import type { Database } from "./database.ts";
+import { managedApp, readableApp, enqueueDeployment, presentDeployment } from "./apps.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
 import { apps, artifacts, deployments } from "./schema.ts";
 import { encryptSecret } from "./secret-encryption.ts";
 import { InvalidOperation } from "./errors.ts";
 import { requireAgentExecution } from "./organization-runtime.ts";
-import { transact, type Transaction } from "./transactions.ts";
+import { readOnly, transact } from "./transactions.ts";
 
 export const storedAppSecrets = z.record(contract.appSecretName, z.string().min(1));
 
-const status = async (transaction: Transaction, app: typeof apps.$inferSelect) => {
+const status = async (transaction: DatabaseExecutor, app: typeof apps.$inferSelect) => {
   const [deployment] = app.secretDeploymentId
     ? await transaction.select().from(deployments).where(eq(deployments.id, app.secretDeploymentId))
     : [];
@@ -33,8 +33,8 @@ export const createAppSecrets = (
   execution?: HostedExecution,
 ) => ({
   read: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
 

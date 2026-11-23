@@ -1,65 +1,185 @@
 import { createServiceAccess } from "./service-access.ts";
-import { transact } from "./transactions.ts";
+import { readOnly, transact } from "./transactions.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, desc, eq, isNull, sql, ne, or } from "drizzle-orm";
 import type { z } from "zod";
-import { managedApp } from "./apps.ts";
+import { readableApp } from "./apps.ts";
 import { bindingState, applyCapabilityChange } from "./capability-changes.ts";
 import { catalogEntrypoints } from "./app-services.ts";
 import { apps, artifacts, deployments, jobs } from "./schema.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
+import { readDocumentation } from "./artifact-documentation.ts";
 import { InvalidOperation } from "./errors.ts";
+import type { ArtifactStorage } from "./storage.ts";
 
-export const createConnectionService = (database: Database, execution?: HostedExecution) => ({
-  ...createServiceAccess(database, execution),
-  describe: (principal: Principal, service: string) =>
-    transact(database, async (transaction) => {
-      const byId = contract.identifier.safeParse(service).success
-        ? eq(apps.id, service)
-        : undefined;
+// The active deployment of an app API in the principal's organization, with its documentation.
+const activeService = (
+  database: Database,
+  storage: ArtifactStorage,
+  principal: Principal,
+  service: string,
+) =>
+  Result.gen(async function* () {
+    const described = yield* Result.await(
+      readOnly(database, async (transaction) => {
+        const byId = contract.identifier.safeParse(service).success
+          ? eq(apps.id, service)
+          : undefined;
 
-      const [record] = await transaction
-        .select({ app: apps, metadata: artifacts.metadata, deploymentId: deployments.id })
-        .from(apps)
-        .innerJoin(
-          deployments,
-          and(eq(deployments.id, apps.activeDeploymentId), eq(deployments.appId, apps.id)),
-        )
-        .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
-        .where(
-          and(
-            eq(apps.organizationId, principal.application.organizationId),
-            isNull(apps.removedAt),
-            ne(apps.state, "deleting"),
-            or(byId, eq(apps.slug, service)),
-          ),
-        )
-        .orderBy(desc(byId ?? apps.slug))
-        .limit(1);
+        const [record] = await transaction
+          .select({
+            app: apps,
+            metadata: artifacts.metadata,
+            documentation: artifacts.documentation,
+            artifactId: artifacts.id,
+            deploymentId: deployments.id,
+          })
+          .from(apps)
+          .innerJoin(
+            deployments,
+            and(eq(deployments.id, apps.activeDeploymentId), eq(deployments.appId, apps.id)),
+          )
+          .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+          .where(
+            and(
+              eq(apps.organizationId, principal.application.organizationId),
+              isNull(apps.removedAt),
+              ne(apps.state, "deleting"),
+              or(byId, eq(apps.slug, service)),
+            ),
+          )
+          .orderBy(desc(byId ?? apps.slug))
+          .limit(1);
 
-      if (!record)
-        return Result.err(
-          new InvalidOperation({ code: "NOT_FOUND", message: "App service not found" }),
-        );
-      const metadata = contract.workerMetadata.parse(record.metadata);
+        if (!record)
+          return Result.err(
+            new InvalidOperation({ code: "NOT_FOUND", message: "App service not found" }),
+          );
+        const metadata = contract.workerMetadata.parse(record.metadata);
 
-      return Result.ok(
-        contract.serviceDescription.parse({
+        return Result.ok({
           appId: record.app.id,
           slug: record.app.slug,
           displayName: record.app.displayName,
           accessMode: record.app.serviceAccessMode,
           deploymentId: record.deploymentId,
           entrypoints: metadata.entrypoints ?? [],
-          documentation: metadata.service_documentation ?? null,
+          artifactId: record.artifactId,
+          documented: record.documentation !== null,
+        });
+      }),
+    );
+
+    const { artifactId, documented, ...description } = described;
+
+    // Read outside the transaction: the artifact and its documentation never change.
+    const documentation = documented
+      ? yield* Result.await(readDocumentation(storage, description.appId, artifactId))
+      : null;
+
+    return Result.ok({ ...description, documentation });
+  });
+
+export const createConnectionService = (
+  database: Database,
+  storage: ArtifactStorage,
+  execution?: HostedExecution,
+) => ({
+  ...createServiceAccess(database, execution),
+  /** An app API's complete documentation, for its reference page. */
+  reference: (principal: Principal, service: string) =>
+    Result.gen(async function* () {
+      const active = yield* Result.await(activeService(database, storage, principal, service));
+
+      return Result.ok(contract.serviceReference.parse(active));
+    }),
+  /** TypeScript declarations for a caller's binding to an app API's entrypoint. */
+  types: (
+    principal: Principal,
+    service: string,
+    binding: { entrypoint: string; binding: string },
+  ) =>
+    Result.gen(async function* () {
+      const { documentation, ...description } = yield* Result.await(
+        activeService(database, storage, principal, service),
+      );
+
+      if (!documentation)
+        return yield* new InvalidOperation({
+          code: "NOT_FOUND",
+          message: `${description.slug} has no API documentation; redeploy it to publish its types`,
+        });
+
+      const { declarations, failure } = contract.serviceBindingTypes(documentation, {
+        app: description.slug,
+        ...binding,
+      });
+
+      if (failure)
+        return yield* new InvalidOperation({
+          code: failure.reason === "entrypoint" ? "NOT_FOUND" : "BAD_REQUEST",
+          message: failure.message,
+        });
+
+      return Result.ok(
+        contract.serviceBindingTypesResult.parse({ ...description, ...binding, declarations }),
+      );
+    }),
+  /** An app API's methods, with the documentation of the selected methods and types. */
+  describe: (
+    principal: Principal,
+    service: string,
+    selection: { entrypoint: string; methods: string[]; types: string[] } = {
+      entrypoint: "default",
+      methods: [],
+      types: [],
+    },
+  ) =>
+    Result.gen(async function* () {
+      const { documentation, ...description } = yield* Result.await(
+        activeService(database, storage, principal, service),
+      );
+
+      const requested = selection.methods.length > 0 || selection.types.length > 0;
+
+      const selected =
+        documentation && requested
+          ? contract.selectServiceMethods(documentation, selection.entrypoint, selection)
+          : null;
+
+      if (requested && !selected?.selection) {
+        // Without documentation, every requested name is unknown.
+        const unknown = selected?.unknown ?? {
+          entrypoint: false,
+          methods: selection.methods,
+          types: selection.types,
+        };
+
+        return yield* new InvalidOperation({
+          code: "NOT_FOUND",
+          message: unknown.entrypoint
+            ? `${selection.entrypoint} is not a documented entrypoint`
+            : `${selection.entrypoint} has no documented ${[
+                ...unknown.methods.map((method) => `method ${method}`),
+                ...unknown.types.map((type) => `type ${type}`),
+              ].join(", ")}`,
+        });
+      }
+
+      return Result.ok(
+        contract.serviceDescription.parse({
+          ...description,
+          documented: documentation !== null,
+          methods: documentation ? contract.listServiceMethods(documentation) : [],
+          documentation: selected?.selection ?? null,
         }),
       );
     }),
   services: (principal: Principal) =>
-    transact(database, async (transaction) => {
+    readOnly(database, async (transaction) => {
       const records = await transaction
         .select()
         .from(apps)
@@ -84,8 +204,8 @@ export const createConnectionService = (database: Database, execution?: HostedEx
       return Result.ok(entries.filter((entry) => entry.entrypoints.length > 0));
     }),
   connections: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
       const app = access.value;
@@ -163,8 +283,8 @@ export const createConnectionService = (database: Database, execution?: HostedEx
       );
     }),
   bindings: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    readOnly(database, async (transaction) => {
+      const access = await readableApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
 

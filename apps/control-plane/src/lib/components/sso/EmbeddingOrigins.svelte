@@ -1,7 +1,7 @@
 <script lang="ts">
   import AppWindow from "@lucide/svelte/icons/app-window";
   import Trash from "@lucide/svelte/icons/trash-2";
-  import { embeddingOrigin, maxEmbeddingOrigins, type settingsView } from "@platform/contracts";
+  import { embeddingOrigin, maxEmbeddingOrigins, type settingsOverview } from "@platform/contracts";
   import type { z } from "zod";
   import { SettingsWriter, ssoDraft, ssoInput } from "#lib/sso-setup.svelte";
   import { Button } from "@platform/ui/button";
@@ -17,7 +17,7 @@
     organizationId,
     readonly,
   }: {
-    view: z.infer<typeof settingsView>;
+    view: z.infer<typeof settingsOverview>;
     organizationId: string;
     readonly: boolean;
   } = $props();

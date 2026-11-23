@@ -7,7 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect } from "vitest";
-import { serviceDocumentation, workerMetadata } from "@platform/contracts";
+import {
+  serviceDocumentation,
+  serviceDocumentationPart,
+  workerMetadata,
+} from "@platform/contracts";
 import { z } from "zod";
 import { esbuildBinary } from "../../../tools/cli-tools.ts";
 import { executeCli } from "./cli-process.ts";
@@ -160,7 +164,9 @@ export async function extractServiceDocumentation(
   expect(metadata.entrypoints).toEqual(expect.arrayContaining(entrypoints));
 
   return {
-    documentation: serviceDocumentation.parse(metadata.service_documentation),
+    documentation: serviceDocumentation.parse(
+      JSON.parse(await z.instanceof(File).parse(form.get(serviceDocumentationPart)).text()),
+    ),
     warnings: result.stderr
       .split("\n")
       .filter((line) => line.startsWith("Warning: "))
