@@ -186,16 +186,53 @@ pub fn initialize(directory: &Path, template: Template) -> Result<()> {
         .ok_or_else(|| Error::invalid("Starter configuration must declare a name".into()))?;
     source.replace_range(range.start..range.end, &serde_json::to_string(&name)?);
     fs::write(config, source)?;
+    let repository = initialize_repository(directory)?;
     println!(
         "Created {} project at {}",
         template.name(),
         directory.display()
     );
+    if repository {
+        println!("Initialized a Git repository on branch main");
+    }
     println!("App name: {name} (editable in wrangler.jsonc)");
     println!(
         "In that directory, run pnpm install --frozen-lockfile, then pnpm check. Run widefleet login to connect your company, then widefleet deploy."
     );
     Ok(())
+}
+
+/// Deploy saves the main app's source from the local branch main. A plain
+/// `git init` may name the first branch master, so the project starts on main.
+/// Projects inside an existing repository keep using it, and without Git the
+/// first deploy initializes the repository instead.
+fn initialize_repository(directory: &Path) -> Result<bool> {
+    let git = || {
+        let mut command = std::process::Command::new("git");
+        command
+            .current_dir(directory)
+            .env("GIT_TERMINAL_PROMPT", "0");
+        command
+    };
+    let probe = match git().args(["rev-parse", "--show-toplevel"]).output() {
+        Ok(probe) => probe,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if probe.status.success() {
+        return Ok(false);
+    }
+    let result = git()
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .output()?;
+    if !result.status.success() {
+        return Err(Error::invalid(format!(
+            "Created the project at {}, but Git could not initialize it: {}",
+            directory.display(),
+            String::from_utf8_lossy(&result.stderr).trim()
+        )));
+    }
+    Ok(true)
 }
 
 fn project_name(directory: &Path) -> String {
@@ -406,6 +443,30 @@ mod tests {
         fs::write(app.join("src/app.ts"), "existing work")?;
         assert!(write_project(&template, &app).is_err());
         assert_eq!(fs::read(app.join("src/app.ts"))?, b"existing work");
+        Ok(())
+    }
+
+    fn branch(directory: &Path) -> Result<String> {
+        let output = std::process::Command::new("git")
+            .current_dir(directory)
+            .args(["symbolic-ref", "--short", "HEAD"])
+            .output()?;
+        assert!(output.status.success());
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    }
+
+    #[test]
+    fn init_starts_a_repository_on_main_unless_one_contains_the_project() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let app = temporary.path().join("app");
+        fs::create_dir(&app)?;
+        assert!(initialize_repository(&app)?);
+        assert_eq!(branch(&app)?, "main");
+
+        let nested = app.join("apps/nested");
+        fs::create_dir_all(&nested)?;
+        assert!(!initialize_repository(&nested)?);
+        assert!(!nested.join(".git").exists());
         Ok(())
     }
 
