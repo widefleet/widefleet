@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-18
+lastModified: 2026-11-22
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -101,14 +101,20 @@ Keep types in TypeScript signatures. You can also document interfaces and their
 properties to explain the data your API accepts and returns.
 
 After deploying, open **App APIs**, then **View API documentation** on the
-provider app. To read the same information as JSON, run:
+provider app. To list the API's methods as JSON, run:
 
 ```sh
 widefleet services describe inventory-api
 ```
 
-The command accepts an app slug or UUID. The response includes methods, parameter
-and return types, descriptions and examples from the active deployment. Redeploy
+To read selected methods with their parameter and return types, descriptions,
+examples and the types they use, name the entrypoint and the methods:
+
+```sh
+widefleet services describe inventory-api --entrypoint Reader --method findItems
+```
+
+The command accepts an app slug or UUID and reads the active deployment. Redeploy
 after editing comments; rolling back the app also restores its API documentation.
 
 ## Connect a caller
