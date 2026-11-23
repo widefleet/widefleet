@@ -14,7 +14,17 @@
 
   const workspace = getWorkspaceContext();
 
-  const apps = $derived(await getCatalog({ organizationId: workspace.organizationId }));
+  const catalog = $derived(await getCatalog({ organizationId: workspace.organizationId }));
+
+  // Connectors have their place on My connections, so Home shows the other apps.
+  const apps = $derived(catalog.filter((app) => !app.connector));
+
+  // A card names the published connectors its app works with.
+  const connectors = $derived(
+    new Map(catalog.flatMap((app) => (app.connector ? [[app.id, app] as const] : []))),
+  );
+
+  const names = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
   // A tile leads the people who manage its app to the pages for managing it.
   const managed = $derived(
@@ -75,32 +85,65 @@
   {:else}
     <ul class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {#each matches as app (app.id)}
+        {@const used = app.uses.flatMap((id) => connectors.get(id) ?? [])}
         <li>
           <div
-            class="hover:border-primary/30 hover:bg-muted/30 relative flex h-full flex-col rounded-xl border p-5 transition-colors"
+            class="hover:border-primary/30 hover:bg-muted/30 relative flex h-full flex-col rounded-xl border transition-colors"
           >
-            <span class="bg-primary/5 text-primary mb-5 grid size-10 place-items-center rounded-xl"
-              ><AppIcon appId={app.id} deploymentId={app.activeDeploymentId} /></span
-            >
-            <a
-              href={workspace.path(`${managed.has(app.id) ? "" : "/catalog"}/apps/${app.id}`)}
-              class="text-sm font-semibold wrap-anywhere after:absolute after:inset-0 after:rounded-xl"
-              >{app.displayName}</a
-            >
-            <span class="text-muted-foreground mt-2 text-xs wrap-anywhere"
-              >{app.description ?? app.hostname}</span
-            >
-            <Button
-              href={app.url}
-              target="_blank"
-              rel="noreferrer"
-              variant="outline"
-              size="sm"
-              class="relative z-10 mt-5 self-end"
-              >Open app<ArrowUpRight /><span class="sr-only">
-                {app.displayName} in a new tab</span
-              ></Button
-            >
+            <div class="flex-1 p-5">
+              <div class="flex items-center gap-3">
+                <span
+                  class="bg-primary/5 text-primary grid size-10 shrink-0 place-items-center rounded-xl"
+                  ><AppIcon appId={app.id} deploymentId={app.activeDeploymentId} /></span
+                >
+                <a
+                  href={workspace.path(`${managed.has(app.id) ? "" : "/catalog"}/apps/${app.id}`)}
+                  class="text-sm font-semibold wrap-anywhere after:absolute after:inset-0 after:rounded-xl"
+                  >{app.displayName}</a
+                >
+              </div>
+              <p class="text-muted-foreground mt-3 line-clamp-2 text-xs/5 wrap-anywhere">
+                {app.description ?? app.hostname}
+              </p>
+            </div>
+            <!-- Every card ends with the same bar, so the way into the app has a fixed place. -->
+            <div class="flex min-h-12 items-center justify-between gap-3 border-t py-1.5 pr-2 pl-5">
+              {#if used.length}
+                <span
+                  role="img"
+                  aria-label={`Uses ${names.format(used.map((connector) => connector.displayName))}`}
+                  class="flex items-center"
+                >
+                  {#each used.slice(0, 4) as connector (connector.id)}
+                    <!-- The icon is drawn for a larger box, so it is scaled into the circle. -->
+                    <span
+                      title={connector.displayName}
+                      class="bg-background ring-background -ml-1.5 grid size-6 place-items-center overflow-hidden rounded-full border ring-2 first:ml-0"
+                      ><span class="scale-[0.6]"
+                        ><AppIcon
+                          appId={connector.id}
+                          deploymentId={connector.activeDeploymentId}
+                        /></span
+                      ></span
+                    >
+                  {/each}
+                  {#if used.length > 4}<span class="text-muted-foreground ml-1.5 text-xs"
+                      >+{used.length - 4}</span
+                    >{/if}
+                </span>
+              {/if}
+              <Button
+                href={app.url}
+                target="_blank"
+                rel="noreferrer"
+                variant="ghost"
+                size="sm"
+                class="relative z-10 ml-auto"
+                >Open app<ArrowUpRight /><span class="sr-only">
+                  {app.displayName} in a new tab</span
+                ></Button
+              >
+            </div>
           </div>
         </li>
       {/each}

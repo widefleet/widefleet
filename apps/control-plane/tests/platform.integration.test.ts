@@ -2469,6 +2469,8 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         hostname: app.hostname,
         url: app.url,
         activeDeploymentId,
+        connector: false,
+        uses: [used],
       }),
     ]);
 
@@ -2492,6 +2494,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       owner: owner?.name,
       uses: [used],
       screenshots: [],
+      connector: false,
     });
     expect((await json(`/apps/${app.id}`, "GET", undefined, outsiderHeaders)).status).toBe(404);
     expect(await (await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).json()).toEqual({

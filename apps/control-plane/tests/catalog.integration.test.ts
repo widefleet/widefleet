@@ -78,6 +78,8 @@ describe("App catalog", () => {
         hostname: "team-notes.apps.localhost",
         url: "https://team-notes.apps.localhost:25453/",
         activeDeploymentId,
+        connector: false,
+        uses: [],
       },
     ]);
     expect((await service.list(colleague)).unwrap()).toEqual([]);
