@@ -6,6 +6,12 @@ import { setSessionCookie } from "better-auth/cookies";
 import type { Caller, Environment } from "./context.ts";
 import { ensureUser } from "./database.ts";
 
+/**
+ * The scope every offered method needs: reading and changing the user's files
+ * and the files others share with them.
+ */
+export const scopes = ["Files.ReadWrite.All"] as const;
+
 export const authentication = (
   environment: Environment,
   identity: Caller,
@@ -69,7 +75,8 @@ export const authentication = (
         clientId: credentials.clientId,
         clientSecret: credentials.clientSecret,
         tenantId: "common",
-        scope: ["Files.Read"],
+        // Better Auth adds openid, profile, email, offline_access and User.Read.
+        scope: [...scopes],
         disableSignUp: true,
         disableProfilePhoto: true,
         mapProfileToUser: (profile) => ({ providerEmail: profile.email }),

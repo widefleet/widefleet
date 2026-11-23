@@ -1,5 +1,5 @@
-// Better Auth's core SQLite schema, with one provider account per Widefleet user.
-// Each app initializes its own account tables on first use.
+// Better Auth's core SQLite schema, with one provider account per Widefleet user,
+// and each user's approval level. Each app initializes its own tables on first use.
 const schema = [
   `CREATE TABLE IF NOT EXISTS "user" (
     id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
@@ -22,6 +22,7 @@ const schema = [
     id TEXT PRIMARY KEY NOT NULL, identifier TEXT NOT NULL, value TEXT NOT NULL,
     expiresAt DATE NOT NULL, createdAt DATE NOT NULL, updatedAt DATE NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS approval_level (userId TEXT PRIMARY KEY NOT NULL, level TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS session_userId ON session (userId)`,
   `CREATE INDEX IF NOT EXISTS verification_identifier ON verification (identifier)`,
 ];

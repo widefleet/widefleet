@@ -1,7 +1,8 @@
 import { connectionLaunch } from "./connection-launch.ts";
 import { oauthCredentials, revokeManagedGrant } from "./oauth.ts";
 import { z } from "zod";
-import { authentication } from "./auth.ts";
+import { approvals } from "./approval.ts";
+import { authentication, scopes } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
 import { authorizationPage, connectionPage } from "./page.ts";
@@ -12,6 +13,19 @@ const linkedAccount = z.object({
   scope: z.string().nullable(),
   providerEmail: z.string().nullable(),
 });
+
+// An account connected for fewer scopes than the methods need reconnects to
+// grant the others.
+const granted = (linked: z.infer<typeof linkedAccount>) => {
+  // Microsoft may name Graph's scopes with their resource prefix.
+  const scope = new Set(
+    linked.scope
+      ?.split(/[,\s]+/)
+      .map((name) => name.replace(/^https:\/\/graph\.microsoft\.com\//, "")),
+  );
+
+  return scopes.every((name) => scope.has(name));
+};
 
 const redirect = (location: string, cookies: string[] = []) => {
   const headers = new Headers({
@@ -100,6 +114,8 @@ export const accountConnection = (environment: Environment, properties: Properti
     if (!linked)
       return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
+    if (!granted(linked))
+      return { status: "permission_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
     const auth = authentication(environment, identity, id, config.credentials);
 
     const response = await auth.api.getAccessToken({
@@ -218,35 +234,29 @@ export const accountConnection = (environment: Environment, properties: Properti
       if (config.status !== "configured") return config;
       const linked = await account(id);
 
+      if (!linked)
+        return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
+      if (!granted(linked))
+        return { status: "permission_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
       return {
-        status: linked ? "connected" : "connection_required",
-        accountId: linked?.accountId ?? null,
+        status: "connected",
+        accountId: linked.accountId,
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
     },
-    request: async (url: string, headers = new Headers()) => {
+    /** Sends one request to Microsoft Graph with the user's token. */
+    send: async (url: string, init: RequestInit) => {
       const result = await token();
 
       if (result.status !== "connected") return result;
+      const headers = new Headers(init.headers);
       headers.set("authorization", `Bearer ${result.accessToken}`);
-      const response = await fetch(url, { headers, redirect: "manual" });
 
-      if (response.status === 401)
-        return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+      const response = await fetch(url, { ...init, headers, redirect: "manual" });
 
-      if (response.status === 403) return { status: "access_denied" } as const;
-
-      if (response.status === 404) return { status: "not_found" } as const;
-
-      if (response.status === 429)
-        return { status: "rate_limited", retryAfter: response.headers.get("retry-after") } as const;
-
-      if (!response.ok && response.status !== 302)
-        throw new Error(`OneDrive request failed (HTTP ${response.status})`);
-
-      const connected = { status: "connected", response } as const;
-
-      return connected;
+      return { status: "connected", response } as const;
     },
     fetch: async (request: Request) => {
       if (!caller.safeParse(properties.caller).success) return new Response(null, { status: 401 });
@@ -304,6 +314,7 @@ export const accountConnection = (environment: Environment, properties: Properti
           config.status === "setup_required" ? config.missing : [],
           url.origin,
           url.searchParams.has("error"),
+          await approvals(environment.DB, id).level(),
         );
       }
 

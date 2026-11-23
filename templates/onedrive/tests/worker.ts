@@ -116,27 +116,53 @@ export class TestUserConnection extends UserConnection {
   }
 }
 
-// Widefleet supplies these props after verifying the signed-in caller.
+// The methods these tests call, as a consuming app declares them. Cloudflare's
+// RPC types for the loopback binding fail on recursive JSON results (TS2589,
+// cloudflare/workerd#3063).
+type Binding = Pick<
+  TestApp,
+  | "connectionStatus"
+  | "listChildren"
+  | "getContent"
+  | "createChild"
+  | "replaceContent"
+  | "deleteItem"
+  | "approvalLevel"
+  | "setApprovalLevel"
+  | "fetch"
+>;
+
+// Widefleet supplies these props after verifying the signed-in caller, and the
+// user's answer when it calls a method again after a question.
 export default class Host extends WorkerEntrypoint<TestEnvironment> {
   override async fetch(request: Request) {
     const subject = request.headers.get("test-subject");
+    const answer = request.headers.get("test-answer");
 
-    const options = {
-      props: {
-        caller: subject
-          ? {
-              issuer: request.headers.get("test-issuer") ?? "https://identity.example.test",
-              subject,
-              name: subject,
-            }
-          : null,
-      },
-    };
+    const caller = subject
+      ? {
+          issuer: request.headers.get("test-issuer") ?? "https://identity.example.test",
+          subject,
+          name: subject,
+        }
+      : null;
 
-    const app = this.ctx.exports.TestApp(options);
-    const connection = this.ctx.exports.TestUserConnection(options);
+    const input = answer
+      ? {
+          inputResponses: { approve: { action: z.enum(["accept", "decline"]).parse(answer) } },
+        }
+      : undefined;
 
-    const path = new URL(request.url).pathname;
+    const stub: unknown = this.ctx.exports.TestApp(
+      input ? { props: { caller, input } } : { props: { caller } },
+    );
+
+    // SAFETY: TestApp implements every Binding method; the loopback stub calls
+    // them over RPC with the same arguments and results.
+    const app = stub as Binding;
+    const connection = this.ctx.exports.TestUserConnection({ props: { caller } });
+    const url = new URL(request.url);
+    const path = url.pathname;
 
     if (path === "/rpc/personal/status") return Response.json(await connection.status());
 
@@ -149,9 +175,71 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
 
     if (path === "/rpc/status") return Response.json(await app.connectionStatus());
 
-    if (path === "/rpc/list") return Response.json(await app.listFiles());
+    if (path === "/rpc/list")
+      return Response.json(
+        await app.listChildren({
+          driveId: "drive-1",
+          driveItemId: "root",
+          $top: 5,
+          $select: ["id", "name"],
+        }),
+      );
 
-    if (path === "/rpc/content") return Response.json(await app.getDownloadUrl("file"));
+    if (path === "/rpc/next")
+      return Response.json(
+        await app.listChildren({
+          driveId: "drive-1",
+          driveItemId: "root",
+          nextLink: url.searchParams.get("link") ?? "",
+        }),
+      );
+
+    if (path === "/rpc/invalid")
+      return Response.json(
+        // @ts-expect-error Unknown arguments are rejected before anything is sent.
+        await app.listChildren({ driveId: "drive-1", driveItemId: "root", top: 5 }),
+      );
+
+    if (path === "/rpc/content")
+      return Response.json(await app.getContent({ driveId: "drive-1", driveItemId: "file-1" }));
+
+    if (path === "/rpc/create")
+      return Response.json(
+        await app.createChild({
+          driveId: "drive-1",
+          driveItemId: "root",
+          body: { name: url.searchParams.get("name") ?? "Reports", folder: {} },
+        }),
+      );
+
+    if (path === "/rpc/upload")
+      return Response.json(
+        await app.replaceContent({
+          driveId: "drive-1",
+          driveItemId: "file-1",
+          body: "new content",
+          contentType: "text/plain",
+        }),
+      );
+
+    if (path === "/rpc/delete")
+      return Response.json(
+        await app.deleteItem({
+          driveId: "drive-1",
+          driveItemId: url.searchParams.get("id") ?? "file-1",
+        }),
+      );
+
+    if (path === "/rpc/level") return Response.json(await app.approvalLevel());
+
+    if (path === "/rpc/set-level")
+      return Response.json(
+        await app.setApprovalLevel({
+          level: z
+            .enum(["all_changes", "updates_and_deletions", "none"])
+            .parse(url.searchParams.get("level")),
+        }),
+      );
 
     return app.fetch(request);
   }

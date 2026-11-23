@@ -499,6 +499,9 @@ importers:
       graphql:
         specifier: 17.0.2
         version: 17.0.2
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
       zod:
         specifier: 4.6.5
         version: 4.6.5
