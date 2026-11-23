@@ -58,7 +58,8 @@ export const operations = {
   "drive.approvals.approve": "update",
   "drive.approvals.decline": "update",
   "drive.approvals.cancel": "update",
-  "drive.approvals.comment": "create",
+  // Notifies the approval's initiator and reviewers.
+  "drive.approvals.comment": "send",
   "drive.approvals.reassign": "update",
   "drive.revisions.update": "update",
   "drive.revisions.delete": "delete",

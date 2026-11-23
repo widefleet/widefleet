@@ -362,7 +362,7 @@ export const operations = {
     response: "json",
     altMedia: false,
     upload: null,
-    change: "create",
+    change: "send",
   },
   approvalsReassign: {
     httpMethod: "POST",

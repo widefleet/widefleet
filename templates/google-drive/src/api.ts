@@ -3247,7 +3247,7 @@ export class GoogleDriveApi extends WorkerEntrypoint<TemplateEnvironment, Google
   /**
    * Comments on an approval. For more information, see [Manage approvals](https://developers.google.com/workspace/drive/api/guides/approvals). This sends a notification to both the initiator and the reviewers. Additionally, a message is also added to the approval activity log.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `fileId`: Required. The ID of the file that the approval is on.

@@ -112,10 +112,11 @@ level says:
 
 - `all_changes`: every change asks.
 - `updates_and_deletions`, the default: changing, moving or deleting files, emptying
-  the trash, changing shared drives, revisions and comments, and `permissionsCreate`,
+  the trash, changing shared drives, revisions and comments, `permissionsCreate`,
   which shares with people and emails them unless `sendNotificationEmail` is false,
-  ask. Creating or copying files, folders and shared drives and adding comments run at
-  once.
+  and starting or commenting on an approval, which notifies its participants, ask.
+  Creating or copying files, folders and shared drives and adding comments to files
+  run at once.
 - `none`: nothing asks.
 
 `...WithContent` methods ask like the method they extend. `scripts/operations.ts`
