@@ -474,6 +474,15 @@ export const createAppService = (
         })),
       );
     }),
+  rename: (principal: Principal, appId: string, displayName: string) =>
+    transact(database, async (transaction) => {
+      const access = await managedApp(transaction, principal, appId);
+
+      if (access.isErr()) return access;
+      await transaction.update(apps).set({ displayName }).where(eq(apps.id, appId));
+
+      return Result.ok({ displayName });
+    }),
   setDescription: (principal: Principal, appId: string, text: string) =>
     transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);

@@ -62,6 +62,11 @@ export const appSlug = z
   .max(48)
   .regex(/^[a-z](?:[a-z0-9-]*[a-z0-9])?$/);
 
+export const appNameLength = 120;
+
+/** The name people see. An app's slug and address do not follow it. */
+export const appDisplayName = z.string().trim().min(1).max(appNameLength);
+
 /** One sentence that tells people what an app is for. An empty text removes it. */
 export const appDescriptionLength = 200;
 
@@ -72,7 +77,7 @@ export const createAppInput = z.strictObject({
     (value) => !["auth", "mcp"].includes(value),
     "The auth and mcp hostnames are reserved for platform services",
   ),
-  displayName: z.string().trim().min(1).max(120),
+  displayName: appDisplayName,
   parentId: identifier.nullable().default(null),
   previewBranch: gitBranch.optional(),
   previewName: z
@@ -152,6 +157,10 @@ export const catalogListingInput = appPath.extend(catalogListing.shape);
 export const appDescriptionChange = z.strictObject({ description: appDescription });
 
 export const appDescriptionInput = appPath.extend(appDescriptionChange.shape);
+
+export const appNameChange = z.strictObject({ displayName: appDisplayName });
+
+export const appNameInput = appPath.extend(appNameChange.shape);
 
 export const deploymentPath = z.strictObject({ deploymentId: identifier });
 

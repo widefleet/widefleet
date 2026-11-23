@@ -3,7 +3,8 @@ import { templateCatalog, readTemplate } from "#server/app-templates";
 import { form, getRequestEvent, query } from "$app/server";
 import { invalid, redirect } from "@sveltejs/kit";
 import {
-  appDescriptionChange,
+  appDescription,
+  appDisplayName,
   appPath,
   networkPolicy,
   organizationSelection,
@@ -12,7 +13,7 @@ import {
   templateSearch,
 } from "@platform/contracts";
 import { z } from "zod";
-import { getAppDetails } from "#lib/apps.remote";
+import { getAppDetails, getApps } from "#lib/apps.remote";
 import { InvalidOperation } from "#server/errors";
 import { templateNetworkChanged } from "#server/template-installs";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
@@ -49,17 +50,36 @@ export const setCatalogListing = form(
   },
 );
 
-// The description appears with the app in the catalog, so both views reload.
-export const setAppDescription = form(
+// One text of an app that people edit in place. The forms share this shape, so one editor
+// serves them.
+const appText = (value: z.ZodType<string, string>) =>
   appPath.extend({
     ...organizationSelection.shape,
-    ...appDescriptionChange.shape,
+    value,
     search: z.string().trim().max(200).default(""),
-  }),
-  async ({ appId, description, search, organizationId }) => {
+  });
+
+// The description appears with the app in the catalog, so both views reload.
+export const setAppDescription = form(
+  appText(appDescription),
+  async ({ appId, value, search, organizationId }) => {
     const { runtime, principal } = await remoteContext({ organizationId });
-    formValue(await runtime.apps.setDescription(principal, appId, description));
+    formValue(await runtime.apps.setDescription(principal, appId, value));
     await getAppDetails({ appId, search, organizationId }).refresh();
+    await getCatalog({ organizationId }).refresh();
+
+    return { saved: true };
+  },
+);
+
+// The name also appears in the list of apps a person manages.
+export const renameApp = form(
+  appText(appDisplayName),
+  async ({ appId, value, search, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.apps.rename(principal, appId, value));
+    await getAppDetails({ appId, search, organizationId }).refresh();
+    await getApps({ organizationId }).refresh();
     await getCatalog({ organizationId }).refresh();
 
     return { saved: true };

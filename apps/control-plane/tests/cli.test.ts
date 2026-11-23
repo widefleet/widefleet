@@ -245,6 +245,18 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      if (request.method === "PUT" && request.url === `/api/v1/apps/${app.id}/name`) {
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          response.end(JSON.stringify(contract.appNameChange.parse(JSON.parse(body))));
+        });
+
+        return;
+      }
+
       if (request.method === "PUT" && request.url === `/api/v1/apps/${app.id}/description`) {
         let body = "";
         request.setEncoding("utf8").on("data", (chunk: string) => {
@@ -1044,6 +1056,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         `PUT /api/v1/apps/${app.id}/catalog`,
         `PUT /api/v1/apps/${app.id}/description`,
       ]);
+    });
+
+    it("renames an app through the API", async () => {
+      const renamed = await execute(
+        join(state, "installation", executableName),
+        ["rename", app.id, "Stock counter"],
+        { env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken } },
+      );
+
+      expect(JSON.parse(renamed.stdout)).toEqual({ displayName: "Stock counter" });
+      expect(requests).toEqual([`PUT /api/v1/apps/${app.id}/name`]);
     });
 
     it("discovers templates and reads setup instructions in the selected organization", async () => {

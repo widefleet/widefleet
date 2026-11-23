@@ -2378,11 +2378,11 @@ test.describe(`app catalog`, () => {
       await field.fill("A draft");
       await page.getByRole("button", { name: "Discard changes", exact: true }).click();
       await expect(describe).toBeFocused();
-      await expect(describe).toContainText("Add a description");
+      await expect(page.getByText("Add a description", { exact: true })).toBeVisible();
       await page.keyboard.press("Enter");
       await field.fill("Counts the stock.");
       await save.click();
-      await expect(describe).toContainText("Counts the stock.");
+      await expect(page.getByText("Counts the stock.", { exact: true })).toBeVisible();
       await expect(describe).toBeFocused();
       await readerPage.reload();
       await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveAttribute(
@@ -2396,10 +2396,26 @@ test.describe(`app catalog`, () => {
       expect(catalog.headers()["cache-control"]).toBe("private, no-store");
       expect(await catalog.text()).toContain(record.displayName);
 
+      // The owner renames the app in its heading; Escape keeps the name, Enter saves a new one.
+      const rename = page.getByRole("button", { name: "Edit name" });
+      await rename.click();
+      const title = page.getByRole("textbox", { name: "Name", exact: true });
+      await title.fill("A draft");
+      await page.keyboard.press("Escape");
+      await expect(rename).toBeFocused();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("Catalog App");
+      await page.keyboard.press("Enter");
+      await title.fill("Stock Counter");
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("Stock Counter");
+      await expect(page).toHaveTitle("Stock Counter · Widefleet");
+      await readerPage.reload();
+      await expect(readerPage.getByRole("link", { name: "Stock Counter" })).toBeVisible();
+
       await page.getByRole("button", { name: "Remove from catalog", exact: true }).click();
       await expect(publish).toBeVisible();
       await readerPage.reload();
-      await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveCount(0);
+      await expect(readerPage.getByRole("link", { name: "Stock Counter" })).toHaveCount(0);
     } finally {
       await readerContext.close();
     }

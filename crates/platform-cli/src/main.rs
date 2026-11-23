@@ -124,6 +124,11 @@ enum Command {
         #[arg(long)]
         parent: Option<Uuid>,
     },
+    /// Change the name people see; the app's address and the name in commands stay.
+    Rename {
+        app: Uuid,
+        name: String,
+    },
     /// Build locally and upload a Wrangler-style deployment.
     Deploy {
         app: Option<Uuid>,
@@ -300,6 +305,15 @@ async fn run(args: Arguments) -> Result<()> {
                 .await?,
             )
         }
+        Command::Rename { app, name } => print_json(
+            &json::<Value>(
+                api.authenticated(Method::PUT, &format!("/apps/{app}/name"), &token)
+                    .json(&value!({ "displayName": name }))
+                    .send()
+                    .await?,
+            )
+            .await?,
+        ),
         Command::Deploy { app, options } => {
             deploy::run(&api, &credentials, deploy::Target::App(app), options).await
         }
@@ -455,6 +469,7 @@ async fn main() {
         Command::Secret(_) => "secret",
         Command::Connections(_) => "connections",
         Command::Create { .. } => "create",
+        Command::Rename { .. } => "rename",
         Command::Deploy { .. } => "deploy",
         Command::Preview(_) => "preview",
         Command::History { .. } => "history",

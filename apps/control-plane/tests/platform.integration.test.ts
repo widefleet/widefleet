@@ -2427,6 +2427,15 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(
       await (await json(description, "PUT", { description: " Counts the stock. " })).json(),
     ).toEqual(text);
+
+    // The name people see changes the same way; the app's address stays.
+    const name = `/apps/${app.id}/name`;
+    const renamed = { displayName: "Stock counter" };
+    expect((await json(name, "PUT", renamed, outsiderHeaders)).status).toBe(404);
+    expect((await json(name, "PUT", { displayName: " " })).status).toBe(400);
+    expect(await (await json(name, "PUT", { displayName: " Stock counter " })).json()).toEqual(
+      renamed,
+    );
     expect(
       z
         .array(contract.catalogEntry)
@@ -2434,7 +2443,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).toEqual([
       contract.catalogEntry.parse({
         id: app.id,
-        displayName: app.displayName,
+        ...renamed,
         ...text,
         hostname: app.hostname,
         url: app.url,
