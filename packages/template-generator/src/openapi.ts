@@ -150,7 +150,8 @@ export type OpenapiOperation = {
 
 const changes = z.enum(["create", "update", "delete", "send"]);
 
-// A parameter or body name as an input field: `drive-id` is `driveId`.
+// A path parameter's name as an input field: `drive-id` is `driveId`. Query
+// parameters keep the API's names, quoted where they are not identifiers.
 const inputName = (name: string) =>
   /^[A-Za-z_$][\w$]*$/.test(name)
     ? name
@@ -160,7 +161,7 @@ const queryParameter = (
   name: string,
   separator: string | null,
   required: boolean,
-): [string, [string, string | null, boolean]] => [inputName(name), [name, separator, required]];
+): [string, [string, string | null, boolean]] => [name, [name, separator, required]];
 
 // The characters of a type, and whether each lies outside nested types and quoted values.
 const characters = (type: string) => {
@@ -475,14 +476,27 @@ export const generateOpenapi = (
     const jsonBody = body?.content?.["application/json"];
     const bodyKind = !body ? null : jsonBody ? "json" : "text";
 
-    const success = Object.entries(entry.responses ?? {})
-      .flatMap(([code, value]) =>
-        code.startsWith("2") ? [resolve(value, "responses", response)] : [],
-      )
-      .find((value) => value.content);
+    // Every success answer counts: JSON, other content, or none, such as a 204.
+    const successes = Object.entries(entry.responses ?? {}).flatMap(([code, value]) =>
+      code.startsWith("2") ? [resolve(value, "responses", response)] : [],
+    );
 
-    const jsonResponse = success?.content?.["application/json"];
-    const responseKind = !success ? null : jsonResponse ? "json" : "binary";
+    const contents = successes.flatMap((value) =>
+      value.content && Object.keys(value.content).length ? [value.content] : [],
+    );
+
+    const jsonResponses = contents.flatMap((content) => {
+      const json = content["application/json"];
+
+      return json ? [json] : [];
+    });
+
+    const binary = contents.length > jsonResponses.length;
+
+    if (binary && jsonResponses.length)
+      throw new Error(`${id} answers with JSON and with other content, which is not supported`);
+    const empty = contents.length < successes.length;
+    const responseKind = binary ? "binary" : jsonResponses.length ? "json" : null;
 
     // Pages are read again with GET; Graph also marks some actions pageable.
     const pageable = method === "get" && entry["x-ms-pageable"] !== undefined;
@@ -511,8 +525,11 @@ export const generateOpenapi = (
       change,
     };
 
+    const inputOf = (value: z.infer<typeof parameter>) =>
+      value.in === "path" ? inputName(value.name) : value.name;
+
     const inputs = [
-      ...parameters.map((value) => inputName(value.name)),
+      ...parameters.map(inputOf),
       ...(bodyKind ? ["body"] : []),
       ...(bodyKind === "text" ? ["contentType"] : []),
       ...(pageable ? ["nextLink"] : []),
@@ -528,6 +545,12 @@ export const generateOpenapi = (
       const target = value.schema?.$ref
         ? schemas[value.schema.$ref.replace("#/components/schemas/", "")]
         : value.schema;
+
+      // Path values are written as they are, in the default simple style.
+      if (value.in === "path" && value.style !== undefined && value.style !== "simple")
+        throw new Error(
+          `${id}'s path parameter ${value.name} has the unsupported style ${value.style}`,
+        );
 
       // A path holds one value.
       if (
@@ -550,7 +573,7 @@ export const generateOpenapi = (
         "    ",
       );
 
-      return `${comment(single(value.description), "    ")}    ${propertyName(inputName(value.name))}${value.in === "path" || value.required ? "" : "?"}: ${type};`;
+      return `${comment(single(value.description), "    ")}    ${propertyName(inputOf(value))}${value.in === "path" || value.required ? "" : "?"}: ${type};`;
     });
 
     if (bodyKind)
@@ -563,13 +586,18 @@ export const generateOpenapi = (
         `    /** The body's media type, \`application/octet-stream\` unless given. */\n    contentType?: string;`,
       );
 
-    const result = !responseKind
-      ? "null"
-      : jsonResponse
-        ? jsonResponse.schema
-          ? typeOf(jsonResponse.schema, "  ")
-          : "JsonValue"
-        : "BinaryContent";
+    // An empty success answers null; binary content always arrives as BinaryContent.
+    const result =
+      responseKind === "binary"
+        ? "BinaryContent"
+        : [
+            ...new Set([
+              ...jsonResponses.map((json) =>
+                json.schema ? typeOf(json.schema, "  ") : "JsonValue",
+              ),
+              ...(empty || !responseKind ? ["null"] : []),
+            ]),
+          ].join(" | ");
 
     if (responseKind === "binary") usesBinary = true;
 

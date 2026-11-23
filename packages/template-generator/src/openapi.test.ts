@@ -280,6 +280,44 @@ paths:
     );
   });
 
+  it("types every success answer and refuses one of JSON and other content", () => {
+    // A JSON 201 next to an empty 204 may answer null.
+    const withEmpty = edited(
+      '"responses":{"201":{"content"',
+      '"responses":{"204":{"description":"Unchanged"},"201":{"content"',
+    );
+
+    expect(generateOpenapi(withEmpty, rules, service, "").files["src/api.ts"]).toContain(
+      "Promise<ExampleResult<Item | null>>",
+    );
+
+    const mixed = edited(
+      '"responses":{"201":{"content"',
+      '"responses":{"202":{"content":{"text/csv":{}}},"201":{"content"',
+    );
+
+    expect(() => generateOpenapi(mixed, rules, service, "")).toThrow(
+      "folders.CreateItem answers with JSON and with other content",
+    );
+  });
+
+  it("keeps query names and refuses path styles it cannot write", () => {
+    const hyphenated = edited('"name":"view","in":"query"', '"name":"api-version","in":"query"');
+    const { files } = generateOpenapi(hyphenated, rules, service, "");
+
+    expect(files["src/api.ts"]).toContain('"api-version": string;');
+    expect(files["src/schema.ts"]).toContain('"api-version":["api-version",null,true]');
+
+    const labelled = edited(
+      '"name":"item-id","in":"path","required":true,"schema"',
+      '"name":"item-id","in":"path","required":true,"style":"label","schema"',
+    );
+
+    expect(() => generateOpenapi(labelled, rules, service, "")).toThrow(
+      "items.GetContent's path parameter item-id has the unsupported style label",
+    );
+  });
+
   it("takes any JSON where a JSON body or result has no schema", () => {
     const item = '{"schema":{"$ref":"#/components/schemas/example.item"}}';
 
