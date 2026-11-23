@@ -336,12 +336,11 @@ export const managedOAuth = (environment: Environment) => ({
 
     const present = async (tokens: OAuth2Tokens | null, previousRefreshToken?: string) => {
       if (!tokens?.accessToken) throw new Error("OAuth provider returned no usable token");
+      // A token may carry more scopes than the client allows. Some providers,
+      // such as Microsoft, include every scope the user consented to for the
+      // client before, and only the user or an administrator can withdraw that
+      // consent. Authorization requests stay limited to the allowed scopes.
       const granted = (tokens.scopes ?? []).flatMap((scope) => scopeList(scope));
-
-      if (disallowed(client, granted).length > 0) {
-        await revoke(config, client, tokens.refreshToken ?? tokens.accessToken).catch(() => false);
-        throw new Error("OAuth provider granted scopes this client does not allow");
-      }
 
       const accessToken = await seal(
         environment,
