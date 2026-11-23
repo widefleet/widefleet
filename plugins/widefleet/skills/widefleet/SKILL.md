@@ -28,4 +28,8 @@ Start with:
 - Deployments: https://widefleet.com/docs/guides/deployments.md
 - Source code from earlier sessions: https://widefleet.com/docs/guides/source-code.md
 
+Every app opens only after the organization's sign-in, which Widefleet provides. Do not
+ask the user for an identity provider, domain or login setup. Restrict an app to company
+groups only when the user asks for it.
+
 Ask the user before deleting anything or changing access, secrets or data.
