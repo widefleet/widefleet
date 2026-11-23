@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: App configuration fields, storage bindings and settings managed by the platform.
-lastModified: 2026-10-29
+lastModified: 2026-11-23
 ---
 
 App projects use `wrangler.jsonc`. Start with the generated starter and use the
@@ -38,6 +38,7 @@ for app code that does not use storage.
 | `compatibility_flags`                 | Supported flags are `nodejs_compat` and `nodejs_als`; see [Node.js compatibility](/reference/runtime-compatibility#nodejs-compatibility).                                     |
 | `assets.directory` / `assets.binding` | Built static asset directory and the binding exposed to app code.                                                                                                             |
 | `vars`                                | Plain-text string values. Never put credentials here.                                                                                                                         |
+| `secrets.required`                    | App secrets that every deployment needs; see [required secrets](#required-secrets).                                                                                           |
 
 Service entrypoints come from the Worker module exports; there is no additional
 service declaration in `wrangler.jsonc`. Workflow classes declared in `workflows`
@@ -119,6 +120,27 @@ If an invocation exceeds its budget, check its runtime logs, reduce the work per
 call or ask the operator to adjust that profile. See
 [Cloudflare's Dynamic Worker limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/)
 for runtime constraints.
+
+## Required secrets
+
+List the secrets your app cannot run without under `secrets.required`, as in
+Cloudflare's Wrangler configuration:
+
+```jsonc
+{
+  "secrets": { "required": ["API_KEY", "API_SECRET"] },
+}
+```
+
+Set the values on the app's **Secrets** tab or with
+`widefleet secret put NAME --file PATH`, then deploy. Deployments and rollbacks
+start once every required secret is set; otherwise the error names the missing
+ones. For a new app, run `widefleet create NAME --name "Display name"` first and
+set its secrets before the first deployment.
+
+The **Secrets** tab marks the secrets the current version requires and lists the
+missing ones with a shortcut to set them. Templates with required secrets
+[ask for their values when you install them](/guides/app-templates#install-with-the-required-secrets).
 
 ## Database migrations
 

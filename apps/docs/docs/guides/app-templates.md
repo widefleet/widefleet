@@ -1,7 +1,7 @@
 ---
 title: Use an app template
 description: Find a ready-made app and set it up with your agent or the CLI.
-lastModified: 2026-11-16
+lastModified: 2026-11-23
 ---
 
 App templates give you source code and instructions for a working app. Deploy a
@@ -22,6 +22,24 @@ instructions through the CLI, checks for an existing app to reuse, and helps you
 deploy and configure the app.
 
 If copying is unavailable, select the prompt text and copy it manually.
+
+## Install with the required secrets
+
+Some templates need your organization's credentials, such as an OAuth client.
+Their page lists these required secrets with a field for each value. Fill them in
+and select **Install**: Widefleet saves the values as app secrets and deploys the
+app with them. The template's instructions explain where to get each value.
+
+From the CLI, `widefleet catalog templates show ID` lists the names in
+`requiredSecrets`. Install with one file per secret:
+
+```sh
+widefleet catalog templates install gmail \
+  --secret-file GOOGLE_CLIENT_ID=./client-id \
+  --secret-file GOOGLE_CLIENT_SECRET=./client-secret
+```
+
+Change the values later on the app's **Secrets** tab.
 
 ## Find templates from the CLI
 
