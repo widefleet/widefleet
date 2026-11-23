@@ -29,6 +29,12 @@ export interface OpenapiRules {
       result?: readonly string[] | undefined;
     }
   >;
+  /**
+   * Navigation properties the types keep, by schema and property, with the
+   * schemas their values can be. Graph accepts some of them inline, such as a
+   * message's attachments when sending it.
+   */
+  navigation?: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> | undefined;
 }
 
 /** The names the generated code uses for the template's service. */
@@ -219,7 +225,7 @@ const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? 
 
 export const generateOpenapi = (
   source: string,
-  { operations }: OpenapiRules,
+  { operations, navigation = {} }: OpenapiRules,
   service: OpenapiService,
   header: string,
 ): GeneratedFiles => {
@@ -274,6 +280,9 @@ export const generateOpenapi = (
   const takenTypes = new Map<string, string>();
   const referenced = new Set<string>();
   const pending: string[] = [];
+
+  // The schema whose type is being written, which navigation rules name.
+  let owner: string | undefined;
 
   const typeName = (ref: string) => {
     const key = ref.replace("#/components/schemas/", "");
@@ -401,13 +410,24 @@ export const generateOpenapi = (
   // Annotations such as OData's `@odata.type` are the server's to add.
   const objectType = (value: Schema, indent: string): string => {
     const required = new Set(value.required?.filter((name) => !name.startsWith("@")));
+    const kept = owner === undefined ? {} : (navigation[owner] ?? {});
 
     const fields = Object.entries(value.properties ?? {})
-      .filter(([, field]) => !field.deprecated && !field["x-ms-navigationProperty"])
-      .map(
+      .filter(
         ([name, field]) =>
-          `${comment(describe(field), `${indent}  `)}${indent}  ${propertyName(name)}${required.has(name) ? "" : "?"}: ${typeOf(field, `${indent}  `)};`,
-      );
+          !field.deprecated && (!field["x-ms-navigationProperty"] || Object.hasOwn(kept, name)),
+      )
+      .map(([name, field]) => {
+        const values = field["x-ms-navigationProperty"] ? kept[name] : undefined;
+
+        const type = values
+          ? field.type === "array"
+            ? `(${schemaUnion(values)})[]`
+            : schemaUnion(values)
+          : typeOf(field, `${indent}  `);
+
+        return `${comment(describe(field), `${indent}  `)}${indent}  ${propertyName(name)}${required.has(name) ? "" : "?"}: ${type};`;
+      });
 
     // Every named field must also fit the type of the other keys.
     if (value.additionalProperties) {
@@ -663,7 +683,9 @@ export const generateOpenapi = (
     const value = schemas[key];
 
     if (!value) continue;
+    owner = key;
     const body = typeOf(value, "");
+    owner = undefined;
     models.push(
       `${comment(describe(value) || value.title)}export type ${typeNames.get(key)} = ${body};\n`,
     );

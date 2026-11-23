@@ -59,4 +59,22 @@ export const examples = async () => {
 
   if (attached.status === "connected" && "contentBytes" in attached.data)
     void attached.data.contentBytes;
+
+  // A message sends its file attachments inline.
+  await outlook.sendMail({
+    body: {
+      Message: {
+        subject: "Report",
+        toRecipients: [{ emailAddress: { address: "bob@example.com" } }],
+        attachments: [
+          {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            name: "report.txt",
+            contentType: "text/plain",
+            contentBytes: "SGVsbG8=",
+          },
+        ],
+      },
+    },
+  });
 };

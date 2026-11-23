@@ -363,6 +363,20 @@ paths:
     expect(files["src/api.ts"]).toContain("Promise<ExampleResult<Parent>>");
   });
 
+  it("keeps the navigation properties the rules name, typed with their schemas", () => {
+    const { files } = generateOpenapi(
+      JSON.stringify(api),
+      {
+        ...rules,
+        navigation: { "example.item": { children: ["example.item", "example.parent"] } },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain("children?: (Item | Parent)[];");
+  });
+
   it("takes any JSON where a JSON body or result has no schema", () => {
     const item = '{"schema":{"$ref":"#/components/schemas/example.item"}}';
 

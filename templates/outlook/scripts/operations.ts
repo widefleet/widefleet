@@ -30,6 +30,11 @@ const attachmentTypes = [
   "microsoft.graph.referenceAttachment",
 ];
 
+// A message carries its attachments inline when it is sent or drafted.
+export const navigation = {
+  "microsoft.graph.message": { attachments: attachmentTypes },
+};
+
 export const operations = {
   // Messages
   "me.ListMessages": {
