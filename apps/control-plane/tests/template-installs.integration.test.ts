@@ -324,15 +324,23 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   expect(resumed.app.description).toBe(result.app.description);
 
   // A description someone already saved stays.
+  const named = contract.app.parse(
+    await (
+      await createApi(runtime)(
+        new Request("http://localhost/api/v1/apps", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ slug: "mail-described", displayName: "mail-described" }),
+        }),
+      )
+    ).json(),
+  );
+
   await createApi(runtime)(
-    new Request("http://localhost/api/v1/apps", {
-      method: "POST",
+    new Request(`http://localhost/api/v1/apps/${named.id}/description`, {
+      method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        slug: "mail-described",
-        displayName: "mail-described",
-        description: "Reads the team inbox.",
-      }),
+      body: JSON.stringify({ description: "Reads the team inbox." }),
     }),
   );
 
@@ -594,12 +602,12 @@ it("does not install over an app deployed while the template builds", async () =
   // Only the concurrent deployment exists.
   expect(deployments).toHaveLength(1);
 
-  // The other deployment's app is not marked as installed from the template.
+  // The other deployment's app is not marked as installed from the template or described by it.
   const record = await environment.database.db.query.apps.findFirst({
     where: (apps, { eq }) => eq(apps.id, app.id),
   });
 
-  expect(record).toMatchObject({ templateId: null, templateCommit: null });
+  expect(record).toMatchObject({ templateId: null, templateCommit: null, description: null });
 });
 
 it("keeps offering a template whose deployment was rejected", async () => {

@@ -25,7 +25,7 @@ export const createTemplateInstalls = (
   configuration: Pick<Configuration, "GITHUB_TOKEN">,
   apps: Pick<
     ReturnType<typeof createAppService>,
-    "named" | "create" | "resolve" | "setDescription" | "recordTemplateInstall"
+    "named" | "create" | "resolve" | "recordTemplateInstall"
   >,
   uploads: Pick<ReturnType<typeof createUploadService>, "start" | "putAsset" | "publish">,
   network: Pick<ReturnType<typeof createNetworkService>, "change" | "read">,
@@ -85,9 +85,6 @@ export const createTemplateInstalls = (
         templateSources(configuration, input.templateId),
       );
 
-      // The app starts with the template's description.
-      const description = templateDescription(files);
-
       // The builder bundles the code; static assets are uploaded as the CLI does.
       const { sources, assets } = yield* templateProject(files);
       const built = yield* Result.await(builder.bundle(sources));
@@ -128,7 +125,7 @@ export const createTemplateInstalls = (
       // failed to publish, which this one completes.
       const created = await (existing
         ? apps.resolve(principal, name)
-        : apps.create(principal, { ...appInput.data, description }));
+        : apps.create(principal, appInput.data));
 
       if (
         created.isErr() &&
@@ -137,16 +134,7 @@ export const createTemplateInstalls = (
       )
         return yield* nameTaken();
 
-      const draft = yield* created;
-
-      // An earlier install's app has no description yet. Text someone saved stays.
-      const installed =
-        draft.description || !description
-          ? draft
-          : {
-              ...draft,
-              ...(yield* Result.await(apps.setDescription(principal, draft.id, description))),
-            };
+      const installed = yield* created;
 
       const session = yield* Result.await(uploads.start(principal, installed.id, assets.manifest));
 
@@ -194,10 +182,11 @@ export const createTemplateInstalls = (
       const notes: string[] = [];
 
       // Recorded once the deployment was accepted, so a rejected install
-      // keeps offering Install in the catalog.
+      // keeps offering Install in the catalog and leaves the app's description.
       const recorded = await apps.recordTemplateInstall(installed.id, deployment.id, {
         id: input.templateId,
         commit,
+        description: templateDescription(files),
       });
 
       if (recorded.isErr())
@@ -223,7 +212,7 @@ export const createTemplateInstalls = (
 
       return Result.ok(
         contract.templateInstall.parse({
-          app: installed,
+          app: { ...installed, ...(recorded.isOk() ? recorded.value : undefined) },
           deployment,
           warnings: [...built.warnings, ...documented.warnings, ...notes],
           requestedNetwork:

@@ -73,7 +73,6 @@ export const createAppInput = z.strictObject({
     "The auth and mcp hostnames are reserved for platform services",
   ),
   displayName: z.string().trim().min(1).max(120),
-  description: appDescription.optional(),
   parentId: identifier.nullable().default(null),
   previewBranch: gitBranch.optional(),
   previewName: z

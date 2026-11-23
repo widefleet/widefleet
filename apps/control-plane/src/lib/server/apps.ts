@@ -400,7 +400,6 @@ const provisionApp = async (
         id: crypto.randomUUID(),
         slug: input.slug,
         displayName: input.displayName,
-        description: input.description || null,
         parentId: input.parentId,
         sourceBranch: input.previewBranch ?? null,
         accessGroups,
@@ -562,17 +561,22 @@ export const createAppService = (
   /**
    * Records the template an install deployed, once that deployment was
    * accepted. Only the app's first deployment installs a template, so an app
-   * someone else deployed meanwhile is not marked.
+   * someone else deployed meanwhile is not marked. The template describes the
+   * app unless someone already did; the result is the description it then has.
    */
   recordTemplateInstall: (
     appId: string,
     deploymentId: string,
-    template: { id: string; commit: string },
+    template: { id: string; commit: string; description?: string | undefined },
   ) =>
     transact(database, async (transaction) => {
-      await transaction
+      const [recorded] = await transaction
         .update(apps)
-        .set({ templateId: template.id, templateCommit: template.commit })
+        .set({
+          templateId: template.id,
+          templateCommit: template.commit,
+          description: sql`coalesce(${apps.description}, ${template.description ?? null})`,
+        })
         .where(
           and(
             eq(apps.id, appId),
@@ -584,9 +588,10 @@ export const createAppService = (
                 .where(and(eq(deployments.appId, appId), ne(deployments.id, deploymentId))),
             ),
           ),
-        );
+        )
+        .returning({ description: apps.description });
 
-      return Result.ok(undefined);
+      return Result.ok(recorded);
     }),
   /** The newest app the caller manages per catalog template it was installed from. */
   templateInstalls: (principal: Principal) =>
