@@ -85,6 +85,16 @@ export const createTemplateInstalls = (
         templateSources(configuration, input.templateId),
       );
 
+      // Read before any write: failing once the deployment was accepted would leave
+      // a deployed app that the install can neither finish nor repeat.
+      const description = Result.try(() => templateDescription(files));
+
+      if (description.isErr())
+        return yield* new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "The template's template.md has no readable description",
+        });
+
       // The builder bundles the code; static assets are uploaded as the CLI does.
       const { sources, assets } = yield* templateProject(files);
       const built = yield* Result.await(builder.bundle(sources));
@@ -186,7 +196,7 @@ export const createTemplateInstalls = (
       const recorded = await apps.recordTemplateInstall(installed.id, deployment.id, {
         id: input.templateId,
         commit,
-        description: templateDescription(files),
+        description: description.value,
       });
 
       if (recorded.isErr())

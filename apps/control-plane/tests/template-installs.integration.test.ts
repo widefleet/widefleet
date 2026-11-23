@@ -650,6 +650,21 @@ it("reports build errors and missing templates", async () => {
   expect(missing.status).toBe(404);
   expect(builderRequests).toHaveLength(2);
 
+  // A template whose document cannot be read fails before anything is built or created.
+  vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+
+    return url.pathname.endsWith("/templates/github/template.md")
+      ? new Response("No frontmatter")
+      : ((await templateRepository(url)) ?? originalFetch(input, init));
+  });
+
+  const unreadable = await install(runtime, "github", { name: "repository-reader" });
+
+  expect(unreadable.status).toBe(400);
+  expect(await unreadable.text()).toContain("no readable description");
+  expect(builderRequests).toHaveLength(2);
+
   // Failed builds create no app, so the name stays free.
   const apps = await environment.database.db.query.apps.findMany({
     where: (apps, { eq }) => eq(apps.slug, "repository-reader"),
