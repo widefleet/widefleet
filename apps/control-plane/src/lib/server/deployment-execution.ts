@@ -28,6 +28,10 @@ export const deploymentCommand = z.discriminatedUnion("kind", [
     requestId: z.string().min(1).max(128),
     rollback: z.boolean(),
     refreshSecrets: z.boolean().optional(),
+    // Only an app without deployments accepts this deployment.
+    firstDeployment: z.boolean().optional(),
+    // Encrypted secrets saved when Cloudflare accepts this deployment.
+    secrets: z.record(contract.appSecretName, z.string().min(1)).optional(),
   }),
   command.extend({
     kind: z.literal("network"),
@@ -131,7 +135,11 @@ export type HostedExecution = {
     requestId: string,
     rollback?: boolean,
     actor?: z.infer<typeof deploymentActor>,
-    options?: { refreshSecrets: true },
+    options?: {
+      refreshSecrets?: true;
+      firstDeployment?: true;
+      secrets?: Readonly<Record<string, string>>;
+    },
   ) => Promise<
     Result<
       z.infer<typeof contract.deployment>,

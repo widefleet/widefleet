@@ -4,6 +4,7 @@ import { and, eq, gt, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { checkCapabilityNames } from "./capability-changes.ts";
+import { saveAppSecrets } from "./app-secrets.ts";
 import { appUrl, enqueueDeployment, managedApp } from "./apps.ts";
 import { hashAsset } from "./asset-hash.ts";
 import type { Configuration } from "./config.ts";
@@ -132,13 +133,17 @@ export const createUploadService = (
     documentation: z.infer<typeof contract.serviceDocumentation> | null,
     modules: WorkerModule[],
     requestId: string,
-    options: { firstDeployment?: boolean } = {},
+    options: {
+      firstDeployment?: boolean;
+      /** Encrypted secrets saved with this deployment, as a template install provides them. */
+      secrets?: Readonly<Record<string, string>>;
+    } = {},
   ) => {
     const prepared = await transact(database, (transaction) =>
       Result.gen(async function* () {
-        const record = yield* Result.await(managedApp(transaction, principal, appId));
+        const locked = yield* Result.await(managedApp(transaction, principal, appId));
 
-        if (record.state === "deleting")
+        if (locked.state === "deleting")
           return yield* new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
 
         // managedApp holds the app's row lock until the deployment is queued, so
@@ -153,6 +158,22 @@ export const createUploadService = (
           if (deployed)
             return yield* new InvalidOperation({ code: "CONFLICT", message: appAlreadyDeployed });
         }
+
+        const variables = metadata.bindings.filter((binding) => binding.type === "plain_text");
+
+        // Secrets reach only the deployment they come with. An agent installation
+        // accepts that deployment in this transaction, under the app lock. Cloudflare
+        // accepts it later, so the hosted command carries them, and recording the
+        // accepted deployment saves them; see registerCloudflareOperation.
+        const record =
+          options.secrets && !execution
+            ? await saveAppSecrets(transaction, locked, options.secrets, {
+                hosted: false,
+                variables: variables.length,
+              })
+            : locked;
+
+        const supplied = execution ? Object.keys(options.secrets ?? {}) : [];
 
         if (
           metadata.source &&
@@ -181,8 +202,11 @@ export const createUploadService = (
         checkCapabilityNames(metadata, contract.capabilityGrants.parse(record.capabilities));
 
         if (
-          Object.keys(z.record(z.string(), z.string()).parse(record.secrets)).length +
-            metadata.bindings.filter((binding) => binding.type === "plain_text").length >
+          new Set([
+            ...Object.keys(z.record(z.string(), z.string()).parse(record.secrets)),
+            ...supplied,
+          ]).size +
+            variables.length >
           contract.appEnvironmentMaxBindings
         )
           return yield* new InvalidOperation({
@@ -282,6 +306,7 @@ export const createUploadService = (
 
           return enqueueDeployment(transaction, record, artifactId, requestId, {
             hosted: Boolean(execution),
+            suppliedSecrets: supplied,
           });
         }
 
@@ -300,12 +325,16 @@ export const createUploadService = (
 
         return enqueueDeployment(transaction, record, artifactId, requestId, {
           hosted: Boolean(execution),
+          suppliedSecrets: supplied,
         });
       }),
     );
 
     if (prepared.isErr() || !execution) return prepared;
 
-    return execution.deploy(prepared.value, requestId, false, principal);
+    return execution.deploy(prepared.value, requestId, false, principal, {
+      ...(options.secrets && { secrets: options.secrets }),
+      ...(options.firstDeployment && { firstDeployment: true }),
+    });
   },
 });

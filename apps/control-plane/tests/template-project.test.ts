@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
-import { templateProject } from "../src/lib/server/template-project.ts";
+import { declaredSecrets, templateProject } from "../src/lib/server/template-project.ts";
 
 const encoder = new TextEncoder();
 
@@ -68,5 +68,22 @@ describe("template projects", () => {
     const result = templateProject(project(assets, extra));
 
     expect(result.isErr() && result.error.message).toContain(message);
+  });
+
+  it("reads the secrets a Wrangler file requires and leaves invalid lists to the builder", () => {
+    expect(
+      declaredSecrets(
+        '// A comment\n{ "secrets": { "required": ["CLIENT_ID", "CLIENT_SECRET"] } }',
+      ),
+    ).toEqual(["CLIENT_ID", "CLIENT_SECRET"]);
+
+    for (const wrangler of [
+      undefined,
+      "{}",
+      '{ "secrets": {} }',
+      '{ "secrets": { "required": ["client-id"] } }',
+      "not JSON",
+    ])
+      expect(declaredSecrets(wrangler)).toEqual([]);
   });
 });

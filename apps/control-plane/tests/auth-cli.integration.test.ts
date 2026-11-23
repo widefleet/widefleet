@@ -179,6 +179,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
           createAppService(database, configuration),
           createUploadService(database, storage, configuration),
           createNetworkService(database),
+          createAppSecrets(
+            environment.database.db,
+            environment.environment.PLATFORM_ENCRYPTION_KEY,
+          ),
         ),
         telemetry: createTelemetry(database, storage, configuration),
       });

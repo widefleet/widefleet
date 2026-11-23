@@ -200,9 +200,12 @@ export const enqueueDeployment = async (
     rollback = false,
     hosted = false,
     secretChange = false,
+    suppliedSecrets = [],
   }: {
     rollback?: boolean;
     hosted?: boolean;
+    /** Secrets this deployment brings, which Cloudflare saves when it accepts it. */
+    suppliedSecrets?: readonly string[];
     /**
      * Redeploys the selected code with changed secrets. As on Cloudflare,
      * deleting a secret that the code requires is allowed.
@@ -243,7 +246,9 @@ export const enqueueDeployment = async (
 
   const missing = secretChange
     ? []
-    : (metadata.required_secrets ?? []).filter((name) => !Object.hasOwn(stored, name));
+    : (metadata.required_secrets ?? []).filter(
+        (name) => !Object.hasOwn(stored, name) && !suppliedSecrets.includes(name),
+      );
 
   if (missing.length > 0)
     return Result.err(

@@ -185,6 +185,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
         response.end(
           JSON.stringify({
             names: ["TOKEN"],
+            required: ["API_KEY", "TOKEN"],
             revision: newer ? 2 : 1,
             appliedRevision: null,
             deployment: newer ?? secretDeployment,
@@ -755,6 +756,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
         message: "Synthetic failure",
       });
       expect(JSON.parse((await command("secret", "list", "--json")).stdout)).toMatchObject({
+        required: ["API_KEY", "TOKEN"],
         deployment: { status },
       });
       expect(requests.map((entry) => entry.path)).toEqual([

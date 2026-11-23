@@ -55,6 +55,7 @@ export const seedDeployment = async (
     groups?: string[];
     crons?: string[];
     consumers?: z.infer<typeof contract.queueConsumer>[];
+    requiredSecrets?: string[];
   } = {},
 ) => {
   const appId = options.appId ?? crypto.randomUUID();
@@ -97,6 +98,7 @@ export const seedDeployment = async (
       assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
       crons: options.crons ?? [],
       queue_consumers: options.consumers ?? [],
+      required_secrets: options.requiredSecrets,
       bindings: options.bindings ?? [
         { type: "d1", name: "DB", database_name: "data" },
         { type: "r2_bucket", name: "FILES", bucket_name: "files" },

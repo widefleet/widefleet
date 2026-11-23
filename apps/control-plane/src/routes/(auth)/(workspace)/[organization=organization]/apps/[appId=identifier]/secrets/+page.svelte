@@ -7,6 +7,7 @@
   import { Textarea } from "@platform/ui/textarea";
   import { Label } from "@platform/ui/label";
   import { Button } from "@platform/ui/button";
+  import StatusBadge from "#shadcn/components/StatusBadge.svelte";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
@@ -18,6 +19,16 @@
   const request = $derived(getAppSecrets({ organizationId: workspace.organizationId, appId }));
 
   const secrets = $derived(await request);
+
+  // Required by the latest deployment's version, which secret changes redeploy.
+  const missing = $derived(secrets.required.filter((name) => !secrets.names.includes(name)));
+
+  let valueField = $state<HTMLTextAreaElement | null>(null);
+
+  const setMissing = (name: string) => {
+    putAppSecret.fields.secret.set(name);
+    valueField?.focus();
+  };
 </script>
 
 <section class="max-w-xl space-y-6">
@@ -40,13 +51,31 @@
             : "Saved. Deploy the app to activate."}
   </p>
   <Button variant="outline" onclick={() => request.refresh()}>Refresh status</Button>
+  {#if missing.length > 0}
+    <p class="text-sm">
+      The app requires secrets that are not set. Set them to complete its setup; deployments fail
+      without them.
+    </p>
+  {/if}
+  {#each missing as name (name)}
+    <div class="flex items-center justify-between gap-4 rounded-lg border p-4">
+      <span class="flex min-w-0 flex-wrap items-center gap-2"
+        ><code class="break-all">{name}</code><StatusBadge tone="pending" label="Missing" /></span
+      ><Button variant="outline" onclick={() => setMissing(name)}>Set value</Button>
+    </div>
+  {/each}
   {#each secrets.names as name (name)}
     {@const removal = deleteAppSecret.for(name)}
     <form {...removal} class="flex items-center justify-between gap-4 rounded-lg border p-4">
       <OrganizationField field={removal.fields.organizationId} /><input
         {...removal.fields.appId.as("hidden", appId)}
       /><input {...removal.fields.secret.as("hidden", name)} />
-      <code>{name}</code><FormIssues issues={removal.fields.allIssues()} /><Button
+      <span class="flex min-w-0 flex-wrap items-center gap-2"
+        ><code class="break-all">{name}</code>{#if secrets.required.includes(name)}<StatusBadge
+            tone="neutral"
+            label="Required"
+          />{/if}</span
+      ><FormIssues issues={removal.fields.allIssues()} /><Button
         variant="outline"
         type="submit"
         disabled={removal.pending > 0}>Remove</Button
@@ -67,6 +96,7 @@
     </div>
     <div class="space-y-2">
       <Label for="secret-value">Value</Label><Textarea
+        bind:ref={valueField}
         id="secret-value"
         {...putAppSecret.fields._value.as("text")}
         autocomplete="new-password"

@@ -27,6 +27,8 @@ export const appTemplate = appTemplateSummary.extend({
   installable: z.boolean(),
   /** Origins the template declares in widefleet.jsonc; installing from its page grants them. */
   network: networkPolicy.optional(),
+  /** Secrets its wrangler.jsonc requires; an install provides their values. */
+  requiredSecrets: z.array(z.string()),
 });
 
 export const appTemplateCatalog = z.strictObject({

@@ -323,6 +323,9 @@ enum SecretCommand {
 #[serde(rename_all = "camelCase")]
 struct SecretStatus {
     names: Vec<String>,
+    /// Older servers do not report the secrets a deployment requires.
+    #[serde(default)]
+    required: Vec<String>,
     revision: u64,
     applied_revision: Option<u64>,
     deployment: Option<Deployment>,
@@ -373,6 +376,15 @@ pub async fn secrets(api: &Api, credentials: &auth::Credentials, options: Secret
         return crate::print_json(&status);
     }
     println!("Secrets: {}", status.names.join(", "));
+    let missing: Vec<&str> = status
+        .required
+        .iter()
+        .filter(|name| !status.names.contains(name))
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        println!("Missing required secrets: {}", missing.join(", "));
+    }
     println!(
         "Revision: {} (active: {:?})",
         status.revision, status.applied_revision
