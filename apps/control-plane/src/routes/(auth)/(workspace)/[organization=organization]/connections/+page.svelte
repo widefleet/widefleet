@@ -27,8 +27,9 @@
   // A connector whose status check finds no personal connection drops out of the list.
   const visible = $derived(connections.filter((_, index) => statuses[index]?.current !== null));
 
-  // Once every status is known, the connectors sort into those with an account and those
-  // without one. Until then they stay in one list, so no row changes its place twice.
+  // Once every check has ended, the connectors sort into those with an account and those
+  // without one. Until then they stay in one list, so no row changes its place twice. A
+  // connector whose check failed is in neither group: its account may well be connected.
   const entries = $derived(statuses.flatMap((status) => (status.current ? [status.current] : [])));
 
   const groups = $derived(
@@ -41,7 +42,12 @@
       {
         id: "open",
         title: "Not connected yet",
-        entries: entries.filter((entry) => entry.status?.connection !== "connected"),
+        entries: entries.filter((entry) => entry.status?.connection === "disconnected"),
+      },
+      {
+        id: "unknown",
+        title: "Could not check",
+        entries: entries.filter((entry) => !entry.status),
       },
     ].filter((group) => group.entries.length),
   );

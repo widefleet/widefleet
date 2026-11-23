@@ -3891,6 +3891,12 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     unavailable = true;
     await page.reload();
     await expect(page.getByText("Could not check this account.")).toBeVisible();
+    // A connector that could not be checked is in neither group: its account may be connected.
+    await expect(
+      page
+        .getByRole("region", { name: "Could not check", exact: true })
+        .getByRole("heading", { name: "Microsoft OneDrive — Finance and Operations", exact: true }),
+    ).toBeVisible();
 
     await page.screenshot({
       path: "../../.local/personal-connections/mobile-unavailable.png",
