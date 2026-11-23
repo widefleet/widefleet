@@ -32,7 +32,8 @@ export const examples = async () => {
     const member = (user: string) => ({
       "@odata.type": "#microsoft.graph.aadUserConversationMember",
       roles: ["owner"],
-      "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${user}')`,
+      // A quoted key doubles its apostrophes; the address encodes the rest.
+      "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${encodeURIComponent(user.replaceAll("'", "''"))}')`,
     });
 
     const chat = await teams.createChat({
@@ -47,6 +48,17 @@ export const examples = async () => {
 
     if (chat.resultType === "input_required") void chat.inputRequests.approve.message;
   }
+
+  // Chat members carry their user's identity.
+  const members = await teams.listChatMembers({ chatId: "c" });
+
+  if (members.status === "connected")
+    for (const member of members.data.value ?? []) {
+      const user: string | null | undefined = member.userId;
+      const email: string | null | undefined = member.email;
+      const tenant: string | null | undefined = member.tenantId;
+      void [user, email, tenant, member.displayName];
+    }
 
   // @ts-expect-error A chat message needs its chat.
   await teams.sendChatMessage({ body: { body: { content: "Hello" } } });

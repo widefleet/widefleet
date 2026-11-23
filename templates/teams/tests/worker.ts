@@ -197,10 +197,10 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
         await app.createChat({
           body: {
             chatType: "oneOnOne",
-            members: ["101", "bob@example.test"].map((user) => ({
+            members: ["101", "o'brien#1@example.test"].map((user) => ({
               "@odata.type": "#microsoft.graph.aadUserConversationMember",
               roles: ["owner"],
-              "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${user}')`,
+              "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${encodeURIComponent(user.replaceAll("'", "''"))}')`,
             })),
           },
         }),

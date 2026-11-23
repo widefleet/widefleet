@@ -48,7 +48,12 @@ export const operations = {
     description:
       "Start a one-on-one or group chat with its members, the user included. A one-on-one chat that exists already is returned.",
   },
-  "chats.ListMembers": { name: "listChatMembers" },
+  // Graph lists chat members by their base type; as for a chat's members, each
+  // is typed with the user identity Teams members carry.
+  "chats.ListMembers": {
+    name: "listChatMembers",
+    result: ["microsoft.graph.aadUserConversationMemberCollectionResponse"],
+  },
   "chats.ListMessages": {
     name: "listChatMessages",
     description: "List a chat's messages, newest first.",
@@ -91,4 +96,7 @@ export const operations = {
     change: "send",
     description: "Reply to a message in a channel.",
   },
-} satisfies Record<string, { name: string; change?: Change | "read"; description?: string }>;
+} satisfies Record<
+  string,
+  { name: string; change?: Change | "read"; description?: string; result?: readonly string[] }
+>;

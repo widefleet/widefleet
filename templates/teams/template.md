@@ -106,7 +106,8 @@ if (me.status === "connected" && me.data.id) {
   const member = (user: string) => ({
     "@odata.type": "#microsoft.graph.aadUserConversationMember",
     roles: ["owner"],
-    "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${user}')`,
+    // A quoted key doubles its apostrophes; the address encodes the rest.
+    "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${encodeURIComponent(user.replaceAll("'", "''"))}')`,
   });
   const chat = await env.TEAMS.createChat({
     body: { chatType: "oneOnOne", members: [member(me.data.id), member("bob@example.com")] },

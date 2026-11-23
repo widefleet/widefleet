@@ -28,6 +28,13 @@ export type AadUserConversationMember = ConversationMember & {
 };
 
 /**
+ * Collection of aadUserConversationMember
+ */
+export type AadUserConversationMemberCollectionResponse = BaseCollectionPaginationCountResponse & {
+  value?: AadUserConversationMember[];
+};
+
+/**
  * assignedLicense
  */
 export type AssignedLicense = {
@@ -616,13 +623,6 @@ export type ConversationMember = Entity & {
    */
   visibleHistoryStartDateTime?: string | null;
   "@odata.type"?: string;
-};
-
-/**
- * Collection of conversationMember
- */
-export type ConversationMemberCollectionResponse = BaseCollectionPaginationCountResponse & {
-  value?: ConversationMember[];
 };
 
 /**
@@ -1843,7 +1843,7 @@ export class TeamsApi extends WorkerEntrypoint<TemplateEnvironment, TeamsPropert
            */
           nextLink: string;
         },
-  ): Promise<TeamsResult<ConversationMemberCollectionResponse>> {
+  ): Promise<TeamsResult<AadUserConversationMemberCollectionResponse>> {
     return run(this.env, this.ctx.props, "listChatMembers", input);
   }
 

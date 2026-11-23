@@ -227,10 +227,10 @@ describe("Teams personal account app", () => {
       data: { id: "message-3" },
     });
 
-    const member = (user: string) => ({
+    const member = (address: string) => ({
       "@odata.type": "#microsoft.graph.aadUserConversationMember",
       roles: ["owner"],
-      "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${user}')`,
+      "user@odata.bind": address,
     });
 
     expect(upstream.calls).toEqual([
@@ -245,7 +245,11 @@ describe("Teams personal account app", () => {
         url: "https://graph.microsoft.com/v1.0/chats",
         body: JSON.stringify({
           chatType: "oneOnOne",
-          members: [member("101"), member("bob@example.test")],
+          // A name's apostrophe is doubled and the rest encoded, as template.md shows.
+          members: [
+            member("https://graph.microsoft.com/v1.0/users('101')"),
+            member("https://graph.microsoft.com/v1.0/users('o''brien%231%40example.test')"),
+          ],
         }),
         type: "application/json",
       },
