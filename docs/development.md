@@ -52,7 +52,7 @@ docker build -f infra/runtime/Dockerfile -t app-platform-runtime:0.1.0 .
 docker build -f infra/agent/Dockerfile -t app-platform-agent:0.1.0 .
 docker build -f infra/control-plane/Dockerfile -t app-platform-control-plane:0.1.0 .
 RUN_ENTRA_TESTS=1 RUN_IMAGE_TESTS=1 pnpm exec vitest run --no-file-parallelism
-RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts
+RUN_RUNTIME_TESTS=1 pnpm exec vitest run --config vitest.deployment.config.ts
 RUN_EDGE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/edge/sso.test.ts
 ```
 
@@ -62,10 +62,12 @@ The native runtime command above assumes rootless Docker. With a rootful daemon,
 sudo env -u SUDO_USER "PATH=$PATH" \
   "DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
   "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
-  RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts
+  RUN_RUNTIME_TESTS=1 pnpm exec vitest run --config vitest.deployment.config.ts
 ```
 
 Otherwise the runtime cannot write the test agent's bind-mounted state and reports `Permission denied` for `/state/node`. Keep the runtime's dropped capabilities and filesystem protections enabled.
+
+The [deployment configuration](../vitest.deployment.config.ts) runs the native runtime suite in parallel groups, each with its own control plane, runtime container and port pair from 25470 to 25475. To run every group against one fixture on `RUNTIME_TEST_PORT` (default 25430), pass `apps/control-plane/tests/runtime/deployment.test.ts` instead of the configuration.
 
 Finish image builds before browser tests, and run browser, runtime and edge suites sequentially. Some share ports; creating or removing Docker networks can also interrupt Chromium requests with `ERR_NETWORK_CHANGED`. The [CI suite configuration](../.github/workflows/check-suites.yaml) is the maintained source for test selection and setup.
 
