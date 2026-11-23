@@ -11,10 +11,13 @@
     record,
     confirmDisconnect,
     showHostname = false,
+    href,
   }: {
     record: Omit<z.infer<typeof userConnectionEntry>, "status" | "unavailable">;
     confirmDisconnect: boolean;
     showHostname?: boolean;
+    /** The connector's page, when it has one for the reader. */
+    href?: string | undefined;
   } = $props();
 
   const entry = $derived(
@@ -26,4 +29,4 @@
 </script>
 
 <!-- A connector that no longer offers personal connections drops out of the list. -->
-{#if entry}<UserConnectionRow connection={entry} {confirmDisconnect} {showHostname} />{/if}
+{#if entry}<UserConnectionRow connection={entry} {confirmDisconnect} {showHostname} {href} />{/if}

@@ -3995,6 +3995,11 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     });
     await page.goto("/widefleet/connections?success=true");
     await expect(githubRow.getByText("Checking account…", { exact: true })).toBeVisible();
+    // The way to the connector's page does not wait for the check.
+    await expect(githubRow.getByRole("link", { name: "GitHub", exact: true })).toHaveAttribute(
+      "href",
+      `/widefleet/catalog/apps/${github}`,
+    );
     releaseStatus();
     await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
     // Duplicate names retain the hostnames needed to distinguish deployments.

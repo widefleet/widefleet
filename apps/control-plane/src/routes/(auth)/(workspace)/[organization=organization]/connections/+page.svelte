@@ -142,10 +142,16 @@
         {@const confirmDisconnect = page.url.searchParams.get("disconnect") === connection.appId}
         <!-- Each status runs the connector's code, so rows show while their status loads. -->
         <svelte:boundary>
-          <UserConnectionEntry record={connection} {showHostname} {confirmDisconnect} />
+          <UserConnectionEntry
+            record={connection}
+            {showHostname}
+            {confirmDisconnect}
+            href={pageOf(connection.appId)}
+          />
           {#snippet pending()}
             <UserConnectionRow
               connection={{ ...connection, status: null, unavailable: false }}
+              href={pageOf(connection.appId)}
               {showHostname}
               {confirmDisconnect}
               checking
