@@ -48,11 +48,12 @@
 
   const hasChoices = $derived(data.organizations.length > 0 || data.joinable.length > 0);
 
+  // Back always returns to the choices. Without choices, the form stays to show why creation
+  // failed even once the person can no longer create an organization.
   const showCreation = $derived(
-    Boolean(creationIssues?.length) || (data.canCreateOrganization && (creating || !hasChoices)),
+    creating || (!hasChoices && (data.canCreateOrganization || Boolean(creationIssues?.length))),
   );
 
-  // A colleague's name makes the organization recognizable at a glance.
   // The heading already says what to do; a subtitle only adds scope or a reason.
   const subtitle = $derived(
     data.organizations.length
@@ -66,6 +67,7 @@
           : "Your account has no available organizations. Ask your administrator to grant access.",
   );
 
+  // A colleague's name makes the organization recognizable at a glance.
   const describeMembers = (organization: PageData["joinable"][number]) => {
     const [colleague] = organization.colleagues;
     const others = organization.memberCount - 1;
