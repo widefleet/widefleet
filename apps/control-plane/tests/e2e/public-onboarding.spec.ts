@@ -128,8 +128,8 @@ for (const entry of ["registration", "sign-in"] as const)
       expect(new URL(page.url()).searchParams.get("next")).toBe(
         entry === "registration" ? "/[organization]/welcome" : "/[organization]",
       );
-      await page.getByLabel("Organization name", { exact: true }).fill("Example Builders");
-      await page.getByLabel("Organization URL name", { exact: true }).fill("example-builders");
+      await page.getByLabel("Name", { exact: true }).fill("Example Builders");
+      await expect(page.getByLabel("URL", { exact: true })).toHaveValue("example-builders");
       environment.authControl.available(false);
       await page.getByRole("button", { name: "Create organization", exact: true }).click();
       await expect(
@@ -140,12 +140,8 @@ for (const entry of ["registration", "sign-in"] as const)
           },
         ),
       ).toBeVisible();
-      await expect(page.getByLabel("Organization name", { exact: true })).toHaveValue(
-        "Example Builders",
-      );
-      await expect(page.getByLabel("Organization URL name", { exact: true })).toHaveValue(
-        "example-builders",
-      );
+      await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Example Builders");
+      await expect(page.getByLabel("URL", { exact: true })).toHaveValue("example-builders");
       environment.authControl.available(true);
       await page.getByRole("button", { name: "Create organization", exact: true }).click();
       await expect(page).toHaveURL(/\/welcome$/);
@@ -175,9 +171,7 @@ for (const entry of ["registration", "sign-in"] as const)
 
       expect(other.status()).toBe(403);
       await page.goto("/organizations");
-      await expect(page.getByRole("button", { name: "Set up your own organization" })).toHaveCount(
-        0,
-      );
+      await expect(page.getByRole("button", { name: "Create a new organization" })).toHaveCount(0);
 
       // A choice made after the session expires signs in again and returns to that organization.
       await environment.database.db.delete(session);

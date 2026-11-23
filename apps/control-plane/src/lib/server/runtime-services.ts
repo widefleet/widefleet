@@ -38,6 +38,8 @@ import { createAuthenticationAdmission } from "./auth-admission.ts";
 import { discoverPlatform } from "./platform-discovery.ts";
 import { createCliLogin } from "./cli-login.ts";
 import { createOnboardingService, type CreateOrganization } from "./onboarding.ts";
+import { createDomainAccess } from "./domain-access.ts";
+import { installationOrganizationId } from "../organization.ts";
 
 export const createRuntime = ({
   configuration,
@@ -148,6 +150,13 @@ export const createRuntime = ({
     ),
     publicSignup,
     onboarding: createOnboardingService(database.db, settings, createOrganization, observation),
+    domainAccess: createDomainAccess(
+      database.db,
+      organizationAccess ?? {
+        filterOrganizations: async () => [installationOrganizationId],
+      },
+      publicSignup,
+    ),
     identity: createIdentityService(
       auth,
       database.db,

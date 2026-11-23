@@ -30,6 +30,10 @@ export const readOrganizationSlug = async (database: DatabaseExecutor, organizat
   return current.slug;
 };
 
+// Better Auth enforces this for invitations and additions; domain joining checks it under the
+// organization's settings lock.
+export const organizationMemberLimit = 100;
+
 export const enrollCompanyUser = async (database: DatabaseExecutor, userId: string) => {
   const [installation] = await database
     .select({ id: organization.id })

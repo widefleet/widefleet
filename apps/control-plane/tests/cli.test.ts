@@ -82,6 +82,24 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let sourceTarget = { supported: false, branch: "main", preview: false };
     const checkedTargets: z.infer<typeof contract.sourceDeployTargetInput>[] = [];
     let expireSourceLookup = false;
+    const domainAccessBodies: unknown[] = [];
+
+    const domainAccessView = contract.domainAccess.parse({
+      joinDomains: ["company.example.test"],
+      provableDomains: ["company.example.test"],
+      verifiedDomains: [],
+      restrictOrganizationCreation: false,
+    });
+
+    const joinableOrganization = contract.joinableOrganization.parse({
+      id: "joinable-organization",
+      name: "Joinable Team",
+      slug: "joinable-team",
+      domain: "company.example.test",
+      memberCount: 3,
+      colleagues: ["Colleague"],
+      verified: false,
+    });
 
     const server = createServer((request, response) => {
       request.resume();
@@ -384,6 +402,35 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
             value: "synthetic-domain-proof",
           }),
         );
+
+        return;
+      }
+
+      if (
+        request.url === "/api/v1/settings/domain-access" ||
+        request.url?.startsWith("/api/v1/settings/join-domains") ||
+        request.url === "/api/v1/settings/organization-creation" ||
+        request.url?.startsWith("/api/v1/organizations")
+      ) {
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          if (body) domainAccessBodies.push(JSON.parse(body));
+
+          response.end(
+            JSON.stringify(
+              request.url === "/api/v1/organizations/joinable"
+                ? [joinableOrganization]
+                : request.url === "/api/v1/organizations"
+                  ? { id: "created-organization", name: "Created", slug: "created" }
+                  : request.url?.startsWith("/api/v1/organizations/")
+                    ? { organizationId: joinableOrganization.id }
+                    : domainAccessView,
+            ),
+          );
+        });
 
         return;
       }
@@ -1576,6 +1623,52 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(requests).toContain("POST /api/v1/settings/verify-domain");
       await settingsCli("activate-sso");
       expect(requests).toContain("POST /api/v1/settings/activate-sso");
+    });
+
+    it("manages joining by email domain", async () => {
+      const cli = (...args: string[]) =>
+        execute(join(state, "installation", executableName), args, {
+          env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+        });
+
+      domainAccessBodies.length = 0;
+      requests.length = 0;
+      expect(JSON.parse((await cli("settings", "domain-access")).stdout)).toEqual(domainAccessView);
+      await cli("settings", "add-join-domain", "company.example.test");
+      await cli("settings", "remove-join-domain", "Company.Example.Test");
+      await cli("settings", "restrict-organization-creation", "true");
+      expect(JSON.parse((await cli("organizations", "joinable")).stdout)).toEqual([
+        joinableOrganization,
+      ]);
+      expect(
+        JSON.parse((await cli("organizations", "join", joinableOrganization.id)).stdout),
+      ).toEqual({ organizationId: joinableOrganization.id });
+      await cli(
+        "organizations",
+        "create",
+        "--name",
+        "Created",
+        "--slug",
+        "created",
+        "--allow-domain-join",
+      );
+      await cli("organizations", "create", "--name", "Created", "--slug", "created");
+      expect(requests).toEqual([
+        "GET /api/v1/settings/domain-access",
+        "POST /api/v1/settings/join-domains",
+        "DELETE /api/v1/settings/join-domains/company.example.test",
+        "PUT /api/v1/settings/organization-creation",
+        "GET /api/v1/organizations/joinable",
+        `POST /api/v1/organizations/${joinableOrganization.id}/join`,
+        "POST /api/v1/organizations",
+        "POST /api/v1/organizations",
+      ]);
+      expect(domainAccessBodies).toEqual([
+        { domain: "company.example.test" },
+        { restricted: true },
+        { name: "Created", slug: "created", allowDomainJoin: true },
+        { name: "Created", slug: "created", allowDomainJoin: false },
+      ]);
     });
 
     it.each(["flag", "environment"])(

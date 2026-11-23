@@ -199,7 +199,7 @@ export const createApi = (runtime: Runtime) => {
       ),
     createOrganization: base
       .route({ method: "POST", path: "/organizations" })
-      .input(contract.createOrganizationInput)
+      .input(contract.organizationCreation)
       .output(contract.onboardingOrganization)
       .handler(async ({ context, input }) =>
         apiOperation(async () =>
@@ -208,6 +208,30 @@ export const createApi = (runtime: Runtime) => {
             input,
           ),
         ),
+      ),
+    joinableOrganizations: base
+      .route({ method: "GET", path: "/organizations/joinable" })
+      .output(z.array(contract.joinableOrganization))
+      .handler(async ({ context }) =>
+        apiOperation(async () =>
+          runtime.domainAccess.joinable(
+            unwrap(await runtime.identity.authenticateUser(context.request, "platform:read")),
+          ),
+        ),
+      ),
+    joinOrganization: base
+      .route({ method: "POST", path: "/organizations/{organizationId}/join" })
+      .input(contract.organizationSelection)
+      .output(contract.organizationSelection)
+      .handler(async ({ context, input }) =>
+        apiOperation(async () => {
+          const joined = await runtime.domainAccess.join(
+            unwrap(await runtime.identity.authenticateUser(context.request, "platform:write")),
+            input.organizationId,
+          );
+
+          return { organizationId: joined.organizationId };
+        }),
       ),
     members: read
       .route({ method: "GET", path: "/members" })
@@ -650,6 +674,33 @@ export const createApi = (runtime: Runtime) => {
       .output(contract.settingsView)
       .handler(({ context }) =>
         apiOperation(() => runtime.settings.activateSso(context.principal)),
+      ),
+    domainAccess: read
+      .route({ method: "GET", path: "/settings/domain-access" })
+      .output(contract.domainAccess)
+      .handler(({ context }) => apiOperation(() => runtime.domainAccess.read(context.principal))),
+    addJoinDomain: write
+      .route({ method: "POST", path: "/settings/join-domains" })
+      .input(contract.joinDomainInput)
+      .output(contract.domainAccess)
+      .handler(({ context, input }) =>
+        apiOperation(() => runtime.domainAccess.addJoinDomain(context.principal, input.domain)),
+      ),
+    removeJoinDomain: write
+      .route({ method: "DELETE", path: "/settings/join-domains/{domain}" })
+      .input(contract.joinDomainInput)
+      .output(contract.domainAccess)
+      .handler(({ context, input }) =>
+        apiOperation(() => runtime.domainAccess.removeJoinDomain(context.principal, input.domain)),
+      ),
+    restrictOrganizationCreation: write
+      .route({ method: "PUT", path: "/settings/organization-creation" })
+      .input(contract.organizationCreationRestriction)
+      .output(contract.domainAccess)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.domainAccess.restrictOrganizationCreation(context.principal, input.restricted),
+        ),
       ),
     searchGroups: read
       .route({ method: "GET", path: "/groups" })

@@ -1,5 +1,5 @@
 import { form } from "$app/server";
-import { createOrganizationInput } from "@platform/contracts";
+import { organizationCreation, organizationSelection } from "@platform/contracts";
 import { invalid, redirect } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
 import { requireLogin } from "#server/page-auth";
@@ -10,7 +10,7 @@ import { z } from "zod";
 import { InvalidOperation } from "#server/errors";
 
 export const createOrganization = form(
-  createOrganizationInput.extend({ next: z.string().optional() }),
+  organizationCreation.extend({ next: z.string().optional() }),
   async ({ next, ...input }) => {
     const { user, session } = requireLogin("/organizations");
     const runtime = await getRuntime();
@@ -31,5 +31,24 @@ export const createOrganization = form(
         ? workspacePath(organization.slug, "/welcome")
         : chosenDestination(destination, organization.slug),
     );
+  },
+);
+
+// Joining by email domain adds the person as a member, then opens the organization like the
+// chooser does. Organizations with required company SSO continue through their sign-in.
+export const joinOrganization = form(
+  organizationSelection.extend({ next: z.string().optional() }),
+  async ({ organizationId, next }) => {
+    const { user, session } = requireLogin("/organizations");
+    const runtime = await getRuntime();
+
+    const joined = await runtime.domainAccess
+      .join(sessionSignIn(user, session), organizationId)
+      .catch((cause: unknown) => {
+        if (cause instanceof InvalidOperation) invalid(cause.message);
+        throw cause;
+      });
+
+    redirect(303, chosenDestination(localDestination(next), joined.slug));
   },
 );
