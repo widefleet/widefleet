@@ -117,6 +117,11 @@ the directory name; review it before deploying. An unknown template exits with a
 error and does not create a project. If the installed CLI rejects `--template`,
 check `widefleet --version` and upgrade to CLI 0.3.3 or newer.
 
+`init` also creates a Git repository on branch `main`, without a commit, because
+`deploy` saves the main app's source from `main`. A project created inside an
+existing Git repository uses that repository instead. Without Git, the first
+deploy that saves source creates the repository.
+
 Inside either project, run `pnpm install --frozen-lockfile`, `pnpm check`, then
 `pnpm dev`. Follow [app development](/guides/app-development) for identity,
 bindings and the next deployment.
