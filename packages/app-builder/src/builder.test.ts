@@ -576,6 +576,14 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
 
     expect(invalid.status).toBe(422);
     expect(await failure(invalid)).toContain("Invalid widefleet.jsonc");
+
+    // The project offers no personal connections.
+    const mismatched = await post("/bundle", {
+      files: { ...project, "widefleet.jsonc": '{ "connector": "personal" }' },
+    });
+
+    expect(mismatched.status).toBe(422);
+    expect(await failure(mismatched)).toContain("A personal connector exports");
   });
 
   // As pnpm-workspace.yaml declares them for `pnpm install`.

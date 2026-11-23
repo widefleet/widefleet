@@ -34,6 +34,34 @@ export const networkDeclaration = z.strictObject({
  */
 export const connectorKind = z.enum(["personal", "shared"]);
 
+// The entrypoint through which an app offers personal connections.
+const userConnectionEntrypoint = "UserConnection";
+
+type DeclaredConnector = {
+  connector?: z.infer<typeof connectorKind> | undefined;
+  entrypoints?: readonly string[] | undefined;
+};
+
+/** Why a declared connector kind does not fit the entrypoints the app exports. */
+export const connectorIssue = ({ connector, entrypoints }: DeclaredConnector) => {
+  const personal = entrypoints?.includes(userConnectionEntrypoint) ?? false;
+
+  if (connector === "personal" && !personal)
+    return `A personal connector exports a ${userConnectionEntrypoint} entrypoint`;
+
+  if (connector === "shared" && personal)
+    return `A shared connector cannot export ${userConnectionEntrypoint}; declare "connector": "personal"`;
+
+  return null;
+};
+
+/**
+ * Whether a deployment is a connector. Apps deployed before the declaration
+ * existed count as personal connectors when they offer personal connections.
+ */
+export const connectorOf = ({ connector, entrypoints }: DeclaredConnector) =>
+  connector ?? (entrypoints?.includes(userConnectionEntrypoint) ? "personal" : null);
+
 /** widefleet.jsonc: what an app needs from Widefleet beyond its Wrangler configuration. */
 export const appDeclaration = z.strictObject({
   $schema: z.string().optional(),

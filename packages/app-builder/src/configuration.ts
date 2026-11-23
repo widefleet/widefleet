@@ -1,7 +1,7 @@
 // Wrangler configuration as `widefleet deploy` reads it
 // (crates/platform-cli/src/deploy.rs and worker.rs), and the Worker metadata
 // it produces.
-import { appDeclaration } from "@platform/contracts";
+import { appDeclaration, connectorIssue } from "@platform/contracts";
 import { stripJsonc } from "@platform/contracts/jsonc";
 import { builtWorker } from "@platform/contracts/builds";
 import { z } from "zod";
@@ -106,8 +106,18 @@ export const workerMetadata = (
   declaration: ReturnType<typeof readDeclaration>,
   exports: readonly string[],
   debug: { build_id: string; source_maps: Record<string, string> },
-) =>
-  builtWorker.parse({
+) => {
+  // Service entrypoints are module exports; Workflow classes are not.
+  const entrypoints = exports.filter(
+    (name) => !configuration.workflows.some((workflow) => workflow.class_name === name),
+  );
+
+  // Publishing would reject these too, after an install has already created its app.
+  const connector = connectorIssue({ connector: declaration.connector, entrypoints });
+
+  if (connector) throw new BuildError(connector);
+
+  return builtWorker.parse({
     main_module: "worker.js",
     compatibility_date: configuration.compatibility_date,
     compatibility_flags: configuration.compatibility_flags,
@@ -147,13 +157,11 @@ export const workerMetadata = (
     ],
     debug,
     // As the CLI: static assets or a default export give the app a URL.
-    // Service entrypoints are module exports; Workflow classes are not.
     web: configuration.assets !== undefined || exports.includes("default"),
-    entrypoints: exports.filter(
-      (name) => !configuration.workflows.some((workflow) => workflow.class_name === name),
-    ),
+    entrypoints,
     crons: configuration.triggers.crons,
     queue_consumers: configuration.queues.consumers,
     network: declaration.network,
     connector: declaration.connector,
   });
+};

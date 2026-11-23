@@ -27,7 +27,13 @@ export * from "./user-connections.ts";
 
 import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
-import { connectorKind, networkDeclaration, networkPolicy, networkSnapshot } from "./network.ts";
+import {
+  connectorIssue,
+  connectorKind,
+  networkDeclaration,
+  networkPolicy,
+  networkSnapshot,
+} from "./network.ts";
 import { migrationEntry } from "./migrations.ts";
 import { workflowName, workflowRequest } from "./workflows.ts";
 import { templatePath } from "./templates.ts";
@@ -301,9 +307,6 @@ export {
   serviceDocumentationMaxSignatures,
 } from "./service-documentation.ts";
 
-// The entrypoint through which an app offers personal connections.
-const userConnectionEntrypoint = "UserConnection";
-
 export const workerMetadata = workerConfiguration
   .extend({
     source: sourceRevision.optional(),
@@ -330,19 +333,9 @@ export const workerMetadata = workerConfiguration
     assets: z.strictObject({ upload_session: identifier, binding: bindingName.default("ASSETS") }),
   })
   .superRefine((metadata, context) => {
-    const personal = metadata.entrypoints?.includes(userConnectionEntrypoint) ?? false;
+    const connector = connectorIssue(metadata);
 
-    if (metadata.connector === "personal" && !personal)
-      context.addIssue({
-        code: "custom",
-        message: `A personal connector exports a ${userConnectionEntrypoint} entrypoint`,
-      });
-
-    if (metadata.connector === "shared" && personal)
-      context.addIssue({
-        code: "custom",
-        message: `A shared connector cannot export ${userConnectionEntrypoint}; declare "connector": "personal"`,
-      });
+    if (connector) context.addIssue({ code: "custom", message: connector });
 
     const workflows = metadata.bindings
       .filter((binding) => binding.type === "workflow")
@@ -376,14 +369,6 @@ export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
 
   return metadata;
 }
-
-/**
- * Whether a deployment is a connector. Apps deployed before the declaration
- * existed count as personal connectors when they offer personal connections.
- */
-export const connectorOf = (metadata: z.infer<typeof workerMetadata>) =>
-  metadata.connector ??
-  (metadata.entrypoints?.includes(userConnectionEntrypoint) ? "personal" : null);
 
 export const storedModule = z.strictObject({
   name: moduleName,
