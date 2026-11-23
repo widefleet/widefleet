@@ -1487,67 +1487,6 @@ export class OneDriveApi extends WorkerEntrypoint<TemplateEnvironment, OneDriveP
   }
 
   /**
-   * Invoke function sharedWithMe
-   *
-   * Get a list of driveItem objects shared with the owner of a drive. The driveItems returned from the sharedWithMe method always include the remoteItem facet that indicates they are items from a different drive.
-   */
-  async sharedWithMe(
-    input:
-      | {
-          /**
-           * The unique identifier of drive
-           */
-          driveId: string;
-          /**
-           * Show only the first n items
-           */
-          $top?: number;
-          /**
-           * Skip the first n items
-           */
-          $skip?: number;
-          /**
-           * Search items by search phrases
-           */
-          $search?: string;
-          /**
-           * Filter items by property values
-           */
-          $filter?: string;
-          /**
-           * Include count of items
-           */
-          $count?: boolean;
-          /**
-           * Select properties to be returned
-           */
-          $select?: string[];
-          /**
-           * Order items by property values
-           */
-          $orderby?: string[];
-          /**
-           * Expand related entities
-           */
-          $expand?: string[];
-        }
-      | {
-          /**
-           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
-           */
-          nextLink: string;
-        },
-  ): Promise<
-    OneDriveResult<
-      BaseCollectionPaginationCountResponse & {
-        value?: DriveItem[];
-      }
-    >
-  > {
-    return run(this.env, this.ctx.props, "sharedWithMe", input);
-  }
-
-  /**
    * Get special from drives
    *
    * Collection of common folders available in OneDrive. Read-only. Nullable.

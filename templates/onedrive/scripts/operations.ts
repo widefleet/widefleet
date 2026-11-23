@@ -29,7 +29,6 @@ export const operations = {
   "drives.drive.GetDrive": { name: "getDrive" },
   "drives.drive.recent": { name: "recentItems" },
   "drives.drive.search": { name: "search" },
-  "drives.drive.sharedWithMe": { name: "sharedWithMe" },
   "drives.ListSpecial": { name: "listSpecialFolders" },
   "drives.GetSpecial": { name: "getSpecialFolder" },
   "drives.ListFollowing": { name: "listFollowing" },
