@@ -94,8 +94,9 @@ correct. Action bodies use the parameter names of Graph's description, such as
 `@odata.nextLink`: pass it as `nextLink` to the same method to read the next page.
 Delta methods answer with `@odata.deltaLink`, which `nextLink` also takes.
 
-Treat email HTML as untrusted content. `getMessageMime` returns the message as MIME
-bytes up to 8 MiB. See `src/api.ts` for every method, its input and Graph's
+Treat email HTML as untrusted content. `getMessageMime` returns the message as MIME,
+up to 8 MiB, with its `contentType` and as `text`, or as `base64` when Graph sends
+another media type. See `src/api.ts` for every method, its input and Graph's
 description, and `scripts/operations.ts` for the Graph operation behind each method.
 
 ## Approvals

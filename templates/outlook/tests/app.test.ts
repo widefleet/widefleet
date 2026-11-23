@@ -154,10 +154,11 @@ describe("Outlook personal account app", () => {
       await (await alice.request(`/rpc/next?link=${encodeURIComponent(next)}`)).json(),
     ).toMatchObject({ status: "connected", data: { value: [{ id: "message-2" }] } });
     expect(upstream.calls.at(-1)?.url).toBe(next);
-    // MIME content up to 8 MiB arrives as base64, so the result stays JSON, as MCP needs.
+    // MIME content up to 8 MiB arrives as JSON, as MCP needs: text, as Graph
+    // sends it as text/plain.
     expect(await (await alice.request("/rpc/content")).json()).toEqual({
       status: "connected",
-      data: { contentType: "text/plain", base64: btoa("Subject: Hello\r\n\r\nHi") },
+      data: { contentType: "text/plain", text: "Subject: Hello\r\n\r\nHi" },
     });
     // A POST that only reads never asks.
     expect(await (await alice.request("/rpc/schedule")).json()).toEqual({
