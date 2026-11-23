@@ -1,5 +1,6 @@
 import { requireAvailableHostname } from "./hostnames.ts";
 import { checkServiceConsumers } from "./app-services.ts";
+import { findAppScreenshot, screenshotNumbers } from "./app-screenshots.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import {
@@ -519,9 +520,12 @@ export const createAppService = (
           activeDeploymentId: apps.activeDeploymentId,
           appliedCapabilities: apps.appliedCapabilities,
           owner: user.name,
+          manifest: artifacts.manifest,
         })
         .from(apps)
         .leftJoin(user, eq(user.id, apps.ownerId))
+        .leftJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
+        .leftJoin(artifacts, eq(artifacts.id, deployments.artifactId))
         .where(
           and(eq(apps.id, appId), or(published(principal), appVisibility(transaction, principal))),
         );
@@ -529,11 +533,14 @@ export const createAppService = (
       if (!record)
         return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
 
-      const { appliedCapabilities, ...listing } = record;
+      const { appliedCapabilities, manifest, ...listing } = record;
+
+      const assets = contract.assetManifest.parse(manifest ?? {});
 
       return Result.ok({
         ...listing,
         url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
+        screenshots: screenshotNumbers.filter((number) => findAppScreenshot(assets, number)),
         uses:
           record.activeDeploymentId && appliedCapabilities
             ? [

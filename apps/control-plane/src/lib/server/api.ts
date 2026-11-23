@@ -15,6 +15,7 @@ import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "
 import { readInstallation } from "./installation-store.ts";
 import { templateCatalog, readTemplate, readTemplateIcon } from "./app-templates.ts";
 import { iconCache, iconResponse, missingIconResponse, readAppIcon } from "./app-icons.ts";
+import { findAppScreenshot } from "./app-screenshots.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
 import { readCompanyAccount } from "./settings-account.ts";
@@ -1162,6 +1163,27 @@ export const createApi = (runtime: Runtime) => {
 
       const result = unwrap(
         await readAppIcon(runtime.database.db, runtime.storage, principal, appId),
+      );
+
+      const cacheControl = iconCache(url.searchParams.get("deployment"), result.deploymentId);
+
+      return result.icon
+        ? iconResponse(result.icon, cacheControl)
+        : missingIconResponse(cacheControl);
+    }
+
+    const screenshot = /^\/api\/v1\/apps\/([^/]+)\/screenshots\/([^/]+)$/.exec(url.pathname);
+
+    if (screenshot && request.method === "GET") {
+      const principal = unwrap(await runtime.identity.authenticate(request, "platform:read"));
+      principals.set(request, principal);
+      const appId = contract.identifier.parse(screenshot[1]);
+      const number = contract.screenshotNumber.parse(Number(screenshot[2]));
+
+      const result = unwrap(
+        await readAppIcon(runtime.database.db, runtime.storage, principal, appId, (manifest) =>
+          findAppScreenshot(manifest, number),
+        ),
       );
 
       const cacheControl = iconCache(url.searchParams.get("deployment"), result.deploymentId);

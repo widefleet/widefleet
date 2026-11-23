@@ -142,9 +142,14 @@ export const catalogEntry = app.pick({
   activeDeploymentId: true,
 });
 
+/** The place of a screenshot among an app's static assets, such as `/screenshots/1.png`. */
+export const screenshotNumber = z.number().int().min(1).max(3);
+
 /** An app's page for the people who use it. */
 export const catalogApp = catalogEntry.extend({
   about: z.string().nullable(),
+  /** The screenshots the active deployment carries. */
+  screenshots: z.array(screenshotNumber),
   /** The name of the person who owns the app. */
   owner: z.string().nullable(),
   /** The apps whose APIs the active deployment may call. */

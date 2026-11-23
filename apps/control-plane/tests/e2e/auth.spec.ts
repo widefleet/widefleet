@@ -3778,8 +3778,28 @@ test(`personal connections account controls and workspace entry`, async ({ brows
       .update(apps)
       .set({ appliedCapabilities: { revision: 1, grants: { FILES: { app: files } } } })
       .where(eq(apps.id, gmail));
+    // It also shows the screenshots that the app's deployment carries.
+    await environment.database.db
+      .update(artifacts)
+      .set({ manifest: { "/screenshots/2.png": { hash: "a".repeat(32), size: 68 } } })
+      .where(eq(artifacts.appId, gmail));
+    await page.route(`**/widefleet/apps/${gmail}/screenshots/2?*`, (route) =>
+      route.fulfill({
+        contentType: "image/png",
+        body: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      }),
+    );
     await page.goto(`/widefleet/catalog/apps/${gmail}`);
     const uses = page.getByRole("region", { name: "Connections", exact: true });
+    await expect(
+      page.getByRole("list", { name: "Screenshots" }).getByRole("img", {
+        name: "Screenshot 2 of Gmail",
+        exact: true,
+      }),
+    ).toBeVisible();
     await expect(uses.getByRole("listitem")).toHaveCount(2);
     await expect(uses.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
     await expect(uses.getByText("taylor@example.test", { exact: false })).toBeVisible();

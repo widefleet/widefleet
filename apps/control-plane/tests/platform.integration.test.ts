@@ -2491,6 +2491,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       activeDeploymentId,
       owner: owner?.name,
       uses: [used],
+      screenshots: [],
     });
     expect((await json(`/apps/${app.id}`, "GET", undefined, outsiderHeaders)).status).toBe(404);
     expect(await (await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).json()).toEqual({
@@ -2523,12 +2524,24 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     const hash = hashAsset("/favicon.svg", bytes);
-    const session = await start(app.id, { "/favicon.svg": { hash, size: bytes.length } });
-    expect(
-      (
-        await storage.put(`apps/${app.id}/assets/${hash}`, bytes, "application/octet-stream")
-      ).isOk(),
-    ).toBe(true);
+    // The app also carries a screenshot, which is served under the same rules.
+    const picture = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const pictureHash = hashAsset("/screenshots/2.png", picture);
+
+    const session = await start(app.id, {
+      "/favicon.svg": { hash, size: bytes.length },
+      "/screenshots/2.png": { hash: pictureHash, size: picture.length },
+    });
+
+    for (const [key, content] of [
+      [hash, bytes],
+      [pictureHash, picture],
+    ] as const)
+      expect(
+        (
+          await storage.put(`apps/${app.id}/assets/${key}`, content, "application/octet-stream")
+        ).isOk(),
+      ).toBe(true);
     const deployment = contract.deployment.parse(await (await publish(app.id, session.id)).json());
 
     expect((await json(path, "GET")).status).toBe(404);
@@ -2551,12 +2564,26 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       (await json(`${path}?deployment=${deployment.id}`, "GET")).headers.get("cache-control"),
     ).toBe("private, max-age=31536000, immutable");
 
+    const screenshots = `/apps/${app.id}/screenshots`;
+    const screenshot = await json(`${screenshots}/2`, "GET");
+    expect(screenshot.headers.get("content-type")).toBe("image/png");
+    expect(screenshot.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(new Uint8Array(await screenshot.arrayBuffer())).toEqual(picture);
+    expect((await json(`${screenshots}/1`, "GET")).status).toBe(404);
+    expect((await json(`${screenshots}/4`, "GET")).status).toBe(400);
+    expect((await json(`${screenshots}/2`, "GET", undefined, outsiderHeaders)).status).toBe(404);
+    expect(
+      contract.catalogApp.parse(await (await json(`/catalog/apps/${app.id}`, "GET")).json())
+        .screenshots,
+    ).toEqual([2]);
+
     // Members see the icons of apps the catalog and My connections list for them.
     await environment.database.db
       .update(apps)
       .set({ catalogListed: true })
       .where(eq(apps.id, app.id));
     expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(200);
+    expect((await json(`${screenshots}/2`, "GET", undefined, outsiderHeaders)).status).toBe(200);
     await environment.database.db
       .update(apps)
       .set({ catalogListed: false })

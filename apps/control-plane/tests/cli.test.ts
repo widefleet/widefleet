@@ -57,6 +57,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       activeDeploymentId: queued.id,
       owner: "Ada Example",
       uses: [],
+      screenshots: [1],
     });
 
     const finishedAt = "2026-10-01T00:00:01.000Z";
