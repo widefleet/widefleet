@@ -25,7 +25,7 @@ export const createTemplateInstalls = (
   configuration: Pick<Configuration, "GITHUB_TOKEN">,
   apps: Pick<
     ReturnType<typeof createAppService>,
-    "named" | "create" | "resolve" | "recordTemplateInstall"
+    "named" | "create" | "resolve" | "setDescription" | "recordTemplateInstall"
   >,
   uploads: Pick<ReturnType<typeof createUploadService>, "start" | "putAsset" | "publish">,
   network: Pick<ReturnType<typeof createNetworkService>, "change" | "read">,
@@ -137,7 +137,17 @@ export const createTemplateInstalls = (
       )
         return yield* nameTaken();
 
-      const installed = yield* created;
+      const draft = yield* created;
+
+      // An earlier install's app has no description yet. Text someone saved stays.
+      const installed =
+        draft.description || !description
+          ? draft
+          : {
+              ...draft,
+              ...(yield* Result.await(apps.setDescription(principal, draft.id, description))),
+            };
+
       const session = yield* Result.await(uploads.start(principal, installed.id, assets.manifest));
 
       const missing = new Set(session.missing);

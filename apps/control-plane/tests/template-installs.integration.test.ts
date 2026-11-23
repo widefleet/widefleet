@@ -321,6 +321,26 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   expect(resumed.app.id).toBe(empty.id);
   expect(resumed.deployment).toMatchObject({ appId: empty.id, status: "queued" });
+  expect(resumed.app.description).toBe(result.app.description);
+
+  // A description someone already saved stays.
+  await createApi(runtime)(
+    new Request("http://localhost/api/v1/apps", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        slug: "mail-described",
+        displayName: "mail-described",
+        description: "Reads the team inbox.",
+      }),
+    }),
+  );
+
+  const described = contract.templateInstall.parse(
+    await (await install(runtime, "gmail", { name: "mail-described" })).json(),
+  );
+
+  expect(described.app.description).toBe("Reads the team inbox.");
 });
 
 // A build of a template that declares one backend origin.
