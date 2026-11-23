@@ -16,6 +16,7 @@ const list: RestOperation = {
     tag: ["tag", null, false],
     ids: ["ids", "|", false],
   },
+  headerParameters: { sessionId: "session-id" },
   body: null,
   bodyRequired: false,
   response: "json",
@@ -27,6 +28,7 @@ const upload: RestOperation = {
   path: "/items/{item-id}/content",
   pathParameters: { "item-id": "itemId" },
   queryParameters: {},
+  headerParameters: {},
   body: "text",
   bodyRequired: true,
   response: "json",
@@ -82,6 +84,22 @@ describe("REST requests", () => {
     expect(() =>
       restRequest(base, "delta", delta, { nextLink: `${base}drives/d/items/root/children` }),
     ).toThrow(InvalidRequest);
+  });
+
+  it("sends header inputs as headers, on later pages too", () => {
+    expect(
+      restRequest(base, "search", list, { driveId: "d", q: "x", sessionId: "s-1" }).init,
+    ).toEqual({ method: "GET", headers: { "session-id": "s-1" } });
+
+    const next = `${base}drives/d/search(q='x')?$skiptoken=2`;
+
+    expect(restRequest(base, "search", list, { nextLink: next, sessionId: "s-1" })).toEqual({
+      url: next,
+      init: { method: "GET", headers: { "session-id": "s-1" } },
+    });
+    expect(() => restRequest(base, "search", list, { driveId: "d", q: "x", sessionId: 1 })).toThrow(
+      "search's sessionId takes text",
+    );
   });
 
   it("sends text bodies with their media type and rejects unknown arguments", () => {

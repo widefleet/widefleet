@@ -3,11 +3,15 @@
 // Microsoft Graph, describe far more than one template offers, so the
 // template's rules list the operations it offers by operation ID, each with
 // its method name and, for operations that are not GET, the change it makes.
+// Rules can add operations the API serves but its description leaves out.
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
 import { reservedMethod } from "./reserved.ts";
 import type { Change, GeneratedFiles } from "./rules.ts";
+
+/** Header inputs of an operation, by input name: the header's name and what it carries. */
+type HeaderRules = Readonly<Record<string, { name: string; description: string }>>;
 
 /** How an OpenAPI template offers operations. */
 export interface OpenapiRules {
@@ -17,7 +21,9 @@ export interface OpenapiRules {
    * `read` when it only reads. `description` replaces the API's own text where it
    * describes another operation, as Microsoft Graph's does for some. `body` and
    * `result` name the schemas a body or result can be where the description only
-   * names their common base, such as Graph's attachment types.
+   * names their common base, such as Graph's attachment types. `headers` are
+   * inputs the method sends as headers the description does not declare, such
+   * as Graph's `workbook-session-id`.
    */
   operations: Record<
     string,
@@ -27,8 +33,32 @@ export interface OpenapiRules {
       description?: string | undefined;
       body?: readonly string[] | undefined;
       result?: readonly string[] | undefined;
+      headers?: HeaderRules | undefined;
     }
   >;
+  /**
+   * Operations the API serves but its description leaves out, by method name:
+   * the HTTP method sent to the path of a described operation, with the change
+   * it makes, its description and the schemas of its JSON body and result.
+   * Graph updates a worksheet range with a PATCH to the address its `range`
+   * function reads. Without `result`, the operation answers nothing.
+   */
+  undescribed?:
+    | Readonly<
+        Record<
+          string,
+          {
+            operation: string;
+            method: "post" | "put" | "patch" | "delete";
+            change: Change;
+            description: string;
+            body: readonly string[];
+            result?: readonly string[] | undefined;
+            headers?: HeaderRules | undefined;
+          }
+        >
+      >
+    | undefined;
   /**
    * Navigation properties the types keep, by schema and property, with the
    * schemas their values can be. Graph accepts some of them inline, such as a
@@ -159,6 +189,8 @@ export type OpenapiOperation = {
    * list into one value, or null to repeat the parameter, and whether it is required.
    */
   queryParameters: Record<string, [string, string | null, boolean]>;
+  /** Header names by input name. */
+  headerParameters: Record<string, string>;
   body: "json" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
@@ -225,7 +257,7 @@ const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? 
 
 export const generateOpenapi = (
   source: string,
-  { operations, navigation = {} }: OpenapiRules,
+  { operations: described, navigation = {}, undescribed = {} }: OpenapiRules,
   service: OpenapiService,
   header: string,
 ): GeneratedFiles => {
@@ -466,6 +498,53 @@ export const generateOpenapi = (
   const byId = new Map(all.map((entry) => [entry.id, entry]));
   const problems: string[] = [];
   const names = new Set<string>();
+  const added: OpenapiRules["operations"] = {};
+
+  // An undescribed operation shares the path and path parameters of the
+  // operation it names and takes the JSON its rule names.
+  for (const [name, rule] of Object.entries(undescribed)) {
+    const found = byId.get(rule.operation);
+    const id = `${rule.method.toUpperCase()} ${rule.operation}`;
+
+    if (!found) {
+      problems.push(`${name} uses the path of ${rule.operation}, which the API no longer offers`);
+      continue;
+    }
+
+    if (found.item[rule.method] !== undefined)
+      problems.push(`The API now describes ${id}; offer its operation instead of ${name}`);
+
+    const json = { content: { "application/json": {} } };
+
+    byId.set(id, {
+      ...found,
+      method: rule.method,
+      id,
+      entry: {
+        operationId: id,
+        parameters: (found.entry.parameters ?? []).filter(
+          (value) => resolve(value, "parameters", parameter).in === "path",
+        ),
+        requestBody: { required: true, ...json },
+        responses: rule.result ? { "200": json } : { "204": { description: "No content" } },
+      },
+    });
+    const { change, description, body, result, headers } = rule;
+
+    if (Object.hasOwn(added, id)) problems.push(`${name} repeats the undescribed target ${id}`);
+    added[id] = { name, change, description, body, result, headers };
+  }
+
+  // Each added method follows the method whose path it shares.
+  const operations = Object.fromEntries([
+    ...Object.entries(described).flatMap((entry) => [
+      entry,
+      ...Object.entries(added).filter(([id]) => id.endsWith(` ${entry[0]}`)),
+    ]),
+    ...Object.entries(added).filter(
+      ([id]) => !Object.hasOwn(described, id.slice(id.indexOf(" ") + 1)),
+    ),
+  ]);
 
   for (const [id, rule] of Object.entries(operations)) {
     const entry = byId.get(id);
@@ -539,6 +618,8 @@ export const generateOpenapi = (
     const empty = contents.length < successes.length;
     const responseKind = binary ? "binary" : jsonResponses.length ? "json" : null;
 
+    const headers = Object.entries(rule.headers ?? {});
+
     // Pages are read again with GET; Graph also marks some actions pageable.
     const pageable = method === "get" && entry["x-ms-pageable"] !== undefined;
 
@@ -559,6 +640,7 @@ export const generateOpenapi = (
             : [],
         ),
       ),
+      headerParameters: Object.fromEntries(headers.map(([input, { name }]) => [input, name])),
       body: bodyKind,
       bodyRequired: body?.required === true,
       response: responseKind,
@@ -571,6 +653,7 @@ export const generateOpenapi = (
 
     const inputs = [
       ...parameters.map(inputOf),
+      ...headers.map(([input]) => input),
       ...(bodyKind ? ["body"] : []),
       ...(bodyKind === "text" ? ["contentType"] : []),
       ...(pageable ? ["nextLink"] : []),
@@ -617,6 +700,14 @@ export const generateOpenapi = (
       return `${comment(single(value.description), "    ")}    ${propertyName(inputOf(value))}${value.in === "path" || value.required ? "" : "?"}: ${type};`;
     });
 
+    // Header inputs, such as a session, apply to every page.
+    const headerFields = headers.map(
+      ([input, { description }]) =>
+        `${comment(description, "    ")}    ${propertyName(input)}?: string;`,
+    );
+
+    fields.push(...headerFields);
+
     if (bodyKind)
       fields.push(
         `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${rule.body ? schemaUnion(rule.body) : jsonBody ? (jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue") : "string"};`,
@@ -650,9 +741,9 @@ export const generateOpenapi = (
 
     const firstPage = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
 
-    // A later page needs only its address.
+    // A later page needs only its address and the headers of the first.
     const input = pageable
-      ? `${firstPage} | {\n    /**\n     * The \`@odata.nextLink\` of an earlier answer, or its \`@odata.deltaLink\`.\n     */\n    nextLink: string;\n  }`
+      ? `${firstPage} | {\n    /**\n     * The \`@odata.nextLink\` of an earlier answer, or its \`@odata.deltaLink\`.\n     */\n    nextLink: string;\n${headerFields.map((field) => `${field}\n`).join("")}  }`
       : firstPage;
 
     const approval =
@@ -738,6 +829,8 @@ export type Operation = {
    * list into one value, or null to repeat the parameter, and whether it is required.
    */
   queryParameters: Record<string, [string, string | null, boolean]>;
+  /** Header names by input name. */
+  headerParameters: Record<string, string>;
   body: "json" | "text" | null;
   bodyRequired: boolean;
   response: "json" | "binary" | null;
