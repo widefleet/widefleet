@@ -9,6 +9,7 @@ import {
   rollbackInput,
 } from "@platform/contracts";
 import { z } from "zod";
+import { InvalidOperation } from "#server/errors";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
 import { workspacePath } from "#lib/workspace-path";
 
@@ -41,8 +42,13 @@ export const getAppCreation = query(
 );
 
 export const getAppDetails = query(appQuery, async ({ appId, search, organizationId }) => {
-  const { runtime, principal } = await remoteContext({ organizationId });
-  const app = queryValue(await runtime.apps.get(principal, appId));
+  const { runtime, principal, organization } = await remoteContext({ organizationId });
+  const found = await runtime.apps.get(principal, appId);
+
+  // People who do not manage the app are led to the page the catalog has for it.
+  if (found.isErr() && found.error instanceof InvalidOperation && found.error.code === "NOT_FOUND")
+    redirect(303, workspacePath(organization.slug, `/catalog/apps/${appId}`));
+  const app = queryValue(found);
   const history = queryValue(await runtime.apps.history(principal, appId));
   const access = queryValue(await runtime.apps.access(principal, appId, search));
 

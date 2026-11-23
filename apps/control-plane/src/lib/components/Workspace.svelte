@@ -85,7 +85,7 @@
 
   // Each item also covers the pages reached from it, so the sidebar keeps showing where they belong.
   const navigation = $derived<NavigationItem[]>([
-    { href: "/", label: "Home", icon: House, paths: [] },
+    { href: "/", label: "Home", icon: House, paths: ["/catalog/apps"] },
     { href: "/connections", label: "My connections", icon: Link2, paths: ["/connections"] },
     {
       href: "/apps",
@@ -136,9 +136,7 @@
   const currentPath = $derived(page.url.pathname.slice(path("/").length) || "/");
 
   const active = (item: { href: string; paths: string[] }) =>
-    item.href === "/"
-      ? currentPath === "/"
-      : item.paths.some((prefix) => currentPath.startsWith(prefix));
+    currentPath === item.href || item.paths.some((prefix) => currentPath.startsWith(prefix));
 
   const section = $derived(navigation.find((item) => active(item))?.label ?? "Workspace");
 
