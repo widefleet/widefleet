@@ -1112,9 +1112,44 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         "network allow --app 00000000-0000-4000-8000-0000000000aa 'https://gmail.googleapis.com'",
       );
       expect(templateInstalls).toEqual([{ name: "mail-reader" }]);
+
+      // Required secrets come from files, never from the command line.
+      const clientId = join(state, "google-client-id");
+      const clientSecret = join(state, "google-client-secret");
+      await writeFile(clientId, "synthetic-client-id");
+      await writeFile(clientSecret, "synthetic-client-secret");
+      await execute(
+        binary,
+        [
+          ...prefix,
+          "install",
+          "gmail",
+          "--secret-file",
+          `GOOGLE_CLIENT_ID=${clientId}`,
+          "--secret-file",
+          `GOOGLE_CLIENT_SECRET=${clientSecret}`,
+        ],
+        options,
+      );
+      expect(templateInstalls[1]).toEqual({
+        secrets: {
+          GOOGLE_CLIENT_ID: "synthetic-client-id",
+          GOOGLE_CLIENT_SECRET: "synthetic-client-secret",
+        },
+      });
+
+      for (const [argument, message] of [
+        ["GOOGLE_CLIENT_ID", "Use NAME=PATH"],
+        [`GOOGLE_CLIENT_ID=${join(state, "missing-secret")}`, "I/O failed"],
+      ] as const)
+        await expect(
+          execute(binary, [...prefix, "install", "gmail", "--secret-file", argument], options),
+        ).rejects.toThrow(message);
+
       expect(requests).toEqual([
         "GET /api/v1/catalog/templates?search=mail+%26+files",
         "GET /api/v1/catalog/templates/gmail",
+        "POST /api/v1/catalog/templates/gmail/install",
         "POST /api/v1/catalog/templates/gmail/install",
       ]);
 
@@ -1127,7 +1162,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           stderr: "Use a template ID from catalog templates list\n",
         });
 
-      expect(requests).toHaveLength(3);
+      expect(requests).toHaveLength(4);
     });
 
     it("preserves catalog listing in app list JSON", async () => {

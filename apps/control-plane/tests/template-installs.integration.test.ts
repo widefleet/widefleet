@@ -416,7 +416,7 @@ it("grants consented origins on the template page and requests them through the 
     // The page showed fewer origins than the template now declares.
     const changed = await runtime.templates.install(
       principal,
-      { templateId: "github", name: "github-changed" },
+      { templateId: "github", name: "github-changed", secrets: {} },
       { consentedNetwork: { backend: [], browser: [] } },
     );
 
@@ -426,7 +426,7 @@ it("grants consented origins on the template page and requests them through the 
     const granted = (
       await runtime.templates.install(
         principal,
-        { templateId: "github", name: "github-granted" },
+        { templateId: "github", name: "github-granted", secrets: {} },
         { consentedNetwork: github },
       )
     ).unwrap();
@@ -446,7 +446,7 @@ it("grants consented origins on the template page and requests them through the 
     const pending = (
       await runtime.templates.install(
         principal,
-        { templateId: "github", name: "github-pending" },
+        { templateId: "github", name: "github-pending", secrets: {} },
         { consentedNetwork: github },
       )
     ).unwrap();
@@ -584,7 +584,7 @@ it("does not install over an app deployed while the template builds", async () =
     // Installing from the page, whose consent must not reach the other app.
     const raced = await runtime.templates.install(
       principal,
-      { templateId: "gmail", name: "mail-race" },
+      { templateId: "gmail", name: "mail-race", secrets: {} },
       { consentedNetwork: github },
     );
 
@@ -608,6 +608,126 @@ it("does not install over an app deployed while the template builds", async () =
   });
 
   expect(record).toMatchObject({ templateId: null, templateCommit: null, description: null });
+});
+
+it("saves the secrets a template requires before its first deployment", async () => {
+  const runtime = await runtimeWith(builder);
+  const fixed = bundleResponse;
+  const required = ["SYNTHETIC_CLIENT_ID", "SYNTHETIC_CLIENT_SECRET"];
+
+  const principal = (
+    await runtime.identity.authenticate(new Request("http://localhost"), "platform:write")
+  ).unwrap();
+
+  // The template's Wrangler file requires two secrets, at the pinned commit
+  // and on its page.
+  vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+
+    if (url.pathname.endsWith("/templates/linear/wrangler.jsonc"))
+      return Response.json({
+        name: "linear",
+        main: "src/app.ts",
+        compatibility_date: "2026-10-01",
+        secrets: { required },
+      });
+
+    return (await templateRepository(url)) ?? originalFetch(input, init);
+  });
+
+  bundleResponse = () =>
+    Response.json(
+      bundleResult.parse({
+        worker,
+        map,
+        entry: "src/app.ts",
+        metadata: {
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          compatibility_flags: [],
+          bindings: [],
+          debug: { build_id: "d".repeat(64), source_maps: { "worker.js": mapName } },
+          web: true,
+          entrypoints: ["default"],
+          crons: [],
+          queue_consumers: [],
+          required_secrets: required,
+        },
+        warnings: [],
+      }),
+    );
+
+  try {
+    const page = await createApi(runtime)(
+      new Request("http://localhost/api/v1/catalog/templates/linear"),
+    );
+
+    expect(contract.appTemplate.parse(await page.json()).requiredSecrets).toEqual(required);
+
+    // Every required value is needed, and only those, before anything is built.
+    const missing = await install(runtime, "linear", {
+      name: "issues",
+      secrets: { SYNTHETIC_CLIENT_ID: "client" },
+    });
+
+    expect(missing.status).toBe(400);
+    expect(await missing.text()).toContain(
+      "Provide values for the template's required secrets: SYNTHETIC_CLIENT_SECRET",
+    );
+
+    const extra = await install(runtime, "linear", {
+      name: "issues",
+      secrets: { SYNTHETIC_CLIENT_ID: "client", SYNTHETIC_CLIENT_SECRET: "secret", OTHER: "x" },
+    });
+
+    expect(extra.status).toBe(400);
+    expect(await extra.text()).toContain("The template does not require OTHER");
+    expect(builderRequests).toEqual([]);
+    expect((await runtime.apps.named(principal, "issues")).unwrap()).toBeNull();
+
+    // Only members who may create apps install templates, and nothing is saved otherwise.
+    vi.mocked(runtime.identity.authenticate).mockResolvedValueOnce(
+      Result.ok({ ...principal, creator: false }),
+    );
+
+    const forbidden = await install(runtime, "linear", {
+      name: "issues",
+      secrets: { SYNTHETIC_CLIENT_ID: "client", SYNTHETIC_CLIENT_SECRET: "secret" },
+    });
+
+    expect(forbidden.status).toBe(403);
+    expect((await runtime.apps.named(principal, "issues")).unwrap()).toBeNull();
+
+    const response = await install(runtime, "linear", {
+      name: "issues",
+      secrets: { SYNTHETIC_CLIENT_ID: "client", SYNTHETIC_CLIENT_SECRET: "secret" },
+    });
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    const installed = contract.templateInstall.parse(await response.json());
+
+    expect(installed.deployment.status).toBe("queued");
+
+    // The values are app secrets, and the deployed version records its list.
+    const secrets = (await runtime.appSecrets.read(principal, installed.app.id)).unwrap();
+
+    expect(secrets).toMatchObject({ names: required, required });
+
+    const artifact = await environment.database.db.query.artifacts.findFirst({
+      where: (artifacts, { eq }) => eq(artifacts.id, installed.deployment.artifactId),
+    });
+
+    expect(contract.workerMetadata.parse(artifact?.metadata).required_secrets).toEqual(required);
+
+    // Removing a required secret is allowed; the page then lists it as missing.
+    const removed = (
+      await runtime.appSecrets.set(principal, installed.app.id, "SYNTHETIC_CLIENT_SECRET", null)
+    ).unwrap();
+
+    expect(removed).toMatchObject({ names: ["SYNTHETIC_CLIENT_ID"], required });
+  } finally {
+    bundleResponse = fixed;
+  }
 });
 
 it("keeps offering a template whose deployment was rejected", async () => {

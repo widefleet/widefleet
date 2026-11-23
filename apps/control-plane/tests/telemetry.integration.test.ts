@@ -225,6 +225,10 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
           createAppService(environment.database.db, configuration),
           createUploadService(environment.database.db, storage, configuration),
           createNetworkService(environment.database.db),
+          createAppSecrets(
+            environment.database.db,
+            environment.environment.PLATFORM_ENCRYPTION_KEY,
+          ),
         ),
       });
       const admin = environment.users.createUser({ email: "telemetry-admin@example.test" });

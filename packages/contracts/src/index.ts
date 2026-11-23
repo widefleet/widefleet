@@ -115,20 +115,6 @@ export const deployment = z.strictObject({
   message: z.string().nullable(),
 });
 
-export const templateInstallInput = templatePath.extend({
-  /** The new app's name; the template ID by default. */
-  name: appSlug.optional(),
-});
-
-export const templateInstall = z.strictObject({
-  app,
-  deployment,
-  /** Build notes, such as dependencies whose types could not be installed. */
-  warnings: z.array(z.string()),
-  /** Origins the template declares that the app is not allowed to reach yet. */
-  requestedNetwork: networkPolicy.optional(),
-});
-
 export const deploymentEvent = z.strictObject({
   id: z.number().int(),
   deploymentId: identifier,
@@ -467,9 +453,27 @@ export const appSecretPreparation = z.strictObject({
 
 export const appSecretStatus = z.strictObject({
   names: z.array(appSecretName),
+  /** The secrets the latest deployment's version requires, set or not. */
+  required: z.array(appSecretName),
   revision: z.number().int().nonnegative(),
   appliedRevision: z.number().int().nonnegative().nullable(),
   deployment: deployment.nullable(),
+});
+
+export const templateInstallInput = templatePath.extend({
+  /** The new app's name; the template ID by default. */
+  name: appSlug.optional(),
+  /** Values of the secrets the template requires, saved before its first deployment. */
+  secrets: z.record(appSecretName, appSecretValue).default({}),
+});
+
+export const templateInstall = z.strictObject({
+  app,
+  deployment,
+  /** Build notes, such as dependencies whose types could not be installed. */
+  warnings: z.array(z.string()),
+  /** Origins the template declares that the app is not allowed to reach yet. */
+  requestedNetwork: networkPolicy.optional(),
 });
 
 export const serviceAccessMode = z.enum(["approval_required", "organization"]);

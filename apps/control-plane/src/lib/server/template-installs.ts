@@ -2,13 +2,15 @@
 // current commit, and the result is published through the same upload path as
 // `widefleet deploy`, under the caller's authorization. An install never
 // replaces a deployed app: it creates the app, or continues an earlier install
-// whose app never received a deployment.
+// whose app never received a deployment. The values of the secrets the
+// template requires are saved with that first deployment.
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { z } from "zod";
 import type { AppBuilder } from "./app-builder.ts";
 import { templateDescription, templateSources } from "./app-templates.ts";
-import { templateProject } from "./template-project.ts";
+import { declaredSecrets, templateProject } from "./template-project.ts";
+import type { createAppSecrets } from "./app-secrets.ts";
 import type { createAppService } from "./apps.ts";
 import type { Configuration } from "./config.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -17,6 +19,8 @@ import type { createNetworkService } from "./network.ts";
 import { appAlreadyDeployed, type createUploadService } from "./uploads.ts";
 
 const encoder = new TextEncoder();
+
+const decoder = new TextDecoder();
 
 export const templateNetworkChanged =
   "The template's network access changed. Review it and install again.";
@@ -29,6 +33,7 @@ export const createTemplateInstalls = (
   >,
   uploads: Pick<ReturnType<typeof createUploadService>, "start" | "putAsset" | "publish">,
   network: Pick<ReturnType<typeof createNetworkService>, "change" | "read">,
+  secrets: Pick<ReturnType<typeof createAppSecrets>, "encrypt">,
   builder?: AppBuilder,
 ) => ({
   available: Boolean(builder),
@@ -93,6 +98,24 @@ export const createTemplateInstalls = (
         return yield* new InvalidOperation({
           code: "BAD_REQUEST",
           message: "The template's template.md has no readable description",
+        });
+
+      const wrangler = files["wrangler.jsonc"] ?? files["wrangler.json"];
+      const required = declaredSecrets(wrangler && decoder.decode(wrangler));
+
+      const unset = required.filter((secret) => !Object.hasOwn(input.secrets, secret));
+      const unrequired = Object.keys(input.secrets).filter((secret) => !required.includes(secret));
+
+      if (unset.length > 0)
+        return yield* new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: `Provide values for the template's required secrets: ${unset.join(", ")}`,
+        });
+
+      if (unrequired.length > 0)
+        return yield* new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: `The template does not require ${unrequired.join(", ")}. Set other secrets after installing.`,
         });
 
       // The builder bundles the code; static assets are uploaded as the CLI does.
@@ -182,7 +205,8 @@ export const createTemplateInstalls = (
       ];
 
       // Publishing checks again, under the app's lock, that the app was not
-      // deployed while the template was building.
+      // deployed while the template was building. The template's secrets are
+      // saved in the same step, so they never reach another deployment.
       const published = await uploads.publish(
         principal,
         installed.id,
@@ -190,7 +214,10 @@ export const createTemplateInstalls = (
         documented.documentation,
         modules,
         crypto.randomUUID(),
-        { firstDeployment: true },
+        {
+          firstDeployment: true,
+          ...(required.length > 0 && { secrets: await secrets.encrypt(input.secrets) }),
+        },
       );
 
       if (
