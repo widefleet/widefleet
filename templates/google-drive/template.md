@@ -86,10 +86,11 @@ for every method, its input and Google's description.
 
 ### File content
 
-`filesGetContent` and `revisionsGetContent` return a file's content as bytes, and
-`filesExport` converts a Google Docs, Sheets or Slides file to another type, such as
-`text/plain` or `application/pdf`. Results carry content up to 8 MiB; larger files
-return `too_large`.
+`filesGetContent` and `revisionsGetContent` return a file's content with its
+`contentType` and the content as `base64`, and `filesExport` converts a Google Docs,
+Sheets or Slides file to another type, such as `text/plain` or `application/pdf`.
+Results carry content up to 8 MiB; larger files return `too_large`. Through MCP,
+results are limited to 1 MiB.
 
 `filesCreateWithContent` and `filesUpdateWithContent` send a file's metadata and
 content in one upload. The content has its `mimeType` and either `text` or `base64`:

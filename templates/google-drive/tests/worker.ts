@@ -179,22 +179,13 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
         ),
       );
 
-    if (path === "/rpc/content" || path === "/rpc/export") {
-      const result =
-        path === "/rpc/content"
-          ? await app.filesGetContent({ fileId: url.searchParams.get("id") ?? "file-1" })
-          : await app.filesExport({ fileId: "doc-1", mimeType: "text/plain" });
-
-      // RPC carries the bytes; the test reads them as text.
+    if (path === "/rpc/content")
       return Response.json(
-        result.status === "connected" && "data" in result.data
-          ? {
-              contentType: result.data.contentType,
-              text: new TextDecoder().decode(result.data.data),
-            }
-          : result,
+        await app.filesGetContent({ fileId: url.searchParams.get("id") ?? "file-1" }),
       );
-    }
+
+    if (path === "/rpc/export")
+      return Response.json(await app.filesExport({ fileId: "doc-1", mimeType: "text/plain" }));
 
     if (path === "/rpc/upload")
       return Response.json(
