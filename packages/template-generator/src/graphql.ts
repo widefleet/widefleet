@@ -315,6 +315,9 @@ export const generateGraphql = (
     (rule) => hiddenRule.safeParse(rule).success,
   ).length;
 
+  // Types and method signatures both may use the JSON types.
+  const uses = (name: string) => new RegExp(`\\b${name}\\b`).test(models + methods.join(""));
+
   return {
     files: {
       "src/api.ts": `${header}import { WorkerEntrypoint } from "cloudflare:workers";
@@ -322,10 +325,10 @@ import type { Environment as TemplateEnvironment } from "./context.ts";
 import type { ${service.result} } from "./results.ts";
 import { type ${service.properties}, run } from "./run.ts";
 import type { Exact, ${["JsonObject", "JsonValue"]
-        .flatMap((used) => (new RegExp(`\\b${used}\\b`).test(models) ? [`${used}, `] : []))
+        .flatMap((used) => (uses(used) ? [`${used}, `] : []))
         .join(
           "",
-        )}Selection, ValueResult${/\bVariants\b/.test(models) ? ", Variants" : ""} } from "./selection.ts";
+        )}Selection, ValueResult${uses("Variants") ? ", Variants" : ""} } from "./selection.ts";
 
 ${models}/**
  * Every query and mutation of ${service.name}'s GraphQL API that a user's token can use,

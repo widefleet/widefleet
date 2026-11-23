@@ -29,5 +29,6 @@ export type LinearResult<T> =
       | { status: "connected"; data: T }
       | { status: "linear_error"; errors: LinearError[] }
       | { status: "declined" }
+      | { status: "too_large"; maximumBytes: number }
       | ConnectionProblem
     >;

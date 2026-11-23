@@ -103,7 +103,7 @@ it("lets members discover templates without creating apps or granting management
   }
 
   const filtered = await api(
-    new Request("http://localhost/api/v1/catalog/templates?search=PRIVATE"),
+    new Request("http://localhost/api/v1/catalog/templates?search=PULL%20REQUESTS"),
   );
 
   expect(

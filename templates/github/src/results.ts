@@ -30,5 +30,6 @@ export type GitHubResult<T> =
       | { status: "connected"; data: T }
       | { status: "github_error"; errors: GitHubError[] }
       | { status: "declined" }
+      | { status: "too_large"; maximumBytes: number }
       | ConnectionProblem
     >;

@@ -5,6 +5,7 @@ import { approvals } from "./approval.ts";
 import { authentication } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
+import { boundedJson, maximumResponseBytes } from "./input.ts";
 import { type GraphQLError, type GraphQLRequest, graphqlResponse } from "./graphql.ts";
 import { authorizationPage, connectionPage } from "./page.ts";
 
@@ -278,9 +279,12 @@ export const accountConnection = (environment: Environment, properties: Properti
       if (response.status === 429) return limited;
 
       // Linear answers request errors with GraphQL errors, partly with HTTP 400.
-      const parsed = response.headers.get("content-type")?.startsWith("application/json")
-        ? graphqlResponse.safeParse(await response.json())
-        : null;
+      const read = await boundedJson(response);
+
+      if (read.status === "too_large")
+        return { status: "too_large", maximumBytes: maximumResponseBytes } as const;
+
+      const parsed = read.body === null ? null : graphqlResponse.safeParse(read.body);
 
       // A failed response without GraphQL errors has no answer to read.
       if (!parsed?.success || (!response.ok && !parsed.data.errors?.length)) {

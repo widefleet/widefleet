@@ -55,8 +55,8 @@ export const mutations = {
   addProjectV2DraftIssue: "create",
   addProjectV2ItemById: "create",
   addPullRequestCreationCapBypassUsers: "update",
-  // Starts a pending review that only its author sees until it is submitted.
-  addPullRequestReview: "create",
+  // Submits the review at once when given an event such as APPROVE.
+  addPullRequestReview: "update",
   addPullRequestReviewComment: "create",
   addPullRequestReviewThread: "create",
   addPullRequestReviewThreadReply: "create",

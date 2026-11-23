@@ -393,6 +393,14 @@ describe("GitHub personal account app", () => {
 
     expect(Number(limited.retryAfter)).toBeGreaterThan(3590);
     expect(Number(limited.retryAfter)).toBeLessThanOrEqual(3601);
+    // Larger responses are not read.
+    upstream.state.errors = [{ type: "LARGE", message: "x".repeat(9 * 1024 * 1024) }];
+    upstream.state.apiHeaders.delete("x-ratelimit-remaining");
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "too_large",
+      maximumBytes: 8 * 1024 * 1024,
+    });
+    upstream.state.apiHeaders.set("x-ratelimit-remaining", "0");
     upstream.state.errors = [];
     // Requests that do not match GitHub's schema never reach GitHub.
     upstream.calls.length = 0;

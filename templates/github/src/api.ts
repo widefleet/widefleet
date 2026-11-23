@@ -52004,7 +52004,7 @@ export class GitHubApi extends WorkerEntrypoint<TemplateEnvironment, GitHubPrope
   /**
    * Adds a review to a Pull Request.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    *
    * @param input - The arguments:
    * - `input`: Parameters for AddPullRequestReview
@@ -52022,7 +52022,7 @@ export class GitHubApi extends WorkerEntrypoint<TemplateEnvironment, GitHubPrope
     return run(
       this.env,
       this.ctx.props,
-      { root: "Mutation", field: "addPullRequestReview", change: "create" },
+      { root: "Mutation", field: "addPullRequestReview", change: "update" },
       input,
       select,
     );

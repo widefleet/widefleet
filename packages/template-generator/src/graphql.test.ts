@@ -97,4 +97,19 @@ describe("GraphQL template generator", () => {
       "The API's types Selection have the names of imports of the generated file",
     );
   });
+
+  it("imports the JSON types that only method signatures use", () => {
+    const json = `scalar JSON\ntype Query { value(filter: JSON): JSON! }\ntype Mutation { reset: Boolean! }`;
+
+    const { files } = generateGraphql(
+      json,
+      { mutations: { reset: "update" }, queries: {} },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain(
+      "import type { Exact, JsonValue, Selection, ValueResult }",
+    );
+  });
 });

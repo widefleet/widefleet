@@ -130,8 +130,9 @@ missing access. A `setup_required` result lists missing secrets.
 `connection_required`, `reconnect_required` and `permission_required` provide a
 `connectUrl` for the user. `authentication_required` means the call has no signed-in
 user. `access_denied` means GitHub refused the request. Retry `refresh_failed` after
-a provider outage; respect `retryAfter` for `rate_limited`. A selection or input that
-does not match GitHub's schema fails before anything is sent.
+a provider outage; respect `retryAfter` for `rate_limited`. `too_large` means the
+response is larger than `maximumBytes` (8 MiB): select fewer fields or fewer items. A
+selection or input that does not match GitHub's schema fails before anything is sent.
 
 After connecting, verify a repository read through the consuming app. Users can
 disconnect their account on the GitHub app's page.

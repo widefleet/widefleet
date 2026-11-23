@@ -114,8 +114,9 @@ example for an unknown issue or invalid input. A `setup_required` result lists
 missing secrets. `connection_required` and `reconnect_required` provide a
 `connectUrl` for the user. `authentication_required` means the call has no signed-in
 user. Retry `refresh_failed` after a provider outage; respect `retryAfter` for
-`rate_limited`. A selection or input that does not match Linear's schema fails
-before anything is sent.
+`rate_limited`. `too_large` means the response is larger than `maximumBytes` (8 MiB):
+select fewer fields or fewer items. A selection or input that does not match Linear's
+schema fails before anything is sent.
 
 After connecting, verify an issue read through the consuming app. Users can
 disconnect their account on the Linear app's page.
