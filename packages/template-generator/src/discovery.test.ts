@@ -30,6 +30,7 @@ const document = JSON.stringify({
                 userId: { location: "path", type: "string", required: true, default: "me" },
                 id: { location: "path", type: "string", required: true },
                 view: { location: "query", type: "string", enum: ["full", "minimal"] },
+                types: { location: "query", type: "string", repeated: true, enum: ["x", "y"] },
               },
               response: { $ref: "Item" },
               scopes: ["https://example/readonly", "https://example/full"],
@@ -93,23 +94,40 @@ describe("Discovery template generator", () => {
     expect(api).toContain('kind?: "a" | "b";');
     expect(api).toContain("userId?: string;");
     expect(api).toContain("body: Item;");
+    // A repeated parameter with choices takes a list of them.
+    expect(api).toContain('types?: ("x" | "y")[];');
     expect(schema).toContain('"itemsSend":{"httpMethod":"POST"');
     expect(schema).toContain('"change":"send"');
     expect(schema).toContain('export const scopes = ["https://example/full"];');
     expect(schema).toContain('export const base = "https://example.googleapis.com/";');
   });
 
-  it("stops on changing methods the rules do not list and on rules the API no longer has", () => {
+  it("stops on changing methods the rules do not list", () => {
     expect(() =>
       generateDiscovery(
         document,
-        { operations: { "example.users.items.gone": "update" } },
+        { operations: { "example.users.items.delete": "delete" } },
         service,
         "",
       ),
-    ).toThrow(
-      /POST example\.users\.items\.send is new[\s\S]*DELETE example\.users\.items\.delete is new|example\.users\.items\.gone, which the API no longer offers/,
-    );
+    ).toThrow(/^POST example\.users\.items\.send is new; add it to the rules/);
+  });
+
+  it("stops on rules the API no longer has", () => {
+    expect(() =>
+      generateDiscovery(
+        document,
+        {
+          operations: {
+            "example.users.items.send": "send",
+            "example.users.items.delete": "delete",
+            "example.users.items.gone": "update",
+          },
+        },
+        service,
+        "",
+      ),
+    ).toThrow(/^The rules list example\.users\.items\.gone, which the API no longer offers$/);
   });
 
   it("leaves out hidden methods", () => {

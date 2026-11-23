@@ -302,7 +302,9 @@ export const generateDiscovery = (
     };
 
     const fields = parameters.map(([key, value]) => {
-      const type = `${typeOf(parameterSchema(value), "    ")}${value.repeated ? "[]" : ""}`;
+      const single = typeOf(parameterSchema(value), "    ");
+      const item = single.includes(" | ") ? `(${single})` : single;
+      const type = value.repeated ? `${item}[]` : single;
       const optional = !value.required || value.default !== undefined;
 
       return `${comment(describe(parameterSchema(value)), "    ")}    ${propertyName(key)}${optional ? "?" : ""}: ${type};`;

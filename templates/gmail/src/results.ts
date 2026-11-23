@@ -31,5 +31,6 @@ export type GmailResult<T> =
       | { status: "connected"; data: T }
       | { status: "gmail_error"; error: GmailError }
       | { status: "declined" }
+      | { status: "too_large"; maximumBytes: number }
       | ConnectionProblem
     >;

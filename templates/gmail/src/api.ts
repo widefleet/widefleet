@@ -1151,7 +1151,7 @@ export class GmailApi extends WorkerEntrypoint<Environment, GmailProperties> {
       /**
        * History types to be returned by the function
        */
-      historyTypes?: "messageAdded" | "messageDeleted" | "labelAdded" | "labelRemoved"[];
+      historyTypes?: ("messageAdded" | "messageDeleted" | "labelAdded" | "labelRemoved")[];
       /**
        * Page token to retrieve a specific page of results in the list.
        */

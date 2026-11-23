@@ -56,11 +56,12 @@ export const googleRequest = (
   input: Arguments,
   select?: FieldSelection,
 ) => {
-  const values = z.record(z.string(), definedJson).parse(input);
+  // Optional arguments may be passed as undefined, which leaves them out.
+  const values = z.record(z.string(), definedJson.optional()).parse(input);
   const known = new Set([...Object.keys(operation.pathParameters), ...operation.queryParameters]);
 
-  for (const key of Object.keys(values))
-    if (!known.has(key) && !(key === "body" && operation.body))
+  for (const [key, value] of Object.entries(values))
+    if (value !== undefined && !known.has(key) && !(key === "body" && operation.body))
       throw new InvalidRequest(`${method} has no argument ${key}`);
 
   const path = operation.path.replace(/\{\+?(\w+)\}/g, (_, key: string) => {

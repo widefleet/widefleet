@@ -3,7 +3,13 @@ import { approvalAnswer, approvals, asks, changeQuestion } from "./approval.ts";
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { googleErrorOf, googleRequest } from "./google.ts";
-import { type Arguments, definedJson, type FieldSelection } from "./input.ts";
+import {
+  type Arguments,
+  boundedJson,
+  definedJson,
+  type FieldSelection,
+  maximumResponseBytes,
+} from "./input.ts";
 import type { GmailResult } from "./results.ts";
 import { base, operations } from "./schema.ts";
 
@@ -55,9 +61,11 @@ export const run = async <T>(
 
   if (response.status === 401) return { status: "reconnect_required", connectUrl };
 
-  const body = response.headers.get("content-type")?.startsWith("application/json")
-    ? definedJson.parse(await response.json())
-    : null;
+  const read = await boundedJson(response);
+
+  if (read.status === "too_large")
+    return { status: "too_large", maximumBytes: maximumResponseBytes };
+  const { body } = read;
 
   if (response.ok)
     // SAFETY: Gmail answered the request written from this method's selection,

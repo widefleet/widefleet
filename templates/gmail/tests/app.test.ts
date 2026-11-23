@@ -230,6 +230,16 @@ describe("Gmail personal account app", () => {
         payload: { headers: [{ name: "Subject", value: "Greetings" }] },
       },
     });
+    // Larger responses are not read.
+    upstream.state.answer = {
+      status: 200,
+      body: { id: "big", raw: "x".repeat(9 * 1024 * 1024) },
+      headers: {},
+    };
+    expect(await (await alice.request("/rpc/message?id=big")).json()).toEqual({
+      status: "too_large",
+      maximumBytes: 8 * 1024 * 1024,
+    });
     upstream.state.answer = {
       status: 404,
       body: {

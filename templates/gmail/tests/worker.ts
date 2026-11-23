@@ -169,7 +169,8 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
     if (path === "/rpc/message")
       return Response.json(
         await app.messagesGet(
-          { id: url.searchParams.get("id") ?? "message-1" },
+          // @ts-expect-error JavaScript callers may pass optional arguments as undefined.
+          { id: url.searchParams.get("id") ?? "message-1", format: undefined, userId: undefined },
           { id: true, snippet: true, payload: { headers: { name: true, value: true } } },
         ),
       );

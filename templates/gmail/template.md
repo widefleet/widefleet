@@ -125,8 +125,9 @@ for an unknown message. A `setup_required` result lists missing secrets.
 `permission_required` means the account granted fewer scopes than the connector needs
 and must reconnect. `authentication_required` means the call has no signed-in user.
 Retry `refresh_failed` after a provider outage; respect `retryAfter` for
-`rate_limited`. A selection or input that does not match the method fails before
-anything is sent.
+`rate_limited`. `too_large` means the response is larger than `maximumBytes` (8 MiB):
+select fewer fields, or read a large attachment in a calling app. A selection or input
+that does not match the method fails before anything is sent.
 
 After connecting, verify a message search through the consuming app. Users can disconnect
 their account on the Gmail app's page.
