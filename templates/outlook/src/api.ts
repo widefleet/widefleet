@@ -749,6 +749,10 @@ export type InternetMessageHeader = {
 };
 
 export type ItemAttachment = Attachment & {
+  /**
+   * The attached message or event. Navigation property.
+   */
+  item?: Message | Event | Contact;
   "@odata.type"?: string;
 };
 

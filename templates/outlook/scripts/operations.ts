@@ -30,9 +30,13 @@ const attachmentTypes = [
   "microsoft.graph.referenceAttachment",
 ];
 
-// A message carries its attachments inline when it is sent or drafted.
+// A message carries its attachments inline when it is sent or drafted, and an
+// item attachment carries the message, event or contact it attaches.
 export const navigation = {
   "microsoft.graph.message": { attachments: attachmentTypes },
+  "microsoft.graph.itemAttachment": {
+    item: ["microsoft.graph.message", "microsoft.graph.event", "microsoft.graph.contact"],
+  },
 };
 
 export const operations = {

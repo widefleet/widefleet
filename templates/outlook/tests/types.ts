@@ -60,7 +60,22 @@ export const examples = async () => {
   if (attached.status === "connected" && "contentBytes" in attached.data)
     void attached.data.contentBytes;
 
-  // A message sends its file attachments inline.
+  // An item attachment carries the event it attaches.
+  await outlook.addAttachment({
+    messageId: "draft-1",
+    body: {
+      "@odata.type": "#microsoft.graph.itemAttachment",
+      name: "Planning",
+      item: {
+        "@odata.type": "#microsoft.graph.event",
+        subject: "Planning",
+        start: { dateTime: "2026-12-01T10:00:00", timeZone: "UTC" },
+        end: { dateTime: "2026-12-01T11:00:00", timeZone: "UTC" },
+      },
+    },
+  });
+
+  // A message sends its file and item attachments inline.
   await outlook.sendMail({
     body: {
       Message: {
@@ -72,6 +87,11 @@ export const examples = async () => {
             name: "report.txt",
             contentType: "text/plain",
             contentBytes: "SGVsbG8=",
+          },
+          {
+            "@odata.type": "#microsoft.graph.itemAttachment",
+            name: "Earlier message",
+            item: { "@odata.type": "#microsoft.graph.message", subject: "Earlier" },
           },
         ],
       },
