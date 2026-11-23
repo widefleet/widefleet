@@ -49,16 +49,19 @@ export const examples = async () => {
       salesInvoiceId,
     });
 
+    // A question is answered through the binding's `withInput`; the PDF follows
+    // once the invoice is posted.
     if (posted.resultType === "input_required") void posted.inputRequests.approve.message;
+    else if (posted.status === "connected") {
+      const pdf = await businessCentral.downloadSalesInvoicePdf({
+        environment,
+        companyId,
+        salesInvoiceId,
+      });
 
-    const pdf = await businessCentral.downloadSalesInvoicePdf({
-      environment,
-      companyId,
-      salesInvoiceId,
-    });
-
-    if (pdf.status === "connected" && "base64" in pdf.data)
-      void [pdf.data.contentType, pdf.data.base64];
+      if (pdf.status === "connected" && "base64" in pdf.data)
+        void [pdf.data.contentType, pdf.data.base64];
+    }
   }
 
   // A change names the version it was read at.

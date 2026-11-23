@@ -110,7 +110,9 @@ if (environment) {
 ```
 
 A document can be created with its lines in one call. Posting it is an action of
-its own, and its PDF arrives as `base64`:
+its own, which asks the user first at the default approval level. Show the question
+and call again with the user's answer through `withInput`; download the PDF, which
+arrives as `base64`, once the invoice is posted:
 
 ```ts
 const created = await env.BUSINESS_CENTRAL.createSalesInvoice({
@@ -124,14 +126,23 @@ const created = await env.BUSINESS_CENTRAL.createSalesInvoice({
 
 if (created.status === "connected" && created.data.id) {
   const salesInvoiceId = created.data.id;
-  await env.BUSINESS_CENTRAL.postSalesInvoice({ environment, companyId, salesInvoiceId });
-  const pdf = await env.BUSINESS_CENTRAL.downloadSalesInvoicePdf({
-    environment,
-    companyId,
-    salesInvoiceId,
-  });
-  if (pdf.status === "connected" && "base64" in pdf.data) {
-    console.log(pdf.data.contentType, pdf.data.base64.length);
+  const post = { environment, companyId, salesInvoiceId };
+  let posted = await env.BUSINESS_CENTRAL.postSalesInvoice(post);
+
+  if (posted.resultType === "input_required") {
+    // Your app shows the question and returns the user's answer, such as { action: "accept" }.
+    const answer = await askUser(posted.inputRequests.approve.message);
+    posted = await env.BUSINESS_CENTRAL.withInput({
+      inputResponses: { approve: answer },
+      requestState: posted.requestState,
+    }).postSalesInvoice(post);
+  }
+
+  if (posted.status === "connected") {
+    const pdf = await env.BUSINESS_CENTRAL.downloadSalesInvoicePdf(post);
+    if (pdf.status === "connected" && "base64" in pdf.data) {
+      console.log(pdf.data.contentType, pdf.data.base64.length);
+    }
   }
 }
 ```
