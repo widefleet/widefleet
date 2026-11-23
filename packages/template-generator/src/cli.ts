@@ -19,7 +19,7 @@ import { z } from "zod";
 import { generateDiscovery } from "./discovery.ts";
 import { generateGraphql } from "./graphql.ts";
 import { generateOpenapi, parseDescription } from "./openapi.ts";
-import { bundleReferences } from "./references.ts";
+import { bundleReferences, localCopy } from "./references.ts";
 
 const [target, sourceArgument] = process.argv.slice(2);
 
@@ -132,12 +132,7 @@ const source = sourcePath
 // A file the description refers to: next to the source file when there is one
 // at the same path relative to the source's URL, otherwise downloaded.
 const load = async (url: string) => {
-  const folder = new URL(".", generator.source).href;
-
-  const local =
-    sourcePath && url.startsWith(folder)
-      ? join(dirname(sourcePath), url.slice(folder.length))
-      : null;
+  const local = sourcePath ? localCopy(url, generator.source, sourcePath) : null;
 
   return parseDescription(
     local && existsSync(local) ? readFileSync(local, "utf8") : await download(url),

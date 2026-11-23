@@ -51,6 +51,11 @@ const upload = z
       ),
   );
 
+// An object a multipart form sends as a JSON part, as OpenAPI's default encoding does.
+const jsonPart = z
+  .record(z.string(), definedJson)
+  .transform((value) => new Blob([JSON.stringify(value)], { type: "application/json" }));
+
 // A form's fields as text, or in multipart forms also files: values, and lists
 // of them, which repeat the field unless the operation joins them into one
 // value. Fields passed as undefined are left out.
@@ -162,8 +167,8 @@ export const restRequest = (
       method,
       operation,
       body,
-      z.union([text, upload]),
-      "values, lists and files",
+      z.union([text, upload, jsonPart]),
+      "values, lists, files and objects",
     ))
       form.append(name, item);
 

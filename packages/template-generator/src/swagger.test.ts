@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { generateOpenapi } from "./openapi.ts";
-import { bundleReferences } from "./references.ts";
+import { bundleReferences, localCopy } from "./references.ts";
 import type { Json } from "./rules.ts";
+import { upgradeSwagger } from "./swagger.ts";
 
 // A Swagger 2.0 description in the shape Strava publishes, with its schemas in
 // sibling files.
@@ -477,6 +478,112 @@ describe("Swagger lists, paths and references", () => {
       },
       paths: {
         "/pets": { get: { responses: { "200": { schema: { $ref: "#/definitions/Pet" } } } } },
+      },
+    });
+  });
+});
+
+describe("Form shapes, local copies and literal data", () => {
+  const formWith = (type: string) => ({
+    openapi: "3.0.3",
+    servers: [{ url: "https://api.example.test" }],
+    paths: {
+      "/uploads": {
+        post: {
+          operationId: "createUpload",
+          requestBody: {
+            content: {
+              [type]: {
+                schema: {
+                  type: "object",
+                  properties: {
+                    file: { type: "string", format: "binary" },
+                    metadata: { type: "object", properties: { title: { type: "string" } } },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "204": { description: "Done." } },
+        },
+      },
+    },
+  });
+
+  const rules = {
+    operations: { createUpload: { name: "createUpload", change: "create" } },
+  } as const;
+
+  it("types a multipart form's objects, which go as JSON parts, and refuses objects in plain forms", () => {
+    expect(
+      generateOpenapi(formWith("multipart/form-data"), rules, service, "").files["src/api.ts"],
+    ).toMatch(/metadata\?: \{\n\s+title\?: string;\n\s+\};/);
+    expect(() =>
+      generateOpenapi(formWith("application/x-www-form-urlencoded"), rules, service, ""),
+    ).toThrow("createUpload's form field metadata is an object, which a form cannot send");
+  });
+
+  it("finds referred files beside a local copy, decoded and in parent folders", () => {
+    const source = "https://api.example.test/specs/v3/swagger.json";
+    const file = "/work/strava/swagger.json";
+
+    expect(localCopy("https://api.example.test/specs/v3/Pet%20Details.json", source, file)).toBe(
+      "/work/strava/Pet Details.json",
+    );
+    expect(localCopy("https://api.example.test/specs/shared/x.json", source, file)).toBe(
+      "/work/shared/x.json",
+    );
+    expect(localCopy("https://other.example.test/specs/v3/x.json", source, file)).toBeNull();
+  });
+
+  it("leaves references in examples, defaults, enums, constants and extensions as data", async () => {
+    const description = {
+      swagger: "2.0",
+      host: "api.example.test",
+      definitions: {
+        Model: {
+          type: "object",
+          example: { $ref: "https://example.test/model" },
+          default: { $ref: "#/definitions/Model" },
+          "x-sample": { $ref: "https://example.test/sample" },
+          properties: {
+            kind: { type: "string", enum: [{ $ref: "https://example.test/kind" }] },
+            // A property named like a keyword is still a schema.
+            example: { $ref: "https://api.example.test/swagger/child.json#/Child" },
+          },
+        },
+      },
+      paths: {},
+    };
+
+    const bundled = await bundleReferences(description, source, async (url) => {
+      if (url !== "https://api.example.test/swagger/child.json") throw new Error(`Loaded ${url}`);
+
+      return { Child: { type: "string" } };
+    });
+
+    expect(bundled).toMatchObject({
+      definitions: {
+        Model: {
+          example: { $ref: "https://example.test/model" },
+          "x-sample": { $ref: "https://example.test/sample" },
+          properties: {
+            kind: { enum: [{ $ref: "https://example.test/kind" }] },
+            example: { $ref: "#/definitions/Child" },
+          },
+        },
+        Child: { type: "string" },
+      },
+    });
+    // The upgrade moves references to schemas, but not those inside data.
+    expect(upgradeSwagger(bundled)).toMatchObject({
+      components: {
+        schemas: {
+          Model: {
+            default: { $ref: "#/definitions/Model" },
+            properties: { example: { $ref: "#/components/schemas/Child" } },
+          },
+        },
       },
     });
   });

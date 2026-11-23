@@ -2,9 +2,31 @@
 // description, so the generator reads one document. Strava's Swagger
 // description keeps its schemas in sibling files, such as
 // `activity.json#/DetailedActivity`, which refer to each other.
+import { dirname, join, posix } from "node:path";
 import { z } from "zod";
-import { type Json, jsonEntries, jsonObject, type JsonObject } from "./rules.ts";
+import { type Json, jsonEntries, jsonObject, type JsonObject, literalData } from "./rules.ts";
 import { isSwagger } from "./swagger.ts";
+
+/**
+ * Where a local copy of the description, at `file`, keeps the file a reference
+ * names: at the same path relative to it as the reference's URL to the
+ * description's `source` URL, decoded, so `Pet%20Details.json` is
+ * `Pet Details.json` and `../shared/x.json` lies beside the copy's folder.
+ * Files on other origins have no local copy.
+ */
+export const localCopy = (url: string, source: string, file: string) => {
+  const target = new URL(url);
+  const home = new URL(source);
+
+  if (target.origin !== home.origin) return null;
+
+  const relative = posix.relative(
+    decodeURIComponent(new URL(".", home).pathname),
+    decodeURIComponent(target.pathname),
+  );
+
+  return join(dirname(file), ...relative.split("/"));
+};
 
 /** Reads a document the description refers to, by its URL. */
 export type LoadDocument = (url: string) => Promise<Json>;
@@ -31,13 +53,15 @@ const external = (key: string, entry: Json, inside: boolean) => {
   return key === "$ref" && ref.success && (inside || !ref.data.startsWith("#")) ? ref.data : null;
 };
 
-// Whether a value refers to another file anywhere.
-const refersOut = (value: Json): boolean => {
-  if (Array.isArray(value)) return value.some(refersOut);
+// Whether a value refers to another file anywhere outside literal data, such as examples.
+const refersOut = (value: Json, parent: string | null = null): boolean => {
+  if (Array.isArray(value)) return value.some((entry) => refersOut(entry));
 
   return (
     jsonEntries(value)?.some(
-      ([key, entry]) => external(key, entry, false) !== null || refersOut(entry),
+      ([key, entry]) =>
+        !literalData(key, parent) &&
+        (external(key, entry, false) !== null || refersOut(entry, key)),
     ) ?? false
   );
 };
@@ -121,7 +145,12 @@ export const bundleReferences = async (
   };
 
   // Local references of the description stay; those of a referred file are its own.
-  const walk = async (value: Json, base: string | null): Promise<Json> => {
+  // Literal data, such as examples, stays as it is.
+  const walk = async (
+    value: Json,
+    base: string | null,
+    parent: string | null = null,
+  ): Promise<Json> => {
     if (Array.isArray(value)) return Promise.all(value.map((entry) => walk(entry, base)));
     const entries = jsonEntries(value);
 
@@ -130,8 +159,11 @@ export const bundleReferences = async (
     return Object.fromEntries(
       await Promise.all(
         entries.map(async ([key, entry]) => {
+          if (literalData(key, parent)) return [key, entry] as const;
           const ref = external(key, entry, base !== null);
-          const walked = ref === null ? await walk(entry, base) : await resolve(ref, base ?? url);
+
+          const walked =
+            ref === null ? await walk(entry, base, key) : await resolve(ref, base ?? url);
 
           return [key, walked] as const;
         }),

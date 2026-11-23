@@ -388,6 +388,34 @@ export const generateOpenapi = (
   // The schemas a multipart body's type writes out, which a schema may not repeat.
   const inlined: string[] = [];
 
+  // A form schema's fields, through a reference.
+  const fieldsOf = (value: Schema | undefined): Record<string, Schema> =>
+    value?.$ref
+      ? fieldsOf(schemas[value.$ref.replace("#/components/schemas/", "")])
+      : (value?.properties ?? {});
+
+  // Whether a field holds objects, or lists of them, through references.
+  const holdsObjects = (value: Schema, seen: Set<string>): boolean => {
+    if (value.$ref) {
+      const key = value.$ref.replace("#/components/schemas/", "");
+      const target = schemas[key];
+
+      if (seen.has(key) || !target) return false;
+      seen.add(key);
+
+      return holdsObjects(target, seen);
+    }
+
+    return (
+      value.type === "object" ||
+      value.properties !== undefined ||
+      (value.items !== undefined && holdsObjects(value.items, seen)) ||
+      [...(value.allOf ?? []), ...(value.anyOf ?? []), ...(value.oneOf ?? [])].some((part) =>
+        holdsObjects(part, seen),
+      )
+    );
+  };
+
   // Whether a schema holds binary strings, which a multipart body uploads as files.
   const carriesFiles = (value: Schema, seen: Set<string>): boolean => {
     if (value.$ref) {
@@ -768,6 +796,12 @@ export const generateOpenapi = (
 
       return entry ? [{ kind, schema: formSchema(id, entry.schema, rule.fields), entry }] : [];
     })[0];
+
+    // Multipart forms send objects as JSON parts; plain forms have no encoding for them.
+    if (form?.kind === "form")
+      for (const [name, field] of Object.entries(fieldsOf(form.schema)))
+        if (holdsObjects(field, new Set()))
+          throw new Error(`${id}'s form field ${name} is an object, which a form cannot send`);
 
     // Form fields whose lists the encoding joins into one value.
     const formLists = Object.fromEntries(

@@ -4,7 +4,7 @@
 // path and query parameters with their list formats, JSON and form bodies, and
 // the content of answers.
 import { z } from "zod";
-import { json, type Json, jsonEntries, jsonObject, type JsonObject } from "./rules.ts";
+import { json, type Json, jsonEntries, jsonObject, type JsonObject, literalData } from "./rules.ts";
 
 const parameter = z.looseObject({
   name: z.string(),
@@ -75,9 +75,10 @@ const listStyles = {
 
 const listStyle = z.enum(["csv", "ssv", "pipes", "multi", "tsv"]);
 
-// References to definitions become references to OpenAPI 3's schemas, at every depth.
-const moved = (value: Json): Json => {
-  if (Array.isArray(value)) return value.map(moved);
+// References to definitions become references to OpenAPI 3's schemas, at
+// every depth outside literal data, such as examples.
+const moved = (value: Json, parent: string | null = null): Json => {
+  if (Array.isArray(value)) return value.map((entry) => moved(entry));
   const entries = jsonEntries(value);
 
   if (!entries) return value;
@@ -86,11 +87,13 @@ const moved = (value: Json): Json => {
     entries.map(([key, entry]) => {
       const ref = z.string().safeParse(entry);
 
+      if (literalData(key, parent)) return [key, entry];
+
       return [
         key,
         key === "$ref" && ref.success
           ? ref.data.replace(/^#\/definitions\//, "#/components/schemas/")
-          : moved(entry),
+          : moved(entry, key),
       ];
     }),
   );
@@ -281,7 +284,7 @@ export const upgradeSwagger = (description: Json): Json => {
   );
 
   const servers = [{ url: `${scheme}://${api.host}${api.basePath ?? ""}` }];
-  const components = { schemas: moved(api.definitions ?? {}) };
+  const components = { schemas: moved(api.definitions ?? {}, "definitions") };
 
   return api.info === undefined
     ? { openapi: "3.0.3", servers, paths, components }

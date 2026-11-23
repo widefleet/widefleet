@@ -214,9 +214,27 @@ describe("REST requests", () => {
     expect([file.type, await file.text()]).toEqual(["application/gpx+xml", "<gpx/>"]);
     const bytes = z.instanceof(Blob).parse(sent.get("bytes"));
     expect([...new Uint8Array(await bytes.arrayBuffer())]).toEqual([0x00, 0xff]);
-    expect(() =>
-      restRequest(base, "upload", multipart, { body: { file: { mimeType: "text/plain" } } }),
-    ).toThrow(new InvalidRequest("upload takes its body as fields of values, lists and files"));
+
+    // Objects, and each object of a list, are JSON parts, as OpenAPI encodes them by default.
+    const described = z.instanceof(FormData).parse(
+      restRequest(base, "upload", multipart, {
+        body: { metadata: { title: "Ride", laps: [1, 2] }, notes: [{ text: "a" }, { text: "b" }] },
+      }).init.body,
+    );
+
+    const metadata = z.instanceof(Blob).parse(described.get("metadata"));
+    expect([metadata.type, await metadata.text()]).toEqual([
+      "application/json",
+      '{"title":"Ride","laps":[1,2]}',
+    ]);
+    expect(
+      await Promise.all(
+        described.getAll("notes").map((part) => z.instanceof(Blob).parse(part).text()),
+      ),
+    ).toEqual(['{"text":"a"}', '{"text":"b"}']);
+    expect(() => restRequest(base, "upload", multipart, { body: "file" })).toThrow(
+      new InvalidRequest("upload takes its body as fields of values, lists, files and objects"),
+    );
   });
 
   it("returns download addresses and small content", async () => {
