@@ -45,21 +45,98 @@ const fieldsOf = (type: string) => own<Fields>(graph, type);
 
 const aliasSeparator = "__on__";
 
-const aliased = /^(.+)__on__([_A-Za-z][_0-9A-Za-z]*)$/;
+// Two selections of one field, such as a field selected for every type and in
+// `... on Variant`, each return some of its fields: the result holds them together.
+const merge = (left: JsonValue | undefined, right: JsonValue): JsonValue => {
+  if (left === undefined) return right;
 
-/** A result with the names its selection used: `state__on__Issue` is `state` again. */
-export const restoreAliases = (value: JsonValue): JsonValue => {
-  if (Array.isArray(value)) return value.map(restoreAliases);
+  if (Array.isArray(left) && Array.isArray(right))
+    return right.map((entry, index) => merge(left[index], entry));
+  const leftObject = selection.safeParse(left);
+  const rightObject = selection.safeParse(right);
+
+  if (!leftObject.success || !rightObject.success) return right;
+  const merged = { ...leftObject.data };
+
+  for (const [key, entry] of Object.entries(rightObject.data))
+    merged[key] = merge(own(merged, key), entry);
+
+  return merged;
+};
+
+// Reads the fields a selection names from one object of the response, under the
+// alias `field__on__Variant` inside `... on Variant`. Values of JSON fields stay
+// as the provider returned them.
+const collect = (
+  type: string,
+  chosen: Selection,
+  variant: string | undefined,
+  object: Selection,
+  result: Record<string, JsonValue>,
+) => {
+  const known = fieldsOf(type) ?? {};
+
+  for (const [name, nestedSelection] of Object.entries(chosen)) {
+    if (name === "$args") continue;
+
+    if (name === "$on") {
+      const typename = z.string().safeParse(own(object, "__typename"));
+      const variants = selection.safeParse(nestedSelection);
+
+      const fields =
+        variants.success && typename.success ? own(variants.data, typename.data) : undefined;
+
+      const variantFields = selection.safeParse(fields);
+
+      if (typename.success && variantFields.success)
+        collect(typename.data, variantFields.data, typename.data, object, result);
+      continue;
+    }
+
+    const entry = own(object, variant ? `${name}${aliasSeparator}${variant}` : name);
+
+    if (entry === undefined) continue;
+    const [target] = own<Field>(known, name) ?? [];
+    const nested = selection.safeParse(nestedSelection);
+
+    result[name] = merge(
+      own(result, name),
+      target !== undefined && fieldsOf(target) && nested.success
+        ? restored(target, nested.data, entry)
+        : entry,
+    );
+  }
+
+  const typename = own(object, "__typename");
+
+  if (typename !== undefined) result["__typename"] = typename;
+};
+
+const restored = (type: string, chosen: Selection, value: JsonValue): JsonValue => {
+  if (Array.isArray(value)) return value.map((entry) => restored(type, chosen, entry));
   const object = selection.safeParse(value);
 
   if (!object.success) return value;
+  const result: Record<string, JsonValue> = {};
+  collect(type, chosen, undefined, object.data, result);
 
-  return Object.fromEntries(
-    Object.entries(object.data).map(([key, entry]) => [
-      aliased.exec(key)?.[1] ?? key,
-      restoreAliases(entry),
-    ]),
-  );
+  return result;
+};
+
+/**
+ * A query's or mutation's result with the field names its selection used:
+ * `state__on__Issue` is `state` again.
+ */
+export const graphqlResult = (
+  root: "Query" | "Mutation",
+  field: string,
+  select: FieldSelection | undefined,
+  value: JsonValue,
+): JsonValue => {
+  const [target = ""] = own<Field>(fieldsOf(root) ?? {}, field) ?? [];
+  const chosen = selection.safeParse(select);
+
+  return fieldsOf(target) && chosen.success ? restored(target, chosen.data, value) : value;
 };
 
 export type GraphQLRequest = { query: string; variables: Record<string, JsonValue> };
@@ -103,7 +180,7 @@ export const graphqlRequest = (
 
   // Fields inside `... on Variant` take the alias `field__on__Variant`: two
   // variants may have a field of one name with different types, which GraphQL
-  // only accepts under different names. restoreAliases undoes it in the result.
+  // only accepts under different names. graphqlResult undoes it in the result.
   const fields = (type: string, chosen: Selection, variant?: string): string => {
     const named = (name: string) =>
       variant ? `${name}${aliasSeparator}${variant}: ${name}` : name;

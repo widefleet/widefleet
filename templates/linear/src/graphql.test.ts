@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { graphqlRequest } from "./graphql.ts";
+import { graphqlRequest, graphqlResult } from "./graphql.ts";
 import { type Arguments, type FieldSelection, InvalidRequest } from "./input.ts";
 
 describe("Linear GraphQL requests", () => {
@@ -112,5 +112,13 @@ describe("Linear GraphQL requests", () => {
     expect(invalid({ id: "ENG-1" }, { title: 1 })).toThrow(
       "Select Issue.title with true or an object",
     );
+  });
+
+  it("leaves the keys of JSON values as Linear stored them", () => {
+    const metadata = { status__on__Issue: "open", status: "closed" };
+
+    expect(
+      graphqlResult("Query", "attachment", { id: true, metadata: true }, { id: "a", metadata }),
+    ).toEqual({ id: "a", metadata });
   });
 });

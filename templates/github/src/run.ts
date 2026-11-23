@@ -2,7 +2,7 @@ import { z } from "zod";
 import { approvalAnswer, approvals, asks, type Change, changeQuestion } from "./approval.ts";
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
-import { graphqlRequest, restoreAliases } from "./graphql.ts";
+import { graphqlRequest, graphqlResult } from "./graphql.ts";
 import { type Arguments, definedJson, type FieldSelection } from "./input.ts";
 import type { GitHubResult } from "./results.ts";
 
@@ -56,5 +56,13 @@ export const run = async <T>(
 
   // SAFETY: GitHub answered the request written from this method's selection,
   // which its generated signature types as T.
-  return { status: "connected", data: restoreAliases(response.data[operation.field] ?? null) as T };
+  return {
+    status: "connected",
+    data: graphqlResult(
+      operation.root,
+      operation.field,
+      select,
+      response.data[operation.field] ?? null,
+    ) as T,
+  };
 };

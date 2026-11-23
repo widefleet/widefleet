@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { graphqlRequest, restoreAliases } from "./graphql.ts";
+import { graphqlRequest, graphqlResult } from "./graphql.ts";
 import { type Arguments, type FieldSelection, InvalidRequest } from "./input.ts";
 
 describe("GitHub GraphQL requests", () => {
@@ -59,17 +59,46 @@ describe("GitHub GraphQL requests", () => {
       "query($v0: String!, $v1: SearchType!, $v2: Int) { search(query: $v0, type: $v1, first: $v2) { nodes { __typename ... on Issue { state__on__Issue: state } ... on PullRequest { state__on__PullRequest: state } } } }",
     );
     expect(
-      restoreAliases({
-        nodes: [
-          { __typename: "Issue", state__on__Issue: "OPEN" },
-          { __typename: "PullRequest", state__on__PullRequest: "MERGED", author: { login: "a" } },
-        ],
-      }),
+      graphqlResult(
+        "Query",
+        "search",
+        { nodes: { $on: { Issue: { state: true }, PullRequest: { state: true } } } },
+        {
+          nodes: [
+            { __typename: "Issue", state__on__Issue: "OPEN" },
+            { __typename: "PullRequest", state__on__PullRequest: "MERGED" },
+          ],
+        },
+      ),
     ).toEqual({
       nodes: [
         { __typename: "Issue", state: "OPEN" },
-        { __typename: "PullRequest", state: "MERGED", author: { login: "a" } },
+        { __typename: "PullRequest", state: "MERGED" },
       ],
+    });
+    // A field selected for every type and in a fragment holds the fields of both.
+    expect(
+      graphqlResult(
+        "Query",
+        "repository",
+        {
+          object: {
+            $args: { expression: "main:README.md" },
+            repository: { name: true },
+            $on: { Blob: { repository: { id: true }, text: true } },
+          },
+        },
+        {
+          object: {
+            repository: { name: "project" },
+            __typename: "Blob",
+            repository__on__Blob: { id: "R_1" },
+            text__on__Blob: "Hello",
+          },
+        },
+      ),
+    ).toEqual({
+      object: { repository: { name: "project", id: "R_1" }, __typename: "Blob", text: "Hello" },
     });
   });
 
