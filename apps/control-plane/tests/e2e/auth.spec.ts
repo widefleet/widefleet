@@ -602,6 +602,10 @@ test("shows versioned service documentation through authenticated API and access
     page.getByText("Deploy this app to see what it exposes.", { exact: true }),
   ).toBeVisible();
   const deploymentId = await activate(documentation);
+  // The open section follows the deployment: the reference and its availability appear.
+  const availability = page.getByRole("link", { name: "Manage availability", exact: true });
+  await expect(availability).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
   await page.goto(`/widefleet/apps/${record.id}`);
   await page
     .getByRole("navigation", { name: "App sections" })
@@ -609,8 +613,6 @@ test("shows versioned service documentation through authenticated API and access
     .click();
   await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/api$`, "u"));
   await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
-  const availability = page.getByRole("link", { name: "Manage availability", exact: true });
-  await expect(availability).toBeVisible();
 
   const description = await context.request.get(`/api/v1/app-services/${record.slug}`);
   expect(description.ok()).toBe(true);

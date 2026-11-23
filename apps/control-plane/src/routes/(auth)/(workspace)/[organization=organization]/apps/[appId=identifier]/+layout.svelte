@@ -2,7 +2,7 @@
   import { page } from "$app/state";
   import { getAppDetails, getAppSource } from "#lib/apps.remote";
   import { getAppConnections } from "#lib/connections.remote";
-  import { getServiceDescription } from "#lib/services.remote";
+  import { getAppServices, getServiceDescription } from "#lib/services.remote";
   import type { manageWorkflow } from "#lib/workflows.remote";
   import { Button } from "@platform/ui/button";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -82,11 +82,15 @@
           appId: route.appId,
         }).refresh();
 
+      // A deployment can add the app to the organization's APIs or change what it exposes.
       if (activeTab === "api")
-        await getServiceDescription({
-          organizationId: workspace.organizationId,
-          service: route.appId,
-        }).refresh();
+        await Promise.all([
+          getAppServices({ organizationId: workspace.organizationId }).refresh(),
+          getServiceDescription({
+            organizationId: workspace.organizationId,
+            service: route.appId,
+          }).refresh(),
+        ]);
 
       if (activeTab === "connections")
         await getAppConnections({
