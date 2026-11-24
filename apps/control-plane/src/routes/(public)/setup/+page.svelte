@@ -8,8 +8,6 @@
   import { goto } from "$app/navigation";
   import { createOwner } from "#lib/settings.remote";
 
-  let { data } = $props();
-
   let name = $state("");
 
   let email = $state("");
@@ -26,8 +24,8 @@
     message = "";
 
     try {
-      await createOwner({ name, email, organizationName });
-      await goto(`/sign-in?${new URLSearchParams({ email, next: data.next })}`);
+      const { next } = await createOwner({ name, email, organizationName });
+      await goto(`/sign-in?${new URLSearchParams({ email, next })}`);
     } catch (cause) {
       message = cause instanceof Error ? cause.message : "Could not complete setup.";
     } finally {

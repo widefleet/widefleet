@@ -93,8 +93,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     const otp = z.string().parse(logs.match(/code is (\d{6})/)?.[1]);
     await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
     await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
-    await expect(page).toHaveURL(/\/widefleet\/apps$/);
-    await page.goto("/widefleet/settings/company-sign-in");
+    await expect(page).toHaveURL(/\/settings\/company-sign-in$/);
     await expect(page.getByRole("button", { name: "Activate Widefleet sign-in" })).toBeVisible();
     environment.authControl.available(true);
     await page.getByRole("button", { name: "Activate Widefleet sign-in" }).click();
