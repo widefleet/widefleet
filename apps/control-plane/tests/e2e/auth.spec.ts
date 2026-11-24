@@ -3696,6 +3696,33 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     const github = z.string().parse(appIds[0]);
     const files = z.string().parse(appIds[1]);
     const gmail = z.string().parse(appIds[2]);
+
+    // Two ordinary apps for Home: one that calls two of the connectors and one that calls none.
+    for (const [slug, displayName, description, uses] of [
+      [
+        "home-purchasing",
+        "Purchasing",
+        "Inbox and orders for the purchasing team.",
+        [github, files],
+      ],
+      ["home-shelf-notes", "Shelf Notes", "Notes and photos for the team.", []],
+    ] as const)
+      await environment.database.db.insert(apps).values({
+        id: crypto.randomUUID(),
+        slug,
+        displayName,
+        description,
+        hostname: `${slug}.apps.localhost`,
+        ownerId: environment.owner.id,
+        organizationId: "widefleet",
+        state: "active",
+        catalogListed: true,
+        activeDeploymentId: crypto.randomUUID(),
+        appliedCapabilities: {
+          revision: 1,
+          grants: Object.fromEntries(uses.map((app, index) => [`APP_${index}`, { app }])),
+        },
+      });
     connected.add(files);
     environment.authControl.userConnection((input) => {
       expect(input.identity.subject).toBe(expectedUser);
@@ -3746,6 +3773,19 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await page.getByRole("button", { name: "Accept invitation" }).click();
     await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/widefleet");
     expect(statusReads).toBe(0);
+    // Connectors have their place on My connections, so Home shows none of them as an app.
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Home");
+    await expect(page.getByRole("link", { name: "GitHub", exact: true })).toHaveCount(0);
+    // A card names the connectors its app works with, without checking the reader's accounts.
+    const cards = page.getByRole("listitem");
+    await expect(
+      cards.filter({ hasText: "Purchasing" }).getByRole("img", {
+        name: "Uses GitHub and Microsoft OneDrive — Finance and Operations",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(cards.filter({ hasText: "Shelf Notes" }).getByRole("img")).toHaveCount(0);
+    expect(statusReads).toBe(0);
 
     await mkdir("../../.local/personal-connections", { recursive: true });
 
@@ -3781,6 +3821,11 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await expect(openGroup.getByRole("listitem")).toHaveCount(2);
     await expect(openGroup.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
     await expect(openGroup.getByText("Tracks your repositories.", { exact: true })).toBeVisible();
+    // A published connector's name leads to its page.
+    await expect(openGroup.getByRole("link", { name: "GitHub", exact: true })).toHaveAttribute(
+      "href",
+      `/widefleet/catalog/apps/${github}`,
+    );
 
     // An app's page shows the reader's accounts with the app itself and with the apps it calls.
     await environment.database.db
@@ -3950,6 +3995,11 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     });
     await page.goto("/widefleet/connections?success=true");
     await expect(githubRow.getByText("Checking account…", { exact: true })).toBeVisible();
+    // The way to the connector's page does not wait for the check.
+    await expect(githubRow.getByRole("link", { name: "GitHub", exact: true })).toHaveAttribute(
+      "href",
+      `/widefleet/catalog/apps/${github}`,
+    );
     releaseStatus();
     await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
     // Duplicate names retain the hostnames needed to distinguish deployments.

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { getCatalog } from "#lib/catalog.remote";
   import { getUserConnections, getUserConnectionStatus } from "#lib/user-connections.remote";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import UserConnectionRow from "#shadcn/components/UserConnectionRow.svelte";
@@ -14,6 +15,16 @@
   const result = $derived(await getUserConnections({ organizationId: workspace.organizationId }));
 
   const connections = $derived(result.connections);
+
+  // A published connector's name leads to its page.
+  const published = $derived(
+    new Set(
+      (await getCatalog({ organizationId: workspace.organizationId })).map((entry) => entry.id),
+    ),
+  );
+
+  const pageOf = (appId: string) =>
+    published.has(appId) ? workspace.path(`/catalog/apps/${appId}`) : undefined;
 
   const statuses = $derived(
     connections.map((connection) =>
@@ -110,6 +121,7 @@
           {#each group.entries as connection (connection.appId)}
             <UserConnectionRow
               {connection}
+              href={pageOf(connection.appId)}
               showHostname={visible.some(
                 (other) =>
                   other.appId !== connection.appId && other.displayName === connection.displayName,
@@ -130,10 +142,16 @@
         {@const confirmDisconnect = page.url.searchParams.get("disconnect") === connection.appId}
         <!-- Each status runs the connector's code, so rows show while their status loads. -->
         <svelte:boundary>
-          <UserConnectionEntry record={connection} {showHostname} {confirmDisconnect} />
+          <UserConnectionEntry
+            record={connection}
+            {showHostname}
+            {confirmDisconnect}
+            href={pageOf(connection.appId)}
+          />
           {#snippet pending()}
             <UserConnectionRow
               connection={{ ...connection, status: null, unavailable: false }}
+              href={pageOf(connection.appId)}
               {showHostname}
               {confirmDisconnect}
               checking

@@ -58,6 +58,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       owner: "Ada Example",
       uses: [],
       screenshots: [1],
+      connector: false,
     });
 
     const finishedAt = "2026-10-01T00:00:01.000Z";
@@ -237,6 +238,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
               hostname: app.hostname,
               url: app.url,
               activeDeploymentId: queued.id,
+              connector: true,
+              uses: [],
             },
           ]),
         );
@@ -1063,6 +1066,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           hostname: app.hostname,
           url: app.url,
           activeDeploymentId: queued.id,
+          connector: true,
+          uses: [],
         },
       ]);
 

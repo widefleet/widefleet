@@ -18,12 +18,15 @@
     confirmDisconnect,
     showHostname = false,
     checking = false,
+    href,
   }: {
     connection: z.infer<typeof userConnectionEntry>;
     confirmDisconnect: boolean;
     showHostname?: boolean;
     /** The status is still loading, so the row offers no actions yet. */
     checking?: boolean;
+    /** The connector's page, when it has one for the reader. */
+    href?: string | undefined;
   } = $props();
 
   const connect = $derived(prepareUserConnection.for(connection.appId));
@@ -64,7 +67,8 @@
       <AppIcon appId={connection.appId} deploymentId={connection.activeDeploymentId} />
       <div class="min-w-0">
         <h3 id={`connection-${connection.appId}`} class="text-sm font-medium wrap-anywhere">
-          {connection.displayName}
+          {#if href}<a {href} class="hover:underline">{connection.displayName}</a
+            >{:else}{connection.displayName}{/if}
         </h3>
         {#if connection.description}
           <p class="text-muted-foreground mt-1 text-sm wrap-anywhere">{connection.description}</p>

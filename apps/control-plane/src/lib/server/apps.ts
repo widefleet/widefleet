@@ -61,6 +61,21 @@ const published = (principal: Pick<Principal, "application">) =>
     isNotNull(apps.activeDeploymentId),
   );
 
+// The apps whose APIs an app's active deployment may call.
+const usedApps = (record: { activeDeploymentId: string | null; appliedCapabilities: unknown }) =>
+  record.activeDeploymentId && record.appliedCapabilities
+    ? [
+        ...new Set(
+          Object.values(contract.capabilitySnapshot.parse(record.appliedCapabilities).grants).map(
+            (grant) => grant.app,
+          ),
+        ),
+      ]
+    : [];
+
+// An app is a connector when its active deployment offers personal connections.
+const connector = sql<boolean>`coalesce(${artifacts.metadata}->'entrypoints' ? 'UserConnection', false)`;
+
 export const managedApp = async (
   transaction: Transaction,
   principal: Pick<Principal, "id" | "application">,
@@ -495,15 +510,20 @@ export const createAppService = (
           description: apps.description,
           hostname: apps.hostname,
           activeDeploymentId: apps.activeDeploymentId,
+          appliedCapabilities: apps.appliedCapabilities,
+          connector,
         })
         .from(apps)
+        .leftJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
+        .leftJoin(artifacts, eq(artifacts.id, deployments.artifactId))
         .where(published(principal))
         .orderBy(apps.displayName, apps.id);
 
       return Result.ok(
-        records.map((record) => ({
+        records.map(({ appliedCapabilities, ...record }) => ({
           ...record,
           url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
+          uses: usedApps({ ...record, appliedCapabilities }),
         })),
       );
     }),
@@ -521,6 +541,7 @@ export const createAppService = (
           appliedCapabilities: apps.appliedCapabilities,
           owner: user.name,
           manifest: artifacts.manifest,
+          connector,
         })
         .from(apps)
         .leftJoin(user, eq(user.id, apps.ownerId))
@@ -549,16 +570,7 @@ export const createAppService = (
         ...listing,
         url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
         screenshots: screenshotNumbers.filter((number) => findAppScreenshot(assets, number)),
-        uses:
-          record.activeDeploymentId && appliedCapabilities
-            ? [
-                ...new Set(
-                  Object.values(contract.capabilitySnapshot.parse(appliedCapabilities).grants).map(
-                    (grant) => grant.app,
-                  ),
-                ),
-              ]
-            : [],
+        uses: usedApps({ ...listing, appliedCapabilities }),
       });
     }),
   rename: (principal: Principal, appId: string, displayName: string) =>

@@ -130,6 +130,19 @@ describe("Personal connector accounts", () => {
       .update(apps)
       .set({ description: "Reads the shared mailbox." })
       .where(eq(apps.id, visible.id));
+    // The catalog marks the published apps that are connectors.
+    expect(
+      (
+        await createAppService(environment.database.db, environment.configuration).catalog(
+          principal(),
+        )
+      )
+        .unwrap()
+        .map((entry) => [entry.displayName, entry.connector]),
+    ).toEqual([
+      ["ordinary", false],
+      ["visible", true],
+    ]);
     expect(await service().list(principal())).toEqual(
       [unlisted, visible].map((app) => ({
         appId: app.id,

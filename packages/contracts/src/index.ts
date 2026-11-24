@@ -133,14 +133,21 @@ export const appPath = z.strictObject({ appId: identifier });
 
 export const sourceDeployTargetInput = z.union([appPath, z.strictObject({ slug: appSlug })]);
 
-export const catalogEntry = app.pick({
-  id: true,
-  displayName: true,
-  description: true,
-  hostname: true,
-  url: true,
-  activeDeploymentId: true,
-});
+export const catalogEntry = app
+  .pick({
+    id: true,
+    displayName: true,
+    description: true,
+    hostname: true,
+    url: true,
+    activeDeploymentId: true,
+  })
+  .extend({
+    /** Whether the app connects people's own accounts with another system. */
+    connector: z.boolean(),
+    /** The apps whose APIs the active deployment may call. */
+    uses: z.array(identifier),
+  });
 
 /** The place of a screenshot among an app's static assets, such as `/screenshots/1.png`. */
 export const screenshotNumber = z.number().int().min(1).max(3);
@@ -152,8 +159,6 @@ export const catalogApp = catalogEntry.extend({
   screenshots: z.array(screenshotNumber),
   /** The name of the person who owns the app. */
   owner: z.string().nullable(),
-  /** The apps whose APIs the active deployment may call. */
-  uses: z.array(identifier),
 });
 
 export const catalogListing = z.strictObject({ listed: z.boolean() });
