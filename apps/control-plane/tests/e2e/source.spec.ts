@@ -237,9 +237,12 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
       "Any associated Widefleet Git repository and its branches will also be permanently deleted.",
     ),
   ).toBeVisible();
-  const sourceReads = await readFile(`${state}.reads`, "utf8");
   await page.getByRole("link", { name: /^Deployments/ }).click();
   await expect(page.getByTitle("Deployment ID", { exact: true })).toHaveText(deploymentId);
+  // Only the section that shows the saved code reads it.
+  await page.getByRole("link", { name: "Connections", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Connections", exact: true })).toBeVisible();
+  const sourceReads = await readFile(`${state}.reads`, "utf8");
   await page.getByRole("button", { name: "Refresh app" }).click();
   await expect(page.getByRole("button", { name: "Refresh app" })).toBeEnabled();
   expect(await readFile(`${state}.reads`, "utf8")).toBe(sourceReads);

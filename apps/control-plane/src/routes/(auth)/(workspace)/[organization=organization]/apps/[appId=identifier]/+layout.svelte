@@ -69,11 +69,12 @@
 
   const refreshFailed = $derived(Boolean(details.error));
 
-  const refresh = async () => {
+  const refresh = async (manual = true) => {
     if (refreshing) return;
     refreshing = true;
 
     try {
+      const deployed = data.app.activeDeploymentId;
       await details.refresh();
 
       // A deployment can change the apps this one calls, which its page shows.
@@ -83,7 +84,12 @@
           appId: route.appId,
         }).refresh();
 
-      if (activeTab === "deployments" && data.source.supported)
+      // The saved code comes from the Git host, so the timer asks again only after a deployment.
+      if (
+        activeTab === "deployments" &&
+        data.source.supported &&
+        (manual || details.current?.app.activeDeploymentId !== deployed)
+      )
         await getAppSource({
           organizationId: workspace.organizationId,
           appId: route.appId,
@@ -113,7 +119,7 @@
 
   onMount(() => {
     const timer = setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") void refresh(false);
     }, 5000);
 
     return () => clearInterval(timer);
@@ -178,7 +184,7 @@
       aria-label="Refresh app"
       title="Refresh"
       disabled={refreshing}
-      onclick={refresh}
+      onclick={() => refresh()}
       ><RefreshCw class={refreshing ? "animate-spin motion-reduce:animate-none" : ""} /></Button
     >{#if data.app.state === "active" && data.app.web}<Button
         href={data.app.url}
