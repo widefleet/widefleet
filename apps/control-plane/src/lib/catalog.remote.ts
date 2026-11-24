@@ -57,7 +57,7 @@ export const setCatalogListing = form(
         303,
         workspacePath(
           organization.slug,
-          `/apps/${appId}/settings?${new URLSearchParams({ q: search })}#catalog`,
+          `/apps/${appId}/access?${new URLSearchParams({ q: search })}#home`,
         ),
       );
 

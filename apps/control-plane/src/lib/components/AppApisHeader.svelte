@@ -22,7 +22,7 @@
   } = $props();
 
   const views = $derived([
-    { id: "catalog", label: "Catalog", href: workspace.path(`/services${query}`), count: apis },
+    { id: "catalog", label: "All APIs", href: workspace.path(`/services${query}`), count: apis },
     {
       id: "requests",
       label: "Requests",

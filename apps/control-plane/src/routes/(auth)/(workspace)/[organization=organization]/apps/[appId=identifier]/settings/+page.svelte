@@ -5,4 +5,4 @@
   const app = getAppContext();
 </script>
 
-{#if app.data.app.state !== "deleting"}<AppSettings data={app.data} search={app.search} />{/if}
+{#if app.data.app.state !== "deleting"}<AppSettings data={app.data} />{/if}

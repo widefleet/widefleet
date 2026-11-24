@@ -2417,12 +2417,10 @@ test.describe(`app catalog`, () => {
       // An app that is not published has no page for people who do not manage it.
       expect((await readerContext.request.get(`/widefleet/apps/${record.id}`)).status()).toBe(404);
 
-      await page.goto(`/widefleet/apps/${record.id}/settings`);
+      // Whether the app shows on Home is decided beside who can use it.
+      await page.goto(`/widefleet/apps/${record.id}/access`);
 
-      const publish = page.getByRole("button", {
-        name: "Publish to catalog",
-        exact: true,
-      });
+      const publish = page.getByRole("switch", { name: "Show on Home", exact: true });
 
       const form = page.locator("form").filter({ has: publish });
       const action = z.string().parse(await form.getAttribute("action"));
@@ -2450,10 +2448,17 @@ test.describe(`app catalog`, () => {
           .where(eq(apps.id, record.id)),
       ).toEqual([{ catalogListed: false }]);
 
+      await expect(publish).not.toBeChecked();
       await publish.click();
-      await expect(
-        page.getByRole("button", { name: "Remove from catalog", exact: true }),
-      ).toBeVisible();
+      await expect(publish).toBeChecked();
+      await expect
+        .poll(() =>
+          environment.database.db
+            .select({ catalogListed: apps.catalogListed })
+            .from(apps)
+            .where(eq(apps.id, record.id)),
+        )
+        .toEqual([{ catalogListed: true }]);
 
       // The owner writes the description under the app's name; it appears with the app on Home.
       const describe = page.getByRole("button", { name: "Edit description" });
@@ -2520,7 +2525,7 @@ test.describe(`app catalog`, () => {
       await expect(
         page.getByRole("link", { name: record.displayName, exact: true }),
       ).toHaveAttribute("href", `/widefleet/apps/${record.id}`);
-      await page.goto(`/widefleet/apps/${record.id}/settings`);
+      await page.goto(`/widefleet/apps/${record.id}/access`);
       await readerPage.getByRole("main").getByRole("link", { name: "Home", exact: true }).click();
       await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText("Home");
       expect((await readerContext.request.get(`/api/v1/apps/${record.id}`)).status()).toBe(404);
@@ -2546,8 +2551,17 @@ test.describe(`app catalog`, () => {
         readerPage.getByRole("link", { name: "Stock Counter", exact: true }),
       ).toBeVisible();
 
-      await page.getByRole("button", { name: "Remove from catalog", exact: true }).click();
-      await expect(publish).toBeVisible();
+      await publish.click();
+      await expect(publish).not.toBeChecked();
+      // The switch shows the choice before it is saved, so wait for the save itself.
+      await expect
+        .poll(() =>
+          environment.database.db
+            .select({ catalogListed: apps.catalogListed })
+            .from(apps)
+            .where(eq(apps.id, record.id)),
+        )
+        .toEqual([{ catalogListed: false }]);
       await readerPage.reload();
       await expect(
         readerPage.getByRole("link", { name: "Stock Counter", exact: true }),
