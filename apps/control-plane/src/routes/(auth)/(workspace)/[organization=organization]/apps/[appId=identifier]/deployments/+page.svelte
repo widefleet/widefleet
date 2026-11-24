@@ -37,8 +37,7 @@
         <p class="text-muted-foreground mt-2 text-sm">Loading the saved code …</p>
         <noscript
           ><p class="text-muted-foreground mt-2 text-sm">
-            This section needs JavaScript. <code>widefleet source status --app {data.app.id}</code>
-            shows the same.
+            This section needs JavaScript.
           </p></noscript
         >
       {/snippet}
