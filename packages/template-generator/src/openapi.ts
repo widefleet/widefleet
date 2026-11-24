@@ -958,7 +958,9 @@ export const generateOpenapi = (
 
     const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : "text";
 
-    // The rules may require a body the description leaves optional.
+    // The rules may require a body the description leaves optional, but not add one.
+    if (rule.requiredBody && !body) throw new Error(`${id}'s requiredBody rule needs a body`);
+
     const bodyRequired = body?.required === true || rule.requiredBody === true;
 
     // Every success answer counts: JSON, other content, or none, such as a 204.

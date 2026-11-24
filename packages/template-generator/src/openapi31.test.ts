@@ -124,6 +124,16 @@ describe("OpenAPI 3.1 descriptions", () => {
     );
     expect(variants).toContain("async upload(input: {");
 
+    // Only a body the operation takes can be required.
+    expect(() =>
+      generateOpenapi(
+        page("/transfers", "listTransfers", "Transfer"),
+        { operations: { listTransfers: { name: "listTransfers", requiredBody: true } } },
+        service,
+        "",
+      ),
+    ).toThrow("listTransfers's requiredBody rule needs a body");
+
     // Without the rule, a form whose fields are required stays optional as a whole.
     const optional = uploads({
       ...plainForm,
