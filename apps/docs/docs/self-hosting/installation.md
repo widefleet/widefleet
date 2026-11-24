@@ -224,7 +224,7 @@ Widefleet provisions one installation organization automatically. No organizatio
 
 After the first verified management sign-in, the person appears under **Members**. Owners and admins can search by name or email and change their role there. Role changes apply to existing browser and CLI sessions on their next API request. At least one Owner must remain. Only Owners can change Owner assignments.
 
-On an app's **Access** tab, **Management access** lets you search members by name or email and grant or revoke app collaboration. A collaborator can deploy, roll back and delete that app; only its owner or an organization administrator can change its grants. Organization administrators retain access independently of individual grants. The CLI's existing `grant` and `revoke` commands remain compatible.
+On an app's **Access** tab, **Manage access** lets you search members by name or email and grant or revoke app collaboration. A collaborator can deploy, roll back and delete that app; only its owner or an organization administrator can change its grants. Organization administrators retain access independently of individual grants. The CLI's existing `grant` and `revoke` commands remain compatible.
 
 The first administrator is created by setup or the bootstrap file. Subsequent company sign-ins create Members. Role changes persist across restarts. Published apps have separate [access rules](/reference/app-access).
 

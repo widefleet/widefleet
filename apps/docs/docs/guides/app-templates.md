@@ -46,7 +46,7 @@ Use `--organization ID` when you work across organizations. See
 
 Follow the template's setup steps and verify the result with its usage example.
 For an app that connects personal accounts, complete account sign-in in your
-browser. Provide credentials through the app's **Secrets** tab or the CLI's
+browser. Provide credentials under **Secrets** on the app's **Connections** tab or the CLI's
 protected-file input.
 
 If the app provides an API, follow its instructions to use it from another app.

@@ -350,7 +350,7 @@ widefleet connections
 
 ## Secrets
 
-App collaborators manage secrets in the app's **Secrets** tab or through the CLI:
+App collaborators manage secrets under **Secrets** on the app's **Connections** tab or through the CLI:
 
 ```sh
 widefleet secret list
