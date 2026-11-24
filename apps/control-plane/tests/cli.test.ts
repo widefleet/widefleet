@@ -331,7 +331,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       }
 
       if (request.method === "GET" && request.url === "/api/v1/apps") {
-        response.end(JSON.stringify([{ ...app, catalogListed: true }, preview]));
+        response.end(
+          JSON.stringify([
+            { ...app, catalogListed: true, connector: true },
+            { ...preview, connector: false },
+          ]),
+        );
 
         return;
       }
@@ -1207,14 +1212,14 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(requests).toHaveLength(4);
     });
 
-    it("preserves catalog listing in app list JSON", async () => {
+    it("preserves catalog listing and the connector mark in app list JSON", async () => {
       const result = await execute(join(state, "installation", executableName), ["apps"], {
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
 
-      expect(z.array(contract.app).parse(JSON.parse(result.stdout))).toEqual([
-        { ...app, catalogListed: true },
-        preview,
+      expect(z.array(contract.appListEntry).parse(JSON.parse(result.stdout))).toEqual([
+        { ...app, catalogListed: true, connector: true },
+        { ...preview, connector: false },
       ]);
     });
 

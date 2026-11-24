@@ -885,7 +885,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       proxy.closeIdleConnections();
     }
 
-    const apps = z.array(contract.app).parse(JSON.parse((await cli("apps")).stdout));
+    const apps = z.array(contract.appListEntry).parse(JSON.parse((await cli("apps")).stdout));
     expect(apps).toHaveLength(1);
     const app = contract.app.parse(apps[0]);
     createdApps.push(app.id);
@@ -990,7 +990,9 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       })(),
     ]);
     expect((await curl("http://127.0.0.1:8080/")).stdout).toContain("Persisted starter note");
-    expect(z.array(contract.app).parse(JSON.parse((await cli("apps")).stdout))).toHaveLength(1);
+    expect(
+      z.array(contract.appListEntry).parse(JSON.parse((await cli("apps")).stdout)),
+    ).toHaveLength(1);
 
     const previewResult = contract.deployment
       .extend({ url: z.url(), source: contract.sourceRevision.nullable() })
@@ -1048,7 +1050,9 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await agent();
     await cli("delete", app.id, "--yes");
     await agent();
-    expect(z.array(contract.app).parse(JSON.parse((await cli("apps")).stdout))).toHaveLength(0);
+    expect(
+      z.array(contract.appListEntry).parse(JSON.parse((await cli("apps")).stdout)),
+    ).toHaveLength(0);
   }, 360_000);
 
   it("bundles and deploys Node ESM imports, CommonJS builtins and Worker package exports with nodejs_compat", async () => {

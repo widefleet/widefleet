@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { app } from "@platform/contracts";
+import { app, appListEntry } from "@platform/contracts";
 import { and, eq, or } from "drizzle-orm";
 import { esbuildBinary } from "../../../tools/cli-tools.ts";
 import { CreateBucketCommand, DeleteBucketCommand } from "@aws-sdk/client-s3";
@@ -254,11 +254,11 @@ describe("Organization discovery and selection", () => {
     const b = await create(beta);
     expect(b).toMatchObject({ hostname: "shared-name-beta.apps.localhost" });
     expect(await (await api(request("/apps"))).json()).toEqual([
-      { ...b, source: { supported: false, branch: "main", deployed: null } },
+      { ...b, connector: false, source: { supported: false, branch: "main", deployed: null } },
     ]);
     headers.set("x-widefleet-organization", alpha);
     expect(await (await api(request("/apps"))).json()).toEqual([
-      { ...a, source: { supported: false, branch: "main", deployed: null } },
+      { ...a, connector: false, source: { supported: false, branch: "main", deployed: null } },
     ]);
     headers.delete("x-widefleet-organization");
   });
@@ -477,8 +477,9 @@ describe("Organization discovery and selection", () => {
           application: { organizationId: alpha, admin: true },
         });
         const listed = await execute(binary, ["apps"], options);
-        expect(z.array(app).parse(JSON.parse(listed.stdout))).toContainEqual({
+        expect(z.array(appListEntry).parse(JSON.parse(listed.stdout))).toContainEqual({
           ...fixture,
+          connector: false,
           source: { supported: false, branch: "main", deployed: null },
         });
 

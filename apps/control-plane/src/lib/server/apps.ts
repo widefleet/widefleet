@@ -635,7 +635,7 @@ export const createAppService = (
   list: (principal: Principal) =>
     readOnly(database, async (transaction) => {
       const records = await transaction
-        .select({ app: apps, metadata: artifacts.metadata })
+        .select({ app: apps, metadata: artifacts.metadata, connector })
         .from(apps)
         .leftJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
         .leftJoin(artifacts, eq(artifacts.id, deployments.artifactId))
@@ -643,8 +643,9 @@ export const createAppService = (
         .orderBy(apps.slug);
 
       return Result.ok(
-        records.map(({ app, metadata }) => ({
+        records.map(({ app, metadata, connector }) => ({
           ...presentApp(app, configuration),
+          connector,
           source: presentAppSource(
             app,
             metadata ? (contract.workerMetadata.parse(metadata).source ?? null) : null,

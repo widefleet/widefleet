@@ -21,7 +21,7 @@ describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () =>
       await expect
         .poll(() => page.getByRole("heading", { name: "Home", exact: true }).count())
         .toBe(1);
-      await page.getByRole("link", { name: "My apps", exact: true }).click();
+      await page.getByRole("link", { name: "Manage", exact: true }).click();
       await page.getByRole("link", { name: "Team Notes", exact: true }).click();
       const appLink = page.getByRole("link", { name: "Open app", exact: true });
       expect(await appLink.getAttribute("href")).toBe("https://team-notes.apps.localhost:25453/");

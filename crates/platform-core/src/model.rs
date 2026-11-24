@@ -22,6 +22,9 @@ pub struct App {
     pub created_at: String,
     pub state: String,
     pub active_deployment_id: Option<Uuid>,
+    /// Present in the list of apps: whether the app offers personal connections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<AppSourceSummary>,
 }

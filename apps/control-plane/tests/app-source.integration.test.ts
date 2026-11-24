@@ -458,8 +458,8 @@ describe("App source repositories", () => {
 
       const status =
         path === "/apps"
-          ? contract.app.array().parse(body)[0]?.source
-          : contract.app.parse(body).source;
+          ? contract.appListEntry.array().parse(body)[0]?.source
+          : contract.appListEntry.partial({ connector: true }).parse(body).source;
 
       expect(status).toEqual({ supported: true, branch: "main", deployed: null });
     }
@@ -554,8 +554,8 @@ describe("App source repositories", () => {
 
         const summary =
           path === "/apps"
-            ? contract.app.array().parse(body)[0]?.source
-            : contract.app.parse(body).source;
+            ? contract.appListEntry.array().parse(body)[0]?.source
+            : contract.appListEntry.partial({ connector: true }).parse(body).source;
 
         expect(summary).toEqual({ supported: true, branch: "main", deployed: null });
       }

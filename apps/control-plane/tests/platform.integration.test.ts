@@ -538,7 +538,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         ).toBe(expected);
         expect(
           z
-            .array(contract.app)
+            .array(contract.appListEntry)
             .parse(await (await json("/apps", "GET")).json())
             .find((item) => item.id === app.id)?.url,
         ).toBe(expected);
@@ -689,7 +689,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       responses.map((response) => response.status).sort((left, right) => left - right),
     ).toEqual([200, 409]);
     const listed = await json("/apps", "GET");
-    const records = z.array(contract.app).parse(await listed.json());
+    const records = z.array(contract.appListEntry).parse(await listed.json());
     const app = records.find((record) => record.slug === "permissions");
     expect(app).toBeDefined();
 
@@ -697,7 +697,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json(`/apps/${app.id}`, "GET", undefined, outsiderHeaders)).status).toBe(404);
 
     const memberApps = z
-      .array(contract.app)
+      .array(contract.appListEntry)
       .parse(await (await json("/apps", "GET", undefined, outsiderHeaders)).json());
 
     expect(memberApps.map((record) => record.slug).sort()).toEqual([
@@ -2609,10 +2609,23 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       })
       .where(eq(artifacts.id, deployment.artifactId));
     expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(200);
+    // The list of managed apps says which of them are connectors.
+    expect(
+      z
+        .array(contract.appListEntry)
+        .parse(await (await json("/apps", "GET")).json())
+        .find((record) => record.id === app.id)?.connector,
+    ).toBe(true);
     await environment.database.db
       .update(artifacts)
       .set({ metadata: sql`jsonb_set(${artifacts.metadata}, '{entrypoints}', '["default"]')` })
       .where(eq(artifacts.id, deployment.artifactId));
+    expect(
+      z
+        .array(contract.appListEntry)
+        .parse(await (await json("/apps", "GET")).json())
+        .find((record) => record.id === app.id)?.connector,
+    ).toBe(false);
     expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(404);
 
     const foreignOrganizationId = crypto.randomUUID();

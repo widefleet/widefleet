@@ -73,7 +73,7 @@
       description="Apps appear here once their owners show them on Home."
       >{#snippet icon()}<LayoutGrid />{/snippet}<Button
         href={workspace.path("/apps")}
-        variant="outline">Go to My apps</Button
+        variant="outline">Go to Manage</Button
       ></EmptyState
     >
   {:else if matches.length === 0}

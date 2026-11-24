@@ -247,7 +247,7 @@ if (command === "agent") {
         registration = { agentId: created.agent.id, agentToken: created.token };
       }
 
-      const knownApps = z.array(contract.app).parse(await api("/apps"));
+      const knownApps = z.array(contract.appListEntry).parse(await api("/apps"));
 
       const demo =
         knownApps.find((app) => app.slug === "team-notes") ??

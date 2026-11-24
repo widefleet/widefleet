@@ -89,7 +89,7 @@
     { href: "/connections", label: "My connections", icon: Link2, paths: ["/connections"] },
     {
       href: "/apps",
-      label: "My apps",
+      label: "Manage",
       icon: Layers2,
       paths: ["/apps", "/catalog/templates", "/services"],
     },
