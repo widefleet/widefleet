@@ -216,7 +216,6 @@
     maxlength={appDescriptionLength}
     empty="Add a description"
   />{/if}
-<p class="text-muted-foreground mt-2 text-sm wrap-anywhere">{data.app.hostname}</p>
 <nav class="mt-7 mb-8 flex gap-5 overflow-x-auto border-b sm:gap-7" aria-label="App sections">
   {#each tabs as tab (tab.id)}<a
       href={workspace.path(`/apps/${data.app.id}${tab.id === "overview" ? "" : `/${tab.id}`}`)}

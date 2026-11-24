@@ -1679,7 +1679,11 @@ test("registers an agent, creates an app and an isolated preview, then requests 
     "href",
     `/widefleet/apps/${appId}`,
   );
-  await expect(page.getByText("notes-preview.apps.localhost", { exact: true })).toBeVisible();
+  // The address of an app is on its Deployments page.
+  await page.getByRole("link", { name: "Deployments", exact: true }).click();
+  await expect(
+    page.getByText("https://notes-preview.apps.localhost/", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByText("Permanently delete app", { exact: true }).click();
   await page.getByRole("checkbox").check();
