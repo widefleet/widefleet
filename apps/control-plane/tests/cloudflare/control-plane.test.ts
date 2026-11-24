@@ -747,12 +747,20 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       await browserExpect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
       await browserExpect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
       await page.getByRole("link", { name: "Manage", exact: true }).click();
-      // The form for a name and an address has no link of its own; previews open it.
       await page.waitForURL(/\/apps$/);
-      await page.goto(`${page.url()}/new`);
-      await page.getByLabel("App name", { exact: true }).fill("Worker Browser App");
-      await page.getByLabel("URL slug").fill("worker-browser-app");
-      await page.getByRole("button", { name: "Create app", exact: true }).click();
+
+      const created = await page.request.post(`${origin}/api/v1/apps`, {
+        headers: { origin },
+        data: { slug: "worker-browser-app", displayName: "Browser App" },
+      });
+
+      expect(created.status(), await created.text()).toBe(200);
+      await page.goto(`${page.url()}/${contract.app.parse(await created.json()).id}`);
+      // The pencil opens the field only once the page has attached its handlers.
+      await page.waitForLoadState("networkidle");
+      await page.getByRole("button", { name: "Edit name" }).click();
+      await page.getByRole("textbox", { name: "Name", exact: true }).fill("Worker Browser App");
+      await page.keyboard.press("Enter");
       await browserExpect(page.getByRole("heading", { level: 1 })).toHaveText("Worker Browser App");
       await page.reload();
       await browserExpect(page.getByRole("heading", { level: 1 })).toHaveText("Worker Browser App");
