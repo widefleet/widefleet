@@ -37,10 +37,13 @@ export default class Qonto extends QontoApi {
    * unless their approval level is `none`.
    */
   override async revokeAccess(input: Record<string, never> = {}) {
+    const connection = accountConnection(this.env, this.ctx.props);
+    // The account whose access ends: the one connected when the request is sent.
+    const status = await connection.status();
     const result = await super.revokeAccess(input);
 
-    if (result.status === "connected")
-      await accountConnection(this.env, this.ctx.props).disconnect();
+    if (result.status === "connected" && status.status === "connected")
+      await connection.forget(status.accountId);
 
     return result;
   }

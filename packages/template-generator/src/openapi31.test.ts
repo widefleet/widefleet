@@ -88,6 +88,37 @@ describe("OpenAPI 3.1 descriptions", () => {
 
     expect(generated["src/api.ts"]).toContain("file?: UploadContent;");
     expect(generated["src/schema.ts"]).toContain('"body":"multipart"');
+
+    // A form rule replaces the form with variants; requiring fields requires the body.
+    const variants = generateOpenapi(
+      upload,
+      {
+        operations: {
+          upload: {
+            name: "upload",
+            change: "create",
+            form: {
+              description: "A file or a link",
+              oneOf: [
+                {
+                  type: "object",
+                  properties: { file: { type: "string", format: "binary" } },
+                  required: ["file"],
+                },
+                { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+              ],
+            },
+          },
+        },
+      },
+      service,
+      "",
+    ).files["src/api.ts"];
+
+    expect(variants).toMatch(
+      /\* A file or a link\n\s+\*\/\n\s+body: \{\n\s+file: UploadContent;\n\s+\} \| \{\n\s+url: string;\n\s+\};/,
+    );
+    expect(variants).toContain("async upload(input: {");
   });
 
   it("reads nullable type lists, unions and fixed values as OpenAPI 3.0 schemas", () => {

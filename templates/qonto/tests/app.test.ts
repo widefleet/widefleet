@@ -412,6 +412,27 @@ describe("Qonto personal account app", () => {
       connection: "disconnected",
     });
 
+    // An account the user connects while Qonto revokes the earlier one stays.
+    await connect(alice, "10129");
+    const db = await runtime.getD1Database("DB");
+
+    upstream.state.whileRevoking = async () => {
+      await db
+        .prepare("UPDATE account SET accountId = ? WHERE accountId = ?")
+        .bind("membership-10131", "membership-10129")
+        .run();
+    };
+
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/revoke")).json()).toMatchObject({
+      status: "connected",
+    });
+    alice.identity.answer = "";
+    expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+      connection: "connected",
+      account: { id: "membership-10131" },
+    });
+
     // With approvals off, nothing asks.
     const bob = browser("bob");
     await connect(bob, "10130");

@@ -12833,26 +12833,41 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
   }
 
   /**
-   * Create a supplier invoice from a file or from an attachment uploaded with `uploadAttachment`. Pass `supplier_invoices[][file]` or `supplier_invoices[][attachment_id]`, and a unique `supplier_invoices[][idempotency_key]`, such as a UUID, which keeps Qonto from creating the invoice twice.
+   * Create a supplier invoice from a file, or from an attachment uploaded with `uploadAttachment`, with a unique key that keeps Qonto from creating it twice.
    *
    * Asks the user first when their approval level is `all_changes`.
    */
-  async createSupplierInvoice(
-    input: {
-      /**
-       * You have to specify multipart form data in order to attach the file to the request. When using `curl` it will look like that: ``` curl --location --request POST 'https://thirdparty.qonto.com/supplier_invoices/bulk' \ --form 'supplier_invoices[][file]=@"/path/to/file1.png"' \ --form 'supplier_invoices[][idempotency_key]="4d5418bb-bd0d-4df4-865c-c07afab8bb48"' \ --form 'supplier_invoices[][file]=@"/path/to/file2.png"' \ --form 'supplier_invoices[][idempotency_key]="4d5418bb-bd0d-4df4-865c-c07afab8bb49"' \ --form 'skip_attachment_matcher=true' ```
-       */
-      body?: {
-        /**
-         * If true, skips the attachment matcher step for all invoices in the bulk request.
-         */
-        skip_attachment_matcher?: boolean;
-        "supplier_invoices[][file]"?: UploadContent;
-        "supplier_invoices[][attachment_id]"?: string;
-        "supplier_invoices[][idempotency_key]"?: string;
-      };
-    } = {},
-  ): Promise<
+  async createSupplierInvoice(input: {
+    /**
+     * The invoice's file or uploaded attachment, with its key.
+     */
+    body:
+      | {
+          "supplier_invoices[][file]": UploadContent;
+          /**
+           * A unique key for the invoice, such as a UUID, which keeps Qonto from creating it twice.
+           */
+          "supplier_invoices[][idempotency_key]": string;
+          /**
+           * Whether Qonto skips matching the invoice to a transaction's attachment.
+           */
+          skip_attachment_matcher?: boolean;
+        }
+      | {
+          /**
+           * An attachment uploaded with `uploadAttachment`.
+           */
+          "supplier_invoices[][attachment_id]": string;
+          /**
+           * A unique key for the invoice, such as a UUID, which keeps Qonto from creating it twice.
+           */
+          "supplier_invoices[][idempotency_key]": string;
+          /**
+           * Whether Qonto skips matching the invoice to a transaction's attachment.
+           */
+          skip_attachment_matcher?: boolean;
+        };
+  }): Promise<
     QontoResult<{
       supplier_invoices: SupplierInvoice[];
       errors: {

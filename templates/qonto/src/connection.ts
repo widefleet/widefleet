@@ -182,8 +182,20 @@ export const accountConnection = (environment: Environment, properties: Properti
     return { disconnected: true } as const;
   };
 
+  // Removes the saved link to one Qonto account, and keeps any other the user
+  // connected since, such as after switching accounts.
+  const forget = async (accountId: string) => {
+    const { id } = await context();
+    await environment.DB.prepare(
+      "DELETE FROM account WHERE userId = ? AND providerId = ? AND accountId = ?",
+    )
+      .bind(id, "qonto", accountId)
+      .run();
+  };
+
   return {
     disconnect,
+    forget,
     prepare: async (input: { completionUrl: string }) => {
       const { id } = await context();
       const config = await configuration();

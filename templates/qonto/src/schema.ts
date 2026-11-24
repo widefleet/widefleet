@@ -2014,7 +2014,7 @@ export const operations = {
     queryParameters: {},
     headerParameters: {},
     body: "multipart",
-    bodyRequired: false,
+    bodyRequired: true,
     response: "json",
     pageable: false,
     change: "create",

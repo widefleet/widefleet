@@ -14,6 +14,8 @@ type State = {
   answer: Answer | null;
   // What the user decided on their paired phone for each SCA session.
   sessions: Map<string, "waiting" | "allow" | "deny">;
+  // Runs while Qonto handles a revocation, as another request of the user could.
+  whileRevoking: (() => Promise<void>) | null;
 };
 
 const api = "https://thirdparty.qonto.com";
@@ -42,6 +44,7 @@ export const provider = () => {
     scope: allScopes,
     answer: null,
     sessions: new Map(),
+    whileRevoking: null,
   };
 
   // Transfers created, by idempotency key, so a repeated key returns the first transfer.
@@ -271,6 +274,8 @@ export const provider = () => {
 
       // Revoking ends every token of the member's grant, refresh tokens included.
       if (path === `${api}/v2/oauth2/consents` && request.method === "DELETE") {
+        await state.whileRevoking?.();
+
         for (const tokens of [access, refresh])
           for (const [key, owner] of tokens) if (owner === user) tokens.delete(key);
 

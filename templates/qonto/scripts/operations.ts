@@ -33,12 +33,45 @@ export type Change = "create" | "update" | "delete" | "send";
 
 // Qonto reads each supplier invoice's fields as separate parts named
 // `supplier_invoices[][file]` and so on, not as one JSON part; one invoice per
-// call keeps each file with its own fields.
-const supplierInvoiceFields = {
-  supplier_invoices: null,
-  "supplier_invoices[][file]": { type: "string", format: "binary" },
-  "supplier_invoices[][attachment_id]": { type: "string", format: "uuid" },
-  "supplier_invoices[][idempotency_key]": { type: "string" },
+// call keeps each file with its own fields. The invoice comes from a file or
+// from an uploaded attachment, each with the key that keeps Qonto from
+// creating it twice.
+const idempotencyKey = {
+  type: "string",
+  description:
+    "A unique key for the invoice, such as a UUID, which keeps Qonto from creating it twice.",
+} as const;
+
+const skipAttachmentMatcher = {
+  type: "boolean",
+  description: "Whether Qonto skips matching the invoice to a transaction's attachment.",
+} as const;
+
+const supplierInvoiceForm = {
+  description: "The invoice's file or uploaded attachment, with its key.",
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        "supplier_invoices[][file]": { type: "string", format: "binary" },
+        "supplier_invoices[][idempotency_key]": idempotencyKey,
+        skip_attachment_matcher: skipAttachmentMatcher,
+      },
+      required: ["supplier_invoices[][file]", "supplier_invoices[][idempotency_key]"],
+    },
+    {
+      type: "object",
+      properties: {
+        "supplier_invoices[][attachment_id]": {
+          type: "string",
+          description: "An attachment uploaded with `uploadAttachment`.",
+        },
+        "supplier_invoices[][idempotency_key]": idempotencyKey,
+        skip_attachment_matcher: skipAttachmentMatcher,
+      },
+      required: ["supplier_invoices[][attachment_id]", "supplier_invoices[][idempotency_key]"],
+    },
+  ],
 } as const;
 
 export const operations = {
@@ -271,8 +304,8 @@ export const operations = {
     name: "createSupplierInvoice",
     change: "create",
     description:
-      "Create a supplier invoice from a file or from an attachment uploaded with `uploadAttachment`. Pass `supplier_invoices[][file]` or `supplier_invoices[][attachment_id]`, and a unique `supplier_invoices[][idempotency_key]`, such as a UUID, which keeps Qonto from creating the invoice twice.",
-    fields: supplierInvoiceFields,
+      "Create a supplier invoice from a file, or from an attachment uploaded with `uploadAttachment`, with a unique key that keeps Qonto from creating it twice.",
+    form: supplierInvoiceForm,
   },
   mark_supplier_invoice_as_paid: { name: "markSupplierInvoicePaid", change: "update" },
   unmark_supplier_invoice_as_paid: { name: "unmarkSupplierInvoicePaid", change: "update" },
@@ -335,6 +368,6 @@ export const operations = {
     change?: Change | "read";
     description?: string;
     parameters?: readonly object[];
-    fields?: typeof supplierInvoiceFields;
+    form?: typeof supplierInvoiceForm;
   }
 >;

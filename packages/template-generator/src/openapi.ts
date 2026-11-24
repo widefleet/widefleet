@@ -38,7 +38,8 @@ export interface OpenapiRules {
    * as Graph's `workbook-session-id`. Where the description leaves out or
    * misdescribes inputs, `parameters` adds OpenAPI parameters or replaces those
    * of the same name and place, and `fields` replaces, adds or, with null,
-   * removes the fields of a form body.
+   * removes the fields of a form body. `form` replaces a form body's whole
+   * schema, such as with variants that each require their own fields.
    */
   operations: Record<
     string,
@@ -51,6 +52,7 @@ export interface OpenapiRules {
       headers?: HeaderRules | undefined;
       parameters?: readonly Json[] | undefined;
       fields?: Readonly<Record<string, Json>> | undefined;
+      form?: Json | undefined;
     }
   >;
   /**
@@ -477,11 +479,16 @@ export const generateOpenapi = (
   // The schemas a multipart body's type writes out, which a schema may not repeat.
   const inlined: string[] = [];
 
-  // A form schema's fields, through a reference.
+  // A form schema's fields, through a reference and in each of its variants.
   const fieldsOf = (value: Schema | undefined): Record<string, Schema> =>
     value?.$ref
       ? fieldsOf(schemas[value.$ref.replace("#/components/schemas/", "")])
-      : (value?.properties ?? {});
+      : Object.fromEntries([
+          ...[...(value?.oneOf ?? []), ...(value?.anyOf ?? [])].flatMap((variant) =>
+            Object.entries(fieldsOf(variant)),
+          ),
+          ...Object.entries(value?.properties ?? {}),
+        ]);
 
   // Whether a field holds objects, or lists of them, through references.
   const holdsObjects = (value: Schema, seen: Set<string>): boolean => {
@@ -913,9 +920,17 @@ export const generateOpenapi = (
     if (rule.fields && !sentForm)
       throw new Error(`${id}'s fields rule needs a form body that lists its fields`);
 
+    if (rule.form && !sentForm) throw new Error(`${id}'s form rule needs a form body`);
+
+    if (rule.fields && rule.form)
+      throw new Error(`${id} gives both fields and a form; describe the fields in the form`);
+
     const form = sentForm && {
       ...sentForm,
-      schema: formSchema(id, sentForm.entry.schema, rule.fields),
+      schema:
+        rule.form === undefined
+          ? formSchema(id, sentForm.entry.schema, rule.fields)
+          : schema.parse(rule.form),
     };
 
     // Multipart forms send objects as JSON parts; plain forms have no encoding for them.
@@ -934,6 +949,18 @@ export const generateOpenapi = (
     );
 
     const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : "text";
+
+    // A form whose every variant requires fields cannot be left out.
+    const requiresFields = (value: Schema | undefined): boolean => {
+      const variants = value?.oneOf ?? value?.anyOf;
+
+      return variants
+        ? variants.length > 0 && variants.every(requiresFields)
+        : (value?.required?.length ?? 0) > 0;
+    };
+
+    const bodyRequired =
+      body?.required === true || (form !== undefined && requiresFields(form.schema));
 
     // Every success answer counts: JSON, other content, or none, such as a 204.
     const successes = Object.entries(entry.responses ?? {}).flatMap(([code, value]) =>
@@ -987,7 +1014,7 @@ export const generateOpenapi = (
       ),
       headerParameters: Object.fromEntries(headers.map(([input, { name }]) => [input, name])),
       body: bodyKind,
-      bodyRequired: body?.required === true,
+      bodyRequired,
       response: responseKind,
       pageable,
       change,
@@ -1077,7 +1104,7 @@ export const generateOpenapi = (
 
     if (bodyKind)
       fields.push(
-        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${bodyType()};`,
+        `${comment(single(rule.form === undefined ? body?.description : form?.schema?.description) || "The request body.", "    ")}    body${bodyRequired ? "" : "?"}: ${bodyType()};`,
       );
 
     if (bodyKind === "text")
@@ -1104,7 +1131,7 @@ export const generateOpenapi = (
     if (responseKind === "binary") usesBinary = true;
 
     const required =
-      parameters.some((value) => value.in === "path" || value.required) || body?.required === true;
+      parameters.some((value) => value.in === "path" || value.required) || bodyRequired;
 
     const firstPage = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
 
