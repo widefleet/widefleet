@@ -248,6 +248,10 @@ describe("App service connections", () => {
       ERP: writer,
     });
     expect((await services().bind(creator, source.id, "ERP", null)).unwrap().grants).toEqual({});
+    (await applications().grant(creator, source.id, other.id)).unwrap();
+    expect((await services().bind(other, source.id, "ERP", grant)).unwrap().grants).toEqual({
+      ERP: grant,
+    });
   });
 
   it("lets an app manager retry a failed connection without a new revision", async () => {
