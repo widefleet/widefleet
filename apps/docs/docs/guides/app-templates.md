@@ -13,7 +13,7 @@ Check the template's instructions for any credentials or permissions it requires
 
 ## Start from the catalog
 
-1. Open **App catalog → Templates** in the control plane.
+1. Open **Manage → Create app** in the control plane.
 2. Choose a template and read its description and instructions.
 3. Copy the prompt under **Set up with your agent** and paste it into your agent.
 
@@ -57,8 +57,8 @@ catalog or `widefleet catalog list` to find their launch URLs.
 
 ## Create an app for another use case
 
-Open **App not here? Create one with your agent** below the templates. Copy the
-prompt and describe what you need. Your agent can also read this prompt from
+Open **Manage → Create app** and choose **Copy prompt** under **Build it with your
+agent**. Paste the prompt into your agent and describe what you need. Your agent can also read this prompt from
 `widefleet catalog templates list` as `createPrompt`.
 
 The [app development guide](/guides/app-development) covers building and
