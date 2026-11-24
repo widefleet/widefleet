@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { connectApp, getServiceConnection, requestAppConnection } from "#lib/services.remote";
+  import { connectApp, getServiceConnection } from "#lib/services.remote";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
@@ -24,8 +24,6 @@
   );
 
   const path = $derived(workspace.path(`/services/${data.service.appId}/connect`));
-
-  const action = $derived(data.approval ? requestAppConnection : connectApp);
 </script>
 
 <svelte:head><title>Connect {data.service.displayName} · Widefleet</title></svelte:head>
@@ -78,24 +76,22 @@
     {/if}
   {:else}
     <PageHeading
-      title={data.approval ? "Request a connection" : "Set up your connection"}
+      title="Set up your connection"
       description={`${data.app.displayName} will use ${data.service.displayName}.`}
     />
     <p class="text-muted-foreground text-sm leading-6">
-      {data.approval
-        ? "An organization administrator must approve this connection. Submitting the request does not give your app access yet."
-        : "This connection can be saved now. We will show you its activation status next."}
+      This connection can be saved now. We will show you its activation status next.
     </p>
-    <form {...action} class="space-y-6">
-      <OrganizationField field={action.fields.organizationId} />
-      <input {...action.fields.appId.as("hidden", data.app.id)} />
-      <input {...action.fields.targetApp.as("hidden", data.service.appId)} />
-      {#if !data.approval}<input {...connectApp.fields.guided.as("hidden", "true")} />{/if}
+    <form {...connectApp} class="space-y-6">
+      <OrganizationField field={connectApp.fields.organizationId} />
+      <input {...connectApp.fields.appId.as("hidden", data.app.id)} />
+      <input {...connectApp.fields.targetApp.as("hidden", data.service.appId)} />
+      <input {...connectApp.fields.guided.as("hidden", "true")} />
       <div class="space-y-2">
         <Label for="entrypoint">API entrypoint</Label>
         <NativeSelect
           id="entrypoint"
-          {...action.fields.entrypoint.as("select")}
+          {...connectApp.fields.entrypoint.as("select")}
           class="w-full"
           required
         >
@@ -108,7 +104,7 @@
         <Label for="binding">Binding name in your code</Label>
         <Input
           id="binding"
-          {...action.fields.binding.as("text")}
+          {...connectApp.fields.binding.as("text")}
           placeholder="ERP"
           aria-describedby="binding-hint"
           required
@@ -117,11 +113,9 @@
           For example, ERP makes this API available as <code>env.ERP</code> in your app.
         </p>
       </div>
-      <FormIssues issues={action.fields.allIssues()} />
+      <FormIssues issues={connectApp.fields.allIssues()} />
       <div class="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={action.pending > 0}
-          >{data.approval ? "Submit request" : "Connect API"}</Button
-        >
+        <Button type="submit" disabled={connectApp.pending > 0}>Connect API</Button>
         <Button variant="ghost" href={workspace.path(`/apps/${data.app.id}/connections`)}
           >Cancel</Button
         >

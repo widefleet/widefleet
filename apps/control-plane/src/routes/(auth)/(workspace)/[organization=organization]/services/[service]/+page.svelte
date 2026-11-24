@@ -1,6 +1,6 @@
 <script lang="ts">
   import ServiceReference from "#shadcn/components/ServiceReference.svelte";
-  import { getAppServices, getServiceDescription } from "#lib/services.remote";
+  import { getServiceDescription } from "#lib/services.remote";
   import { Button } from "@platform/ui/button";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import type { PageProps } from "./$types";
@@ -9,8 +9,6 @@
   const workspace = getWorkspaceContext();
 
   let { params }: PageProps = $props();
-
-  const catalog = $derived(await getAppServices({ organizationId: workspace.organizationId }));
 
   const service = $derived(
     await getServiceDescription({
@@ -36,4 +34,4 @@
   </div>
   <Button href={workspace.path(`/services/${service.appId}/connect`)}>Set up connection</Button>
 </div>
-<div class="mt-8"><ServiceReference {service} {catalog} /></div>
+<div class="mt-8"><ServiceReference {service} /></div>

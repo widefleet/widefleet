@@ -1,4 +1,3 @@
-import { createServiceAccess } from "./service-access.ts";
 import { readOnly, transact } from "./transactions.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -64,7 +63,6 @@ const activeService = (
           appId: record.app.id,
           slug: record.app.slug,
           displayName: record.app.displayName,
-          accessMode: record.app.serviceAccessMode,
           deploymentId: record.deploymentId,
           entrypoints: metadata.entrypoints ?? [],
           artifactId: record.artifactId,
@@ -88,7 +86,6 @@ export const createConnectionService = (
   storage: ArtifactStorage,
   execution?: HostedExecution,
 ) => ({
-  ...createServiceAccess(database, execution),
   /** An app API's complete documentation, for its reference page. */
   reference: (principal: Principal, service: string) =>
     Result.gen(async function* () {
@@ -197,7 +194,6 @@ export const createConnectionService = (
           slug: app.slug,
           displayName: app.displayName,
           entrypoints: await catalogEntrypoints(transaction, app),
-          accessMode: app.serviceAccessMode,
         })),
       );
 

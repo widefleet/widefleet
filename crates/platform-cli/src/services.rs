@@ -1,5 +1,5 @@
 use crate::{app_bindings, apps, auth, deploy};
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, Subcommand};
 use platform_core::{
     Error, FailureReason, Result,
     http::{Api, json},
@@ -47,36 +47,10 @@ enum CatalogCommand {
         #[arg(long, requires = "output")]
         check: bool,
     },
-    /// Set who may connect to an API (organization administrators only).
-    Access {
-        app: String,
-        #[arg(long, value_enum)]
-        mode: AccessMode,
-    },
-    /// List your connection requests, or all requests as an administrator.
-    Requests,
-    /// Approve a request and submit its connection for activation.
-    Approve { request: Uuid },
-    /// Reject a pending connection request.
-    Reject { request: Uuid },
-}
-
-#[derive(Clone, Copy, ValueEnum, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum AccessMode {
-    ApprovalRequired,
-    Organization,
-}
-
-fn default_access_mode() -> AccessMode {
-    AccessMode::ApprovalRequired
 }
 
 #[derive(Args)]
 pub struct Connect {
-    /// Ask an administrator to approve this connection.
-    #[arg(long, conflicts_with = "no_wait")]
-    request: bool,
     target: String,
     #[arg(long = "as")]
     binding: String,
@@ -113,8 +87,6 @@ struct Service {
     slug: String,
     display_name: String,
     entrypoints: Vec<String>,
-    #[serde(default = "default_access_mode")]
-    access_mode: AccessMode,
 }
 
 // Resolve one app through its description, which also covers deployed entrypoints that the
@@ -209,32 +181,6 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
                     )
                 }
             }
-            CatalogCommand::Access { app, mode } => {
-                let target = resolve_service(api, &token, &app).await?;
-                api.authenticated(
-                    Method::PUT,
-                    &format!("/app-services/{}/access", target.app_id),
-                    &token,
-                )
-                .json(&serde_json::json!({ "accessMode": mode }))
-            }
-            CatalogCommand::Requests => {
-                api.authenticated(Method::GET, "/connection-requests", &token)
-            }
-            CatalogCommand::Approve { request } => api
-                .authenticated(
-                    Method::POST,
-                    &format!("/connection-requests/{request}/approve"),
-                    &token,
-                )
-                .json(&serde_json::json!({})),
-            CatalogCommand::Reject { request } => api
-                .authenticated(
-                    Method::POST,
-                    &format!("/connection-requests/{request}/reject"),
-                    &token,
-                )
-                .json(&serde_json::json!({})),
         };
         let result: serde_json::Value = json(request.send().await?).await?;
         return crate::print_json(&result);
@@ -251,15 +197,6 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
 pub async fn connect(api: &Api, credentials: &auth::Credentials, options: Connect) -> Result<()> {
     let token = auth::access_token(api, credentials).await?;
     let target = resolve_service(api, &token, &options.target).await?;
-    if options.request {
-        app_bindings::segment(&options.binding)?;
-        let app = options.source.resolve(api, credentials).await?;
-        let request: serde_json::Value = json(api.authenticated(Method::POST, "/connection-requests", &token)
-            .json(&serde_json::json!({
-                "appId": app, "app": target.app_id, "binding": options.binding, "entrypoint": options.entrypoint,
-            })).send().await?).await?;
-        return crate::print_json(&request);
-    }
     app_bindings::change_binding(
         api,
         credentials,

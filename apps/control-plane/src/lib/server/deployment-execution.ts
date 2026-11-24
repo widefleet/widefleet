@@ -43,7 +43,6 @@ export const deploymentCommand = z.discriminatedUnion("kind", [
     actor: deploymentActor,
     name: contract.appSecretName,
     grant: contract.capabilityGrant.nullable(),
-    connectionRequestId: contract.identifier.optional(),
   }),
   command.extend({
     kind: z.literal("access"),
@@ -80,7 +79,6 @@ export type HostedExecution = {
       appId: string,
       name: string,
       grant: z.infer<typeof contract.capabilityGrant> | null,
-      requestId?: string,
     ) => ExecutionResult<z.infer<typeof contract.capabilityState>>;
   };
   operations: {

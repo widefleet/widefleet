@@ -1,5 +1,3 @@
-import { createConnectionService } from "../src/lib/server/connections.ts";
-import { connectionRequests } from "../src/lib/server/schema.ts";
 import { organization } from "../src/lib/server/auth-schema.ts";
 import { checkServiceConsumers } from "../src/lib/server/app-services.ts";
 import { Result } from "better-result";
@@ -132,7 +130,7 @@ describe("Cloudflare operation history", () => {
     }
   });
 
-  it("approves a connection in the same transaction as its hosted command and replays it only once", async () => {
+  it("saves a connection in the same transaction as its hosted command and replays it only once", async () => {
     const principal = {
       id: environment.ownerId,
       name: "Owner",
@@ -158,46 +156,15 @@ describe("Cloudflare operation history", () => {
         .where(eq(deployments.id, entry.command.id));
     }
 
-    const services = createConnectionService(environment.database.db, storage);
-
-    const request = (
-      await services.request(
-        { ...principal, application: { ...principal.application, admin: false } },
-        {
-          appId: source.appId,
-          app: target.appId,
-          binding: "ERP",
-          entrypoint: "Reader",
-        },
-      )
-    ).unwrap();
-
     const command = deploymentCommand.parse({
       kind: "capabilities",
-      id: request.id,
+      id: crypto.randomUUID(),
       appId: source.appId,
-      name: request.binding,
+      name: "ERP",
       grant: { app: target.appId, entrypoint: "Reader" },
       actor: principal,
-      connectionRequestId: request.id,
       createdAt: new Date().toISOString(),
     });
-
-    const rejectedActor = deploymentCommand.parse({
-      ...command,
-      actor: { ...principal, application: { ...principal.application, admin: false } },
-    });
-
-    expect(
-      (await registerCloudflareOperation(environment.database.db, rejectedActor)).isErr(),
-    ).toBe(true);
-
-    const [pending] = await environment.database.db
-      .select()
-      .from(connectionRequests)
-      .where(eq(connectionRequests.id, request.id));
-
-    expect(pending?.status).toBe("pending");
 
     const first = (await registerCloudflareOperation(environment.database.db, command)).unwrap();
 
@@ -208,10 +175,6 @@ describe("Cloudflare operation history", () => {
     expect((await registerCloudflareOperation(environment.database.db, command)).unwrap()).toEqual(
       first,
     );
-    expect((await services.requests(principal)).unwrap()).toContainEqual({
-      ...request,
-      status: "approved",
-    });
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
   });
 

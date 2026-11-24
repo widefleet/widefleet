@@ -44,7 +44,6 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     slug: "erp-app",
     displayName: "ERP",
     entrypoints: ["Reader"],
-    accessMode: "approval_required",
   });
 
   let catalog = [service];
@@ -130,28 +129,6 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
                 : null,
             }),
           );
-      } else if (
-        request.method === "PUT" &&
-        [...catalog, ...unlisted].some(
-          (entry) => request.url === `/api/v1/app-services/${entry.appId}/access`,
-        )
-      ) {
-        response.end(body);
-      } else if (request.url?.startsWith("/api/v1/connection-requests")) {
-        response.end(
-          JSON.stringify(
-            request.method === "GET"
-              ? []
-              : {
-                  id: app.id,
-                  status: request.url.endsWith("approve")
-                    ? "approved"
-                    : request.url.endsWith("reject")
-                      ? "rejected"
-                      : "pending",
-                },
-          ),
-        );
       } else if (request.method === "POST" && request.url === "/api/v1/apps/source-target") {
         response.end(JSON.stringify({ supported: false, branch: "main", preview: false }));
       } else if (
@@ -296,51 +273,6 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
     });
 
-  it("requests a connection without binding and exposes administrator decisions and availability", async () => {
-    const requested = await command(
-      "connect",
-      "erp-app",
-      "--app",
-      "inventory",
-      "--as",
-      "ERP",
-      "--entrypoint",
-      "Reader",
-      "--request",
-    );
-
-    expect(JSON.parse(requested.stdout)).toMatchObject({ status: "pending" });
-    expect(requests.some((entry) => entry.path.includes("/bindings/"))).toBe(false);
-    expect(
-      JSON.parse(
-        requests.find((entry) => entry.path === "/api/v1/connection-requests")?.body ?? "null",
-      ),
-    ).toEqual({
-      appId: app.id,
-      app: "00000000-0000-4000-8000-000000000099",
-      binding: "ERP",
-      entrypoint: "Reader",
-    });
-    expect(JSON.parse((await command("services", "requests")).stdout)).toEqual([]);
-    expect(JSON.parse((await command("services", "approve", app.id)).stdout)).toMatchObject({
-      status: "approved",
-    });
-    expect(JSON.parse((await command("services", "reject", app.id)).stdout)).toMatchObject({
-      status: "rejected",
-    });
-    expect(
-      JSON.parse((await command("services", "access", "erp-app", "--mode", "organization")).stdout),
-    ).toEqual({ accessMode: "organization" });
-    expect(
-      JSON.parse(
-        (await command("services", "access", "erp-app", "--mode", "approval-required")).stdout,
-      ),
-    ).toEqual({ accessMode: "approval_required" });
-    expect(requests.every((entry) => entry.authorization === "Bearer normal-credential")).toBe(
-      true,
-    );
-  });
-
   it.each([
     {
       target: "a0000000-0000-4000-8000-000000000099",
@@ -356,7 +288,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       expected: "00000000-0000-4000-8000-000000000100",
     },
   ])(
-    "resolves colliding API identifiers for availability and connections: $target",
+    "resolves colliding API identifiers for connections: $target",
     async ({ target, expected }) => {
       catalog = [
         { ...service, slug: "a0000000-0000-4000-8000-000000000099", displayName: "Colliding slug" },
@@ -368,32 +300,6 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
         },
         { ...service, appId: "a0000000-0000-4000-8000-000000000099" },
       ];
-      await command("services", "access", target, "--mode", "organization");
-      expect(requests.filter((entry) => entry.method === "PUT")).toMatchObject([
-        {
-          path: `/api/v1/app-services/${expected}/access`,
-          body: JSON.stringify({ accessMode: "organization" }),
-        },
-      ]);
-      await command(
-        "connect",
-        target,
-        "--app",
-        "inventory",
-        "--as",
-        "ERP",
-        "--entrypoint",
-        "Reader",
-        "--request",
-      );
-      const requested = requests.findLast((entry) => entry.path === "/api/v1/connection-requests");
-      expect(requested?.method).toBe("POST");
-      expect(JSON.parse(requested?.body ?? "null")).toEqual({
-        appId: app.id,
-        app: expected,
-        binding: "ERP",
-        entrypoint: "Reader",
-      });
       await command(
         "connect",
         target,
@@ -414,9 +320,9 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     },
   );
 
-  it("does not change availability when the requested API is absent", async () => {
+  it("does not connect an absent API", async () => {
     await expect(
-      command("services", "access", "missing-api", "--mode", "organization"),
+      command("connect", "missing-api", "--app", "inventory", "--as", "ERP", "--no-wait"),
     ).rejects.toHaveProperty("stderr", expect.stringContaining("App service not found"));
     expect(requests.filter((entry) => entry.method !== "GET")).toEqual([]);
   });
