@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -176,9 +176,14 @@ An active company provider requires SSO authority for organization access; email
 receive `403` with code `SSO_REQUIRED`. The organization list includes `ssoRequired` when
 the current credential must sign in through that organization's provider.
 
-Organization administrators use `POST /api/v1/settings/domain-verification` to obtain
-`{ "name": "_better-auth-token-PROVIDER_ID.example.com", "type": "TXT", "value": "..." }`.
-After publishing the record, `POST /api/v1/settings/verify-domain` verifies ownership.
+Organization administrators add a company email domain with
+`POST /api/v1/settings/domains` and `{ "domain": "example.com" }`, and remove one with
+`DELETE /api/v1/settings/domains/example.com`. `GET /api/v1/settings` lists them in
+`ssoDomains`, each with `verified` and, while pending, its DNS `record`.
+`POST /api/v1/settings/domain-verification` returns the pending records in `records`, such as
+`{ "domain": "example.com", "name": "_better-auth-token-PROVIDER_ID.example.com", "type": "TXT", "value": "..." }`.
+After publishing a record, `POST /api/v1/settings/verify-domain` with `{ "domain": "example.com" }`
+verifies that domain; without a body it verifies every pending domain.
 `POST /api/v1/settings/activate-sso` separately makes company SSO required; it requires
 verified DNS but does not require a completed test login. These operations accept the
 same browser or CLI write credentials as settings changes and operate on the selected organization.
