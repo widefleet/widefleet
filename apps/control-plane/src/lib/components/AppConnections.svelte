@@ -22,6 +22,9 @@
 
   let { app }: { app: z.infer<typeof appContract> } = $props();
 
+  // With the port an installation serves apps on, when that is not the usual one.
+  const host = $derived(new URL(app.url).host);
+
   const request = $derived(
     getAppConnections({ organizationId: workspace.organizationId, appId: app.id }),
   );
@@ -130,11 +133,11 @@
               href={app.url}
               target="_blank"
               rel="noreferrer"
-              ><span class="min-w-0 wrap-anywhere">{app.hostname}</span><ArrowUpRight
+              ><span class="min-w-0 wrap-anywhere">{host}</span><ArrowUpRight
                 class="mt-0.5 size-3 shrink-0"
               /><span class="sr-only">Opens in a new tab</span></a
             >
-          {:else}<p class="text-muted-foreground text-xs wrap-anywhere">{app.hostname}</p>
+          {:else}<p class="text-muted-foreground text-xs wrap-anywhere">{host}</p>
             <p class="text-muted-foreground mt-2 text-xs">Available after deployment</p>{/if}
         </div>
         <span
