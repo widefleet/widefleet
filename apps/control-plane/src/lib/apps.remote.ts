@@ -30,16 +30,15 @@ export const getApps = query(organizationSelection, async (selection) => {
 
 export const getAppDetails = query(appQuery, async ({ appId, search, organizationId }) => {
   const { runtime, principal, organization } = await remoteContext({ organizationId });
-  const found = await runtime.apps.get(principal, appId);
+  const found = await runtime.apps.details(principal, appId);
 
   // People who do not manage the app are led to the page the catalog has for it.
   if (found.isErr() && found.error instanceof InvalidOperation && found.error.code === "NOT_FOUND")
     redirect(303, workspacePath(organization.slug, `/catalog/apps/${appId}`));
-  const app = queryValue(found);
+  // The features decide the label above the app's name and which sections its page offers.
+  const { app, features } = queryValue(found);
   const history = queryValue(await runtime.apps.history(principal, appId));
   const access = queryValue(await runtime.apps.access(principal, appId, search));
-  // They decide the label above the app's name and which sections its page offers.
-  const features = queryValue(await runtime.apps.features(principal, appId));
 
   const source = app.source;
 

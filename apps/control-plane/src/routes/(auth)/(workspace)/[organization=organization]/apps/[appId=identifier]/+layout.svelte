@@ -90,10 +90,13 @@
         data.source.supported &&
         (manual || details.current?.app.activeDeploymentId !== deployed)
       )
-        await getAppSource({
+        // Not awaited: a slow Git host must not hold up the next look at the deployments.
+        void getAppSource({
           organizationId: workspace.organizationId,
           appId: route.appId,
-        }).refresh();
+        })
+          .refresh()
+          .catch(() => {});
 
       // A deployment can add the app to the organization's APIs or change what it exposes.
       if (activeTab === "api")
@@ -174,7 +177,7 @@
 <div class="flex flex-wrap items-center justify-between gap-4">
   <div class="flex items-center gap-2">
     <span class="text-muted-foreground text-[11px] font-medium tracking-wider uppercase"
-      >{data.app.parentId ? "Preview" : data.features.connector ? "Connector" : "App"}</span
+      >{data.features.connector ? "Connector" : "App"}{data.app.parentId ? " preview" : ""}</span
     ><AppStatus state={data.app.state} />
   </div>
   <div class="flex items-center gap-2">

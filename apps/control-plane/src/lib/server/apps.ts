@@ -234,7 +234,7 @@ export const presentDeployment = (record: typeof deployments.$inferSelect) =>
   });
 
 export const missingRequiredSecrets = (names: readonly string[]) =>
-  `The following required secrets have not been set: ${names.join(", ")}. Set them on the app's Secrets page or with widefleet secret put NAME, then try again.`;
+  `The following required secrets have not been set: ${names.join(", ")}. Set them under Secrets on the app's Connections page or with widefleet secret put NAME, then try again.`;
 
 export const enqueueDeployment = async (
   transaction: Transaction,
@@ -683,8 +683,11 @@ export const createAppService = (
         source: presentAppSource(record.value, metadata?.source ?? null, sourceSupported),
       });
     }),
-  /** What the active deployment adds to the app: personal connections, an API and workflows. */
-  features: (principal: Principal, appId: string) =>
+  /**
+   * The app for its own page, with what the active deployment adds to it: personal
+   * connections, an API and workflows.
+   */
+  details: (principal: Principal, appId: string) =>
     readOnly(database, async (transaction) => {
       const record = await readableApp(transaction, principal, appId);
 
@@ -693,11 +696,17 @@ export const createAppService = (
       const metadata = await activeMetadata(transaction, record.value);
 
       return Result.ok({
-        // The same rule as the connector mark in the list of apps.
-        connector:
-          record.value.webEnabled && (metadata?.entrypoints?.includes("UserConnection") ?? false),
-        api: (await catalogEntrypoints(transaction, record.value)).length > 0,
-        workflows: metadata?.bindings.some((binding) => binding.type === "workflow") ?? false,
+        app: {
+          ...presentApp(record.value, configuration),
+          source: presentAppSource(record.value, metadata?.source ?? null, sourceSupported),
+        },
+        features: {
+          // The same rule as the connector mark in the list of apps.
+          connector:
+            record.value.webEnabled && (metadata?.entrypoints?.includes("UserConnection") ?? false),
+          api: (await catalogEntrypoints(transaction, record.value)).length > 0,
+          workflows: metadata?.bindings.some((binding) => binding.type === "workflow") ?? false,
+        },
       });
     }),
   /**

@@ -2589,7 +2589,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       await page.getByLabel("Action", { exact: true }).selectOption("create");
       await page.getByLabel("Parameters (JSON)").fill('{"message":"draft"}');
       const dialog = page.waitForEvent("dialog");
-      const navigation = page.getByRole("link", { name: "Deployments", exact: true }).click();
+      const navigation = page.getByRole("link", { name: /^Deployments/ }).click();
       const confirmation = await dialog;
       expect(confirmation.type()).toBe("confirm");
       await confirmation.accept();
@@ -2605,7 +2605,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       await page.getByText("Requested — waiting for the agent.", { exact: true }).waitFor();
       const pendingOperation = await page.getByText("Operation:", { exact: false }).textContent();
 
-      await page.getByRole("link", { name: "Deployments", exact: true }).click();
+      await page.getByRole("link", { name: /^Deployments/ }).click();
       await page.getByRole("heading", { name: "App address", exact: true }).waitFor();
       await page.getByRole("link", { name: "Workflows", exact: true }).click();
       await page.getByText("Requested — waiting for the agent.", { exact: true }).waitFor();

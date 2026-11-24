@@ -27,4 +27,18 @@
     submitRollback={app.submitRollback}
   />
 </div>
-{#if data.source.supported}<div class="mt-10 border-t pt-8"><AppSource /></div>{/if}
+{#if data.source.supported}<div class="mt-10 border-t pt-8">
+    <!-- The saved code comes from the Git host, so the deployments above do not wait for it. -->
+    <svelte:boundary>
+      <AppSource />
+      {#snippet pending()}
+        <h2 class="text-base font-semibold">Source code</h2>
+        <p class="text-muted-foreground mt-2 text-sm">Loading the saved code …</p>
+        <noscript
+          ><p class="text-muted-foreground mt-2 text-sm">
+            This section needs JavaScript. <code>widefleet source status</code> shows the same.
+          </p></noscript
+        >
+      {/snippet}
+    </svelte:boundary>
+  </div>{/if}
