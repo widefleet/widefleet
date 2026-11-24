@@ -18,6 +18,8 @@ export type RestOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
+  /** The header inputs every call needs. */
+  requiredHeaders?: string[] | undefined;
   body: "json" | "form" | "multipart" | "text" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string> | undefined;
@@ -187,6 +189,9 @@ export const restRequest = (
 
   for (const [key, name] of Object.entries(operation.headerParameters)) {
     const value = own(values, key);
+
+    if (value === undefined && operation.requiredHeaders?.includes(key))
+      throw new InvalidRequest(`${method} needs ${key}`);
 
     if (value === undefined) continue;
     const text = z.string().safeParse(value);

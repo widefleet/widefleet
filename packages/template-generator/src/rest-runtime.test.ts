@@ -124,6 +124,23 @@ describe("REST requests", () => {
     );
   });
 
+  it("needs the header inputs an operation requires", () => {
+    const update: RestOperation = {
+      ...upload,
+      httpMethod: "PATCH",
+      body: "json",
+      headerParameters: { etag: "If-Match" },
+      requiredHeaders: ["etag"],
+    };
+
+    expect(() => restRequest(base, "update", update, { itemId: "1", body: {} })).toThrow(
+      "update needs etag",
+    );
+    expect(
+      restRequest(base, "update", update, { itemId: "1", etag: 'W/"1"', body: {} }).init.headers,
+    ).toEqual({ "content-type": "application/json", "If-Match": 'W/"1"' });
+  });
+
   it("sends text bodies with their media type and rejects unknown arguments", () => {
     expect(
       restRequest(base, "upload", upload, {

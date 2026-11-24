@@ -47,7 +47,10 @@ const change = z.enum(["create", "update", "delete", "send"]);
 
 const hidden = z.object({ hidden: z.string() });
 
-const headers = z.record(z.string(), z.object({ name: z.string(), description: z.string() }));
+const headers = z.record(
+  z.string(),
+  z.object({ name: z.string(), description: z.string(), required: z.boolean().optional() }),
+);
 
 const configuration = z.discriminatedUnion("kind", [
   z.object({

@@ -12,8 +12,13 @@ import { reservedMethod } from "./reserved.ts";
 import { type Change, type GeneratedFiles, json, type Json } from "./rules.ts";
 import { isSwagger, upgradeSwagger } from "./swagger.ts";
 
-/** Header inputs of an operation, by input name: the header's name and what it carries. */
-type HeaderRules = Readonly<Record<string, { name: string; description: string }>>;
+/**
+ * Header inputs of an operation, by input name: the header's name, what it
+ * carries and whether every call needs it.
+ */
+type HeaderRules = Readonly<
+  Record<string, { name: string; description: string; required?: boolean | undefined }>
+>;
 
 /** How an OpenAPI template offers operations. */
 export interface OpenapiRules {
@@ -27,7 +32,8 @@ export interface OpenapiRules {
    * schemas a body or result can be where the description only names their
    * common base, such as Graph's attachment types. `headers` are
    * inputs the method sends as headers the description does not declare, such
-   * as Graph's `workbook-session-id`. Where the description leaves out or
+   * as Graph's `workbook-session-id`, or Business Central's `If-Match`, which
+   * every change of an entity needs. Where the description leaves out or
    * misdescribes inputs, `parameters` adds OpenAPI parameters or replaces those
    * of the same name and place, and `fields` replaces, adds or, with null,
    * removes the fields of a form body.
@@ -217,6 +223,8 @@ export type OpenapiOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
+  /** The header inputs every call needs. */
+  requiredHeaders?: string[];
   body: "json" | "form" | "multipart" | "text" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
@@ -885,6 +893,9 @@ export const generateOpenapi = (
     };
 
     if (Object.keys(formLists).length) call.formLists = formLists;
+    const requiredHeaders = headers.flatMap(([input, { required }]) => (required ? [input] : []));
+
+    if (requiredHeaders.length) call.requiredHeaders = requiredHeaders;
     runtime[rule.name] = call;
 
     const inputOf = (value: z.infer<typeof parameter>) =>
@@ -946,8 +957,8 @@ export const generateOpenapi = (
 
     // Header inputs, such as a session, apply to every page.
     const headerFields = headers.map(
-      ([input, { description }]) =>
-        `${comment(description, "    ")}    ${propertyName(input)}?: string;`,
+      ([input, { description, required }]) =>
+        `${comment(description, "    ")}    ${propertyName(input)}${required ? "" : "?"}: string;`,
     );
 
     fields.push(...headerFields);
@@ -995,7 +1006,9 @@ export const generateOpenapi = (
     if (responseKind === "binary") usesBinary = true;
 
     const required =
-      parameters.some((value) => value.in === "path" || value.required) || body?.required === true;
+      parameters.some((value) => value.in === "path" || value.required) ||
+      body?.required === true ||
+      requiredHeaders.length > 0;
 
     const firstPage = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
 
@@ -1089,6 +1102,8 @@ export type Operation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
+  /** The header inputs every call needs. */
+  requiredHeaders?: string[];
   body: "json" | "form" | "multipart" | "text" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;

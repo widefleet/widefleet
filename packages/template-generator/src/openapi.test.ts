@@ -308,6 +308,30 @@ describe("OpenAPI template generator", () => {
     ).toThrow("items.GetContent has two inputs named itemId");
   });
 
+  it("makes the headers the rules require inputs every call needs", () => {
+    const { files } = generateOpenapi(
+      api,
+      {
+        operations: {
+          "items.GetContent": {
+            name: "getContent",
+            headers: {
+              etag: { name: "If-Match", description: "The item's version.", required: true },
+            },
+          },
+        },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toContain(
+      "    /**\n     * The item's version.\n     */\n    etag: string;",
+    );
+    expect(files["src/schema.ts"]).toContain('"headerParameters":{"etag":"If-Match"}');
+    expect(files["src/schema.ts"]).toContain('"requiredHeaders":["etag"]');
+  });
+
   it("adds operations the description leaves out at a described operation's path", () => {
     const updateItem = {
       operation: "items.GetContent",
