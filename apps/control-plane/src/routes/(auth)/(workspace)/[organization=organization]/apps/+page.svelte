@@ -3,6 +3,11 @@
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import { Badge } from "@platform/ui/badge";
+  import * as DropdownMenu from "@platform/ui/dropdown-menu";
+  import { toast } from "@platform/ui/sonner";
+  import { mergeProps } from "bits-ui";
+  import Bot from "@lucide/svelte/icons/bot";
+  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
   import Plus from "@lucide/svelte/icons/plus";
   import Search from "@lucide/svelte/icons/search";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -39,6 +44,17 @@
     }),
   );
 
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(data.createPrompt);
+      toast.success("Prompt copied.", { description: "Paste it into your agent." });
+    } catch {
+      toast.error("Copying is not available here.", {
+        description: "Find the prompt below the templates.",
+      });
+    }
+  };
+
   const connectors = $derived(data.apps.filter((app) => app.connector).length);
 
   const filters = $derived([
@@ -50,9 +66,38 @@
 
 <svelte:head><title>Manage · Widefleet</title></svelte:head>
 <PageHeading title="Manage">
-  {#if data.principal.creator}<Button href={workspace.path("/catalog/templates")}
-      ><Plus />Create app</Button
-    >{/if}
+  {#if data.principal.creator}
+    <DropdownMenu.Root>
+      <!-- A link keeps the templates reachable before hydration and without JavaScript. -->
+      <DropdownMenu.Trigger>
+        {#snippet child({ props })}<Button
+            {...mergeProps(props, { onclick: (event: MouseEvent) => event.preventDefault() })}
+            href={workspace.path("/catalog/templates")}><Plus />Create app</Button
+          >{/snippet}
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end" class="w-72">
+        <DropdownMenu.Item class="items-start gap-3 p-2.5" onSelect={copyPrompt}>
+          <Bot class="mt-0.5" />
+          <span
+            ><span class="block font-medium">Build with your agent</span><span
+              class="text-muted-foreground block text-xs"
+              >Copy a prompt and tell your agent what you need.</span
+            ></span
+          >
+        </DropdownMenu.Item>
+        <DropdownMenu.Item class="items-start gap-3 p-2.5">
+          {#snippet child({ props })}<a {...props} href={workspace.path("/catalog/templates")}
+              ><LayoutTemplate class="mt-0.5" /><span
+                ><span class="block font-medium">Start from a template</span><span
+                  class="text-muted-foreground block text-xs"
+                  >Choose a ready-made connector and set it up.</span
+                ></span
+              ></a
+            >{/snippet}
+        </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+  {/if}
 </PageHeading>
 {#if data.apps.length === 0}
   <!-- Without apps of their own, members start from the templates. -->
