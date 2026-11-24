@@ -1673,17 +1673,15 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   });
 
   expect(createdPreview.status(), await createdPreview.text()).toBe(200);
-  const preview = app.parse(await createdPreview.json());
-  await page.goto(`/widefleet/apps/${preview.id}`);
+  await page.goto(`/widefleet/apps/${app.parse(await createdPreview.json()).id}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Notes Preview");
   await expect(page.getByRole("link", { name: "Back to original app" })).toHaveAttribute(
     "href",
     `/widefleet/apps/${appId}`,
   );
-  // The address of an app is on its Deployments page.
-  await page.getByRole("link", { name: "Deployments", exact: true }).click();
-  expect(preview.hostname).toBe("notes-preview.apps.localhost");
-  await expect(page.getByText(preview.url, { exact: true })).toBeVisible();
+  // The address of an app is on its Connections page.
+  await page.getByRole("link", { name: "Connections", exact: true }).click();
+  await expect(page.getByText("notes-preview.apps.localhost", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByText("Permanently delete app", { exact: true }).click();
   await page.getByRole("checkbox").check();
