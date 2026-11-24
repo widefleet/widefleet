@@ -4027,6 +4027,21 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
       "Help me create an app on Widefleet.",
     );
+    // Where the browser refuses to copy, the page shows the prompt for copying by hand.
+    await page.evaluate(() =>
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: () => Promise.reject(new Error("Synthetic clipboard failure")) },
+        configurable: true,
+      }),
+    );
+    await page.getByRole("link", { name: "Create app", exact: true }).click();
+    await page.getByRole("menuitem", { name: /^Build with your agent/ }).click();
+    await expect(
+      page.getByText("Copying is not available here. Select the prompt and copy it manually."),
+    ).toBeVisible();
+    await expect(page.getByRole("main").locator("code")).toContainText(
+      "Help me create an app on Widefleet.",
+    );
     await page.getByRole("link", { name: "Create app", exact: true }).click();
     await page.getByRole("menuitem", { name: /^Start from a template/ }).click();
     await expect(page).toHaveURL(/\/widefleet\/catalog\/templates$/);

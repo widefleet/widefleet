@@ -12,6 +12,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
+  import CopyValue from "#shadcn/components/CopyValue.svelte";
   import TemplateList from "#shadcn/components/TemplateList.svelte";
   import AppIcon from "#shadcn/components/AppIcon.svelte";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
@@ -43,14 +44,16 @@
     }),
   );
 
+  // Where the browser refuses to copy, the prompt appears so it can be selected by hand.
+  let uncopied = $state(false);
+
   const copyPrompt = async () => {
     try {
       await navigator.clipboard.writeText(data.createPrompt);
+      uncopied = false;
       toast.success("Prompt copied.", { description: "Paste it into your agent." });
     } catch {
-      toast.error("Copying is not available here.", {
-        description: "Find the prompt below the templates.",
-      });
+      uncopied = true;
     }
   };
 
@@ -98,6 +101,14 @@
     </DropdownMenu.Root>
   {/if}
 </PageHeading>
+{#if uncopied}
+  <div class="mt-6">
+    <p class="text-muted-foreground mb-2 text-sm" role="alert">
+      Copying is not available here. Select the prompt and copy it manually.
+    </p>
+    <CopyValue value={data.createPrompt} label="Copy create app prompt" />
+  </div>
+{/if}
 {#if data.apps.length === 0}
   <!-- Without apps of their own, members start from the templates. -->
   {#if !data.principal.creator}<p class="text-muted-foreground mt-2 text-sm">
