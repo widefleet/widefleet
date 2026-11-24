@@ -169,7 +169,7 @@ export const putAppSecret = form(
     const { runtime, principal, organization } = await remoteContext({ organizationId });
     formValue(await runtime.appSecrets.set(principal, appId, secret, _value));
     await getAppSecrets({ appId, organizationId }).refresh();
-    redirect(303, workspacePath(organization.slug, `/apps/${appId}/secrets?submitted=1`));
+    redirect(303, workspacePath(organization.slug, `/apps/${appId}/connections#secrets`));
   },
 );
 
@@ -179,6 +179,6 @@ export const deleteAppSecret = form(
     const { runtime, principal, organization } = await remoteContext({ organizationId });
     formValue(await runtime.appSecrets.set(principal, appId, secret, null));
     await getAppSecrets({ appId, organizationId }).refresh();
-    redirect(303, workspacePath(organization.slug, `/apps/${appId}/secrets?submitted=1`));
+    redirect(303, workspacePath(organization.slug, `/apps/${appId}/connections#secrets`));
   },
 );

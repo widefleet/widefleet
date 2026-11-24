@@ -38,12 +38,14 @@ export const getAppDetails = query(appQuery, async ({ appId, search, organizatio
   const app = queryValue(found);
   const history = queryValue(await runtime.apps.history(principal, appId));
   const access = queryValue(await runtime.apps.access(principal, appId, search));
+  // They decide the label above the app's name and which sections its page offers.
+  const features = queryValue(await runtime.apps.features(principal, appId));
 
   const source = app.source;
 
   // The rollback form sends this key so a repeated submission starts only one deployment. It
   // comes with the data so the server-rendered form and the hydrated page share it.
-  return { app, history, access, source, requestId: crypto.randomUUID() };
+  return { app, history, access, source, features, requestId: crypto.randomUUID() };
 });
 
 export const getAppSource = query(appTarget, async ({ appId, organizationId }) => {

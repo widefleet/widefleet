@@ -2,7 +2,7 @@
   import { page } from "$app/state";
   import { getAppSource } from "#lib/apps.remote";
   import { getAppContext } from "#lib/app-context";
-  import CopyValue from "#shadcn/components/CopyValue.svelte";
+  import CopyValue from "./CopyValue.svelte";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
@@ -27,8 +27,8 @@
 </script>
 
 <div class="max-w-2xl space-y-8">
-  <section>
-    <h2 class="text-base font-semibold">Source code</h2>
+  <section aria-labelledby="source-heading">
+    <h2 id="source-heading" class="text-base font-semibold">Source code</h2>
     {#if !source.supported}
       <p class="text-muted-foreground mt-2 text-sm">
         This installation does not provide Git repositories.

@@ -105,7 +105,9 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
   const app = contract.app.parse(await response.json());
 
   await page.goto(`/widefleet/apps/${app.id}`);
-  await expect(page.getByRole("link", { name: "Source", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "Deployments", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Deployment history" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Source code" })).toHaveCount(0);
 
   for (const [name, width, height, theme] of [
     ["desktop-light", 1440, 1000, "light"],
@@ -118,7 +120,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
 
   await stop();
   await start(true);
-  await page.goto(`/widefleet/apps/${app.id}/source`);
+  await page.goto(`/widefleet/apps/${app.id}/deployments`);
   await expect(page.getByText("No source has been saved yet.", { exact: false })).toBeVisible();
 
   for (const [name, width, height, theme] of [
@@ -211,7 +213,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
 
   const savedState = await readFile(state, "utf8");
   await writeFile(state, "invalid fixture state");
-  await page.goto(`/widefleet/apps/${app.id}/source`);
+  await page.goto(`/widefleet/apps/${app.id}/deployments`);
   await expect(page.getByRole("alert")).toContainText("The source repository is unavailable");
   await expect(page.getByRole("button", { name: "Create Git repository" })).toHaveCount(0);
 
@@ -229,7 +231,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
     }
   }
 
-  await page.getByRole("link", { name: "App settings", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(
     page.getByText(
       "Any associated Widefleet Git repository and its branches will also be permanently deleted.",
@@ -242,7 +244,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
   await expect(page.getByRole("button", { name: "Refresh app" })).toBeEnabled();
   expect(await readFile(`${state}.reads`, "utf8")).toBe(sourceReads);
   await writeFile(state, savedState);
-  await page.goto(`/widefleet/apps/${app.id}/source`);
+  await page.goto(`/widefleet/apps/${app.id}/deployments`);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText(deployed.commit, { exact: true })).toBeVisible();
 
@@ -258,7 +260,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
 
   expect(previewResponse.ok()).toBe(true);
   const preview = contract.app.parse(await previewResponse.json());
-  await page.goto(`/widefleet/apps/${preview.id}/source`);
+  await page.goto(`/widefleet/apps/${preview.id}/deployments`);
   await expect(page.getByText("review", { exact: true })).toBeVisible();
   await expect(
     page.getByText("This preview uses a branch in the main app’s repository."),
@@ -277,7 +279,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
 
   expect(manualResponse.ok()).toBe(true);
   const manual = contract.app.parse(await manualResponse.json());
-  await page.goto(`/widefleet/apps/${manual.id}/source`);
+  await page.goto(`/widefleet/apps/${manual.id}/deployments`);
   await expect(page.getByRole("button", { name: "Copy preview command" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Git URL" })).toHaveCount(0);
 

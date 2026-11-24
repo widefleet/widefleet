@@ -7,7 +7,7 @@
   import { Textarea } from "@platform/ui/textarea";
   import { Label } from "@platform/ui/label";
   import { Button } from "@platform/ui/button";
-  import StatusBadge from "#shadcn/components/StatusBadge.svelte";
+  import StatusBadge from "./StatusBadge.svelte";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
@@ -31,9 +31,9 @@
   };
 </script>
 
-<section class="max-w-xl space-y-6">
+<section id="secrets" aria-labelledby="secrets-heading" class="max-w-xl space-y-6">
   <div>
-    <h2 class="font-semibold">Secrets</h2>
+    <h2 id="secrets-heading" class="text-base font-semibold">Secrets</h2>
     <p class="text-muted-foreground mt-2 text-sm">
       Only this app receives these values. Connected apps can call its API without receiving its
       secrets.

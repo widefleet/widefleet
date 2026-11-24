@@ -271,7 +271,7 @@ test(`preserves multiline secrets and offers failed disconnection retries`, asyn
       hostname: `service-consumer-${alpha}.apps.localhost`,
     });
     const page = await context.newPage();
-    await page.goto(`/${alpha}/apps/${id}/secrets`);
+    await page.goto(`/${alpha}/apps/${id}/connections`);
     const value = "-----BEGIN FIXTURE-----\nfirst line\nsecond line\n-----END FIXTURE-----";
     await page.getByLabel("Name", { exact: true }).fill("TOKEN");
     await page.getByLabel("Value", { exact: true }).fill(value);

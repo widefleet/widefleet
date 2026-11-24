@@ -1,5 +1,5 @@
 import { requireAvailableHostname } from "./hostnames.ts";
-import { checkServiceConsumers } from "./app-services.ts";
+import { catalogEntrypoints, checkServiceConsumers } from "./app-services.ts";
 import { findAppScreenshot, screenshotNumbers } from "./app-screenshots.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -176,6 +176,21 @@ export const appUrl = (hostname: string, port: number) => {
   url.port = String(port);
 
   return url.href;
+};
+
+const activeMetadata = async (
+  transaction: DatabaseExecutor,
+  app: Pick<typeof apps.$inferSelect, "activeDeploymentId">,
+) => {
+  const [active] = app.activeDeploymentId
+    ? await transaction
+        .select({ metadata: artifacts.metadata })
+        .from(deployments)
+        .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+        .where(eq(deployments.id, app.activeDeploymentId))
+    : [];
+
+  return active ? contract.workerMetadata.parse(active.metadata) : null;
 };
 
 export const presentApp = (record: typeof apps.$inferSelect, configuration: Configuration) =>
@@ -661,21 +676,28 @@ export const createAppService = (
 
       if (record.isErr()) return record;
 
-      const [active] = record.value.activeDeploymentId
-        ? await transaction
-            .select({ metadata: artifacts.metadata })
-            .from(deployments)
-            .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
-            .where(eq(deployments.id, record.value.activeDeploymentId))
-        : [];
+      const metadata = await activeMetadata(transaction, record.value);
 
       return Result.ok({
         ...presentApp(record.value, configuration),
-        source: presentAppSource(
-          record.value,
-          active ? (contract.workerMetadata.parse(active.metadata).source ?? null) : null,
-          sourceSupported,
-        ),
+        source: presentAppSource(record.value, metadata?.source ?? null, sourceSupported),
+      });
+    }),
+  /** What the active deployment adds to the app: personal connections, an API and workflows. */
+  features: (principal: Principal, appId: string) =>
+    readOnly(database, async (transaction) => {
+      const record = await readableApp(transaction, principal, appId);
+
+      if (record.isErr()) return record;
+
+      const metadata = await activeMetadata(transaction, record.value);
+
+      return Result.ok({
+        // The same rule as the connector mark in the list of apps.
+        connector:
+          record.value.webEnabled && (metadata?.entrypoints?.includes("UserConnection") ?? false),
+        api: (await catalogEntrypoints(transaction, record.value)).length > 0,
+        workflows: metadata?.bindings.some((binding) => binding.type === "workflow") ?? false,
       });
     }),
   /**

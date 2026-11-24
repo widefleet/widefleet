@@ -83,7 +83,7 @@
           appId: route.appId,
         }).refresh();
 
-      if (activeTab === "source")
+      if (activeTab === "deployments" && data.source.supported)
         await getAppSource({
           organizationId: workspace.organizationId,
           appId: route.appId,
@@ -149,15 +149,13 @@
 
   const tabs = $derived([
     { id: "overview", label: "Overview" },
-    { id: "status", label: "Status" },
     { id: "deployments", label: "Deployments" },
-    ...(data.source.supported ? [{ id: "source", label: "Source" }] : []),
-    { id: "api", label: "API" },
+    // An app without an API or workflows has no section for them.
+    ...(data.features.api ? [{ id: "api", label: "API" }] : []),
     { id: "connections", label: "Connections" },
-    { id: "workflows", label: "Workflows" },
-    { id: "secrets", label: "Secrets" },
+    ...(data.features.workflows ? [{ id: "workflows", label: "Workflows" }] : []),
     { id: "access", label: "Access" },
-    { id: "settings", label: "App settings" },
+    { id: "settings", label: "Settings" },
   ]);
 </script>
 
@@ -170,7 +168,7 @@
 <div class="flex flex-wrap items-center justify-between gap-4">
   <div class="flex items-center gap-2">
     <span class="text-muted-foreground text-[11px] font-medium tracking-wider uppercase"
-      >{data.app.parentId ? "Preview" : "App"}</span
+      >{data.app.parentId ? "Preview" : data.features.connector ? "Connector" : "App"}</span
     ><AppStatus state={data.app.state} />
   </div>
   <div class="flex items-center gap-2">

@@ -10,9 +10,6 @@
   import Search from "@lucide/svelte/icons/search";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Feedback from "./Feedback.svelte";
-  import { getWorkspaceContext } from "#lib/workspace-context";
-
-  const workspace = getWorkspaceContext();
 
   let { data, search }: { data: Awaited<ReturnType<typeof getAppDetails>>; search: string } =
     $props();
@@ -40,11 +37,9 @@
   <div class="bg-muted/40 flex items-start gap-3 rounded-lg border p-4 text-xs leading-5">
     <ShieldCheck class="text-muted-foreground mt-0.5 size-4 shrink-0" />
     <p>
-      Manage <strong class="font-medium">management access</strong> here. Access to the published
-      app is controlled by its
-      <a href={workspace.path(`/apps/${data.app.id}/access`)} class="underline underline-offset-4"
-        >app usage rules</a
-      >. Workspace owners and admins have access to all apps.
+      Who can use the published app is decided by its
+      <a href="#app-access" class="underline underline-offset-4">app access rules</a>. Workspace
+      owners and admins have access to all apps.
     </p>
   </div>
   {#if saved}<Feedback kind="success">App access saved.</Feedback>{/if}
