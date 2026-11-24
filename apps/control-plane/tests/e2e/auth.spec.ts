@@ -1222,7 +1222,6 @@ test("protects auth-group documents and data requests even when every layout is 
     "/widefleet/account",
     "/widefleet/settings/agents",
     "/widefleet/apps",
-    "/widefleet/apps/new",
     "/widefleet/apps/00000000-0000-4000-8000-000000000000/connections",
     "/widefleet/catalog/templates?q=mail",
     "/widefleet/catalog/templates/gmail",
@@ -1735,22 +1734,21 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   await page.goto("/widefleet/settings/agents");
   await expect(page.getByRole("status")).toHaveCount(0);
   await page.getByRole("link", { name: "Manage", exact: true }).click();
-  // The form for a name and an address has no link of its own; previews open it.
-  await page.goto("/widefleet/apps/new");
-  await page.getByLabel("App name", { exact: true }).fill("Team Notes");
-  await expect(page.getByLabel("Deployment-Agent", { exact: true })).toHaveCount(0);
-  await page.getByLabel("URL slug").fill("team-notes");
-  await page.getByRole("button", { name: "Create app" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Team Notes");
-  await expect(page.getByText("No deployments yet.", { exact: false })).toBeVisible();
-  const appId = z.uuid().parse(new URL(page.url()).pathname.split("/").at(-1));
+  const api = { headers: { origin: environment.configuration.PLATFORM_URL } };
 
-  await page.getByRole("link", { name: "Status", exact: true }).click();
-  await page.getByRole("link", { name: "Create preview", exact: true }).click();
-  await page.getByLabel("App name", { exact: true }).fill("Notes Preview");
-  await page.getByLabel("URL slug").fill("notes-preview");
-  await page.getByLabel("Preview of an existing app").selectOption(appId);
-  await page.getByRole("button", { name: "Create app" }).click();
+  const created = await context.request.post("/api/v1/apps", {
+    ...api,
+    data: { slug: "team-notes", displayName: "Team Notes" },
+  });
+
+  const appId = app.parse(await created.json()).id;
+
+  const createdPreview = await context.request.post("/api/v1/apps", {
+    ...api,
+    data: { slug: "notes-preview", displayName: "Notes Preview", parentId: appId },
+  });
+
+  await page.goto(`/widefleet/apps/${app.parse(await createdPreview.json()).id}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Notes Preview");
   await expect(page.getByRole("link", { name: "Back to original app" })).toHaveAttribute(
     "href",
@@ -1819,12 +1817,13 @@ test("manages organization roles and app access by name while members create the
     await memberPage.goto("/widefleet/apps");
     await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
     expect((await memberContext.request.get("/widefleet/settings/members")).status()).toBe(403);
-    // The form for a name and an address has no link of its own; previews open it.
-    await memberPage.goto("/widefleet/apps/new");
-    await memberPage.getByLabel("App name", { exact: true }).fill("Member Workspace");
-    await memberPage.getByLabel("URL slug").fill("member-workspace");
-    await memberPage.getByRole("button", { name: "Create app" }).click();
-    await expect(memberPage.getByRole("heading", { level: 1 })).toHaveText("Member Workspace");
+
+    const memberApp = await memberContext.request.post("/api/v1/apps", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+      data: { slug: "member-workspace", displayName: "Member Workspace" },
+    });
+
+    expect(memberApp.ok()).toBe(true);
 
     await page.goto("/");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -1865,9 +1864,6 @@ test("manages organization roles and app access by name while members create the
     expect((await demoted).ok()).toBe(true);
     expect((await memberContext.request.get("/widefleet/settings/members")).status()).toBe(403);
 
-    // The form for a name and an address has no link of its own; previews open it.
-    await memberPage.goto("/widefleet/apps/new");
-    await expect(memberPage).toHaveURL(/\/apps\/new$/);
     await memberPage.reload();
     await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
     await expect(
@@ -3024,15 +3020,6 @@ test.describe("workspace experience", () => {
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
-    await page.goto("/widefleet/apps/new");
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-      .toBe(true);
-    await page.getByText("Create as preview", { exact: false }).click();
-    await expect(page.getByLabel("Preview of an existing app")).toBeVisible();
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-      .toBe(true);
   });
 
   test("supports keyboard navigation, system appearance, and copying an exact deployment command", async ({
@@ -3182,50 +3169,6 @@ test.describe("workspace experience", () => {
     expect(
       await environment.database.db.select().from(agents).where(eq(agents.name, "Resilient Agent")),
     ).toHaveLength(1);
-  });
-
-  test("rejects unavailable preview parents instead of creating independent apps", async ({
-    page,
-    context,
-  }) => {
-    const created = await context.request.post("/api/v1/apps", {
-      headers: { origin: environment.configuration.PLATFORM_URL },
-      data: { slug: "preview-parent-check", displayName: "Preview Parent" },
-    });
-
-    expect(created.ok()).toBe(true);
-    const parent = app.parse(await created.json());
-
-    const createdPreview = await context.request.post("/api/v1/apps", {
-      headers: { origin: environment.configuration.PLATFORM_URL },
-      data: {
-        slug: "preview-child-check",
-        displayName: "Preview Child",
-        parentId: parent.id,
-        previewName: "review",
-      },
-    });
-
-    expect(createdPreview.ok()).toBe(true);
-    const preview = app.parse(await createdPreview.json());
-    await page.goto(`/widefleet/apps/new?parent=${parent.id}`);
-    await expect(page.getByLabel("Preview of an existing app")).toHaveValue(parent.id);
-
-    const removed = await context.request.delete(`/api/v1/apps/${parent.id}`, {
-      headers: { origin: environment.configuration.PLATFORM_URL },
-    });
-
-    expect(removed.ok()).toBe(true);
-
-    for (const parentId of [parent.id, preview.id, crypto.randomUUID(), ""]) {
-      const response = await page.goto(`/widefleet/apps/new?parent=${parentId}`);
-      expect(response?.status()).toBe(404);
-      await expect(page.getByLabel("App name", { exact: true })).toHaveCount(0);
-      await expect(page.getByRole("link", { name: "Back to overview", exact: true })).toBeVisible();
-    }
-
-    await page.goto("/widefleet/apps/new");
-    await expect(page.getByLabel("App name", { exact: true })).toBeVisible();
   });
 });
 

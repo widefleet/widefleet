@@ -2,7 +2,7 @@ import { expect, test, type Browser } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
 import { apps, artifacts, deployments, organizationRuntimes } from "../../src/lib/server/schema.ts";
@@ -352,45 +352,45 @@ test(`opens the only organization without visiting the chooser`, async ({ browse
   }
 });
 
-test(`creates apps in the organization a tab shows while another tab opens another`, async ({
+test(`renames an app in the organization a tab shows while another tab opens another`, async ({
   browser,
 }) => {
-  const { alpha, beta, context } = await organizationSession(browser);
+  const { person, alpha, beta, context } = await organizationSession(browser);
 
   try {
+    const id = crypto.randomUUID();
+    await environment.database.db.insert(apps).values({
+      id,
+      organizationId: alpha,
+      ownerId: person.id,
+      slug: "parallel",
+      displayName: "Parallel",
+      hostname: `parallel-${alpha}.apps.localhost`,
+    });
     const first = await context.newPage();
     const second = await context.newPage();
-    await first.goto(`/${alpha}/apps/new`);
+    await first.goto(`/${alpha}/apps/${id}`);
     await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
-    await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(alpha);
-    const slug = `parallel`;
-    await first.getByLabel("App name", { exact: true }).fill("Alpha tab app");
-    await first.getByLabel("URL slug").fill(slug);
+    await first.waitForLoadState("networkidle");
+    await first.getByRole("button", { name: "Edit name" }).click();
+    const name = first.getByRole("textbox", { name: "Name", exact: true });
+    await expect(
+      first.locator("form", { has: name }).locator('input[name^="organizationId/"]'),
+    ).toHaveValue(alpha);
+    await name.fill("Alpha tab app");
 
     await second.goto(`/${beta}`);
     await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
 
-    await first.getByRole("button", { name: "Create app", exact: true }).click();
-    await expect(first).toHaveURL(
-      new RegExp(`^${environment.configuration.PLATFORM_URL}/${alpha}/apps/[a-f0-9-]+$`),
-    );
-    await expect(first.getByText(`${slug}-${alpha}.apps.localhost`, { exact: true })).toBeVisible();
-    await first.getByRole("link", { name: "Status", exact: true }).click();
-    await first.getByRole("link", { name: "Create preview", exact: true }).click();
-    await first.getByLabel("App name", { exact: true }).fill("Review");
-    await first.getByLabel("URL slug").fill(`${slug}-review`);
-    await first.getByRole("button", { name: "Create app", exact: true }).click();
-    await expect(first).toHaveURL(new RegExp(`/${alpha}/apps/[a-f0-9-]+$`));
-    await expect(
-      first.getByText(`${slug}-review-${alpha}.apps.localhost`, { exact: true }),
-    ).toBeVisible();
+    await name.press("Enter");
+    await expect(first.getByRole("heading", { level: 1 })).toHaveText("Alpha tab app");
 
     const records = await environment.database.db
-      .select({ organizationId: apps.organizationId })
+      .select({ displayName: apps.displayName })
       .from(apps)
-      .where(inArray(apps.slug, [slug, `${slug}-review`]));
+      .where(eq(apps.id, id));
 
-    expect(records).toEqual([{ organizationId: alpha }, { organizationId: alpha }]);
+    expect(records).toEqual([{ displayName: "Alpha tab app" }]);
   } finally {
     await context.close();
   }
@@ -594,15 +594,26 @@ test("switches organizations from the sidebar menu", async ({ browser }) => {
 });
 
 test("keeps an open tab on its organization after another tab switches", async ({ browser }) => {
-  const { alpha, beta, context } = await organizationSession(browser);
+  const { person, alpha, beta, context } = await organizationSession(browser);
 
   try {
+    const id = crypto.randomUUID();
+    await environment.database.db.insert(apps).values({
+      id,
+      organizationId: alpha,
+      ownerId: person.id,
+      slug: "unfinished",
+      displayName: "Unfinished",
+      hostname: `unfinished-${alpha}.apps.localhost`,
+    });
     const first = await context.newPage();
     const second = await context.newPage();
-    await first.goto(`/${alpha}/apps/new`);
+    await first.goto(`/${alpha}/apps/${id}`);
     await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
     await first.waitForLoadState("networkidle");
-    await first.getByLabel("App name", { exact: true }).fill("Unfinished Alpha app");
+    await first.getByRole("button", { name: "Edit name" }).click();
+    const name = first.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("Unfinished Alpha app");
 
     await second.goto(`/${beta}`);
     await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
@@ -612,8 +623,10 @@ test("keeps an open tab on its organization after another tab switches", async (
     await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
     const workspaceQuery = (await recheck).url();
     await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
-    await expect(first.getByLabel("App name", { exact: true })).toHaveValue("Unfinished Alpha app");
-    await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(alpha);
+    await expect(name).toHaveValue("Unfinished Alpha app");
+    await expect(
+      first.locator("form", { has: name }).locator('input[name^="organizationId/"]'),
+    ).toHaveValue(alpha);
 
     // The same recheck after the session ended sends the tab to sign-in.
     const anonymous = await browser.newContext();

@@ -1,9 +1,8 @@
 import { form, getRequestEvent, query } from "$app/server";
-import { error, redirect } from "@sveltejs/kit";
+import { redirect } from "@sveltejs/kit";
 import {
   appPath,
   createAgentInput,
-  createAppInput,
   identifier,
   organizationSelection,
   rollbackInput,
@@ -29,24 +28,6 @@ export const getApps = query(organizationSelection, async (selection) => {
   };
 });
 
-// The new app form needs creator permission. A preview link also needs its original app.
-export const getAppCreation = query(
-  organizationSelection.extend({ parentId: z.string().max(100).nullable() }),
-  async ({ organizationId, parentId }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
-
-    if (!principal.creator) error(403, "You do not have permission to create apps.");
-    const apps = queryValue(await runtime.apps.list(principal));
-    const originals = apps.filter((app) => app.state !== "deleting" && !app.parentId);
-    const parent = originals.find((app) => app.id === parentId);
-
-    if (parentId !== null && !parent)
-      error(404, "The original app is no longer available. This preview cannot be created.");
-
-    return { originals, parentId: parent?.id ?? "" };
-  },
-);
-
 export const getAppDetails = query(appQuery, async ({ appId, search, organizationId }) => {
   const { runtime, principal, organization } = await remoteContext({ organizationId });
   const found = await runtime.apps.get(principal, appId);
@@ -70,22 +51,6 @@ export const getAppSource = query(appTarget, async ({ appId, organizationId }) =
 
   return queryValue(await runtime.source.read(principal, appId));
 });
-
-export const createApp = form(
-  createAppInput.extend({
-    ...organizationSelection.shape,
-    parentId: z
-      .union([identifier, z.literal("")])
-      .optional()
-      .transform((value) => value || null),
-  }),
-  async ({ organizationId, ...input }) => {
-    const { runtime, principal, organization } = await remoteContext({ organizationId });
-    const app = formValue(await runtime.apps.create(principal, input));
-    await getApps({ organizationId }).refresh();
-    redirect(303, workspacePath(organization.slug, `/apps/${app.id}`));
-  },
-);
 
 export const registerAgent = form(
   createAgentInput.extend(organizationSelection.shape),

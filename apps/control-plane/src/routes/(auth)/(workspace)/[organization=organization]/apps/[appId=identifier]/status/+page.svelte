@@ -1,11 +1,8 @@
 <script lang="ts">
   import { getAppContext } from "#lib/app-context";
-  import { Button } from "@platform/ui/button";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
   import DeploymentStatus from "#shadcn/components/DeploymentStatus.svelte";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
-  import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
-  import GitBranch from "@lucide/svelte/icons/git-branch";
   import Globe from "@lucide/svelte/icons/globe";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
@@ -40,32 +37,15 @@
           {latest.message}
         </p>{/if}
     </section>{/if}
-  <div class="grid gap-6 lg:grid-cols-2">
-    <section class="min-w-0 rounded-xl border p-5 sm:p-6">
-      <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
-        <Globe class="text-muted-foreground size-4" />App address
-      </h2>
-      <CopyValue value={data.app.url} label="Copy app address" />
-      <p class="text-muted-foreground mt-3 text-xs leading-5">
-        {data.app.state === "active"
-          ? "Users sign in with their company accounts."
-          : "Available after the first successful deployment."}
-      </p>
-    </section>
-    {#if data.app.state !== "deleting" && !data.app.parentId}<section
-        class="rounded-xl border p-5 sm:p-6"
-      >
-        <h2 class="mb-2 flex items-center gap-2 text-sm font-semibold">
-          <GitBranch class="text-muted-foreground size-4" />Try ideas safely
-        </h2>
-        <p class="text-muted-foreground text-xs leading-6">
-          Test changes in a preview with its own address and data.
-        </p>
-        <Button
-          href={workspace.path(`/apps/new?parent=${data.app.id}`)}
-          variant="outline"
-          class="mt-4">Create preview<ArrowUpRight /></Button
-        >
-      </section>{/if}
-  </div>
+  <section class="min-w-0 rounded-xl border p-5 sm:p-6">
+    <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
+      <Globe class="text-muted-foreground size-4" />App address
+    </h2>
+    <CopyValue value={data.app.url} label="Copy app address" />
+    <p class="text-muted-foreground mt-3 text-xs leading-5">
+      {data.app.state === "active"
+        ? "Users sign in with their company accounts."
+        : "Available after the first successful deployment."}
+    </p>
+  </section>
 </div>
