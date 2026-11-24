@@ -754,7 +754,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         data: { slug: "worker-browser-app", displayName: "Browser App" },
       });
 
+      expect(created.status(), await created.text()).toBe(200);
       await page.goto(`${page.url()}/${contract.app.parse(await created.json()).id}`);
+      // The pencil opens the field only once the page has attached its handlers.
+      await page.waitForLoadState("networkidle");
       await page.getByRole("button", { name: "Edit name" }).click();
       await page.getByRole("textbox", { name: "Name", exact: true }).fill("Worker Browser App");
       await page.keyboard.press("Enter");

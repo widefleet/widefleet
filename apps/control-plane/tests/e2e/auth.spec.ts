@@ -1741,6 +1741,7 @@ test("registers an agent, creates an app and an isolated preview, then requests 
     data: { slug: "team-notes", displayName: "Team Notes" },
   });
 
+  expect(created.status(), await created.text()).toBe(200);
   const appId = app.parse(await created.json()).id;
 
   const createdPreview = await context.request.post("/api/v1/apps", {
@@ -1748,6 +1749,7 @@ test("registers an agent, creates an app and an isolated preview, then requests 
     data: { slug: "notes-preview", displayName: "Notes Preview", parentId: appId },
   });
 
+  expect(createdPreview.status(), await createdPreview.text()).toBe(200);
   await page.goto(`/widefleet/apps/${app.parse(await createdPreview.json()).id}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Notes Preview");
   await expect(page.getByRole("link", { name: "Back to original app" })).toHaveAttribute(
