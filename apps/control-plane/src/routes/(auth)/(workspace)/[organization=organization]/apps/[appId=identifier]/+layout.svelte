@@ -69,12 +69,13 @@
 
   const refreshFailed = $derived(Boolean(details.error));
 
-  const refresh = async (manual = true) => {
+  let readingSource = false;
+
+  const refresh = async () => {
     if (refreshing) return;
     refreshing = true;
 
     try {
-      const deployed = data.app.activeDeploymentId;
       await details.refresh();
 
       // A deployment can change the apps this one calls, which its page shows.
@@ -84,19 +85,17 @@
           appId: route.appId,
         }).refresh();
 
-      // The saved code comes from the Git host, so the timer asks again only after a deployment.
-      if (
-        activeTab === "deployments" &&
-        data.source.supported &&
-        (manual || details.current?.app.activeDeploymentId !== deployed)
-      )
-        // Not awaited: a slow Git host must not hold up the next look at the deployments.
-        void getAppSource({
-          organizationId: workspace.organizationId,
-          appId: route.appId,
-        })
+      // The saved code comes from the Git host. Its answer is not awaited, so a slow host does
+      // not hold up the next look at the deployments, and one request runs at a time.
+      if (activeTab === "deployments" && data.source.supported && !readingSource) {
+        readingSource = true;
+        void getAppSource({ organizationId: workspace.organizationId, appId: route.appId })
           .refresh()
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => {
+            readingSource = false;
+          });
+      }
 
       // A deployment can add the app to the organization's APIs or change what it exposes.
       if (activeTab === "api")
@@ -122,7 +121,7 @@
 
   onMount(() => {
     const timer = setInterval(() => {
-      if (document.visibilityState === "visible") void refresh(false);
+      if (document.visibilityState === "visible") void refresh();
     }, 5000);
 
     return () => clearInterval(timer);
@@ -187,7 +186,7 @@
       aria-label="Refresh app"
       title="Refresh"
       disabled={refreshing}
-      onclick={() => refresh()}
+      onclick={refresh}
       ><RefreshCw class={refreshing ? "animate-spin motion-reduce:animate-none" : ""} /></Button
     >{#if data.app.state === "active" && data.app.web}<Button
         href={data.app.url}
