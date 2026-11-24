@@ -18,7 +18,14 @@ export const provisionHostedResources = async (
     );
   } catch (error) {
     if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
-    await wrangler(["r2", "bucket", "create", names.artifacts]);
+    await wrangler([
+      "r2",
+      "bucket",
+      "create",
+      names.artifacts,
+      "--location",
+      installation.storageLocation,
+    ]);
   }
 
   let auth = await cloudflare.findNamespace(names.auth);
