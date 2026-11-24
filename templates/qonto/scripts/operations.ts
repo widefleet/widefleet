@@ -306,6 +306,7 @@ export const operations = {
     description:
       "Create a supplier invoice from a file, or from an attachment uploaded with `uploadAttachment`, with a unique key that keeps Qonto from creating it twice.",
     form: supplierInvoiceForm,
+    requiredBody: true,
   },
   mark_supplier_invoice_as_paid: { name: "markSupplierInvoicePaid", change: "update" },
   unmark_supplier_invoice_as_paid: { name: "unmarkSupplierInvoicePaid", change: "update" },
@@ -369,5 +370,6 @@ export const operations = {
     description?: string;
     parameters?: readonly object[];
     form?: typeof supplierInvoiceForm;
+    requiredBody?: boolean;
   }
 >;

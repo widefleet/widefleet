@@ -39,7 +39,8 @@ export interface OpenapiRules {
    * misdescribes inputs, `parameters` adds OpenAPI parameters or replaces those
    * of the same name and place, and `fields` replaces, adds or, with null,
    * removes the fields of a form body. `form` replaces a form body's whole
-   * schema, such as with variants that each require their own fields.
+   * schema, such as with variants that each require their own fields, and
+   * `requiredBody` requires a body the description leaves optional.
    */
   operations: Record<
     string,
@@ -53,6 +54,7 @@ export interface OpenapiRules {
       parameters?: readonly Json[] | undefined;
       fields?: Readonly<Record<string, Json>> | undefined;
       form?: Json | undefined;
+      requiredBody?: boolean | undefined;
     }
   >;
   /**
@@ -479,16 +481,15 @@ export const generateOpenapi = (
   // The schemas a multipart body's type writes out, which a schema may not repeat.
   const inlined: string[] = [];
 
-  // A form schema's fields, through a reference and in each of its variants.
-  const fieldsOf = (value: Schema | undefined): Record<string, Schema> =>
+  // A form schema's fields, through a reference and in each of its variants,
+  // which may each name a field differently.
+  const fieldsOf = (value: Schema | undefined): [string, Schema][] =>
     value?.$ref
       ? fieldsOf(schemas[value.$ref.replace("#/components/schemas/", "")])
-      : Object.fromEntries([
-          ...[...(value?.oneOf ?? []), ...(value?.anyOf ?? [])].flatMap((variant) =>
-            Object.entries(fieldsOf(variant)),
-          ),
+      : [
+          ...[...(value?.oneOf ?? []), ...(value?.anyOf ?? [])].flatMap(fieldsOf),
           ...Object.entries(value?.properties ?? {}),
-        ]);
+        ];
 
   // Whether a field holds objects, or lists of them, through references.
   const holdsObjects = (value: Schema, seen: Set<string>): boolean => {
@@ -911,10 +912,17 @@ export const generateOpenapi = (
           return entry ? [{ kind, entry }] : [];
         });
 
+    // The rules' form or fields may carry files the description's forms leave out.
+    const ruleFiles = [
+      ...(rule.form === undefined ? [] : [rule.form]),
+      ...Object.values(rule.fields ?? {}).filter((field) => field !== null),
+    ].some((value) => carriesFiles(schema.parse(value), new Set()));
+
     const sentForm =
       forms.find(
         ({ kind, entry }) =>
-          kind === "multipart" && entry.schema && carriesFiles(entry.schema, new Set()),
+          kind === "multipart" &&
+          (ruleFiles || (entry.schema !== undefined && carriesFiles(entry.schema, new Set()))),
       ) ?? forms[0];
 
     if (rule.fields && !sentForm)
@@ -935,7 +943,7 @@ export const generateOpenapi = (
 
     // Multipart forms send objects as JSON parts; plain forms have no encoding for them.
     if (form?.kind === "form")
-      for (const [name, field] of Object.entries(fieldsOf(form.schema)))
+      for (const [name, field] of fieldsOf(form.schema))
         if (holdsObjects(field, new Set()))
           throw new Error(`${id}'s form field ${name} is an object, which a form cannot send`);
 
@@ -950,17 +958,8 @@ export const generateOpenapi = (
 
     const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : "text";
 
-    // A form whose every variant requires fields cannot be left out.
-    const requiresFields = (value: Schema | undefined): boolean => {
-      const variants = value?.oneOf ?? value?.anyOf;
-
-      return variants
-        ? variants.length > 0 && variants.every(requiresFields)
-        : (value?.required?.length ?? 0) > 0;
-    };
-
-    const bodyRequired =
-      body?.required === true || (form !== undefined && requiresFields(form.schema));
+    // The rules may require a body the description leaves optional.
+    const bodyRequired = body?.required === true || rule.requiredBody === true;
 
     // Every success answer counts: JSON, other content, or none, such as a 204.
     const successes = Object.entries(entry.responses ?? {}).flatMap(([code, value]) =>
