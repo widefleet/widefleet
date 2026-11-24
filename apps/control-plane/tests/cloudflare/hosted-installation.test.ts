@@ -21,7 +21,7 @@ import {
   runtimeReleases,
 } from "../../src/lib/server/schema.ts";
 import { CloudflareBindingUpdatePending } from "../../src/lib/server/cloudflare-binding-updates.ts";
-import { deployHostedRuntime } from "../../tools/hosted-runtime.ts";
+import { deployHostedRuntime, waitForRuntimeVersion } from "../../tools/hosted-runtime.ts";
 import { hostedConfigurations, hostedInstallation } from "../../tools/hosted-configuration.ts";
 import { provisionHostedResources } from "../../tools/hosted-resources.ts";
 
@@ -490,6 +490,30 @@ describe("Hosted resource provisioning", () => {
 });
 
 describe("Hosted infrastructure deployment coordination", () => {
+  it("waits until the deployed Runtime version answers", async () => {
+    const answers = ["0.1.0", "0.1.0", "0.2.0"];
+    let reads = 0;
+
+    await waitForRuntimeVersion(async () => answers[reads++] ?? "0.2.0", "0.2.0", {
+      interval: 0,
+    });
+    expect(reads).toBe(3);
+
+    reads = 0;
+    await expect(
+      waitForRuntimeVersion(
+        async () => {
+          reads++;
+
+          return "0.1.0";
+        },
+        "0.2.0",
+        { attempts: 3, interval: 0 },
+      ),
+    ).rejects.toThrow("The requested Runtime version is not active");
+    expect(reads).toBe(3);
+  });
+
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   const source = "export default { fetch() { return new Response('fixture'); } }";
 
