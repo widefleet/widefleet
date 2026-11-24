@@ -873,7 +873,7 @@ export const createApi = (runtime: Runtime) => {
       ),
     listApps: read
       .route({ method: "GET", path: "/apps" })
-      .output(z.array(contract.app))
+      .output(z.array(contract.appListEntry))
       .handler(async ({ context }) => unwrap(await runtime.apps.list(context.principal))),
     createApp: write
       .route({ method: "POST", path: "/apps" })
@@ -899,7 +899,7 @@ export const createApi = (runtime: Runtime) => {
     findApp: read
       .route({ method: "GET", path: "/apps/by-name/{slug}" })
       .input(z.object({ slug: contract.appSlug }))
-      .output(contract.app)
+      .output(contract.appListEntry)
       .handler(async ({ context, input }) => {
         const apps = unwrap(await runtime.apps.list(context.principal));
         const app = apps.find((entry) => entry.slug === input.slug);

@@ -30,6 +30,13 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const cli = (principal: Principal, configuration: Pick<Configuration, "PLATFORM_URL">) =>
   `widefleet --url ${shellQuote(configuration.PLATFORM_URL)} --organization ${shellQuote(principal.application.organizationId)}`;
 
+/** The prompt that lets a person's agent build an app of their own for this organization. */
+export const createAppPrompt = (
+  principal: Principal,
+  configuration: Pick<Configuration, "PLATFORM_URL">,
+) =>
+  `Help me create an app on Widefleet. Ask what it should do. Read https://widefleet.com/SKILL.md. Use ${cli(principal, configuration)} for this installation and organization. Check existing apps and templates, then build, test and deploy the app and help me complete its setup.`;
+
 const templateDocument = (text: string, id: string) => {
   const parts = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/u.exec(text);
 
@@ -146,7 +153,7 @@ export const templateCatalog = (
               ]
             : [],
         ),
-        createPrompt: `Help me create an app on Widefleet. Ask what it should do. Read https://widefleet.com/SKILL.md. Use ${cli(principal, configuration)} for this installation and organization. Check existing apps and templates, then build, test and deploy the app and help me complete its setup.`,
+        createPrompt: createAppPrompt(principal, configuration),
       });
     },
     catch: (cause) =>

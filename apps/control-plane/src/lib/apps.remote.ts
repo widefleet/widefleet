@@ -10,6 +10,7 @@ import {
 } from "@platform/contracts";
 import { z } from "zod";
 import { InvalidOperation } from "#server/errors";
+import { createAppPrompt } from "#server/app-templates";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
 import { workspacePath } from "#lib/workspace-path";
 
@@ -20,7 +21,12 @@ const appQuery = appTarget.extend({ search: z.string().trim().max(200).default("
 export const getApps = query(organizationSelection, async (selection) => {
   const { runtime, principal } = await remoteContext(selection);
 
-  return { principal, apps: queryValue(await runtime.apps.list(principal)) };
+  return {
+    principal,
+    apps: queryValue(await runtime.apps.list(principal)),
+    // The prompt behind Create app comes with the list, so the page waits for one answer.
+    createPrompt: createAppPrompt(principal, runtime.configuration),
+  };
 });
 
 // The new app form needs creator permission. A preview link also needs its original app.

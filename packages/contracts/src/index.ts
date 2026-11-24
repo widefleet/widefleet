@@ -111,6 +111,9 @@ export const app = z.strictObject({
   activeDeploymentId: identifier.nullable(),
 });
 
+/** An app in the list of apps a member manages. */
+export const appListEntry = app.extend({ connector: z.boolean() });
+
 export const deployment = z.strictObject({
   id: identifier,
   appId: identifier,

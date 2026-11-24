@@ -1734,8 +1734,9 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   await expect(page.getByRole("status")).toContainText("agent_");
   await page.goto("/widefleet/settings/agents");
   await expect(page.getByRole("status")).toHaveCount(0);
-  await page.getByRole("link", { name: "My apps", exact: true }).click();
-  await page.getByRole("link", { name: "Create app", exact: true }).click();
+  await page.getByRole("link", { name: "Manage", exact: true }).click();
+  // The form for a name and an address has no link of its own; previews open it.
+  await page.goto("/widefleet/apps/new");
   await page.getByLabel("App name", { exact: true }).fill("Team Notes");
   await expect(page.getByLabel("Deployment-Agent", { exact: true })).toHaveCount(0);
   await page.getByLabel("URL slug").fill("team-notes");
@@ -1760,7 +1761,7 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   await page.getByText("Permanently delete app", { exact: true }).click();
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Delete app", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Manage", exact: true })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: "Notes Preview" })).toContainText(
     "Deleting",
   );
@@ -1818,7 +1819,8 @@ test("manages organization roles and app access by name while members create the
     await memberPage.goto("/widefleet/apps");
     await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
     expect((await memberContext.request.get("/widefleet/settings/members")).status()).toBe(403);
-    await memberPage.getByRole("link", { name: "Create app", exact: true }).click();
+    // The form for a name and an address has no link of its own; previews open it.
+    await memberPage.goto("/widefleet/apps/new");
     await memberPage.getByLabel("App name", { exact: true }).fill("Member Workspace");
     await memberPage.getByLabel("URL slug").fill("member-workspace");
     await memberPage.getByRole("button", { name: "Create app" }).click();
@@ -1840,7 +1842,7 @@ test("manages organization roles and app access by name while members create the
     expect((await promoted).ok()).toBe(true);
     await memberPage
       .getByRole("navigation", { name: "Main navigation" })
-      .getByRole("link", { name: "My apps", exact: true })
+      .getByRole("link", { name: "Manage", exact: true })
       .click();
     await expect(memberPage).toHaveURL(/\/apps$/);
     // Another member's role change reaches an open workspace when it next loads.
@@ -1863,7 +1865,8 @@ test("manages organization roles and app access by name while members create the
     expect((await demoted).ok()).toBe(true);
     expect((await memberContext.request.get("/widefleet/settings/members")).status()).toBe(403);
 
-    await memberPage.getByRole("link", { name: "Create app", exact: true }).click();
+    // The form for a name and an address has no link of its own; previews open it.
+    await memberPage.goto("/widefleet/apps/new");
     await expect(memberPage).toHaveURL(/\/apps\/new$/);
     await memberPage.reload();
     await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
@@ -2176,7 +2179,7 @@ test("confirms discarded workflow drafts on section, history and document naviga
       await page.getByRole("link", { name: "Connections", exact: true }).click();
     },
     async () => {
-      await page.getByRole("main").getByRole("link", { name: "My apps", exact: true }).click();
+      await page.getByRole("main").getByRole("link", { name: "Manage", exact: true }).click();
     },
     async () => {
       await page.goBack();
@@ -2407,7 +2410,11 @@ test.describe(`app catalog`, () => {
       );
       const readerPage = await readerContext.newPage();
       await readerPage.goto("/widefleet/apps");
-      await expect(readerPage.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
+      // Without apps the page shows the ways to start itself, so it needs no Create app button.
+      await expect(readerPage.getByRole("link", { name: "Create app", exact: true })).toHaveCount(
+        0,
+      );
+      await expect(readerPage.getByRole("button", { name: "Copy prompt" })).toBeVisible();
       await expect(
         readerPage.getByRole("heading", { name: "Start from a template" }),
       ).toBeVisible();
@@ -2935,7 +2942,7 @@ test.describe("workspace experience", () => {
     }
 
     await page.goto("/widefleet/apps?q=Icon");
-    await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Manage", exact: true })).toBeVisible();
     await expect(page.locator("header").getByText("Widefleet", { exact: true })).toHaveCount(1);
     const rows = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
     const valid = rows.filter({ hasText: "Icon valid" }).locator("img");
@@ -2976,7 +2983,7 @@ test.describe("workspace experience", () => {
     await expect(page.getByRole("list", { name: "Apps" }).getByRole("listitem")).toHaveCount(1);
     await page
       .getByRole("navigation", { name: "Filter apps" })
-      .getByRole("link", { name: "Active", exact: true })
+      .getByRole("link", { name: /^Connectors/ })
       .click();
     expect(new URL(page.url()).searchParams.get("q")).toBe("searchable");
     await expect(page.getByRole("heading", { name: "No matching apps" })).toBeVisible();
@@ -3003,9 +3010,9 @@ test.describe("workspace experience", () => {
     await page.getByText("Menu", { exact: true }).click();
     await page
       .getByRole("navigation", { name: "Main navigation" })
-      .getByRole("link", { name: "My apps", exact: true })
+      .getByRole("link", { name: "Manage", exact: true })
       .click();
-    await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Manage", exact: true })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Main navigation" })).toHaveCount(0);
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -3430,7 +3437,7 @@ test.describe(`app templates`, () => {
     await expect(page.getByText("Required", { exact: true })).toHaveCount(2);
   });
 
-  test("keeps My apps and the template list usable while templates are unavailable", async ({
+  test("keeps Manage and the template list usable while templates are unavailable", async ({
     page,
     context,
   }) => {
@@ -3458,11 +3465,13 @@ test.describe(`app templates`, () => {
     await writeFile(templateOutage, "");
 
     try {
-      // A member without apps sees the templates on My apps.
+      // A member without apps sees the templates on Manage.
       const mine = await page.goto("/widefleet/apps");
       expect(mine?.status()).toBe(200);
-      await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Manage", exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Create app", exact: true })).toHaveCount(0);
+      // The prompt for the agent needs no template, so a first app stays within reach.
+      await expect(page.getByRole("button", { name: "Copy prompt" })).toBeVisible();
       await expect(
         page.getByRole("searchbox", { name: "Search templates", exact: true }),
       ).toBeVisible();
@@ -3472,7 +3481,7 @@ test.describe(`app templates`, () => {
       expect(list?.status()).toBe(200);
       await expect(page.getByRole("heading", { name: "Templates", exact: true })).toBeVisible();
       await expect(
-        page.getByRole("main").getByRole("link", { name: "My apps", exact: true }),
+        page.getByRole("main").getByRole("link", { name: "Manage", exact: true }),
       ).toBeVisible();
       await expect(unavailable).toBeVisible();
     } finally {
@@ -3540,9 +3549,7 @@ test.describe(`app templates`, () => {
     await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("unknown");
     await page.getByRole("button", { name: "Search", exact: true }).click();
     await expect(page.getByRole("heading", { name: "No matching templates" })).toBeVisible();
-    await expect(
-      page.getByText("Help me create an app on Widefleet.", { exact: false }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy prompt" })).toBeVisible();
     await page.getByRole("link", { name: "Reset search" }).click();
     await page.getByRole("link", { name: /^Gmail/ }).focus();
     await page.keyboard.press("Enter");
@@ -3600,6 +3607,25 @@ test.describe(`app templates`, () => {
 
     await page.goto("/widefleet/catalog/templates");
     await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
+
+    // The prompt for an app of one's own stays behind its button until copying fails.
+    const agent = page.getByRole("region", { name: "Build it with your agent" });
+    await expect(agent.getByLabel("Prompt for your agent")).toHaveCount(0);
+    await agent.getByRole("button", { name: "Copy prompt" }).click();
+    await expect(agent.getByRole("button", { name: "Copied" })).toBeVisible();
+    const prompt = await page.evaluate(() => navigator.clipboard.readText());
+    expect(prompt).toContain("Help me create an app on Widefleet.");
+    await page.evaluate(() =>
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: () => Promise.reject(new Error("Synthetic clipboard failure")) },
+        configurable: true,
+      }),
+    );
+    await agent.getByRole("button", { name: /Copy prompt|Copied/ }).click();
+    await expect(agent.getByRole("alert")).toHaveText(
+      "Copying is not available here. Select the prompt and copy it manually.",
+    );
+    await expect(agent.getByLabel("Prompt for your agent")).toHaveValue(prompt);
     await environment.database.db
       .update(authSession)
       .set({ expiresAt: new Date(Date.now() - 1000) })
@@ -3690,7 +3716,13 @@ test(`personal connections account controls and workspace entry`, async ({ brows
       await environment.database.db.insert(artifacts).values({
         id: artifactId,
         appId,
-        metadata: { entrypoints: ["default", "UserConnection"] },
+        // The list of managed apps reads the whole metadata, so it has to be complete.
+        metadata: workerMetadata.parse({
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          entrypoints: ["default", "UserConnection"],
+          assets: { upload_session: artifactId },
+        }),
         modules: [],
         manifest: {},
       });
@@ -3992,6 +4024,51 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await page.getByText("Menu", { exact: true }).click();
     await page.getByRole("link", { name: "My connections", exact: true }).click();
     await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+
+    // The owner manages apps and connectors on one page, each in its own group.
+    await signInAs(environment.owner.id);
+    await page.goto("/widefleet/apps");
+    await expect(page.getByRole("heading", { name: "Manage", exact: true })).toBeVisible();
+    // One list holds both; a tag marks the connectors and the tabs narrow the list to one kind.
+    const onedrive = "Microsoft OneDrive — Finance and Operations";
+    const managed = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+    await expect(managed.filter({ hasText: onedrive }).getByText("Connector")).toBeVisible();
+    await expect(managed.filter({ hasText: "Shelf Notes" }).getByText("Connector")).toHaveCount(0);
+    const kinds = page.getByRole("navigation", { name: "Filter apps" });
+    await kinds.getByRole("link", { name: /^Connectors/ }).click();
+    await expect(managed.filter({ hasText: onedrive })).toBeVisible();
+    await expect(managed.filter({ hasText: "Shelf Notes" })).toHaveCount(0);
+    await kinds.getByRole("link", { name: /^Apps/ }).click();
+    await expect(managed.filter({ hasText: "Shelf Notes" })).toBeVisible();
+    await expect(managed.filter({ hasText: onedrive })).toHaveCount(0);
+
+    // Create app offers the two ways to start: a prompt for the agent and the templates.
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByRole("link", { name: "Create app", exact: true }).click();
+    await page.getByRole("menuitem", { name: /^Build with your agent/ }).click();
+    await expect(page.getByText("Prompt copied.")).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+      "Help me create an app on Widefleet.",
+    );
+    // Where the browser refuses to copy, the page shows the prompt for copying by hand.
+    await page.evaluate(() =>
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: () => Promise.reject(new Error("Synthetic clipboard failure")) },
+        configurable: true,
+      }),
+    );
+    await page.getByRole("link", { name: "Create app", exact: true }).click();
+    await page.getByRole("menuitem", { name: /^Build with your agent/ }).click();
+    await expect(
+      page.getByText("Copying is not available here. Select the prompt and copy it manually."),
+    ).toBeVisible();
+    await expect(page.getByLabel("Prompt for your agent")).toHaveValue(
+      /Help me create an app on Widefleet\./,
+    );
+    await page.getByRole("link", { name: "Create app", exact: true }).click();
+    await page.getByRole("menuitem", { name: /^Start from a template/ }).click();
+    await expect(page).toHaveURL(/\/widefleet\/catalog\/templates$/);
+    await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
     await signInAs(person.id);
     denied = true;
     await page.goto("/widefleet/connections");

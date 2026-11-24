@@ -456,10 +456,12 @@ describe("App source repositories", () => {
       expect(response.status).toBe(200);
       const body: unknown = await response.json();
 
+      // The list and the lookup by name say whether an app is a connector; the app itself does not.
       const status =
         path === "/apps"
-          ? contract.app.array().parse(body)[0]?.source
-          : contract.app.parse(body).source;
+          ? contract.appListEntry.array().parse(body)[0]?.source
+          : (path.startsWith("/apps/by-name/") ? contract.appListEntry : contract.app).parse(body)
+              .source;
 
       expect(status).toEqual({ supported: true, branch: "main", deployed: null });
     }
@@ -554,8 +556,9 @@ describe("App source repositories", () => {
 
         const summary =
           path === "/apps"
-            ? contract.app.array().parse(body)[0]?.source
-            : contract.app.parse(body).source;
+            ? contract.appListEntry.array().parse(body)[0]?.source
+            : (path.startsWith("/apps/by-name/") ? contract.appListEntry : contract.app).parse(body)
+                .source;
 
         expect(summary).toEqual({ supported: true, branch: "main", deployed: null });
       }

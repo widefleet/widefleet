@@ -28,7 +28,7 @@
   <a
     href={workspace.path("/apps")}
     class="text-muted-foreground hover:text-foreground mb-8 inline-flex items-center gap-2 text-xs"
-    ><ArrowLeft class="size-3.5" />My apps</a
+    ><ArrowLeft class="size-3.5" />Manage</a
   >
   <PageHeading
     title={route.parentId ? "Create preview" : "A new app"}

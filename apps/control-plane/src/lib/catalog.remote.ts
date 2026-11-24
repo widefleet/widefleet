@@ -1,5 +1,5 @@
 import MarkdownIt from "markdown-it";
-import { templateCatalog, readTemplate } from "#server/app-templates";
+import { createAppPrompt, templateCatalog, readTemplate } from "#server/app-templates";
 import { form, getRequestEvent, query } from "$app/server";
 import { invalid, redirect } from "@sveltejs/kit";
 import {
@@ -117,6 +117,13 @@ export const renameApp = form(
     return { saved: true };
   },
 );
+
+// The prompt needs no template, so it stays available while GitHub cannot be reached.
+export const getCreatePrompt = query(organizationSelection, async (selection) => {
+  const { runtime, principal } = await remoteContext(selection);
+
+  return createAppPrompt(principal, runtime.configuration);
+});
 
 export const getTemplates = query(
   templateSearch.extend(organizationSelection.shape),

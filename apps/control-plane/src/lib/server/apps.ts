@@ -73,8 +73,9 @@ const usedApps = (record: { activeDeploymentId: string | null; appliedCapabiliti
       ]
     : [];
 
-// An app is a connector when its active deployment offers personal connections.
-const connector = sql<boolean>`coalesce(${artifacts.metadata}->'entrypoints' ? 'UserConnection', false)`;
+// An app is a connector when its active deployment offers personal connections. Members reach
+// them through the app's web address, so a service-only app is none.
+const connector = sql<boolean>`coalesce(${apps.webEnabled} and (${artifacts.metadata}->'entrypoints' ? 'UserConnection'), false)`;
 
 export const managedApp = async (
   transaction: Transaction,
@@ -635,7 +636,7 @@ export const createAppService = (
   list: (principal: Principal) =>
     readOnly(database, async (transaction) => {
       const records = await transaction
-        .select({ app: apps, metadata: artifacts.metadata })
+        .select({ app: apps, metadata: artifacts.metadata, connector })
         .from(apps)
         .leftJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
         .leftJoin(artifacts, eq(artifacts.id, deployments.artifactId))
@@ -643,8 +644,9 @@ export const createAppService = (
         .orderBy(apps.slug);
 
       return Result.ok(
-        records.map(({ app, metadata }) => ({
+        records.map(({ app, metadata, connector }) => ({
           ...presentApp(app, configuration),
+          connector,
           source: presentAppSource(
             app,
             metadata ? (contract.workerMetadata.parse(metadata).source ?? null) : null,
