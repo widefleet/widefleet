@@ -34,6 +34,11 @@ const page = (path: string, operationId: string, schema: string) => ({
           id: { type: "string" },
           note: { type: ["string", "null"], examples: [{ type: ["kept"] }] },
           amount: { type: ["integer", "string"] },
+          // Each branch of a union keeps the keywords for its type.
+          ids: { type: ["array", "string", "null"], items: { type: "integer" }, maxLength: 9 },
+          // A part that only annotates adds no type.
+          level: { allOf: [{ $ref: "#/components/schemas/Shared" }, { example: "metal" }] },
+          payload: { allOf: [{ description: "Opaque" }], type: "string" },
           side: { const: "debit" },
           cleared: { type: "null" },
           // A field named after a keyword keeps its schema.
@@ -41,12 +46,50 @@ const page = (path: string, operationId: string, schema: string) => ({
         },
         required: ["id"],
       },
-      Shared: { type: "string" },
+      Shared: { type: "string", description: "A level" },
     },
   },
 });
 
 describe("OpenAPI 3.1 descriptions", () => {
+  it("sends files as multipart where an operation also takes a plain form", () => {
+    const upload = {
+      openapi: "3.1.1",
+      servers: [{ url: "https://api.example.test" }],
+      paths: {
+        "/attachments": {
+          post: {
+            operationId: "upload",
+            requestBody: {
+              content: {
+                "application/x-www-form-urlencoded": {
+                  schema: { type: "object", properties: { file: { type: "string" } } },
+                },
+                "multipart/form-data": {
+                  schema: {
+                    type: "object",
+                    properties: { file: { type: "string", format: "binary" } },
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "Uploaded" } },
+          },
+        },
+      },
+    };
+
+    const generated = generateOpenapi(
+      upload,
+      { operations: { upload: { name: "upload", change: "create" } } },
+      service,
+      "",
+    ).files;
+
+    expect(generated["src/api.ts"]).toContain("file?: UploadContent;");
+    expect(generated["src/schema.ts"]).toContain('"body":"multipart"');
+  });
+
   it("reads nullable type lists, unions and fixed values as OpenAPI 3.0 schemas", () => {
     const transfer = page("/transfers", "listTransfers", "Transfer");
     expect(isOpenapi31(transfer)).toBe(true);
@@ -60,6 +103,13 @@ describe("OpenAPI 3.1 descriptions", () => {
             properties: {
               note: { type: "string", nullable: true, examples: [{ type: ["kept"] }] },
               amount: { anyOf: [{ type: "integer" }, { type: "string" }] },
+              ids: {
+                anyOf: [
+                  { type: "array", items: { type: "integer" } },
+                  { type: "string", maxLength: 9 },
+                ],
+                nullable: true,
+              },
               side: { enum: ["debit"] },
               cleared: { enum: [null] },
               type: { type: "array", nullable: true, items: { type: "string" } },
@@ -80,6 +130,9 @@ describe("OpenAPI 3.1 descriptions", () => {
   id: string;
   note?: string | null;
   amount?: number | string;
+  ids?: number[] | string | null;
+  level?: Shared;
+  payload?: string;
   side?: "debit";
   cleared?: null;
   type?: string[] | null;
@@ -104,11 +157,23 @@ describe("OpenAPI 3.1 descriptions", () => {
         service,
         "",
       ).summary,
-    ).toBe("2 methods of 2 operations, 2 types");
+    ).toBe("2 methods of 2 operations, 3 types");
+
+    // Parts may list the same keys in another order.
+    const reordered = page("/cards", "listCards", "Card");
+    reordered.components.schemas["Shared"] = { description: "A level", type: "string" };
+    const { openapi, servers, paths, components } = reordered;
+
+    expect(() =>
+      mergeDescriptions([
+        page("/transfers", "listTransfers", "Transfer"),
+        { servers, openapi, paths, components },
+      ]),
+    ).not.toThrow();
 
     // Parts that disagree stop the generator rather than pick one.
     const changed = page("/cards", "listCards", "Card");
-    changed.components.schemas["Shared"] = { type: "integer" };
+    changed.components.schemas["Shared"] = { type: "integer", description: "A level" };
 
     expect(() =>
       mergeDescriptions([page("/transfers", "listTransfers", "Transfer"), changed]),

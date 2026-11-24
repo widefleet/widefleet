@@ -132,9 +132,9 @@ Reading never asks. Methods that change data ask the user before they run, as th
 approval level says:
 
 - `all_changes`: every change asks.
-- `updates_and_deletions`, the default: payments, sent invoices and quotes, invited
-  members, and changes and deletions ask; creating records such as clients or drafts
-  runs at once.
+- `updates_and_deletions`, the default: payments, invoices, credit notes and quotes
+  that reach clients, invited members, and changes and deletions ask; creating records
+  such as clients, beneficiaries or cards runs at once.
 - `none`: nothing asks.
 
 `scripts/operations.ts` records whether each method creates, updates, deletes or
@@ -175,7 +175,7 @@ anything is sent.
 
 After connecting, verify a transaction listing through the consuming app. Users can
 disconnect their account on the Qonto app's page; `revokeAccess` also ends the app's
-access in Qonto.
+access in Qonto and removes the connection.
 
 ## Update the API
 

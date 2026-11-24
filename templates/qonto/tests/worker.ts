@@ -111,22 +111,27 @@ type Binding = Pick<
   | "listClients"
   | "downloadIbanCertificate"
   | "createSepaTransfer"
+  | "uploadAttachment"
+  | "createSupplierInvoice"
   | "revokeAccess"
   | "approvalLevel"
   | "setApprovalLevel"
   | "fetch"
 >;
 
-// Qonto's approval as Widefleet passes it back, with the state its question returned.
+// An answer as Widefleet passes it back, with the state its question returned.
 const scaInput = z.object({
   inputResponses: z.record(
     z.string(),
     z.object({ action: z.enum(["accept", "decline", "cancel"]) }),
   ),
-  requestState: z.object({ scaSessionToken: z.string(), idempotencyKey: z.string() }),
+  requestState: z.object({
+    idempotencyKey: z.string(),
+    scaSessionToken: z.string().optional(),
+  }),
 });
 
-// The user's answer: Widefleet's own approval as its action, or Qonto's as JSON.
+// The user's answer: Widefleet's own approval as its action alone, or an answer with its state as JSON.
 const answer = (text: string) => {
   const approval = z.enum(["accept", "decline"]).safeParse(text);
 
@@ -192,6 +197,23 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
 
     if (path === "/rpc/certificate")
       return Response.json(await app.downloadIbanCertificate({ id: "account-1" }));
+
+    if (path === "/rpc/upload")
+      return Response.json(
+        await app.uploadAttachment({
+          body: { file: { mimeType: "application/pdf", base64: btoa("%PDF-1.7 receipt") } },
+        }),
+      );
+
+    if (path === "/rpc/supplier-invoice")
+      return Response.json(
+        await app.createSupplierInvoice({
+          body: {
+            "supplier_invoices[][file]": { mimeType: "application/pdf", text: "%PDF-1.7 invoice" },
+            "supplier_invoices[][idempotency_key]": "invoice-key",
+          },
+        }),
+      );
 
     if (path === "/rpc/transfer")
       return Response.json(

@@ -31,6 +31,20 @@ export default class Qonto extends QontoApi {
     return changeApprovalLevel("Qonto", this.env, this.ctx.props, input);
   }
 
+  /**
+   * End the app's access to the organization in Qonto, then remove the saved
+   * connection, since Qonto rejects its tokens afterwards. Asks the user first
+   * unless their approval level is `none`.
+   */
+  override async revokeAccess(input: Record<string, never> = {}) {
+    const result = await super.revokeAccess(input);
+
+    if (result.status === "connected")
+      await accountConnection(this.env, this.ctx.props).disconnect();
+
+    return result;
+  }
+
   override async fetch(request: Request) {
     return (
       (await saveApprovalLevel(this.env, this.ctx.props, request)) ??

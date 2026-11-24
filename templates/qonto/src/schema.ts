@@ -258,7 +258,7 @@ export const operations = {
     pathParameters: {},
     queryParameters: {},
     headerParameters: {},
-    body: "form",
+    body: "multipart",
     bodyRequired: false,
     response: "json",
     pageable: false,
@@ -1470,7 +1470,7 @@ export const operations = {
     bodyRequired: false,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "send",
   },
   updateClientInvoice: {
     httpMethod: "PATCH",
@@ -1656,7 +1656,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   sendCreditNote: {
     httpMethod: "POST",
@@ -1804,7 +1804,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "send",
   },
   updateRecurringInvoice: {
     httpMethod: "PUT",
@@ -2007,7 +2007,7 @@ export const operations = {
     pageable: false,
     change: null,
   },
-  createSupplierInvoices: {
+  createSupplierInvoice: {
     httpMethod: "POST",
     path: "/v2/supplier_invoices/bulk",
     pathParameters: {},

@@ -10,7 +10,14 @@ import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
 import { reservedMethod } from "./reserved.ts";
 import { isOpenapi31, upgradeOpenapi31 } from "./openapi31.ts";
-import { type Change, type GeneratedFiles, json, type Json, jsonObject } from "./rules.ts";
+import {
+  type Change,
+  type GeneratedFiles,
+  json,
+  type Json,
+  jsonEntries,
+  jsonObject,
+} from "./rules.ts";
 import { isSwagger, upgradeSwagger } from "./swagger.ts";
 
 /** Header inputs of an operation, by input name: the header's name and what it carries. */
@@ -317,6 +324,20 @@ export const parseDescription = (source: string) => {
   );
 };
 
+// JSON as text with object keys in order, so equal values compare equal
+// whatever order a part lists their keys in. Lists keep their order.
+const canonical = (value: Json): string => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  const entries = jsonEntries(value);
+
+  if (!entries) return JSON.stringify(value);
+
+  return `{${entries
+    .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
+    .join(",")}}`;
+};
+
 /**
  * One description from the parts a provider publishes it in, such as one page
  * per operation, each a complete document with the components its operations
@@ -326,14 +347,15 @@ export const parseDescription = (source: string) => {
 export const mergeDescriptions = (parts: readonly Json[]): Json => {
   const paths: Record<string, Record<string, Json>> = {};
   const components: Record<string, Record<string, Json>> = {};
-  let shared: string | undefined;
+  // The rest of the first part, which every other part must repeat.
+  let shared: { text: string; fields: Record<string, Json> } | undefined;
 
   // Entries by name, which every part that names one must describe alike.
   const add = (target: Record<string, Json>, entries: Json, where: (key: string) => string) => {
     for (const [key, value] of Object.entries(jsonObject.parse(entries))) {
       const existing = target[key];
 
-      if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(value))
+      if (existing !== undefined && canonical(existing) !== canonical(value))
         throw new Error(`The description's parts describe ${where(key)} differently`);
       target[key] = value;
     }
@@ -346,11 +368,11 @@ export const mergeDescriptions = (parts: readonly Json[]): Json => {
       ...rest
     } = jsonObject.parse(part);
 
-    const text = JSON.stringify(rest);
+    const text = canonical(rest);
 
-    if (shared !== undefined && text !== shared)
+    if (shared !== undefined && text !== shared.text)
       throw new Error("The description's parts differ outside their paths and components");
-    shared = text;
+    shared ??= { text, fields: rest };
 
     for (const [path, item] of Object.entries(jsonObject.parse(partPaths)))
       add((paths[path] ??= {}), item, (key) => `${key} ${path}`);
@@ -359,7 +381,7 @@ export const mergeDescriptions = (parts: readonly Json[]): Json => {
       add((components[section] ??= {}), entries, (name) => `${section}.${name}`);
   }
 
-  return { ...jsonObject.parse(JSON.parse(shared ?? "{}")), paths, components };
+  return { ...shared?.fields, paths, components };
 };
 
 // Form bodies by their media type; other bodies that are not JSON are sent as text.
@@ -596,6 +618,13 @@ export const generateOpenapi = (
         .map((part) => wrap(typeOf(part, indent)));
 
       const own = value.properties ? [objectType(value, indent)] : [];
+
+      // Parts that all annotate leave the schema's own type.
+      if (!parts.length && !own.length) {
+        const { allOf: _, ...outer } = value;
+
+        return typeOf(outer, indent);
+      }
 
       return `${[...parts, ...own].join(" & ")}${nullable}`;
     }
@@ -864,15 +893,22 @@ export const generateOpenapi = (
     // Forms send their fields, and multipart forms also files.
     const jsonBody = body?.content?.["application/json"];
 
-    // Only the body that is sent counts: JSON before forms, and the first form.
+    // Only the body that is sent counts: JSON before forms, then a form that
+    // carries files, which only multipart can send, then the first form.
     // Checks of the form's fields and encoding apply to that body alone.
-    const sentForm = jsonBody
-      ? undefined
+    const forms = jsonBody
+      ? []
       : Object.entries(formBodies).flatMap(([type, kind]) => {
           const entry = body?.content?.[type];
 
           return entry ? [{ kind, entry }] : [];
-        })[0];
+        });
+
+    const sentForm =
+      forms.find(
+        ({ kind, entry }) =>
+          kind === "multipart" && entry.schema && carriesFiles(entry.schema, new Set()),
+      ) ?? forms[0];
 
     if (rule.fields && !sentForm)
       throw new Error(`${id}'s fields rule needs a form body that lists its fields`);

@@ -31,13 +31,16 @@ export interface QontoError {
   traceId: string | null;
 }
 
-/** What the next call needs to finish an action after Qonto's own approval. */
-export interface ScaState {
-  /** Qonto's approval session, valid for 15 minutes. */
-  scaSessionToken: string;
-  /** The idempotency key of the first request, which the approved request repeats. */
+/** What a question keeps for the next round of the same call. */
+export interface CallState {
+  /** The idempotency key of the call's request, which every round repeats. */
   idempotencyKey: string;
+  /** Qonto's approval session, valid for 15 minutes, once Qonto asked for it. */
+  scaSessionToken?: string | undefined;
 }
+
+/** Widefleet's question before a change runs, keeping the change's idempotency key. */
+export type ChangeQuestion = ApprovalQuestion & { requestState: CallState };
 
 /**
  * Qonto's own approval: Qonto asked the user to approve the action in the Qonto
@@ -51,7 +54,7 @@ export interface ScaQuestion {
   inputRequests: {
     approveInQonto: { message: string; requestedSchema: { type: "object"; properties: {} } };
   };
-  requestState: ScaState;
+  requestState: { idempotencyKey: string; scaSessionToken: string };
 }
 
 /** A result other than a question, which has no `resultType`. */
@@ -59,7 +62,7 @@ export type Answered<R> = R & { resultType?: undefined };
 
 /** The result of a Qonto method: the data, a question, or why there is no data. */
 export type QontoResult<T> =
-  | ApprovalQuestion
+  | ChangeQuestion
   | ScaQuestion
   | Answered<
       | { status: "connected"; data: T }

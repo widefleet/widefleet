@@ -8491,7 +8491,7 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
        * You have to specify multipart form data in order to attach the file to the request. When using `curl` it will look like that: ``` curl --request POST \ --url https://thirdparty.qonto.com/v2/attachments \ -H "Content-Type: multipart/form-data" \ -H "Authorization: {Auth}" \ -F file="@path/to/a/file.jpg" ```
        */
       body?: {
-        file?: string;
+        file?: UploadContent;
       };
     } = {},
   ): Promise<
@@ -11445,7 +11445,7 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
    * - The invoice "inherits" the `currency` of the provided client. If the `currency` is not set for that client, you will receive a validation error on the `/data/attributes/currency` property.
    * - Italian organizations must have e-invoicing activated on the Qonto app in order to use this endpoint.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async createClientInvoice(
     input: {
@@ -11905,7 +11905,7 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
    * - Credit notes cannot be created for partial (progress) invoices.
    *
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async createCreditNote(input: {
     /**
@@ -12276,7 +12276,7 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
    * </Info>
    *
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async createRecurringInvoice(input: {
     /**
@@ -12833,43 +12833,23 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
   }
 
   /**
-   * Create supplier invoices
-   *
-   * Creates supplier invoices **in bulk** for the authenticated organization by uploading files.
-   *
-   * <Info>
-   *   **Price plans**: this endpoint is available for all Qonto price plans.
-   * </Info>
-   *
+   * Create a supplier invoice from a file or from an attachment uploaded with `uploadAttachment`. Pass `supplier_invoices[][file]` or `supplier_invoices[][attachment_id]`, and a unique `supplier_invoices[][idempotency_key]`, such as a UUID, which keeps Qonto from creating the invoice twice.
    *
    * Asks the user first when their approval level is `all_changes`.
    */
-  async createSupplierInvoices(
+  async createSupplierInvoice(
     input: {
       /**
        * You have to specify multipart form data in order to attach the file to the request. When using `curl` it will look like that: ``` curl --location --request POST 'https://thirdparty.qonto.com/supplier_invoices/bulk' \ --form 'supplier_invoices[][file]=@"/path/to/file1.png"' \ --form 'supplier_invoices[][idempotency_key]="4d5418bb-bd0d-4df4-865c-c07afab8bb48"' \ --form 'supplier_invoices[][file]=@"/path/to/file2.png"' \ --form 'supplier_invoices[][idempotency_key]="4d5418bb-bd0d-4df4-865c-c07afab8bb49"' \ --form 'skip_attachment_matcher=true' ```
        */
       body?: {
         /**
-         * List of supplier invoices to create (up to 20 per request).
-         */
-        supplier_invoices: (
-          | {
-              file: UploadContent;
-              /**
-               * This is a unique string (we advise to use a `uuid`) that identifies an invoice. This is used by Qonto to prevent performing the same operation twice.
-               */
-              idempotency_key: string;
-            }
-          | {
-              attachment_id: string;
-              idempotency_key: string;
-            }
-        )[];
-        /**
          * If true, skips the attachment matcher step for all invoices in the bulk request.
          */
         skip_attachment_matcher?: boolean;
+        "supplier_invoices[][file]"?: UploadContent;
+        "supplier_invoices[][attachment_id]"?: string;
+        "supplier_invoices[][idempotency_key]"?: string;
       };
     } = {},
   ): Promise<
@@ -12884,7 +12864,7 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
       }[];
     }>
   > {
-    return run(this.env, this.ctx.props, "createSupplierInvoices", input);
+    return run(this.env, this.ctx.props, "createSupplierInvoice", input);
   }
 
   /**

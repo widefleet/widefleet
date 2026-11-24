@@ -33,6 +33,9 @@ export const provider = () => {
     scaSessionToken?: string | undefined;
   }[] = [];
 
+  // The parts of multipart forms Qonto received: name, file type and content.
+  const parts: { name: string; type: string | null; text: string }[] = [];
+
   const state: State = {
     refreshes: 0,
     unavailable: false,
@@ -62,6 +65,7 @@ export const provider = () => {
   return {
     state,
     calls,
+    parts,
     transfers,
     authorize: (location: string, user: string) => {
       const url = new URL(location);
@@ -145,6 +149,16 @@ export const provider = () => {
 
       if (session) {
         calls.push({ method: request.method, url: url.href });
+
+        if (state.answer) {
+          const { status, body, headers } = state.answer;
+          state.answer = null;
+
+          return body === null
+            ? new Response(null, { status, headers })
+            : Response.json(body, { status, headers });
+        }
+
         const result = state.sessions.get(decodeURIComponent(session[1] ?? ""));
 
         if (!result) return Response.json({ errors: [{ code: "not_found" }] }, { status: 404 });
@@ -193,6 +207,23 @@ export const provider = () => {
           ],
           meta: { current_page: 1, next_page: null, per_page: 1 },
         });
+
+      if (
+        (path === `${api}/v2/attachments` || path === `${api}/v2/supplier_invoices/bulk`) &&
+        request.method === "POST"
+      ) {
+        for (const [name, value] of await request.formData()) {
+          const file = z.instanceof(File).safeParse(value);
+
+          parts.push(
+            file.success
+              ? { name, type: file.data.type, text: await file.data.text() }
+              : { name, type: null, text: z.string().parse(value) },
+          );
+        }
+
+        return Response.json({ id: "attachment-1" });
+      }
 
       if (path === `${api}/v2/clients`)
         return Response.json({ clients: [], meta: { current_page: 1, next_page: null } });

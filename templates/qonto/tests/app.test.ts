@@ -271,6 +271,13 @@ describe("Qonto personal account app", () => {
     alice.identity.answer = respond("decline");
     expect(await (await alice.request("/rpc/transfer")).json()).toEqual({ status: "declined" });
     expect(upstream.calls).toEqual([]);
+    // A rate-limited check says when to try again.
+    alice.identity.answer = respond("accept");
+    upstream.state.answer = { status: 429, body: null, headers: { "retry-after": "5" } };
+    expect(await (await alice.request("/rpc/transfer")).json()).toEqual({
+      status: "rate_limited",
+      retryAfter: "5",
+    });
     upstream.state.sessions.set(scaSessionToken, "deny");
     alice.identity.answer = respond("accept");
     expect(await (await alice.request("/rpc/transfer")).json()).toEqual({
@@ -299,12 +306,81 @@ describe("Qonto personal account app", () => {
     expect(keys.every((key) => z.uuid().safeParse(key).success)).toBe(true);
   });
 
+  it("keeps one idempotency key through Widefleet's question and honors its answer", async () => {
+    const alice = browser("alice");
+    await connect(alice, "10129");
+
+    const ask = async () =>
+      z
+        .object({ requestState: z.object({ idempotencyKey: z.uuid() }) })
+        .parse(await (await alice.request("/rpc/transfer?beneficiary=trusted-beneficiary")).json())
+        .requestState;
+
+    const answer = (action: "accept" | "decline", state: { idempotencyKey: string }) =>
+      JSON.stringify({ inputResponses: { approve: { action } }, requestState: state });
+
+    const state = await ask();
+    upstream.calls.length = 0;
+    alice.identity.answer = answer("accept", state);
+
+    // The approved request carries the key the question kept, also when the
+    // answer comes again after a lost response, so Qonto pays once.
+    for (let round = 0; round < 2; round++)
+      expect(
+        await (await alice.request("/rpc/transfer?beneficiary=trusted-beneficiary")).json(),
+      ).toMatchObject({ status: "connected", data: { transfer: { id: "transfer-1" } } });
+    expect(upstream.calls.map((call) => call.idempotencyKey)).toEqual([
+      state.idempotencyKey,
+      state.idempotencyKey,
+    ]);
+    expect(upstream.transfers.size).toBe(1);
+
+    // A decline stands after the user stops being asked.
+    alice.identity.answer = "";
+    const next = await ask();
+    expect(next.idempotencyKey).not.toBe(state.idempotencyKey);
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/set-level?level=none")).json()).toMatchObject({
+      level: "none",
+    });
+    upstream.calls.length = 0;
+    alice.identity.answer = answer("decline", next);
+    expect(
+      await (await alice.request("/rpc/transfer?beneficiary=trusted-beneficiary")).json(),
+    ).toEqual({ status: "declined" });
+    expect(upstream.calls).toEqual([]);
+  });
+
+  it("uploads files as multipart parts, one supplier invoice's fields each as its own part", async () => {
+    const alice = browser("alice");
+    await connect(alice, "10129");
+    expect(await (await alice.request("/rpc/upload")).json()).toMatchObject({
+      status: "connected",
+    });
+    expect(upstream.parts).toEqual([
+      { name: "file", type: "application/pdf", text: "%PDF-1.7 receipt" },
+    ]);
+    upstream.parts.length = 0;
+    expect(await (await alice.request("/rpc/supplier-invoice")).json()).toMatchObject({
+      status: "connected",
+    });
+    expect(upstream.parts).toEqual([
+      { name: "supplier_invoices[][file]", type: "application/pdf", text: "%PDF-1.7 invoice" },
+      { name: "supplier_invoices[][idempotency_key]", type: null, text: "invoice-key" },
+    ]);
+  });
+
   it("asks before revoking access and runs it only after approval", async () => {
     const alice = browser("alice");
     await connect(alice, "10129");
     upstream.calls.length = 0;
 
-    expect(await (await alice.request("/rpc/revoke")).json()).toEqual({
+    const asked = z
+      .object({ requestState: z.object({ idempotencyKey: z.uuid() }) })
+      .passthrough()
+      .parse(await (await alice.request("/rpc/revoke")).json());
+
+    expect(asked).toEqual({
       resultType: "input_required",
       inputRequests: {
         approve: {
@@ -312,6 +388,7 @@ describe("Qonto personal account app", () => {
           requestedSchema: { type: "object", properties: {} },
         },
       },
+      requestState: asked.requestState,
     });
     alice.identity.answer = "decline";
     expect(await (await alice.request("/rpc/revoke")).json()).toEqual({ status: "declined" });
@@ -326,23 +403,14 @@ describe("Qonto personal account app", () => {
       { method: "DELETE", url: "https://thirdparty.qonto.com/v2/oauth2/consents" },
     ]);
     expect(z.uuid().safeParse(upstream.calls[0]?.idempotencyKey).success).toBe(true);
-    // Qonto rejects the saved tokens afterwards; the member reconnects.
+    // Qonto rejects the saved tokens afterwards, so the connection is removed too.
     alice.identity.answer = "";
-    expect(await (await alice.request("/rpc/membership")).json()).toMatchObject({
-      status: "reconnect_required",
+    expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
+      status: "connection_required",
     });
-    // The saved refresh token no longer yields credentials either.
-    const db = await runtime.getD1Database("DB");
-    await db
-      .prepare("UPDATE account SET accessTokenExpiresAt = ?")
-      .bind(Date.now() - 60000)
-      .run();
-    upstream.calls.length = 0;
-    expect(await (await alice.request("/rpc/membership")).json()).toEqual({
-      status: "refresh_failed",
+    expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+      connection: "disconnected",
     });
-    expect(upstream.state.refreshes).toBe(1);
-    expect(upstream.calls).toEqual([]);
 
     // With approvals off, nothing asks.
     const bob = browser("bob");

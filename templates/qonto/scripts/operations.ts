@@ -31,6 +31,16 @@ export { download };
 
 export type Change = "create" | "update" | "delete" | "send";
 
+// Qonto reads each supplier invoice's fields as separate parts named
+// `supplier_invoices[][file]` and so on, not as one JSON part; one invoice per
+// call keeps each file with its own fields.
+const supplierInvoiceFields = {
+  supplier_invoices: null,
+  "supplier_invoices[][file]": { type: "string", format: "binary" },
+  "supplier_invoices[][attachment_id]": { type: "string", format: "uuid" },
+  "supplier_invoices[][idempotency_key]": { type: "string" },
+} as const;
+
 export const operations = {
   // Organization, business accounts and statements
   "GET /v2/organization": { name: "getOrganization" },
@@ -208,7 +218,9 @@ export const operations = {
   // Client invoices, uploads and credit notes
   list_client_invoices: { name: "listClientInvoices" },
   get_client_invoice: { name: "getClientInvoice" },
-  create_client_invoice: { name: "createClientInvoice", change: "create" },
+  // Creates the invoice as unpaid unless its status is draft, and an Italian
+  // organization's invoice goes to SdI at once.
+  create_client_invoice: { name: "createClientInvoice", change: "send" },
   patch_client_invoice: { name: "updateClientInvoice", change: "update" },
   delete_client_invoice: { name: "deleteClientInvoice", change: "delete" },
   finalize_client_invoice: { name: "finalizeClientInvoice", change: "update" },
@@ -223,7 +235,8 @@ export const operations = {
   list_credit_notes: { name: "listCreditNotes" },
   get_credit_note: { name: "getCreditNote" },
   download_credit_note: { name: "downloadCreditNote" },
-  create_credit_note: { name: "createCreditNote", change: "create" },
+  // A credit note for the whole amount cancels its invoice.
+  create_credit_note: { name: "createCreditNote", change: "update" },
   send_credit_note: { name: "sendCreditNote", change: "send" },
 
   // Quotes, recurring invoices, reminders and invoicing settings
@@ -236,7 +249,8 @@ export const operations = {
   list_recurring_invoices: { name: "listRecurringInvoices" },
   get_recurring_invoice: { name: "getRecurringInvoice" },
   validate_recurring_invoice: { name: "validateRecurringInvoice", change: "read" },
-  create_recurring_invoice: { name: "createRecurringInvoice", change: "create" },
+  // Starting today creates the first invoice and emails it unless it is a draft.
+  create_recurring_invoice: { name: "createRecurringInvoice", change: "send" },
   update_recurring_invoice: { name: "updateRecurringInvoice", change: "update" },
   suspend_recurring_invoice: { name: "suspendRecurringInvoice", change: "update" },
   reactivate_recurring_invoice: { name: "reactivateRecurringInvoice", change: "update" },
@@ -253,7 +267,13 @@ export const operations = {
   // Supplier invoices and suppliers
   list_supplier_invoices: { name: "listSupplierInvoices" },
   get_supplier_invoice: { name: "getSupplierInvoice" },
-  bulk_create_supplier_invoices: { name: "createSupplierInvoices", change: "create" },
+  bulk_create_supplier_invoices: {
+    name: "createSupplierInvoice",
+    change: "create",
+    description:
+      "Create a supplier invoice from a file or from an attachment uploaded with `uploadAttachment`. Pass `supplier_invoices[][file]` or `supplier_invoices[][attachment_id]`, and a unique `supplier_invoices[][idempotency_key]`, such as a UUID, which keeps Qonto from creating the invoice twice.",
+    fields: supplierInvoiceFields,
+  },
   mark_supplier_invoice_as_paid: { name: "markSupplierInvoicePaid", change: "update" },
   unmark_supplier_invoice_as_paid: { name: "unmarkSupplierInvoicePaid", change: "update" },
   reject_supplier_invoice: { name: "rejectSupplierInvoice", change: "update" },
@@ -315,5 +335,6 @@ export const operations = {
     change?: Change | "read";
     description?: string;
     parameters?: readonly object[];
+    fields?: typeof supplierInvoiceFields;
   }
 >;

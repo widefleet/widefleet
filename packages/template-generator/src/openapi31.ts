@@ -14,8 +14,21 @@ const typeList = z.union([
 
 const literal = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
+// Keywords that apply to values of one type, which a union's branch for that type keeps.
+const typeKeywords = new Map([
+  ["array", ["items", "minItems", "maxItems", "uniqueItems"]],
+  ["object", ["properties", "additionalProperties", "required", "minProperties", "maxProperties"]],
+  ["string", ["format", "pattern", "minLength", "maxLength"]],
+  ["number", ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"]],
+  [
+    "integer",
+    ["format", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"],
+  ],
+]);
+
 // A schema's types as 3.0 writes them: one type, or a union of them, either
-// nullable. A schema whose only type is `null` holds the null value alone.
+// nullable. A schema whose only type is `null` holds the null value alone. In a
+// union, each branch keeps the keywords for its type, such as an array's items.
 const typed = (schema: JsonObject, listed: string[]): JsonObject => {
   const { type: _, ...rest } = schema;
   const others = listed.filter((entry) => entry !== "null");
@@ -26,7 +39,20 @@ const typed = (schema: JsonObject, listed: string[]): JsonObject => {
 
   if (others.length === 1) return { ...rest, type: only, ...nullable };
 
-  return { ...rest, anyOf: others.map((entry) => ({ type: entry })), ...nullable };
+  const specific = new Set([...typeKeywords.values()].flat());
+
+  const branch = (type: string) => ({
+    type,
+    ...Object.fromEntries(
+      Object.entries(rest).filter(([key]) => typeKeywords.get(type)?.includes(key)),
+    ),
+  });
+
+  return {
+    ...Object.fromEntries(Object.entries(rest).filter(([key]) => !specific.has(key))),
+    anyOf: others.map(branch),
+    ...nullable,
+  };
 };
 
 // A fixed value is an enum of that value.

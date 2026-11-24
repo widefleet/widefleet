@@ -5,12 +5,14 @@ import { binaryContent } from "./content.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { type Arguments, boundedJson, definedJson, maximumResponseBytes } from "./input.ts";
 import { restRequest } from "./rest.ts";
-import type { QontoResult, ScaQuestion, ScaState } from "./results.ts";
+import type { QontoResult, ScaQuestion } from "./results.ts";
 import { base, operations } from "./schema.ts";
 
-const scaState = z.object({
-  scaSessionToken: z.string().min(1),
+// What a question keeps for the next round of the same call: the request's
+// idempotency key and, once Qonto asked for its approval, the SCA session.
+const callState = z.object({
   idempotencyKey: z.string().min(1),
+  scaSessionToken: z.string().min(1).optional(),
 });
 
 // The user's answers when Widefleet calls again after a question: Widefleet's
@@ -21,7 +23,7 @@ const answers = z
       approve: z.object({ action: z.enum(["accept", "decline", "cancel"]) }).optional(),
       approveInQonto: z.object({ action: z.enum(["accept", "decline", "cancel"]) }).optional(),
     }),
-    requestState: scaState.nullable().optional(),
+    requestState: callState.nullable().optional(),
   })
   .optional();
 
@@ -53,7 +55,11 @@ const approvalRequired = z.object({ sca_session_token: z.string().min(1) });
 
 const session = z.object({ result: z.string() });
 
-const scaQuestion = (method: string, state: ScaState, waiting: boolean): ScaQuestion => ({
+const scaQuestion = (
+  method: string,
+  state: ScaQuestion["requestState"],
+  waiting: boolean,
+): ScaQuestion => ({
   resultType: "input_required",
   inputRequests: {
     approveInQonto: {
@@ -85,52 +91,60 @@ export const run = async <T>(
   // Widefleet seals the state of a question for this method, its arguments and
   // this caller, so state here comes from an earlier round of this same call.
   const answered = answers.parse(properties.input);
-  const pending = answered?.requestState ?? null;
+  const state = answered?.requestState ?? null;
   const headers = new Headers(request.init.headers);
 
-  if (pending) {
+  // Every change carries an idempotency key, which Qonto requires for creating
+  // payments, cards and attachments. Each round of a call that asks keeps the
+  // key of its first round, so an answer repeated after a lost response does
+  // not pay twice.
+  const idempotencyKey = state?.idempotencyKey ?? crypto.randomUUID();
+
+  if (state?.scaSessionToken) {
+    const scaSessionToken = state.scaSessionToken;
+
     if (answered?.inputResponses.approveInQonto?.action !== "accept") return { status: "declined" };
 
-    const sent = await connection.send(
-      `${base}v2/sca_sessions/${encodeURIComponent(pending.scaSessionToken)}`,
+    const checked = await connection.send(
+      `${base}v2/sca_sessions/${encodeURIComponent(scaSessionToken)}`,
       { method: "GET" },
     );
 
-    if (sent.status !== "connected") return sent;
-    const read = await boundedJson(sent.response);
+    if (checked.status !== "connected") return checked;
 
-    if (!sent.response.ok || read.status !== "read")
-      throw new Error(`Qonto approval check failed (HTTP ${sent.response.status})`);
+    if (checked.response.status === 429)
+      return { status: "rate_limited", retryAfter: checked.response.headers.get("retry-after") };
+
+    const read = await boundedJson(checked.response);
+
+    if (!checked.response.ok || read.status !== "read")
+      throw new Error(`Qonto approval check failed (HTTP ${checked.response.status})`);
 
     const { result } = session.parse(read.body);
 
-    if (result === "waiting") return scaQuestion(method, pending, true);
+    if (result === "waiting") return scaQuestion(method, { idempotencyKey, scaSessionToken }, true);
 
     // Qonto reports a refusal, and an approval that expired after 15 minutes, as `deny`.
     if (result !== "allow") return { status: "rejected_in_qonto" };
-    headers.set("X-Qonto-Sca-Session-Token", pending.scaSessionToken);
+    headers.set("X-Qonto-Sca-Session-Token", scaSessionToken);
   } else if (operation.change) {
     // A question only helps a user who can run the change afterwards.
     const status = await connection.status();
 
     if (status.status !== "connected") return status;
+    const answer = answered?.inputResponses.approve;
+
+    // An answer stands even when the user's level changed since the question.
+    if (answer && answer.action !== "accept") return { status: "declined" };
     const id = await callerId(caller.parse(properties.caller));
 
-    if (asks(await approvals(environment.DB, id).level(), operation.change)) {
-      const answer = answered?.inputResponses.approve;
-
-      // The question shows the input as Qonto receives it.
-      if (!answer)
-        return changeQuestion("Qonto", method, operation.change, definedJson.parse(input));
-
-      if (answer.action !== "accept") return { status: "declined" };
-    }
+    // The question shows the input as Qonto receives it.
+    if (!answer && asks(await approvals(environment.DB, id).level(), operation.change))
+      return {
+        ...changeQuestion("Qonto", method, operation.change, definedJson.parse(input)),
+        requestState: { idempotencyKey },
+      };
   }
-
-  // Every change carries an idempotency key, which Qonto requires for creating
-  // payments, cards and attachments. The request that finishes after Qonto's
-  // approval repeats the first one, key included.
-  const idempotencyKey = pending?.idempotencyKey ?? crypto.randomUUID();
 
   if (operation.change) headers.set("X-Qonto-Idempotency-Key", idempotencyKey);
 
