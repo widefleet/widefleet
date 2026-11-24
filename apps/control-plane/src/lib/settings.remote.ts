@@ -1,6 +1,5 @@
 import { command, getRequestEvent, query, requested } from "$app/server";
 import { error, redirect } from "@sveltejs/kit";
-import { eq } from "drizzle-orm";
 import {
   settingsInput,
   settingsUpdate,
@@ -12,7 +11,6 @@ import { z } from "zod";
 import { commandContext, remoteContext, remoteOperation } from "#server/remote-support";
 import { getRuntime } from "#server/runtime";
 import { readSettingsAccount } from "#server/settings-account";
-import { organizationRuntimes } from "#server/schema";
 import { workspacePath } from "#lib/workspace-path";
 
 export const getSettings = query(organizationSelection, async (selection) => {
@@ -39,30 +37,6 @@ export const checkSsoSetup = query(organizationSelection, async (selection) => {
     redirect(303, workspacePath(organization.slug, "/settings/company-sign-in"));
 
   return null;
-});
-
-// Administrators finish company sign-in before the getting started page.
-export const getWelcome = query(organizationSelection, async (selection) => {
-  const { runtime, principal, organization } = await remoteContext(selection);
-
-  if (principal.application.admin) {
-    const settings = await runtime.settings.read(principal);
-
-    if (settings.error || settings.activation.state !== "active")
-      redirect(303, workspacePath(organization.slug, "/settings/company-sign-in"));
-  }
-
-  const [execution] = await runtime.database.db
-    .select()
-    .from(organizationRuntimes)
-    .where(eq(organizationRuntimes.organizationId, principal.application.organizationId));
-
-  return {
-    platformUrl: runtime.configuration.PLATFORM_URL,
-    organizationId: principal.application.organizationId,
-    usesAgent: execution?.executor === "agent",
-    installationAdmin: principal.admin,
-  };
 });
 
 export const planSettings = command(

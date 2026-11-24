@@ -24,11 +24,11 @@ export const createOrganization = form(
 
     const destination = localDestination(next);
 
-    // A new organization starts on its welcome page unless the chooser was opened for a page.
+    // A new organization starts on Manage unless the chooser was opened for a page.
     redirect(
       303,
       destination === "/" || destination === workspacePath(organizationPlaceholder)
-        ? workspacePath(organization.slug, "/welcome")
+        ? workspacePath(organization.slug, "/apps")
         : chosenDestination(destination, organization.slug),
     );
   },

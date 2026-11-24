@@ -16,6 +16,6 @@ export const load: PageServerLoad = async ({ url }) => {
 
   return {
     socialProviders: availableSocialProviders(runtime.configuration),
-    next: `/organizations?${new URLSearchParams({ next: destination === "/" ? workspacePath(organizationPlaceholder, "/welcome") : destination })}`,
+    next: `/organizations?${new URLSearchParams({ next: destination === "/" ? workspacePath(organizationPlaceholder, "/apps") : destination })}`,
   };
 };

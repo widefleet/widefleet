@@ -493,7 +493,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
           data: {
             provider: "widefleet-microsoft",
             callbackURL: "/",
-            newUserCallbackURL: "/organizations?next=%2Fwelcome",
+            newUserCallbackURL: "/organizations?next=%2F%5Borganization%5D%2Fapps",
             disableRedirect: true,
             oauth_query: app.oauthQuery,
           },
