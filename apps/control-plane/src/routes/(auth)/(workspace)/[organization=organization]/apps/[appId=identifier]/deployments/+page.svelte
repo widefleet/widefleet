@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getAppContext } from "#lib/app-context";
+  import { Button } from "@platform/ui/button";
   import AppDeployments from "#shadcn/components/AppDeployments.svelte";
   import AppSource from "#shadcn/components/AppSource.svelte";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
@@ -36,9 +37,18 @@
         <p class="text-muted-foreground mt-2 text-sm">Loading the saved code …</p>
         <noscript
           ><p class="text-muted-foreground mt-2 text-sm">
-            This section needs JavaScript. <code>widefleet source status</code> shows the same.
+            This section needs JavaScript. <code>widefleet source status --app {data.app.id}</code>
+            shows the same.
           </p></noscript
         >
+      {/snippet}
+      <!-- A failure stays in this section, so the history and the rollback above remain usable. -->
+      {#snippet failed(_error, reset)}
+        <h2 class="text-base font-semibold">Source code</h2>
+        <p role="alert" class="text-destructive mt-2 text-sm leading-6">
+          The saved code could not be loaded. Your deployment history remains available.
+        </p>
+        <Button variant="outline" class="mt-4" onclick={reset}>Try again</Button>
       {/snippet}
     </svelte:boundary>
   </div>{/if}
