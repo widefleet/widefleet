@@ -748,6 +748,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       await browserExpect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
       await page.getByRole("link", { name: "Manage", exact: true }).click();
       await page.getByRole("link", { name: "Create app", exact: true }).click();
+      await page.getByRole("link", { name: "Set name and address yourself" }).click();
       await page.getByLabel("App name", { exact: true }).fill("Worker Browser App");
       await page.getByLabel("URL slug").fill("worker-browser-app");
       await page.getByRole("button", { name: "Create app", exact: true }).click();

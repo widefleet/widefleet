@@ -6,7 +6,6 @@
   import Plus from "@lucide/svelte/icons/plus";
   import Search from "@lucide/svelte/icons/search";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import TemplateList from "#shadcn/components/TemplateList.svelte";
@@ -28,35 +27,31 @@
 
   const data = $derived(await getApps({ organizationId: workspace.organizationId }));
 
-  const kinds = $derived([
-    { id: "apps", title: "Apps", apps: data.apps.filter((app) => !app.connector) },
-    { id: "connectors", title: "Connectors", apps: data.apps.filter((app) => app.connector) },
-  ]);
+  const apps = $derived(
+    data.apps.filter((app) => {
+      const matches = `${app.displayName} ${app.hostname}`
+        .toLocaleLowerCase("en")
+        .includes(route.search.toLocaleLowerCase("en"));
 
-  // The chosen kind and the search decide which groups remain; empty ones are left out.
-  const groups = $derived(
-    kinds
-      .filter((kind) => route.filter === "all" || route.filter === kind.id)
-      .map((kind) => ({
-        ...kind,
-        apps: kind.apps.filter((app) =>
-          `${app.displayName} ${app.hostname}`
-            .toLocaleLowerCase("en")
-            .includes(route.search.toLocaleLowerCase("en")),
-        ),
-      }))
-      .filter((kind) => kind.apps.length > 0),
+      return (
+        matches && (route.filter === "all" || app.connector === (route.filter === "connectors"))
+      );
+    }),
   );
+
+  const connectors = $derived(data.apps.filter((app) => app.connector).length);
 
   const filters = $derived([
     { value: "all", label: "All", count: data.apps.length },
-    ...kinds.map((kind) => ({ value: kind.id, label: kind.title, count: kind.apps.length })),
+    { value: "apps", label: "Apps", count: data.apps.length - connectors },
+    { value: "connectors", label: "Connectors", count: connectors },
   ]);
 </script>
 
 <svelte:head><title>Manage · Widefleet</title></svelte:head>
 <PageHeading title="Manage">
-  {#if data.principal.creator}<Button href={workspace.path("/apps/new")}><Plus />Create app</Button
+  {#if data.principal.creator}<Button href={workspace.path("/catalog/templates")}
+      ><Plus />Create app</Button
     >{/if}
 </PageHeading>
 {#if data.apps.length === 0}
@@ -96,62 +91,51 @@
       <Button type="submit" variant="outline" class="h-9">Search</Button>
     </form>
   </div>
-  {#if groups.length === 0}
+  {#if apps.length === 0}
     <EmptyState title="No matching apps" description="Try another search or show all apps again.">
       {#snippet icon()}<Search />{/snippet}<Button href={workspace.path("/apps")} variant="outline"
         >Reset filters</Button
       >
     </EmptyState>
   {:else}
-    {#each groups as group (group.id)}
-      <section
-        aria-labelledby={`manage-${group.id}`}
-        class={route.filter === "all" ? "mt-6" : "mt-2"}
-      >
-        <h2
-          id={`manage-${group.id}`}
-          class={route.filter === "all"
-            ? "text-muted-foreground px-3 pb-1 text-[11px] font-medium tracking-wider uppercase"
-            : "sr-only"}
+    <div
+      class="text-muted-foreground hidden grid-cols-[minmax(0,1fr)_190px_24px] gap-4 px-3 pt-5 pb-2 text-[11px] font-medium sm:grid"
+    >
+      <span>NAME</span><span>STATUS</span><span></span>
+    </div>
+    <ul class="divide-y" aria-label="Apps">
+      {#each apps as app (app.id)}
+        <li
+          class="group relative grid grid-cols-[minmax(0,1fr)_24px] items-center gap-4 rounded-md px-3 py-3 hover:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_190px_24px]"
         >
-          {group.title}
-        </h2>
-        <ul class="divide-y" aria-labelledby={`manage-${group.id}`}>
-          {#each group.apps as app (app.id)}
-            <li
-              class="group relative grid grid-cols-[minmax(0,1fr)_24px] items-center gap-4 rounded-md px-3 py-3 hover:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_190px_24px]"
-            >
-              <div class="flex min-w-0 items-center gap-3">
-                <AppIcon
-                  appId={app.id}
-                  deploymentId={app.web && app.state === "active" ? app.activeDeploymentId : null}
-                />
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <a
-                      href={workspace.path(`/apps/${app.id}`)}
-                      class="truncate text-sm font-medium after:absolute after:inset-0 after:rounded-md"
-                      >{app.displayName}</a
-                    >{#if app.parentId}<Badge variant="secondary" class="text-[10px]">Preview</Badge
-                      >{/if}
-                  </div>
-                  <p class="text-muted-foreground mt-1 truncate text-xs">
-                    {app.web ? app.hostname : "Service only"}
-                  </p>
-                  <div class="mt-2 sm:hidden"><AppStatus state={app.state} /></div>
-                </div>
+          <div class="flex min-w-0 items-center gap-3">
+            <AppIcon
+              appId={app.id}
+              deploymentId={app.web && app.state === "active" ? app.activeDeploymentId : null}
+            />
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <a
+                  href={workspace.path(`/apps/${app.id}`)}
+                  class="truncate text-sm font-medium after:absolute after:inset-0 after:rounded-md"
+                  >{app.displayName}</a
+                >{#if app.connector && route.filter === "all"}<Badge
+                    variant="secondary"
+                    class="text-[10px]">Connector</Badge
+                  >{/if}{#if app.parentId}<Badge variant="secondary" class="text-[10px]"
+                    >Preview</Badge
+                  >{/if}
               </div>
-              <div class="hidden sm:block"><AppStatus state={app.state} /></div>
-              <ChevronRight class="text-muted-foreground/50 group-hover:text-foreground size-4" />
-            </li>
-          {/each}
-        </ul>
-      </section>
-    {/each}
+              <p class="text-muted-foreground mt-1 truncate text-xs">
+                {app.web ? app.hostname : "Service only"}
+              </p>
+              <div class="mt-2 sm:hidden"><AppStatus state={app.state} /></div>
+            </div>
+          </div>
+          <div class="hidden sm:block"><AppStatus state={app.state} /></div>
+          <ChevronRight class="text-muted-foreground/50 group-hover:text-foreground size-4" />
+        </li>
+      {/each}
+    </ul>
   {/if}
-  <a
-    href={workspace.path("/catalog/templates")}
-    class="text-muted-foreground hover:text-foreground mt-6 inline-flex items-center gap-1 text-xs"
-    >Start a connector from a template<ArrowRight class="size-3" /></a
-  >
 {/if}

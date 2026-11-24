@@ -885,9 +885,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       proxy.closeIdleConnections();
     }
 
-    const apps = z.array(contract.appListEntry).parse(JSON.parse((await cli("apps")).stdout));
-    expect(apps).toHaveLength(1);
-    const app = contract.app.parse(apps[0]);
+    const [app] = z.tuple([contract.appListEntry]).parse(JSON.parse((await cli("apps")).stdout));
     createdApps.push(app.id);
     hostnames.set(app.id, app.hostname);
     expect(app.slug).toBe("independent-app");

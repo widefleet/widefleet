@@ -2609,23 +2609,27 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       })
       .where(eq(artifacts.id, deployment.artifactId));
     expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(200);
-    // The list of managed apps says which of them are connectors.
-    expect(
+
+    // The list of managed apps says which of them are connectors. A service-only app is none,
+    // because members connect their accounts through the app's web address.
+    const isConnector = async () =>
       z
         .array(contract.appListEntry)
         .parse(await (await json("/apps", "GET")).json())
-        .find((record) => record.id === app.id)?.connector,
-    ).toBe(true);
+        .find((record) => record.id === app.id)?.connector;
+
+    expect(await isConnector()).toBe(true);
+    await environment.database.db
+      .update(apps)
+      .set({ webEnabled: false })
+      .where(eq(apps.id, app.id));
+    expect(await isConnector()).toBe(false);
+    await environment.database.db.update(apps).set({ webEnabled: true }).where(eq(apps.id, app.id));
     await environment.database.db
       .update(artifacts)
       .set({ metadata: sql`jsonb_set(${artifacts.metadata}, '{entrypoints}', '["default"]')` })
       .where(eq(artifacts.id, deployment.artifactId));
-    expect(
-      z
-        .array(contract.appListEntry)
-        .parse(await (await json("/apps", "GET")).json())
-        .find((record) => record.id === app.id)?.connector,
-    ).toBe(false);
+    expect(await isConnector()).toBe(false);
     expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(404);
 
     const foreignOrganizationId = crypto.randomUUID();
