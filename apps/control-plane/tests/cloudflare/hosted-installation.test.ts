@@ -219,7 +219,8 @@ describe("Hosted resource provisioning", () => {
     expect(writes).toBe(0);
   });
 
-  it("updates only caching through Wrangler, preserving Hyperdrive connection and TLS settings", async () => {
+  it("creates the artifacts bucket in its location and updates only Hyperdrive caching through Wrangler", async () => {
+    const buckets: unknown[] = [];
     const updates: unknown[] = [];
 
     const api = createServer((request, response) => {
@@ -227,6 +228,14 @@ describe("Hosted resource provisioning", () => {
         let body = "";
 
         for await (const chunk of request) body += String(chunk);
+        response.setHeader("content-type", "application/json");
+
+        if (request.method === "POST" && request.url === `/accounts/${ids.account}/r2/buckets`) {
+          buckets.push(JSON.parse(body));
+          response.end(JSON.stringify({ success: true, result: {} }));
+
+          return;
+        }
 
         if (
           request.method !== "PATCH" ||
@@ -235,7 +244,6 @@ describe("Hosted resource provisioning", () => {
           throw new Error(`Unexpected request: ${request.method} ${request.url}`);
 
         updates.push(JSON.parse(body));
-        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ success: true, result: { id: installation.hyperdriveId } }));
       };
 
@@ -260,7 +268,7 @@ describe("Hosted resource provisioning", () => {
         expect(request.method).toBe("GET");
 
         if (pathname.endsWith("/r2/buckets/fixture-artifacts-weur"))
-          return Response.json({ success: true, result: { name: "fixture-artifacts-weur" } });
+          return new Response(null, { status: 404 });
 
         if (pathname.endsWith("/storage/kv/namespaces"))
           return Response.json({
@@ -285,6 +293,7 @@ describe("Hosted resource provisioning", () => {
         });
       });
 
+      expect(buckets).toEqual([{ name: "fixture-artifacts-weur", locationHint: "weur" }]);
       expect(updates).toEqual([{ caching: { disabled: true } }]);
     } finally {
       await new Promise<void>((resolve, reject) =>
