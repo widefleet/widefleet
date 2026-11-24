@@ -6,8 +6,7 @@
   import * as DropdownMenu from "@platform/ui/dropdown-menu";
   import { toast } from "@platform/ui/sonner";
   import { mergeProps } from "bits-ui";
-  import Bot from "@lucide/svelte/icons/bot";
-  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
+  import Copy from "@lucide/svelte/icons/copy";
   import Plus from "@lucide/svelte/icons/plus";
   import Search from "@lucide/svelte/icons/search";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -77,17 +76,17 @@
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end" class="w-72">
         <DropdownMenu.Item class="items-start gap-3 p-2.5" onSelect={copyPrompt}>
-          <Bot class="mt-0.5" />
-          <span
+          <span class="flex-1"
             ><span class="block font-medium">Build with your agent</span><span
               class="text-muted-foreground block text-xs"
               >Copy a prompt and tell your agent what you need.</span
             ></span
           >
+          <Copy class="text-muted-foreground mt-0.5" />
         </DropdownMenu.Item>
-        <DropdownMenu.Item class="items-start gap-3 p-2.5">
+        <DropdownMenu.Item class="p-2.5">
           {#snippet child({ props })}<a {...props} href={workspace.path("/catalog/templates")}
-              ><LayoutTemplate class="mt-0.5" /><span
+              ><span
                 ><span class="block font-medium">Start from a template</span><span
                   class="text-muted-foreground block text-xs"
                   >Choose a ready-made connector and set it up.</span
