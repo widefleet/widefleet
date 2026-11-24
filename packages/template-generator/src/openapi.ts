@@ -9,7 +9,15 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
 import { reservedMethod } from "./reserved.ts";
-import { type Change, type GeneratedFiles, json, type Json } from "./rules.ts";
+import { isOpenapi31, upgradeOpenapi31 } from "./openapi31.ts";
+import {
+  type Change,
+  type GeneratedFiles,
+  json,
+  type Json,
+  jsonEntries,
+  jsonObject,
+} from "./rules.ts";
 import { isSwagger, upgradeSwagger } from "./swagger.ts";
 
 /** Header inputs of an operation, by input name: the header's name and what it carries. */
@@ -30,7 +38,9 @@ export interface OpenapiRules {
    * as Graph's `workbook-session-id`. Where the description leaves out or
    * misdescribes inputs, `parameters` adds OpenAPI parameters or replaces those
    * of the same name and place, and `fields` replaces, adds or, with null,
-   * removes the fields of a form body.
+   * removes the fields of a form body. `form` replaces a form body's whole
+   * schema, such as with variants that each require their own fields, and
+   * `requiredBody` requires a body the description leaves optional.
    */
   operations: Record<
     string,
@@ -43,6 +53,8 @@ export interface OpenapiRules {
       headers?: HeaderRules | undefined;
       parameters?: readonly Json[] | undefined;
       fields?: Readonly<Record<string, Json>> | undefined;
+      form?: Json | undefined;
+      requiredBody?: boolean | undefined;
     }
   >;
   /**
@@ -292,6 +304,21 @@ const separator = (
 
 const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? "";
 
+// Keywords that constrain a value; a schema without them only annotates it.
+const constraining = [
+  "$ref",
+  "type",
+  "enum",
+  "properties",
+  "additionalProperties",
+  "items",
+  "allOf",
+  "anyOf",
+  "oneOf",
+] as const;
+
+const annotationOnly = (value: Schema) => constraining.every((key) => value[key] === undefined);
+
 /** A description's JSON or YAML text, parsed. */
 export const parseDescription = (source: string) => {
   const text = source.trimStart();
@@ -299,6 +326,66 @@ export const parseDescription = (source: string) => {
   return json.parse(
     text.startsWith("{") ? JSON.parse(text) : parseYaml(text, { maxAliasCount: -1 }),
   );
+};
+
+// JSON as text with object keys in order, so equal values compare equal
+// whatever order a part lists their keys in. Lists keep their order.
+const canonical = (value: Json): string => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  const entries = jsonEntries(value);
+
+  if (!entries) return JSON.stringify(value);
+
+  return `{${entries
+    .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
+    .join(",")}}`;
+};
+
+/**
+ * One description from the parts a provider publishes it in, such as one page
+ * per operation, each a complete document with the components its operations
+ * use. The parts must agree on every operation and component they share and on
+ * the rest of the document, such as its servers.
+ */
+export const mergeDescriptions = (parts: readonly Json[]): Json => {
+  const paths: Record<string, Record<string, Json>> = {};
+  const components: Record<string, Record<string, Json>> = {};
+  // The rest of the first part, which every other part must repeat.
+  let shared: { text: string; fields: Record<string, Json> } | undefined;
+
+  // Entries by name, which every part that names one must describe alike.
+  const add = (target: Record<string, Json>, entries: Json, where: (key: string) => string) => {
+    for (const [key, value] of Object.entries(jsonObject.parse(entries))) {
+      const existing = target[key];
+
+      if (existing !== undefined && canonical(existing) !== canonical(value))
+        throw new Error(`The description's parts describe ${where(key)} differently`);
+      target[key] = value;
+    }
+  };
+
+  for (const part of parts) {
+    const {
+      paths: partPaths = {},
+      components: partComponents = {},
+      ...rest
+    } = jsonObject.parse(part);
+
+    const text = canonical(rest);
+
+    if (shared !== undefined && text !== shared.text)
+      throw new Error("The description's parts differ outside their paths and components");
+    shared ??= { text, fields: rest };
+
+    for (const [path, item] of Object.entries(jsonObject.parse(partPaths)))
+      add((paths[path] ??= {}), item, (key) => `${key} ${path}`);
+
+    for (const [section, entries] of Object.entries(jsonObject.parse(partComponents)))
+      add((components[section] ??= {}), entries, (name) => `${section}.${name}`);
+  }
+
+  return { ...shared?.fields, paths, components };
 };
 
 // Form bodies by their media type; other bodies that are not JSON are sent as text.
@@ -332,7 +419,13 @@ export const generateOpenapi = (
   service: OpenapiService,
   header: string,
 ): GeneratedFiles => {
-  const api = document.parse(isSwagger(description) ? upgradeSwagger(description) : description);
+  const api = document.parse(
+    isSwagger(description)
+      ? upgradeSwagger(description)
+      : isOpenapi31(description)
+        ? upgradeOpenapi31(description)
+        : description,
+  );
 
   const components = api.components ?? {};
   const schemas = components.schemas ?? {};
@@ -388,11 +481,15 @@ export const generateOpenapi = (
   // The schemas a multipart body's type writes out, which a schema may not repeat.
   const inlined: string[] = [];
 
-  // A form schema's fields, through a reference.
-  const fieldsOf = (value: Schema | undefined): Record<string, Schema> =>
+  // A form schema's fields, through a reference and in each of its variants,
+  // which may each name a field differently.
+  const fieldsOf = (value: Schema | undefined): [string, Schema][] =>
     value?.$ref
       ? fieldsOf(schemas[value.$ref.replace("#/components/schemas/", "")])
-      : (value?.properties ?? {});
+      : [
+          ...[...(value?.oneOf ?? []), ...(value?.anyOf ?? [])].flatMap(fieldsOf),
+          ...Object.entries(value?.properties ?? {}),
+        ];
 
   // Whether a field holds objects, or lists of them, through references.
   const holdsObjects = (value: Schema, seen: Set<string>): boolean => {
@@ -523,8 +620,19 @@ export const generateOpenapi = (
     if (value.$ref) return `${typeName(value.$ref)}${nullable}`;
 
     if (value.allOf) {
-      const parts = value.allOf.map((part) => wrap(typeOf(part, indent)));
+      // A part that only annotates, such as with an example, adds no type.
+      const parts = value.allOf
+        .filter((part) => !annotationOnly(part))
+        .map((part) => wrap(typeOf(part, indent)));
+
       const own = value.properties ? [objectType(value, indent)] : [];
+
+      // Parts that all annotate leave the schema's own type.
+      if (!parts.length && !own.length) {
+        const { allOf: _, ...outer } = value;
+
+        return typeOf(outer, indent);
+      }
 
       return `${[...parts, ...own].join(" & ")}${nullable}`;
     }
@@ -559,7 +667,9 @@ export const generateOpenapi = (
       return [...union, ...(nullable ? ["null"] : [])].join(" | ");
     }
 
-    if (value.enum) return `${value.enum.map(literal).join(" | ")}${nullable}`;
+    // An enum that lists null already allows it.
+    if (value.enum)
+      return `${value.enum.map(literal).join(" | ")}${value.enum.includes(null) ? "" : nullable}`;
 
     switch (value.type) {
       case "integer":
@@ -791,27 +901,49 @@ export const generateOpenapi = (
     // Forms send their fields, and multipart forms also files.
     const jsonBody = body?.content?.["application/json"];
 
-    // Only the body that is sent counts: JSON before forms, and the first form.
+    // Only the body that is sent counts: JSON before forms, then a form that
+    // carries files, which only multipart can send, then the first form.
     // Checks of the form's fields and encoding apply to that body alone.
-    const sentForm = jsonBody
-      ? undefined
+    const forms = jsonBody
+      ? []
       : Object.entries(formBodies).flatMap(([type, kind]) => {
           const entry = body?.content?.[type];
 
           return entry ? [{ kind, entry }] : [];
-        })[0];
+        });
+
+    // The rules' form or fields may carry files the description's forms leave out.
+    const ruleFiles = [
+      ...(rule.form === undefined ? [] : [rule.form]),
+      ...Object.values(rule.fields ?? {}).filter((field) => field !== null),
+    ].some((value) => carriesFiles(schema.parse(value), new Set()));
+
+    const sentForm =
+      forms.find(
+        ({ kind, entry }) =>
+          kind === "multipart" &&
+          (ruleFiles || (entry.schema !== undefined && carriesFiles(entry.schema, new Set()))),
+      ) ?? forms[0];
 
     if (rule.fields && !sentForm)
       throw new Error(`${id}'s fields rule needs a form body that lists its fields`);
 
+    if (rule.form && !sentForm) throw new Error(`${id}'s form rule needs a form body`);
+
+    if (rule.fields && rule.form)
+      throw new Error(`${id} gives both fields and a form; describe the fields in the form`);
+
     const form = sentForm && {
       ...sentForm,
-      schema: formSchema(id, sentForm.entry.schema, rule.fields),
+      schema:
+        rule.form === undefined
+          ? formSchema(id, sentForm.entry.schema, rule.fields)
+          : schema.parse(rule.form),
     };
 
     // Multipart forms send objects as JSON parts; plain forms have no encoding for them.
     if (form?.kind === "form")
-      for (const [name, field] of Object.entries(fieldsOf(form.schema)))
+      for (const [name, field] of fieldsOf(form.schema))
         if (holdsObjects(field, new Set()))
           throw new Error(`${id}'s form field ${name} is an object, which a form cannot send`);
 
@@ -825,6 +957,11 @@ export const generateOpenapi = (
     );
 
     const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : "text";
+
+    // The rules may require a body the description leaves optional, but not add one.
+    if (rule.requiredBody && !body) throw new Error(`${id}'s requiredBody rule needs a body`);
+
+    const bodyRequired = body?.required === true || rule.requiredBody === true;
 
     // Every success answer counts: JSON, other content, or none, such as a 204.
     const successes = Object.entries(entry.responses ?? {}).flatMap(([code, value]) =>
@@ -878,7 +1015,7 @@ export const generateOpenapi = (
       ),
       headerParameters: Object.fromEntries(headers.map(([input, { name }]) => [input, name])),
       body: bodyKind,
-      bodyRequired: body?.required === true,
+      bodyRequired,
       response: responseKind,
       pageable,
       change,
@@ -968,7 +1105,7 @@ export const generateOpenapi = (
 
     if (bodyKind)
       fields.push(
-        `${comment(single(body?.description) || "The request body.", "    ")}    body${body?.required ? "" : "?"}: ${bodyType()};`,
+        `${comment(single(rule.form === undefined ? body?.description : form?.schema?.description) || "The request body.", "    ")}    body${bodyRequired ? "" : "?"}: ${bodyType()};`,
       );
 
     if (bodyKind === "text")
@@ -995,7 +1132,7 @@ export const generateOpenapi = (
     if (responseKind === "binary") usesBinary = true;
 
     const required =
-      parameters.some((value) => value.in === "path" || value.required) || body?.required === true;
+      parameters.some((value) => value.in === "path" || value.required) || bodyRequired;
 
     const firstPage = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
 

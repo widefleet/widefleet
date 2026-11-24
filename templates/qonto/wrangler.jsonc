@@ -1,0 +1,15 @@
+{
+  "name": "qonto",
+  "main": "src/app.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "public", "binding": "ASSETS" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "accounts",
+    },
+  ],
+  // The organization's Qonto OAuth application. Every deployment needs both values.
+  "secrets": { "required": ["QONTO_CLIENT_ID", "QONTO_CLIENT_SECRET"] },
+}
