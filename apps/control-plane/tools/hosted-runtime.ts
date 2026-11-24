@@ -74,3 +74,18 @@ export const deployHostedRuntime = (
       })
       .where(eq(organizationRuntimes.organizationId, execution.organizationId));
   });
+
+// A new Worker version takes a few seconds to reach every Cloudflare location, so
+// a check right after the deployment can still reach the previous version.
+export const waitForRuntimeVersion = async (
+  read: () => Promise<string>,
+  version: string,
+  { attempts = 30, interval = 2_000 } = {},
+) => {
+  for (let attempt = 1; ; attempt++) {
+    if ((await read()) === version) return;
+
+    if (attempt >= attempts) throw new Error("The requested Runtime version is not active");
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+};

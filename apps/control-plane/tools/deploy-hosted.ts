@@ -33,7 +33,7 @@ import {
   initializeCloudflareInstallation,
   type InitializationPlatform,
 } from "./cloudflare-initialization.ts";
-import { deployHostedRuntime } from "./hosted-runtime.ts";
+import { deployHostedRuntime, waitForRuntimeVersion } from "./hosted-runtime.ts";
 
 const execute = promisify(execFile);
 
@@ -338,8 +338,10 @@ try {
         ...(confirmedBindingTag ? ["--tag", confirmedBindingTag] : []),
       ]);
 
-      if ((await readCloudflareRuntimeVersion(await platform())) !== release.version)
-        throw new Error("The requested Runtime version is not active");
+      await waitForRuntimeVersion(
+        async () => readCloudflareRuntimeVersion(await platform()),
+        release.version,
+      );
     },
   );
 
