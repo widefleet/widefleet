@@ -559,7 +559,7 @@ export const createApi = (runtime: Runtime) => {
         if (origin !== runtime.configuration.PLATFORM_URL)
           throw new ORPCError("FORBIDDEN", { message: "A same-origin setup request is required" });
 
-        return apiOperation(() => runtime.settings.createOwner(input));
+        return apiOperation(async () => (await runtime.settings.createOwner(input)).owner);
       }),
     getSettings: read
       .route({ method: "GET", path: "/settings" })

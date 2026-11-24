@@ -101,18 +101,15 @@ export const createOwner = command(setupOwner, async (input) => {
   if (request.headers.get("origin") !== runtime.configuration.PLATFORM_URL)
     error(403, "A same-origin setup request is required");
 
-  await remoteOperation(() => runtime.settings.createOwner(input));
+  const { activation } = await remoteOperation(() => runtime.settings.createOwner(input));
 
-  const [slug, settings] = await Promise.all([
-    readOrganizationSlug(runtime.database.db, installationOrganizationId),
-    runtime.settings.inspect(),
-  ]);
+  const slug = await readOrganizationSlug(runtime.database.db, installationOrganizationId);
 
-  // Setup turns on app sign-in itself. Should that fail, the administrator retries it first.
+  // Should turning on app sign-in have failed, the administrator retries it first.
   return {
     next: workspacePath(
       slug,
-      settings.activation.state === "active" ? "/apps" : "/settings/company-sign-in",
+      activation?.state === "active" ? "/apps" : "/settings/company-sign-in",
     ),
   };
 });
