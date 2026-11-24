@@ -9,7 +9,8 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
 import { reservedMethod } from "./reserved.ts";
-import { type Change, type GeneratedFiles, json, type Json } from "./rules.ts";
+import { isOpenapi31, upgradeOpenapi31 } from "./openapi31.ts";
+import { type Change, type GeneratedFiles, json, type Json, jsonObject } from "./rules.ts";
 import { isSwagger, upgradeSwagger } from "./swagger.ts";
 
 /** Header inputs of an operation, by input name: the header's name and what it carries. */
@@ -292,6 +293,21 @@ const separator = (
 
 const single = (text: string | undefined) => text?.replace(/\s*\n\s*/g, " ") ?? "";
 
+// Keywords that constrain a value; a schema without them only annotates it.
+const constraining = [
+  "$ref",
+  "type",
+  "enum",
+  "properties",
+  "additionalProperties",
+  "items",
+  "allOf",
+  "anyOf",
+  "oneOf",
+] as const;
+
+const annotationOnly = (value: Schema) => constraining.every((key) => value[key] === undefined);
+
 /** A description's JSON or YAML text, parsed. */
 export const parseDescription = (source: string) => {
   const text = source.trimStart();
@@ -299,6 +315,51 @@ export const parseDescription = (source: string) => {
   return json.parse(
     text.startsWith("{") ? JSON.parse(text) : parseYaml(text, { maxAliasCount: -1 }),
   );
+};
+
+/**
+ * One description from the parts a provider publishes it in, such as one page
+ * per operation, each a complete document with the components its operations
+ * use. The parts must agree on every operation and component they share and on
+ * the rest of the document, such as its servers.
+ */
+export const mergeDescriptions = (parts: readonly Json[]): Json => {
+  const paths: Record<string, Record<string, Json>> = {};
+  const components: Record<string, Record<string, Json>> = {};
+  let shared: string | undefined;
+
+  // Entries by name, which every part that names one must describe alike.
+  const add = (target: Record<string, Json>, entries: Json, where: (key: string) => string) => {
+    for (const [key, value] of Object.entries(jsonObject.parse(entries))) {
+      const existing = target[key];
+
+      if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(value))
+        throw new Error(`The description's parts describe ${where(key)} differently`);
+      target[key] = value;
+    }
+  };
+
+  for (const part of parts) {
+    const {
+      paths: partPaths = {},
+      components: partComponents = {},
+      ...rest
+    } = jsonObject.parse(part);
+
+    const text = JSON.stringify(rest);
+
+    if (shared !== undefined && text !== shared)
+      throw new Error("The description's parts differ outside their paths and components");
+    shared = text;
+
+    for (const [path, item] of Object.entries(jsonObject.parse(partPaths)))
+      add((paths[path] ??= {}), item, (key) => `${key} ${path}`);
+
+    for (const [section, entries] of Object.entries(jsonObject.parse(partComponents)))
+      add((components[section] ??= {}), entries, (name) => `${section}.${name}`);
+  }
+
+  return { ...jsonObject.parse(JSON.parse(shared ?? "{}")), paths, components };
 };
 
 // Form bodies by their media type; other bodies that are not JSON are sent as text.
@@ -332,7 +393,13 @@ export const generateOpenapi = (
   service: OpenapiService,
   header: string,
 ): GeneratedFiles => {
-  const api = document.parse(isSwagger(description) ? upgradeSwagger(description) : description);
+  const api = document.parse(
+    isSwagger(description)
+      ? upgradeSwagger(description)
+      : isOpenapi31(description)
+        ? upgradeOpenapi31(description)
+        : description,
+  );
 
   const components = api.components ?? {};
   const schemas = components.schemas ?? {};
@@ -523,7 +590,11 @@ export const generateOpenapi = (
     if (value.$ref) return `${typeName(value.$ref)}${nullable}`;
 
     if (value.allOf) {
-      const parts = value.allOf.map((part) => wrap(typeOf(part, indent)));
+      // A part that only annotates, such as with an example, adds no type.
+      const parts = value.allOf
+        .filter((part) => !annotationOnly(part))
+        .map((part) => wrap(typeOf(part, indent)));
+
       const own = value.properties ? [objectType(value, indent)] : [];
 
       return `${[...parts, ...own].join(" & ")}${nullable}`;
@@ -559,7 +630,9 @@ export const generateOpenapi = (
       return [...union, ...(nullable ? ["null"] : [])].join(" | ");
     }
 
-    if (value.enum) return `${value.enum.map(literal).join(" | ")}${nullable}`;
+    // An enum that lists null already allows it.
+    if (value.enum)
+      return `${value.enum.map(literal).join(" | ")}${value.enum.includes(null) ? "" : nullable}`;
 
     switch (value.type) {
       case "integer":

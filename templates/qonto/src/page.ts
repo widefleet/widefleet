@@ -1,0 +1,56 @@
+import type { ApprovalLevel } from "./approval.ts";
+import { approvalForm, approvalStyles } from "./approval-page.ts";
+
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
+
+const page = (title: string, content: string, cookies: string[] = []) => {
+  const headers = new Headers({
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "referrer-policy": "same-origin",
+  });
+
+  for (const cookie of cookies) headers.append("set-cookie", cookie);
+
+  return new Response(
+    `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<meta name="referrer" content="same-origin"><link rel="icon" href="/favicon.svg"><title>${escapeHtml(title)}</title>
+<style>*{box-sizing:border-box}body{margin:0;background:#fafafa;color:#202124;font:16px/1.6 system-ui,sans-serif}main{max-width:640px;margin:10vh auto;padding:32px}h1{font-size:30px;line-height:1.2;letter-spacing:-.7px}.muted{color:#666;font-size:14px}.notice{border-left:3px solid #b45309;padding:8px 16px;background:#fffbeb}${approvalStyles}form{margin:16px 0}button{font:inherit;border:1px solid #ddd;border-radius:7px;padding:10px 18px;cursor:pointer;background:white}.primary{background:#202124;color:white;border-color:#202124}code{overflow-wrap:anywhere}</style>
+</head><body><main>${content}</main></body></html>`,
+    { headers },
+  );
+};
+
+export const connectionPage = (
+  name: string,
+  account: string | null,
+  missing: string[],
+  origin: string,
+  failed: boolean,
+  level: ApprovalLevel,
+) =>
+  page(
+    "Connect Qonto",
+    `
+<p class="muted">Personal connection</p><h1>Qonto ${account ? "connected" : "connection"}</h1>
+<p>Widefleet user: ${escapeHtml(name)}</p><p>Use your Qonto organization through Qonto's Business API: accounts, transactions, transfers, cards, invoicing and team. Payments to beneficiaries your organization has not trusted still need your approval in the Qonto app on your paired phone.</p>
+${failed ? '<p class="notice" role="alert">The connection could not be completed. Try again. To switch accounts, disconnect the current account first.</p>' : ""}
+${missing.length ? `<p class="notice">Setup is required before accounts can be connected.</p><p>Create an app in Qonto's Developer Portal for the use case <em>Automate your business operations</em> and register the redirect URL below.</p><p>Ask your administrator to set these app secrets on the app's Secrets page in Widefleet: ${missing.map((key) => `<code>${escapeHtml(key)}</code>`).join(", ")}.</p><p>Redirect URL: <code>${escapeHtml(`${origin}/auth/callback/qonto`)}</code></p>` : `<p>${account ? `Your account <code>${escapeHtml(account)}</code> is linked.` : "Connect your account to use it through Widefleet apps."}</p><p>${account ? "" : "Qonto asks you to choose the organization to connect. "}Connected apps use your account when you use them. Other users connect their own accounts.</p><form method="post" action="/connect"><button class="primary">${account ? "Reconnect account" : "Connect account"}</button></form>`}
+${account ? approvalForm("Qonto", level) : ""}
+${account ? '<form method="post" action="/disconnect"><button>Disconnect</button></form><p class="muted">Disconnect removes the saved tokens from this app. It does not revoke access in your Qonto account settings.</p>' : ""}
+<p class="muted">After connecting, return to your app and retry its action.</p>`,
+  );
+
+export const authorizationPage = (destination: string, cookies: string[]) => {
+  const url = escapeHtml(destination);
+
+  // Chromium's form-action policy also constrains form redirects. Complete the
+  // POST in a document, then navigate to the provider from that document.
+  return page(
+    "Continue to Qonto",
+    `<meta http-equiv="refresh" content="0;url=${url}"><p>Opening Qonto to connect your account. <a href="${url}">Continue</a></p>`,
+    cookies,
+  );
+};

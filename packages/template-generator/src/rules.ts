@@ -50,6 +50,9 @@ const nameMaps = new Set([
   "paths",
 ]);
 
+/** Whether the object under `key` maps names to values, such as a schema's properties. */
+export const holdsNames = (key: string) => nameMaps.has(key);
+
 /**
  * Whether the value under `key` is literal data, such as an example or an
  * extension, whose `$ref` fields are data rather than references. `parent` is
