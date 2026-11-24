@@ -22,7 +22,6 @@ export const reservedOrganizationSlugs = [
   "setup",
   "sign-in",
   "sign-up",
-  "welcome",
 ] as const;
 
 export const organizationSlugFormat = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

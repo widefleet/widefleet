@@ -1151,7 +1151,6 @@ test("protects auth-group documents and data requests even when every layout is 
     "/widefleet/settings/members?q=reader&page=2",
     "/widefleet/services",
     "/widefleet/settings/company-sign-in",
-    "/widefleet/welcome",
     "/organizations",
     "/device?user_code=ABCD1234",
   ]) {

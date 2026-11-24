@@ -40,7 +40,7 @@
         callbackURL: next,
         newUserCallbackURL: register
           ? next
-          : `/organizations?${new URLSearchParams({ next: next === "/" ? workspacePath(organizationPlaceholder, "/welcome") : next })}`,
+          : `/organizations?${new URLSearchParams({ next: next === "/" ? workspacePath(organizationPlaceholder, "/apps") : next })}`,
         errorCallbackURL: `/sign-in/connect?${new URLSearchParams({ provider, next })}`,
       });
 

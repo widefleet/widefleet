@@ -126,7 +126,7 @@ for (const entry of ["registration", "sign-in"] as const)
       await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
 
       expect(new URL(page.url()).searchParams.get("next")).toBe(
-        entry === "registration" ? "/[organization]/welcome" : "/[organization]",
+        entry === "registration" ? "/[organization]/apps" : "/[organization]",
       );
       await page.getByLabel("Name", { exact: true }).fill("Example Builders");
       await expect(page.getByLabel("URL", { exact: true })).toHaveValue("example-builders");
@@ -144,8 +144,7 @@ for (const entry of ["registration", "sign-in"] as const)
       await expect(page.getByLabel("URL", { exact: true })).toHaveValue("example-builders");
       environment.authControl.available(true);
       await page.getByRole("button", { name: "Create organization", exact: true }).click();
-      await expect(page).toHaveURL(/\/welcome$/);
-      await expect(page.getByRole("heading", { name: "Publish your first app" })).toBeVisible();
+      await expect(page).toHaveURL(/\/example-builders\/apps$/);
 
       const [created] = await environment.database.db
         .select()
@@ -159,11 +158,8 @@ for (const entry of ["registration", "sign-in"] as const)
           .from(member)
           .where(eq(member.organizationId, created.id)),
       ).toMatchObject([{ role: "owner" }]);
-      await expect(page.locator("pre").filter({ hasText: "widefleet deploy" })).toContainText(
-        `--organization ${created.id}`,
-      );
-      await page.getByRole("link", { name: "Open apps", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Manage", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Build it with your agent" })).toBeVisible();
 
       const other = await page.request.get("/api/v1/apps", {
         headers: { "x-widefleet-organization": "widefleet" },

@@ -196,7 +196,7 @@ test("joins an organization by email domain and manages its join domains", async
     // The address follows the name.
     await expect(builder.getByLabel("URL", { exact: true })).toHaveValue("builders");
     await builder.getByRole("button", { name: "Create organization", exact: true }).click();
-    await expect(builder).toHaveURL(/\/builders\/welcome$/);
+    await expect(builder).toHaveURL(/\/builders\/apps$/);
 
     const [created] = await database
       .select({ joinDomains: organizationSettings.joinDomains })

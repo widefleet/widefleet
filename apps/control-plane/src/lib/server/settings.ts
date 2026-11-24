@@ -698,9 +698,10 @@ export const createSettingsService = (
         });
       const owner = await createInstallationOwner(database, input, bootstrapPending, observation);
 
-      if (signInEnabled) await installed.inspect(true);
+      // Setup turns on app sign-in for the installation and reports whether that worked.
+      const activation = signInEnabled ? (await installed.inspect(true)).activation : null;
 
-      return owner;
+      return { owner, activation };
     },
     publish: (organizationId = installationOrganizationId) => scoped(organizationId).inspect(true),
     republish: async () => {

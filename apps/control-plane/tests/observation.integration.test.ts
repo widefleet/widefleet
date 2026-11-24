@@ -169,7 +169,7 @@ describe("Installation observation", () => {
       ).rejects.toThrow();
       expect(events).toEqual([]);
 
-      const created = await settings.createOwner({
+      const { owner: created } = await settings.createOwner({
         name: "Observed owner",
         email: "setup-observer@example.test",
       });

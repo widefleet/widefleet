@@ -24,8 +24,8 @@
     message = "";
 
     try {
-      await createOwner({ name, email, organizationName });
-      await goto(`/sign-in?email=${encodeURIComponent(email)}&next=/welcome`);
+      const { next } = await createOwner({ name, email, organizationName });
+      await goto(`/sign-in?${new URLSearchParams({ email, next })}`);
     } catch (cause) {
       message = cause instanceof Error ? cause.message : "Could not complete setup.";
     } finally {

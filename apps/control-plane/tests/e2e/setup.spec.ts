@@ -98,9 +98,6 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     environment.authControl.available(true);
     await page.getByRole("button", { name: "Activate Widefleet sign-in" }).click();
     await expect(page.getByText("Widefleet app sign-in is active.", { exact: true })).toBeVisible();
-    await page.goto("/widefleet/welcome");
-    await expect(page.getByRole("heading", { name: "Publish your first app" })).toBeVisible();
-    await page.getByRole("link", { name: "Organization settings", exact: true }).click();
     await expect(page.getByRole("link", { name: "Privacy", exact: true })).toHaveCount(0);
     await page.goto("/widefleet/settings?section=reporting");
     await page.waitForLoadState("networkidle");
