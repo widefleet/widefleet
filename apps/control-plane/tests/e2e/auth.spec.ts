@@ -3470,6 +3470,8 @@ test.describe(`app templates`, () => {
       expect(mine?.status()).toBe(200);
       await expect(page.getByRole("heading", { name: "Manage", exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Create app", exact: true })).toHaveCount(0);
+      // The prompt for the agent needs no template, so a first app stays within reach.
+      await expect(page.getByRole("button", { name: "Copy prompt" })).toBeVisible();
       await expect(
         page.getByRole("searchbox", { name: "Search templates", exact: true }),
       ).toBeVisible();

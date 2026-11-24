@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getApps } from "#lib/apps.remote";
+  import { getCreatePrompt } from "#lib/catalog.remote";
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import { Badge } from "@platform/ui/badge";
@@ -45,12 +46,16 @@
     }),
   );
 
+  const createPrompt = $derived(
+    await getCreatePrompt({ organizationId: workspace.organizationId }),
+  );
+
   // Where the browser refuses to copy, the prompt appears so it can be selected by hand.
   let uncopied = $state(false);
 
   const copyPrompt = async () => {
     try {
-      await navigator.clipboard.writeText(data.createPrompt);
+      await navigator.clipboard.writeText(createPrompt);
       uncopied = false;
       toast.success("Prompt copied.", { description: "Paste it into your agent." });
     } catch {
@@ -111,7 +116,7 @@
       id="create-prompt"
       readonly
       rows={4}
-      value={data.createPrompt}
+      value={createPrompt}
       aria-describedby="create-prompt-help"
       class="font-mono text-xs"
       onfocus={(event) => event.currentTarget.select()}
