@@ -58,8 +58,8 @@ catalog or `widefleet catalog list` to find their launch URLs.
 ## Create an app for another use case
 
 Open **Manage** and choose **Create app → Build with your agent**. This copies a
-prompt; paste it into your agent and describe what you need. The same prompt is
-below the template list. Your agent can also read this prompt from
+prompt; paste it into your agent and describe what you need. **Copy prompt** above
+the template list copies the same prompt. Your agent can also read this prompt from
 `widefleet catalog templates list` as `createPrompt`.
 
 The [app development guide](/guides/app-development) covers building and
