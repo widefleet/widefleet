@@ -1,6 +1,6 @@
 import { jobs } from "../src/lib/server/schema.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import * as contract from "@platform/contracts";
 import type { z } from "zod";
 import { createTestEnvironment } from "./environment.ts";
@@ -12,14 +12,7 @@ import {
 import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
-import { member } from "../src/lib/server/auth-schema.ts";
-import {
-  apps,
-  artifacts,
-  deployments,
-  appGrants,
-  connectionRequests,
-} from "../src/lib/server/schema.ts";
+import { apps, artifacts, deployments } from "../src/lib/server/schema.ts";
 import { decryptSecret } from "../src/lib/server/secret-encryption.ts";
 import type { Principal } from "../src/lib/server/identity.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
@@ -185,7 +178,7 @@ describe("App service connections", () => {
     expect(await describe(target.id.toUpperCase())).toBe(target.id);
   });
 
-  it("publishes app APIs and restricts grants to administrators in the owning organization", async () => {
+  it("publishes app APIs and grants connections only in the owning organization", async () => {
     const source = await app();
     const target = await app(["Reader"]);
     expect((await services().services(principal)).unwrap()).toContainEqual({
@@ -193,20 +186,11 @@ describe("App service connections", () => {
       slug: target.slug,
       displayName: target.displayName,
       entrypoints: ["Reader"],
-      accessMode: "approval_required",
     });
     const grant = { app: target.id, entrypoint: "Reader" };
     expect((await services().bind(principal, source.id, "ERP", grant)).unwrap().grants).toEqual({
       ERP: grant,
     });
-    expect(
-      await services().bind(
-        { ...principal, application: { ...principal.application, admin: false } },
-        source.id,
-        "NEW_ERP",
-        grant,
-      ),
-    ).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect(
       await services().bind(
         { ...principal, application: { organizationId: "foreign", admin: true } },
@@ -241,16 +225,12 @@ describe("App service connections", () => {
     };
   };
 
-  it("allows organization APIs only on managed apps and keeps existing connections on policy changes", async () => {
+  it("lets anyone who manages the caller connect any API in the organization", async () => {
     const creator = await person();
     const other = await person();
     const source = await app([], creator);
-    const target = await app(["Reader"]);
+    const target = await app(["Reader", "Writer"]);
     const grant = { app: target.id, entrypoint: "Reader" };
-    expect(await services().setAccess(creator, target.id, "organization")).toMatchObject({
-      error: { code: "FORBIDDEN" },
-    });
-    (await services().setAccess(principal, target.id, "organization")).unwrap();
     expect(await services().bind(other, source.id, "ERP", grant)).toMatchObject({
       error: { code: "NOT_FOUND" },
     });
@@ -258,74 +238,24 @@ describe("App service connections", () => {
       ERP: grant,
     });
     expect(
-      await services().bind(creator, source.id, "WRONG", { ...grant, entrypoint: "Writer" }),
+      await services().bind(creator, source.id, "WRONG", { ...grant, entrypoint: "Missing" }),
     ).toMatchObject({ error: { code: "CONFLICT" } });
     expect(await services().bind(creator, source.id, "ASSETS", grant)).toMatchObject({
       error: { code: "CONFLICT" },
     });
-    (await services().setAccess(principal, target.id, "approval_required")).unwrap();
-    expect((await services().bindings(creator, source.id)).unwrap().grants).toEqual({ ERP: grant });
-    expect(await services().bind(creator, source.id, "OTHER", grant)).toMatchObject({
-      error: { code: "FORBIDDEN" },
+    const writer = { ...grant, entrypoint: "Writer" };
+    expect((await services().bind(creator, source.id, "ERP", writer)).unwrap().grants).toEqual({
+      ERP: writer,
     });
     expect((await services().bind(creator, source.id, "ERP", null)).unwrap().grants).toEqual({});
   });
 
-  it("deduplicates pending requests and approves the exact app, binding and entrypoint once", async () => {
+  it("lets an app manager retry a failed connection without a new revision", async () => {
     const creator = await person();
-    const other = await person();
     const source = await app([], creator);
     const target = await app(["Reader"]);
-    const input = { appId: source.id, app: target.id, binding: "ERP", entrypoint: "Reader" };
-    expect(await services().request(other, input)).toMatchObject({ error: { code: "NOT_FOUND" } });
-
-    const requests = await Promise.all([
-      services().request(creator, input),
-      services().request(creator, input),
-    ]);
-
-    const request = requests[0]?.unwrap();
-
-    if (!request) throw new Error("Missing request");
-    expect(requests[1]?.unwrap().id).toBe(request.id);
-    expect(request.status).toBe("pending");
-    expect((await services().bindings(creator, source.id)).unwrap().grants).toEqual({});
-    expect((await services().requests(other)).unwrap()).toEqual([]);
-    expect((await services().requests(principal)).unwrap()).toContainEqual(request);
-    expect(await services().approve(creator, request.id)).toMatchObject({
-      error: { code: "FORBIDDEN" },
-    });
-    expect(await services().reject(creator, request.id)).toMatchObject({
-      error: { code: "FORBIDDEN" },
-    });
-    (await applications().grant(creator, source.id, other.id)).unwrap();
-    expect(await services().request(other, input)).toMatchObject({ error: { code: "CONFLICT" } });
-    const approved = (await services().approve(principal, request.id)).unwrap();
-    expect(approved.status).toBe("approved");
-    expect((await services().bindings(creator, source.id)).unwrap()).toMatchObject({
-      revision: 1,
-      state: "pending",
-      grants: { ERP: { app: target.id, entrypoint: "Reader" } },
-    });
-    expect((await services().approve(principal, request.id)).unwrap()).toEqual(approved);
-    expect((await services().bindings(creator, source.id)).unwrap().revision).toBe(1);
-    expect(await services().reject(principal, request.id)).toMatchObject({
-      error: { code: "CONFLICT" },
-    });
-  });
-
-  it("lets an app manager retry an approved binding without changing its target or entrypoint", async () => {
-    const creator = await person();
-    const source = await app([], creator);
-    const target = await app(["Reader", "Writer"]);
-    const other = await app(["Reader"]);
     const grant = { app: target.id, entrypoint: "Reader" };
-
-    const request = (
-      await services().request(creator, { appId: source.id, binding: "ERP", ...grant })
-    ).unwrap();
-
-    (await services().approve(principal, request.id)).unwrap();
+    (await services().bind(creator, source.id, "ERP", grant)).unwrap();
     await environment.database.db
       .update(apps)
       .set({ capabilityError: "Synthetic activation failure" })
@@ -336,15 +266,6 @@ describe("App service connections", () => {
       .from(jobs)
       .where(eq(jobs.appId, source.id));
 
-    expect(
-      await services().bind(creator, source.id, "ERP", { ...grant, entrypoint: "Writer" }),
-    ).toMatchObject({ error: { code: "FORBIDDEN" } });
-    expect(
-      await services().bind(creator, source.id, "ERP", { ...grant, app: other.id }),
-    ).toMatchObject({ error: { code: "FORBIDDEN" } });
-    expect(await services().bind(creator, source.id, "NEW", grant)).toMatchObject({
-      error: { code: "FORBIDDEN" },
-    });
     expect((await services().bind(creator, source.id, "ERP", grant)).unwrap()).toMatchObject({
       revision: 1,
       error: null,
@@ -354,112 +275,6 @@ describe("App service connections", () => {
     expect(
       await environment.database.db.select().from(jobs).where(eq(jobs.appId, source.id)),
     ).toHaveLength(previous.length + 1);
-    (await services().bind(principal, source.id, "ERP", null)).unwrap();
-    expect(await services().bind(creator, source.id, "ERP", grant)).toMatchObject({
-      error: { code: "FORBIDDEN" },
-    });
-  });
-
-  it("isolates request decisions and policies by organization, and allows a new request after rejection", async () => {
-    const creator = await person();
-    const source = await app([], creator);
-    const target = await app(["Reader"]);
-    const input = { appId: source.id, app: target.id, binding: "ERP", entrypoint: "Reader" };
-    const request = (await services().request(creator, input)).unwrap();
-    const foreign = { ...principal, application: { organizationId: "foreign", admin: true } };
-    expect((await services().requests(foreign)).unwrap()).toEqual([]);
-    expect(await services().approve(foreign, request.id)).toMatchObject({
-      error: { code: "NOT_FOUND" },
-    });
-    expect((await services().reject(foreign, request.id)).isErr()).toBe(true);
-    expect((await services().setAccess(foreign, target.id, "organization")).isErr()).toBe(true);
-    expect((await services().request(foreign, input)).isErr()).toBe(true);
-    expect((await services().reject(principal, request.id)).unwrap().status).toBe("rejected");
-    expect(await services().approve(principal, request.id)).toMatchObject({
-      error: { code: "CONFLICT" },
-    });
-    expect((await services().request(creator, input)).unwrap().id).not.toBe(request.id);
-    expect((await services().bindings(creator, source.id)).unwrap().grants).toEqual({});
-  });
-
-  it("does not approve stale requests after app access, membership, bindings or APIs change", async () => {
-    for (const change of ["access", "membership", "binding", "entrypoint", "removed"] as const) {
-      const creator = await person();
-      const source = await app();
-      const target = await app(["Reader"]);
-      (await applications().grant(principal, source.id, creator.id)).unwrap();
-
-      const request = (
-        await services().request(creator, {
-          appId: source.id,
-          app: target.id,
-          binding: "ERP",
-          entrypoint: "Reader",
-        })
-      ).unwrap();
-
-      if (change === "access")
-        await environment.database.db
-          .delete(appGrants)
-          .where(and(eq(appGrants.appId, source.id), eq(appGrants.userId, creator.id)));
-
-      if (change === "membership")
-        await environment.database.db.delete(member).where(eq(member.userId, creator.id));
-
-      if (change === "binding")
-        (
-          await services().bind(principal, source.id, "ERP", {
-            app: target.id,
-            entrypoint: "Reader",
-          })
-        ).unwrap();
-
-      if (change === "entrypoint")
-        await environment.database.db
-          .update(apps)
-          .set({ activeDeploymentId: null })
-          .where(eq(apps.id, target.id));
-
-      if (change === "removed")
-        await environment.database.db
-          .update(apps)
-          .set({ removedAt: new Date() })
-          .where(eq(apps.id, source.id));
-      expect((await services().approve(principal, request.id)).isErr()).toBe(true);
-
-      const [stored] = await environment.database.db
-        .select()
-        .from(connectionRequests)
-        .where(eq(connectionRequests.id, request.id));
-
-      expect(stored?.status).toBe("pending");
-    }
-  });
-
-  it("serializes approval against rejection and validates resource collisions before accepting requests", async () => {
-    const creator = await person();
-    const source = await app([], creator);
-    const target = await app(["Reader"]);
-    const input = { appId: source.id, app: target.id, binding: "ERP", entrypoint: "Reader" };
-    expect(await services().request(creator, { ...input, binding: "ASSETS" })).toMatchObject({
-      error: { code: "CONFLICT" },
-    });
-    const request = (await services().request(creator, input)).unwrap();
-
-    const outcomes = await Promise.all([
-      services().approve(principal, request.id),
-      services().reject(principal, request.id),
-    ]);
-
-    expect(outcomes.filter((result) => result.isOk())).toHaveLength(1);
-
-    const [stored] = await environment.database.db
-      .select()
-      .from(connectionRequests)
-      .where(eq(connectionRequests.id, request.id));
-
-    const bound = (await services().bindings(creator, source.id)).unwrap().grants["ERP"];
-    expect(Boolean(bound)).toBe(stored?.status === "approved");
   });
 
   it("describes only the active provider version in the selected organization, including rollback and legacy artifacts", async () => {

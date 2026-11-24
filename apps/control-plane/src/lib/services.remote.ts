@@ -10,10 +10,7 @@ import { workspacePath } from "#lib/workspace-path";
 export const getAppServices = query(contract.organizationSelection, async (selection) => {
   const { runtime, principal } = await remoteContext(selection);
 
-  return {
-    admin: principal.application.admin,
-    entries: queryValue(await runtime.connections.services(principal)),
-  };
+  return { entries: queryValue(await runtime.connections.services(principal)) };
 });
 
 export const getServiceDescription = query(
@@ -52,21 +49,6 @@ export const getServiceListApp = query(
   },
 );
 
-export const getServiceAvailability = query(
-  contract.servicePath.extend(contract.organizationSelection.shape),
-  async ({ organizationId, service }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
-
-    if (!principal.application.admin)
-      error(403, "Organization administrator permission is required");
-    const entry = findService(queryValue(await runtime.connections.services(principal)), service);
-
-    if (!entry) error(404, "API not found");
-
-    return entry;
-  },
-);
-
 export const getServiceConnection = query(
   contract.servicePath.extend({ ...contract.organizationSelection.shape, app: optionalText }),
   async ({ organizationId, service, app }) => {
@@ -89,7 +71,6 @@ export const getServiceConnection = query(
       service: entry,
       applications,
       app: selected,
-      approval: !principal.application.admin && entry.accessMode === "approval_required",
     };
   },
 );
@@ -125,76 +106,6 @@ export const getConnectionResult = query(
         services.find((candidate) => candidate.appId === grant.app)?.displayName ?? "API",
       connections,
     };
-  },
-);
-
-export const getConnectionRequests = query(contract.organizationSelection, async (selection) => {
-  const { runtime, principal } = await remoteContext(selection);
-
-  return {
-    admin: principal.application.admin,
-    entries: queryValue(await runtime.connections.requests(principal)),
-  };
-});
-
-export const getConnectionRequest = query(
-  contract.organizationSelection.extend({ requestId: z.string().max(128) }),
-  async ({ organizationId, requestId }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
-    const requests = queryValue(await runtime.connections.requests(principal));
-    const request = requests.find((entry) => entry.id === requestId);
-
-    if (!request) error(404, "Connection request not found");
-
-    return request;
-  },
-);
-
-export const setServiceAccess = form(
-  contract.appPath.extend({
-    ...contract.organizationSelection.shape,
-    ...contract.serviceAccessChange.shape,
-    id: z.string().max(160).optional(),
-  }),
-  async ({ organizationId, appId, accessMode }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
-    formValue(await runtime.connections.setAccess(principal, appId, accessMode));
-
-    // The page names the API by identifier or slug, so every query on it refreshes.
-    return { saved: true };
-  },
-);
-
-export const requestAppConnection = form(
-  contract.capabilityPath.extend({
-    ...contract.organizationSelection.shape,
-    id: z.string().max(160).optional(),
-    targetApp: contract.identifier,
-    entrypoint: contract.capabilityGrant.shape.entrypoint,
-  }),
-  async ({ organizationId, targetApp, appId, binding, entrypoint }) => {
-    const { runtime, principal, organization } = await remoteContext({ organizationId });
-
-    const request = formValue(
-      await runtime.connections.request(principal, { appId, binding, entrypoint, app: targetApp }),
-    );
-
-    await getConnectionRequests({ organizationId }).refresh();
-    redirect(303, workspacePath(organization.slug, `/services/requests/${request.id}`));
-  },
-);
-
-export const decideConnectionRequest = form(
-  contract.connectionRequestPath.extend({
-    ...contract.organizationSelection.shape,
-    decision: z.enum(["approve", "reject"]),
-    id: z.string().max(160).optional(),
-  }),
-  async ({ organizationId, requestId, decision }) => {
-    const { runtime, principal, organization } = await remoteContext({ organizationId });
-    formValue(await runtime.connections[decision](principal, requestId));
-    await getConnectionRequests({ organizationId }).refresh();
-    redirect(303, workspacePath(organization.slug, "/services/requests"));
   },
 );
 

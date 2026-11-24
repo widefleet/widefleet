@@ -219,7 +219,7 @@ test.beforeAll(async () => {
     .toBe(true);
 });
 
-test(`connects open APIs and requests restricted APIs`, async ({ browser }, testInfo) => {
+test(`lets members connect any API in their organization`, async ({ browser }, testInfo) => {
   const creator = environment.users.createUser({
     name: "Connection creator",
     email: `connections@example.test`,
@@ -256,7 +256,6 @@ test(`connects open APIs and requests restricted APIs`, async ({ browser }, test
 
   try {
     const page = await memberContext.newPage();
-    const adminPage = await adminContext.newPage();
 
     const create = async (context: typeof memberContext, slug: string, displayName: string) => {
       const response = await context.request.post("/api/v1/apps", {
@@ -325,23 +324,31 @@ test(`connects open APIs and requests restricted APIs`, async ({ browser }, test
     }
 
     for (const service of [target.id, target.slug]) {
-      await adminPage.goto(`/widefleet/services/${service}/availability`);
-      await expect(
-        adminPage.getByText(`Choose who can connect ${target.displayName} to their apps.`, {
-          exact: true,
-        }),
-      ).toBeVisible();
       await page.goto(`/widefleet/services/${service}/connect`);
       await expect(
         page.getByRole("heading", { name: `Connect ${target.displayName}`, exact: true }),
       ).toBeVisible();
     }
 
-    await page.goto("/widefleet/services/requests");
-    await expect(page.getByText("No connection requests yet.")).toBeVisible();
     await page.goto("/widefleet/services");
-    await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Requests" })).toHaveCount(0);
     await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+
+      for (const colorScheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme });
+        await page.screenshot({
+          path: testInfo.outputPath(`catalog-${width}-${colorScheme}.png`),
+          fullPage: true,
+        });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      }
+    }
+
     await page.getByRole("link", { name: `Connect to ${target.displayName}` }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
@@ -351,61 +358,17 @@ test(`connects open APIs and requests restricted APIs`, async ({ browser }, test
       new RegExp(`/widefleet/services/${target.id}/connect\\?app=${source.id}`),
     );
     await expect(
-      page.getByRole("heading", { name: "Request a connection", exact: true }),
+      page.getByRole("heading", { name: "Set up your connection", exact: true }),
     ).toBeVisible();
     await page.getByRole("link", { name: "Back to app selection" }).click();
     await expect(page.getByLabel("Your app", { exact: true })).toBeVisible();
     await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByLabel("Binding name in your code").fill("ERP");
-    await page.getByRole("button", { name: "Submit request" }).click();
-    await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Approve and connect" })).toHaveCount(0);
-    const requests = await memberContext.request.get("/api/v1/connection-requests");
-
-    const entries = z
-      .array(z.object({ id: z.string(), status: z.string(), serviceId: z.string() }))
-      .parse(await requests.json());
-
-    expect(entries[0]?.serviceId).toBe(target.id);
-    const id = entries[0]?.id;
-
-    if (!id) throw new Error("Missing request");
-
-    const denied = await memberContext.request.post(`/api/v1/connection-requests/${id}/approve`, {
-      headers: { origin: environment.configuration.PLATFORM_URL },
-      data: {},
-    });
-
-    expect(denied.status()).toBe(403);
-    await adminPage.goto("/widefleet/services/requests");
-
-    const review = adminPage
-      .getByRole("listitem", {
-        name: `${source.displayName} to ${target.displayName}`,
-        exact: true,
-      })
-      .filter({ hasText: "Awaiting approval" });
-
-    for (const width of [1280, 390]) {
-      await adminPage.setViewportSize({ width, height: 900 });
-
-      for (const colorScheme of ["light", "dark"] as const) {
-        await adminPage.emulateMedia({ colorScheme });
-        await adminPage.screenshot({
-          path: testInfo.outputPath(`review-${width}-${colorScheme}.png`),
-          fullPage: true,
-        });
-        expect(
-          await adminPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-        ).toBe(true);
-      }
-    }
-
-    await review.getByRole("button", { name: "Approve and connect" }).click();
-    await expect(review).toHaveCount(0);
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "Request approved" })).toBeVisible();
+    await page.getByRole("button", { name: "Connect API", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Connection saved", exact: true }),
+    ).toBeVisible();
     await page.getByRole("link", { name: "View app connections" }).click();
     await expect(page.getByText("ERP", { exact: true })).toBeVisible();
     await environment.database.db
@@ -448,23 +411,6 @@ test(`connects open APIs and requests restricted APIs`, async ({ browser }, test
     await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${source.id}/connections$`));
     await expect(page.getByText("ERP", { exact: true })).toBeVisible();
     await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
-    await adminPage.goto(`/widefleet/services/${target.id}`);
-    await adminPage.getByRole("link", { name: "Manage availability", exact: true }).click();
-    await adminPage.getByLabel("Who can connect this API?").selectOption("organization");
-    await adminPage.getByRole("button", { name: "Save availability" }).click();
-    await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
-
-    const availability = await environment.database.db
-      .select({ id: apps.id, accessMode: apps.serviceAccessMode })
-      .from(apps)
-      .where(inArray(apps.id, [target.id, collision.id]));
-
-    expect(availability).toEqual(
-      expect.arrayContaining([
-        { id: target.id, accessMode: "organization" },
-        { id: collision.id, accessMode: "approval_required" },
-      ]),
-    );
     await page.goto(`/widefleet/services?app=${source.id}`);
     await page.getByRole("link", { name: `Connect to ${target.displayName}` }).click();
     await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
@@ -493,22 +439,6 @@ test(`connects open APIs and requests restricted APIs`, async ({ browser }, test
     await page.getByRole("link", { name: "View app connections" }).click();
     await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${source.id}/connections$`));
     await expect(page.getByText("FREE", { exact: true })).toBeVisible();
-    await adminPage.getByLabel("Who can connect this API?").selectOption("approval_required");
-    await adminPage.getByRole("button", { name: "Save availability" }).click();
-    await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
-    await page.goto(`/widefleet/services/${target.id}/connect?app=${source.id}`);
-    await page.getByLabel("Binding name in your code").fill("ERP");
-    await page.getByRole("button", { name: "Submit request" }).click();
-    await expect(page.getByRole("alert")).toContainText("Choose an unused binding name");
-    await expect(page.getByLabel("Binding name in your code")).toHaveValue("ERP");
-    await page.getByLabel("Binding name in your code").fill("REJECTED");
-    await page.getByRole("button", { name: "Submit request" }).click();
-    await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
-    await adminPage.goto("/widefleet/services/requests");
-    await review.getByRole("button", { name: "Reject", exact: true }).click();
-    await expect(review).toHaveCount(0);
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "Request rejected" })).toBeVisible();
     await page.goto(`/widefleet/apps/${source.id}/connections`);
 
     const freeConnection = page
@@ -520,17 +450,11 @@ test(`connects open APIs and requests restricted APIs`, async ({ browser }, test
     await expect(page.getByText("FREE", { exact: true })).toHaveCount(0);
     await expect(page.getByText("ERP", { exact: true })).toBeVisible();
 
-    const forbiddenAvailability = await page.goto(`/widefleet/services/${target.id}/availability`);
-
-    expect(forbiddenAvailability?.status()).toBe(403);
-
     const forbiddenApp = await page.goto(
       `/widefleet/services/${target.id}/connect?app=${target.id}`,
     );
 
     expect(forbiddenApp?.status()).toBe(404);
-    await page.goto("/widefleet/services/requests");
-    await page.screenshot({ path: testInfo.outputPath("request-statuses.png"), fullPage: true });
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await environment.database.db.delete(apps).where(inArray(apps.id, createdAppIds));
@@ -659,10 +583,10 @@ test("shows versioned service documentation through authenticated API and access
     page.getByText("Deploy this app to see what it exposes.", { exact: true }),
   ).toBeVisible();
   const deploymentId = await activate(documentation);
-  // The open section follows the deployment: the reference and its availability appear.
-  const availability = page.getByRole("link", { name: "Manage availability", exact: true });
-  await expect(availability).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+  // The open section follows the deployment: the reference appears.
+  await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
   await page.goto(`/widefleet/apps/${record.id}`);
   await page
     .getByRole("navigation", { name: "App sections" })
@@ -738,11 +662,10 @@ test("shows versioned service documentation through authenticated API and access
   const missing = await page.goto(`/widefleet/services/${crypto.randomUUID()}`);
   expect(missing?.status()).toBe(404);
 
-  // An app without an API says so and has no availability to manage.
+  // An app without an API says so.
   await activate(undefined, []);
   await page.goto(`/widefleet/apps/${record.id}/api`);
   await expect(page.getByText("This app does not expose an API.", { exact: true })).toBeVisible();
-  await expect(availability).toHaveCount(0);
 });
 
 test("completes app OAuth through the built server after signing in", async ({ page }) => {

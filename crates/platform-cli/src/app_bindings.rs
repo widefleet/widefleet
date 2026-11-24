@@ -20,16 +20,6 @@ pub(crate) struct Target {
     config: PathBuf,
 }
 
-impl Target {
-    pub(crate) async fn resolve(
-        &self,
-        api: &Api,
-        credentials: &auth::Credentials,
-    ) -> Result<uuid::Uuid> {
-        apps::resolve(api, credentials, self.app.as_deref(), &self.config).await
-    }
-}
-
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Bindings {

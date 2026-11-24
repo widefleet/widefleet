@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { getAppServices, getConnectionRequests, getServiceListApp } from "#lib/services.remote";
-  import AppApisHeader from "#shadcn/components/AppApisHeader.svelte";
+  import { getAppServices, getServiceListApp } from "#lib/services.remote";
+  import PageHeading from "#shadcn/components/PageHeading.svelte";
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import Plug from "@lucide/svelte/icons/plug";
@@ -14,10 +14,9 @@
   const selection = $derived({ organizationId: workspace.organizationId });
 
   // Start the queries together; consecutive awaits would request them one after another.
-  const [catalog, requests, app] = $derived(
+  const [catalog, app] = $derived(
     await Promise.all([
       getAppServices(selection),
-      getConnectionRequests(selection),
       getServiceListApp({ ...selection, app: page.url.searchParams.get("app") }),
     ]),
   );
@@ -34,17 +33,6 @@
     ),
   );
 
-  const groups = $derived(
-    [
-      { mode: "organization", label: "Available to your organization" },
-      { mode: "approval_required", label: "Requires administrator approval" },
-    ].flatMap((group) => {
-      const members = entries.filter((entry) => entry.accessMode === group.mode);
-
-      return members.length ? [{ ...group, entries: members }] : [];
-    }),
-  );
-
   const context = $derived(app ? `?app=${app.id}` : "");
 </script>
 
@@ -54,13 +42,15 @@
     class="text-muted-foreground hover:text-foreground mb-6 inline-flex items-center gap-2 text-xs"
     ><ArrowLeft class="size-3.5" />Back to {app.displayName}</a
   >{/if}
-<AppApisHeader
-  active="catalog"
-  apis={available.length}
-  pending={requests.entries.filter((entry) => entry.status === "pending").length}
-  query={context}
+<PageHeading
+  title="App APIs"
   {...app ? { description: `Choose an API for ${app.displayName}.` } : {}}
->
+/>
+<div class="mt-8 flex flex-wrap items-center justify-between gap-4 border-b pb-4">
+  <p class="text-muted-foreground text-xs">
+    <span class="tabular-nums">{available.length}</span>
+    {available.length === 1 ? "API" : "APIs"}
+  </p>
   <div class="relative w-full sm:w-60">
     <Search class="text-muted-foreground pointer-events-none absolute top-2.5 left-2.5 size-3.5" />
     <Input
@@ -71,55 +61,47 @@
       bind:value={search}
     />
   </div>
-</AppApisHeader>
-{#each groups as group (group.mode)}
-  <section aria-label={group.label} class="mt-6">
-    <h2 class="text-muted-foreground flex items-center gap-2 px-3 pb-2 text-xs font-medium">
-      <span
-        class={`size-1.5 rounded-full ${group.mode === "organization" ? "bg-emerald-500" : "bg-amber-500"}`}
-        aria-hidden="true"
-      ></span>{group.label}<span class="tabular-nums">{group.entries.length}</span>
-    </h2>
-    <ul class="divide-y border-y">
-      {#each group.entries as entry (entry.appId)}
-        <li
-          class="group hover:bg-muted/40 relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,220px)_auto]"
-        >
-          <div class="flex min-w-0 items-center gap-3">
-            <span
-              class="text-muted-foreground grid size-6 shrink-0 place-items-center"
-              aria-hidden="true"><Plug class="size-4" /></span
+</div>
+{#if entries.length}
+  <ul class="divide-y border-b">
+    {#each entries as entry (entry.appId)}
+      <li
+        class="group hover:bg-muted/40 relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,220px)_auto]"
+      >
+        <div class="flex min-w-0 items-center gap-3">
+          <span
+            class="text-muted-foreground grid size-6 shrink-0 place-items-center"
+            aria-hidden="true"><Plug class="size-4" /></span
+          >
+          <div class="min-w-0">
+            <a
+              href={workspace.path(`/services/${entry.appId}`)}
+              class="block truncate text-sm font-medium after:absolute after:inset-0"
+              >{entry.displayName}<span class="sr-only"> API documentation</span></a
             >
-            <div class="min-w-0">
-              <a
-                href={workspace.path(`/services/${entry.appId}`)}
-                class="block truncate text-sm font-medium after:absolute after:inset-0"
-                >{entry.displayName}<span class="sr-only"> API documentation</span></a
-              >
-              <p class="text-muted-foreground truncate font-mono text-xs">{entry.slug}</p>
-            </div>
+            <p class="text-muted-foreground truncate font-mono text-xs">{entry.slug}</p>
           </div>
-          <p
-            class="text-muted-foreground hidden truncate font-mono text-xs sm:block"
-            title={entry.entrypoints.join(", ")}
-          >
-            {entry.entrypoints.join(" · ")}
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            class="relative z-10 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
-            href={workspace.path(`/services/${entry.appId}/connect${context}`)}
-            >Connect<span class="sr-only"> to {entry.displayName}</span></Button
-          >
-        </li>
-      {/each}
-    </ul>
-  </section>
+        </div>
+        <p
+          class="text-muted-foreground hidden truncate font-mono text-xs sm:block"
+          title={entry.entrypoints.join(", ")}
+        >
+          {entry.entrypoints.join(" · ")}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          class="relative z-10 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
+          href={workspace.path(`/services/${entry.appId}/connect${context}`)}
+          >Connect<span class="sr-only"> to {entry.displayName}</span></Button
+        >
+      </li>
+    {/each}
+  </ul>
 {:else}
   <p class="text-muted-foreground py-10 text-center text-sm">
     {available.length === 0
       ? "No apps publish an API yet. APIs appear here after their provider app is deployed."
       : "No APIs match your search."}
   </p>
-{/each}
+{/if}

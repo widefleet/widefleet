@@ -179,7 +179,7 @@
                   : "No apps connected"}
               </p>
               <p class="text-muted-foreground mt-2 text-xs leading-5">
-                Browse app APIs to connect an integration or request administrator approval.
+                Browse app APIs to connect an integration.
               </p>
             </div>
           {:else}

@@ -29,7 +29,7 @@ import {
 } from "../cloudflare-deployment.fixture.ts";
 import { StorageUnavailable } from "../../src/lib/server/errors.ts";
 import { cloudflareRemovalId } from "../../src/lib/server/cloudflare-removal-command.ts";
-import { user, member } from "../../src/lib/server/auth-schema.ts";
+import { user } from "../../src/lib/server/auth-schema.ts";
 import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
 import { createCloudflareAppSignIn } from "../../src/lib/server/app-sign-in-cloudflare.ts";
 import { createArtifactStorage } from "../../src/lib/server/artifact-storage.ts";
@@ -853,11 +853,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           const deploymentBinding = {
             async create(options) {
               attemptedId = options.id;
-              if (url.searchParams.get('mode') === 'revoke-requester') {
-                await withCloudflareDatabase(env, ({db}) => db.$client.query('DELETE FROM member WHERE user_id = $1 AND organization_id = $2', [command.requesterId, command.actor.application.organizationId]));
-                const modifier = await env.DEPLOYMENTS.unsafeGetInstanceModifier(options.id);
-                try { await modifier.disableRetryDelays(); } finally { modifier[Symbol.dispose]?.(); }
-              }
               if (url.searchParams.get('mode') === 'unavailable') throw new Error('Fixture unavailable');
               const instance = await env.DEPLOYMENTS.create(options);
               if (url.searchParams.get('mode') === 'lost-response') throw new Error('Fixture lost response');
@@ -867,7 +862,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           };
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding, WIDEFLEET_QUEUES: url.searchParams.get('mode') === 'queues-disabled' ? 'false' : 'true' }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
-            if (command.kind === 'capabilities') return command.connectionRequestId ? createConnectionService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), executor).approve(command.actor, command.connectionRequestId) : executor.connections.bind(command.actor, command.appId, command.name, command.grant);
+            if (command.kind === 'capabilities') return executor.connections.bind(command.actor, command.appId, command.name, command.grant);
             if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
@@ -2595,156 +2590,96 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(await (await authenticatedFetch(`https://${source.hostname}/`)).json()).toBeNull();
     }, 60_000);
 
-    it.each(["revoke-requester", "unavailable"])(
-      "retries connection approval with a new activation after %s",
-      async (mode) => {
-        const creator = environment.users.createUser({
-          name: "Connection creator",
-          email: `${crypto.randomUUID()}@example.test`,
-        });
+    it("lets a member connect their app and retries with a new activation after Cloudflare is unavailable", async () => {
+      const creator = environment.users.createUser({
+        name: "Connection creator",
+        email: `${crypto.randomUUID()}@example.test`,
+      });
 
-        await environment.users.saveUser(creator);
-        await environment.linkMicrosoftUser(creator.id);
+      await environment.users.saveUser(creator);
+      await environment.linkMicrosoftUser(creator.id);
 
-        const principal = {
-          ...creator,
-          role: "member" as const,
-          admin: false,
-          creator: true,
-          application: environment.application,
-        };
+      const principal = {
+        ...creator,
+        role: "member" as const,
+        admin: false,
+        creator: true,
+        application: environment.application,
+      };
 
-        const administrator = {
-          ...principal,
-          id: environment.ownerId,
-          role: "owner" as const,
-          admin: true,
-          application: { ...environment.application, admin: true },
-        };
+      const target = await seedDeployment(environment.database.db, {
+        bindings: [],
+        web: false,
+        entrypoints: ["Reader"],
+        source:
+          "import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint {read(){return 'connected';}}",
+      });
 
-        const target = await seedDeployment(environment.database.db, {
-          bindings: [],
-          web: false,
-          entrypoints: ["Reader"],
-          source:
-            "import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint {read(){return 'connected';}}",
-        });
+      await seed(target);
+      await dispatch(target);
+      await completed(target.command.id);
 
-        await seed(target);
-        await dispatch(target);
-        await completed(target.command.id);
+      const source = await seedDeployment(environment.database.db, {
+        bindings: [],
+        source:
+          "export default {async fetch(request, env){return Response.json(env.API ? await env.API.read() : null);}};",
+      });
 
-        const source = await seedDeployment(environment.database.db, {
-          bindings: [],
-          source:
-            "export default {async fetch(request, env){return Response.json(env.API ? await env.API.read() : null);}};",
-        });
+      await environment.database.db
+        .update(apps)
+        .set({ ownerId: creator.id })
+        .where(eq(apps.id, source.appId));
+      await seed(source);
+      await dispatch(source);
+      await completed(source.command.id);
 
-        await environment.database.db
-          .update(apps)
-          .set({ ownerId: creator.id })
-          .where(eq(apps.id, source.appId));
-        await seed(source);
-        await dispatch(source);
-        await completed(source.command.id);
+      const input = {
+        kind: "capabilities",
+        appId: source.appId,
+        name: "API",
+        grant: { app: target.appId, entrypoint: "Reader" },
+        actor: principal,
+      };
 
-        const services = createConnectionService(
-          environment.database.db,
-          createArtifactStorage(memoryStorage()),
-        );
+      const failed = await worker.fetch("http://fixture/start?mode=unavailable", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
 
-        const request = (
-          await services.request(principal, {
-            appId: source.appId,
-            app: target.appId,
-            binding: "API",
-            entrypoint: "Reader",
-          })
-        ).unwrap();
+      expect(failed.status).toBe(400);
+      const attempt = z.object({ attemptedId: z.uuid() }).parse(await failed.json());
 
-        const [membership] = await environment.database.db
-          .select()
-          .from(member)
-          .where(eq(member.userId, creator.id));
+      const services = createConnectionService(
+        environment.database.db,
+        createArtifactStorage(memoryStorage()),
+      );
 
-        if (!membership) throw new Error("Missing requester membership");
+      expect((await services.bindings(principal, source.appId)).unwrap().grants).toEqual({});
 
-        const input = {
-          kind: "capabilities",
-          appId: source.appId,
-          name: request.binding,
-          grant: { app: target.appId, entrypoint: "Reader" },
-          actor: administrator,
-          connectionRequestId: request.id,
-          requesterId: creator.id,
-        };
+      const connected = await worker.fetch("http://fixture/start", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
 
-        const failed = await worker.fetch(`http://fixture/start?mode=${mode}`, {
-          method: "POST",
-          body: JSON.stringify(input),
-        });
+      expect(connected.status).toBe(200);
+      expect(await connected.json()).toMatchObject({
+        grants: { API: { app: target.appId, entrypoint: "Reader" } },
+      });
 
-        expect(failed.status).toBe(400);
-        const attempt = z.object({ attemptedId: z.uuid() }).parse(await failed.json());
+      const [activation] = await environment.database.db
+        .select()
+        .from(cloudflareOperations)
+        .where(eq(cloudflareOperations.appId, source.appId))
+        .orderBy(desc(cloudflareOperations.sequence))
+        .limit(1);
 
-        if (mode === "revoke-requester") {
-          await expect
-            .poll(() => nativeStatus(attempt.attemptedId), { timeout: 30_000 })
-            .toBe("errored");
-          await environment.database.db.insert(member).values(membership);
-        }
-
-        expect((await services.requests(administrator)).unwrap()).toContainEqual(request);
-        expect((await services.bindings(principal, source.appId)).unwrap().grants).toEqual({});
-
-        const nextAdministrator =
-          mode === "unavailable"
-            ? { ...administrator, id: "another-organization-admin" }
-            : administrator;
-
-        const approved = await worker.fetch("http://fixture/start", {
-          method: "POST",
-          body: JSON.stringify({ ...input, actor: nextAdministrator }),
-        });
-
-        expect(approved.status).toBe(200);
-        expect(await approved.json()).toMatchObject({ id: request.id, status: "approved" });
-
-        const [activation] = await environment.database.db
-          .select()
-          .from(cloudflareOperations)
-          .where(eq(cloudflareOperations.appId, source.appId))
-          .orderBy(desc(cloudflareOperations.sequence))
-          .limit(1);
-
-        if (!activation) throw new Error("Missing activation operation");
-        expect(activation.id).not.toBe(attempt.attemptedId);
-        await completed(activation.id);
-        expect(await (await authenticatedFetch(`https://${source.hostname}/`)).json()).toBe(
-          "connected",
-        );
-
-        const repeated = await worker.fetch("http://fixture/start", {
-          method: "POST",
-          body: JSON.stringify({ ...input, actor: nextAdministrator }),
-        });
-
-        expect(repeated.status).toBe(200);
-
-        const records = await environment.database.db
-          .select()
-          .from(cloudflareOperations)
-          .where(
-            and(
-              eq(cloudflareOperations.appId, source.appId),
-              sql`${cloudflareOperations.command}->>'kind' = 'capabilities'`,
-            ),
-          );
-
-        expect(records).toHaveLength(1);
-      },
-      60_000,
-    );
+      if (!activation) throw new Error("Missing activation operation");
+      expect(activation.id).not.toBe(attempt.attemptedId);
+      await completed(activation.id);
+      expect(await (await authenticatedFetch(`https://${source.hostname}/`)).json()).toBe(
+        "connected",
+      );
+    }, 60_000);
 
     it.each(["saved", "failed", "unconfirmed", "legacy"])(
       "confirms saved revocations only without a possible publication: %s",
