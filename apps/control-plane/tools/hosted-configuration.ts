@@ -24,6 +24,9 @@ export const hostedInstallation = z
       .string()
       .regex(/^(aws|gcp|azure):[a-z0-9-]+$/)
       .optional(),
+    // The R2 location hint for app artifacts, which the runtime reads on every app request.
+    // Without it, Cloudflare places the bucket near whoever creates it, such as a CI runner.
+    storageLocation: z.enum(["wnam", "enam", "weur", "eeur", "apac", "oc"]),
   })
   .refine(
     (value) => value.appDomain === value.appZone || value.appDomain.endsWith(`.${value.appZone}`),
@@ -36,7 +39,9 @@ export const readHostedInstallation = async (path: string) =>
 export const hostedResourceNames = (installation: z.infer<typeof hostedInstallation>) => ({
   runtime: `${installation.name}-app-runtime`,
   controlPlane: `${installation.name}-control-plane`,
-  artifacts: `${installation.name}-artifacts`,
+  // Cloudflare honors a location hint only when a bucket name is first created, so the
+  // location is part of the name and a new location gets a new bucket.
+  artifacts: `${installation.name}-artifacts-${installation.storageLocation}`,
   auth: `${installation.name}-auth`,
   // The app builder runs once per build phase, so each phase has its own isolate.
   builder: `${installation.name}-app-builder`,

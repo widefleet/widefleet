@@ -31,6 +31,7 @@ const installation = hostedInstallation.parse({
   appDomain: "apps.example.test",
   appZone: "example.test",
   hyperdriveId: "2".repeat(32),
+  storageLocation: "weur",
 });
 
 const ids = { account: "0".repeat(32), auth: "1".repeat(32) };
@@ -156,9 +157,9 @@ describe("Hosted resource provisioning", () => {
       const path = new URL(request.url).pathname;
       expect(request.method).toBe("GET");
 
-      if (path.endsWith("/r2/buckets/fixture-artifacts"))
+      if (path.endsWith("/r2/buckets/fixture-artifacts-weur"))
         return created.has("r2")
-          ? Response.json({ success: true, result: { name: "fixture-artifacts" } })
+          ? Response.json({ success: true, result: { name: "fixture-artifacts-weur" } })
           : new Response(null, { status: 404 });
 
       if (path.endsWith("/storage/kv/namespaces"))
@@ -182,6 +183,14 @@ describe("Hosted resource provisioning", () => {
       ["r2", "bucket", "create"],
       ["kv", "namespace", "create"],
       ["hyperdrive", "update", installation.hyperdriveId],
+    ]);
+    expect(writes[0]).toEqual([
+      "r2",
+      "bucket",
+      "create",
+      "fixture-artifacts-weur",
+      "--location",
+      "weur",
     ]);
     expect(writes[2]).toEqual([
       "hyperdrive",
@@ -210,7 +219,8 @@ describe("Hosted resource provisioning", () => {
     expect(writes).toBe(0);
   });
 
-  it("updates only caching through Wrangler, preserving Hyperdrive connection and TLS settings", async () => {
+  it("creates the artifacts bucket in its location and updates only Hyperdrive caching through Wrangler", async () => {
+    const buckets: unknown[] = [];
     const updates: unknown[] = [];
 
     const api = createServer((request, response) => {
@@ -218,6 +228,14 @@ describe("Hosted resource provisioning", () => {
         let body = "";
 
         for await (const chunk of request) body += String(chunk);
+        response.setHeader("content-type", "application/json");
+
+        if (request.method === "POST" && request.url === `/accounts/${ids.account}/r2/buckets`) {
+          buckets.push(JSON.parse(body));
+          response.end(JSON.stringify({ success: true, result: {} }));
+
+          return;
+        }
 
         if (
           request.method !== "PATCH" ||
@@ -226,7 +244,6 @@ describe("Hosted resource provisioning", () => {
           throw new Error(`Unexpected request: ${request.method} ${request.url}`);
 
         updates.push(JSON.parse(body));
-        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ success: true, result: { id: installation.hyperdriveId } }));
       };
 
@@ -250,8 +267,8 @@ describe("Hosted resource provisioning", () => {
         const pathname = new URL(request.url).pathname;
         expect(request.method).toBe("GET");
 
-        if (pathname.endsWith("/r2/buckets/fixture-artifacts"))
-          return Response.json({ success: true, result: { name: "fixture-artifacts" } });
+        if (pathname.endsWith("/r2/buckets/fixture-artifacts-weur"))
+          return new Response(null, { status: 404 });
 
         if (pathname.endsWith("/storage/kv/namespaces"))
           return Response.json({
@@ -276,6 +293,7 @@ describe("Hosted resource provisioning", () => {
         });
       });
 
+      expect(buckets).toEqual([{ name: "fixture-artifacts-weur", locationHint: "weur" }]);
       expect(updates).toEqual([{ caching: { disabled: true } }]);
     } finally {
       await new Promise<void>((resolve, reject) =>
@@ -330,6 +348,18 @@ describe("Hosted resource provisioning", () => {
     expect(() =>
       hostedInstallation.parse({ ...installation, placementRegion: "frankfurt" }),
     ).toThrow();
+  });
+
+  it("keeps app artifacts in a bucket named after its configured location", async () => {
+    const configs = await hostedConfigurations(installation, ids);
+    const bucket = { bucket_name: "fixture-artifacts-weur" };
+
+    expect(configs.runtime.r2_buckets).toEqual([{ binding: "WIDEFLEET_PACKAGES", ...bucket }]);
+    expect(configs.controlPlane.r2_buckets).toEqual([{ binding: "ARTIFACTS", ...bucket }]);
+
+    const { storageLocation: _, ...unplaced } = installation;
+    expect(() => hostedInstallation.parse(unplaced)).toThrow();
+    expect(() => hostedInstallation.parse({ ...installation, storageLocation: "eu" })).toThrow();
   });
 
   it("bundles extra runtime variables while retaining event configuration, logging and app bindings", async () => {
