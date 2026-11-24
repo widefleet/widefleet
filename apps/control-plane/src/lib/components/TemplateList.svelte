@@ -4,8 +4,11 @@
   import { page } from "$app/state";
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
+  import { Textarea } from "@platform/ui/textarea";
+  import Copy from "@lucide/svelte/icons/copy";
+  import Check from "@lucide/svelte/icons/check";
   import EmptyState from "./EmptyState.svelte";
-  import CopyValue from "./CopyValue.svelte";
   import TemplateIcon from "./TemplateIcon.svelte";
   import Search from "@lucide/svelte/icons/search";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
@@ -24,8 +27,65 @@
       },
     ),
   );
+
+  let copied = $state(false);
+
+  // Where the browser refuses to copy, the prompt appears so it can be selected by hand.
+  let failed = $state(false);
+
+  const copy = async (prompt: string) => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      copied = true;
+      failed = false;
+      setTimeout(() => {
+        copied = false;
+      }, 2000);
+    } catch {
+      failed = true;
+    }
+  };
 </script>
 
+{#if catalog}
+  <section aria-labelledby="build-with-agent" class="mb-10 rounded-lg border p-4">
+    <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+      <div>
+        <h2 id="build-with-agent" class="text-sm font-semibold">Build it with your agent</h2>
+        <p class="text-muted-foreground mt-1 text-sm">
+          Copy the prompt and tell your agent what you need. It builds and deploys the app for you.
+        </p>
+      </div>
+      <Button onclick={() => copy(catalog.createPrompt)}
+        >{#if copied}<Check />Copied{:else}<Copy />Copy prompt{/if}</Button
+      ><span class="sr-only" aria-live="polite">{copied ? "Copied to clipboard." : ""}</span>
+    </div>
+    {#if failed}
+      <!-- A text area takes keyboard focus, so the prompt can be selected without a pointer. -->
+      <div class="mt-4 space-y-2">
+        <Label for="create-prompt">Prompt for your agent</Label>
+        <Textarea
+          id="create-prompt"
+          readonly
+          rows={4}
+          value={catalog.createPrompt}
+          aria-describedby="create-prompt-help"
+          class="font-mono text-xs"
+          onfocus={(event) => event.currentTarget.select()}
+        />
+        <p id="create-prompt-help" class="text-muted-foreground text-xs" role="alert">
+          Copying is not available here. Select the prompt and copy it manually.
+        </p>
+      </div>
+    {/if}
+    <!-- Without JavaScript the button cannot copy, so the prompt stands here as text. -->
+    <noscript
+      ><code class="mt-4 block text-xs leading-6 whitespace-pre-wrap wrap-anywhere"
+        >{catalog.createPrompt}</code
+      ></noscript
+    >
+  </section>
+{/if}
 <div class="flex flex-wrap items-start justify-between gap-4 border-b pb-5">
   <div>
     <h2 class="text-lg font-semibold">Start from a template</h2>
@@ -83,13 +143,4 @@
       </li>
     {/each}
   </ul>
-{/if}
-{#if catalog}
-  <section class="mt-8 border-t pt-6">
-    <h2 class="text-sm font-medium">App not here? Create one with your agent</h2>
-    <p class="text-muted-foreground mt-2 mb-3 text-sm">
-      Copy this prompt and tell your agent what you need. It builds and deploys the app for you.
-    </p>
-    <CopyValue value={catalog.createPrompt} label="Copy create app prompt" />
-  </section>
 {/if}

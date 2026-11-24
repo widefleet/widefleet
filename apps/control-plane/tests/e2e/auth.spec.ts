@@ -2410,7 +2410,11 @@ test.describe(`app catalog`, () => {
       );
       const readerPage = await readerContext.newPage();
       await readerPage.goto("/widefleet/apps");
-      await expect(readerPage.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
+      // Without apps the page shows the ways to start itself, so it needs no Create app button.
+      await expect(readerPage.getByRole("link", { name: "Create app", exact: true })).toHaveCount(
+        0,
+      );
+      await expect(readerPage.getByRole("button", { name: "Copy prompt" })).toBeVisible();
       await expect(
         readerPage.getByRole("heading", { name: "Start from a template" }),
       ).toBeVisible();
@@ -3465,7 +3469,7 @@ test.describe(`app templates`, () => {
       const mine = await page.goto("/widefleet/apps");
       expect(mine?.status()).toBe(200);
       await expect(page.getByRole("heading", { name: "Manage", exact: true })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Create app", exact: true })).toHaveCount(0);
       await expect(
         page.getByRole("searchbox", { name: "Search templates", exact: true }),
       ).toBeVisible();
@@ -3543,9 +3547,7 @@ test.describe(`app templates`, () => {
     await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("unknown");
     await page.getByRole("button", { name: "Search", exact: true }).click();
     await expect(page.getByRole("heading", { name: "No matching templates" })).toBeVisible();
-    await expect(
-      page.getByText("Help me create an app on Widefleet.", { exact: false }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy prompt" })).toBeVisible();
     await page.getByRole("link", { name: "Reset search" }).click();
     await page.getByRole("link", { name: /^Gmail/ }).focus();
     await page.keyboard.press("Enter");
@@ -3603,6 +3605,25 @@ test.describe(`app templates`, () => {
 
     await page.goto("/widefleet/catalog/templates");
     await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
+
+    // The prompt for an app of one's own stays behind its button until copying fails.
+    const agent = page.getByRole("region", { name: "Build it with your agent" });
+    await expect(agent.getByLabel("Prompt for your agent")).toHaveCount(0);
+    await agent.getByRole("button", { name: "Copy prompt" }).click();
+    await expect(agent.getByRole("button", { name: "Copied" })).toBeVisible();
+    const prompt = await page.evaluate(() => navigator.clipboard.readText());
+    expect(prompt).toContain("Help me create an app on Widefleet.");
+    await page.evaluate(() =>
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: () => Promise.reject(new Error("Synthetic clipboard failure")) },
+        configurable: true,
+      }),
+    );
+    await agent.getByRole("button", { name: /Copy prompt|Copied/ }).click();
+    await expect(agent.getByRole("alert")).toHaveText(
+      "Copying is not available here. Select the prompt and copy it manually.",
+    );
+    await expect(agent.getByLabel("Prompt for your agent")).toHaveValue(prompt);
     await environment.database.db
       .update(authSession)
       .set({ expiresAt: new Date(Date.now() - 1000) })
@@ -4039,8 +4060,8 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     await expect(
       page.getByText("Copying is not available here. Select the prompt and copy it manually."),
     ).toBeVisible();
-    await expect(page.getByRole("main").locator("code")).toContainText(
-      "Help me create an app on Widefleet.",
+    await expect(page.getByLabel("Prompt for your agent")).toHaveValue(
+      /Help me create an app on Widefleet\./,
     );
     await page.getByRole("link", { name: "Create app", exact: true }).click();
     await page.getByRole("menuitem", { name: /^Start from a template/ }).click();

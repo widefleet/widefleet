@@ -3,6 +3,8 @@
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import { Badge } from "@platform/ui/badge";
+  import { Label } from "@platform/ui/label";
+  import { Textarea } from "@platform/ui/textarea";
   import * as DropdownMenu from "@platform/ui/dropdown-menu";
   import { toast } from "@platform/ui/sonner";
   import { mergeProps } from "bits-ui";
@@ -12,7 +14,6 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
-  import CopyValue from "#shadcn/components/CopyValue.svelte";
   import TemplateList from "#shadcn/components/TemplateList.svelte";
   import AppIcon from "#shadcn/components/AppIcon.svelte";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
@@ -68,7 +69,8 @@
 
 <svelte:head><title>Manage · Widefleet</title></svelte:head>
 <PageHeading title="Manage">
-  {#if data.principal.creator}
+  <!-- Without apps the page itself shows the ways to start, so the button would repeat them. -->
+  {#if data.principal.creator && data.apps.length > 0}
     <DropdownMenu.Root>
       <!-- A link keeps the templates reachable before hydration and without JavaScript. -->
       <DropdownMenu.Trigger>
@@ -102,11 +104,21 @@
   {/if}
 </PageHeading>
 {#if uncopied}
-  <div class="mt-6">
-    <p class="text-muted-foreground mb-2 text-sm" role="alert">
+  <!-- A text area takes keyboard focus, so the prompt can be selected without a pointer. -->
+  <div class="mt-6 space-y-2">
+    <Label for="create-prompt">Prompt for your agent</Label>
+    <Textarea
+      id="create-prompt"
+      readonly
+      rows={4}
+      value={data.createPrompt}
+      aria-describedby="create-prompt-help"
+      class="font-mono text-xs"
+      onfocus={(event) => event.currentTarget.select()}
+    />
+    <p id="create-prompt-help" class="text-muted-foreground text-xs" role="alert">
       Copying is not available here. Select the prompt and copy it manually.
     </p>
-    <CopyValue value={data.createPrompt} label="Copy create app prompt" />
   </div>
 {/if}
 {#if data.apps.length === 0}
