@@ -17,11 +17,11 @@ export const load: PageServerLoad = async () => {
   if (!runtime.emailSignIn)
     error(503, "Configure email delivery or LOGIN_CODE_DELIVERY=console before interactive setup");
 
-  // Nobody can open an app before app sign-in is active, so setup ends on its settings.
+  // Like a new organization, the first administrator starts on Manage.
   return {
     next: workspacePath(
       await readOrganizationSlug(runtime.database.db, installationOrganizationId),
-      "/settings/company-sign-in",
+      "/apps",
     ),
   };
 };

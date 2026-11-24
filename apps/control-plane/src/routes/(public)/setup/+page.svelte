@@ -47,7 +47,7 @@
   <div class="text-muted-foreground mt-6 flex items-center gap-2 text-[11px]">
     <span class="text-foreground font-medium">1. Account</span><ArrowRight class="size-3" /><span
       >2. Sign-in</span
-    ><ArrowRight class="size-3" /><span>3. App sign-in</span>
+    ><ArrowRight class="size-3" /><span>3. First app</span>
   </div>
   <form onsubmit={create} class="mt-7 space-y-5">
     <div class="space-y-2">
