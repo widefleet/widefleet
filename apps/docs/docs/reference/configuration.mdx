@@ -120,6 +120,25 @@ call or ask the operator to adjust that profile. See
 [Cloudflare's Dynamic Worker limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/)
 for runtime constraints.
 
+### Control plane placement
+
+Cloudflare installation operators can run the control plane next to its database
+by setting `placementRegion` in the installation profile to the database's cloud
+region:
+
+```json
+{
+  "placementRegion": "aws:eu-central-1"
+}
+```
+
+Use the `aws:`, `gcp:` or `azure:` region identifier of your database. Pages and
+API requests then reach the database within the same region, which shortens every
+request that reads several records. Static assets are still served from the
+location nearest each visitor. See
+[Cloudflare's placement hints](https://developers.cloudflare.com/workers/configuration/placement/#configure-explicit-placement-hints)
+for supported regions.
+
 ## Database migrations
 
 Apply SQL migrations separately from deployment using the CLI's migration commands.
