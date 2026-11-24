@@ -2,7 +2,8 @@ import { assetManifest } from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import type { z } from "zod";
-import { appVisibility } from "./apps.ts";
+import { appVisibility, managedBy, opens } from "./apps.ts";
+import { readMemberGroups } from "./member-groups.ts";
 import type { Database } from "./database.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import type { Principal } from "./identity.ts";
@@ -72,7 +73,12 @@ export const readAppIcon = async (
 > => {
   const selected = await readOnly(database, async (transaction) => {
     const [record] = await transaction
-      .select({ manifest: artifacts.manifest, deploymentId: deployments.id })
+      .select({
+        manifest: artifacts.manifest,
+        deploymentId: deployments.id,
+        accessGroups: apps.accessGroups,
+        managed: managedBy(transaction, principal),
+      })
       .from(apps)
       .innerJoin(
         deployments,
@@ -102,7 +108,8 @@ export const readAppIcon = async (
         ),
       );
 
-    return record
+    // Pictures of an app follow its listing: they are for the people who can open it.
+    return record && opens(record, await readMemberGroups(transaction, principal))
       ? Result.ok({
           deploymentId: record.deploymentId,
           icon: find(assetManifest.parse(record.manifest)),

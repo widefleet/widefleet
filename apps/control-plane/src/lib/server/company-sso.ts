@@ -8,6 +8,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import { ssoProvider, user } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
+import { rememberMemberGroups } from "./member-groups.ts";
 import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
 
 export const companySsoOrigins = async (
@@ -140,13 +141,18 @@ export const companySsoPlugin = (
       return identity.success && identity.data.tid === tenant ? identity.data.oid : "";
     },
     provisionUserOnEveryLogin: true,
-    provisionUser: async ({ user: subject, userInfo, provider }) => {
-      if (
-        !provider.organizationId ||
-        !operatorTrustedSso(policy, provider.organizationId) ||
-        subject.emailVerified
-      )
-        return;
+    provisionUser: async ({ user: subject, userInfo, token, provider }) => {
+      if (!provider.organizationId) return;
+
+      await rememberMemberGroups(
+        database,
+        encryptionKey,
+        provider.organizationId,
+        subject.id,
+        token,
+      );
+
+      if (!operatorTrustedSso(policy, provider.organizationId) || subject.emailVerified) return;
 
       // The operator vouches for this provider's email addresses. Confirm only
       // the matching local address so the user can accept its invitations.

@@ -36,6 +36,7 @@ import {
   agents,
   apps,
   artifacts,
+  memberGroups,
   organizationRuntimes,
   jobs,
   runtimeReleases,
@@ -2598,6 +2599,29 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .where(eq(apps.id, app.id));
     expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(200);
     expect((await json(`${screenshots}/2`, "GET", undefined, outsiderHeaders)).status).toBe(200);
+
+    // An app with group rules shows its pictures to the members of those groups.
+    await environment.database.db
+      .update(apps)
+      .set({ accessGroups: ["finance"] })
+      .where(eq(apps.id, app.id));
+
+    for (const [groups, status] of [
+      [["sales"], 404],
+      [["finance"], 200],
+    ] as const) {
+      await environment.database.db.delete(memberGroups);
+      await environment.database.db
+        .insert(memberGroups)
+        .values({ userId: outsiderId, organizationId, groups: [...groups] });
+      expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(status);
+      expect((await json(`${screenshots}/2`, "GET", undefined, outsiderHeaders)).status).toBe(
+        status,
+      );
+    }
+
+    await environment.database.db.delete(memberGroups);
+    await environment.database.db.update(apps).set({ accessGroups: [] }).where(eq(apps.id, app.id));
     await environment.database.db
       .update(apps)
       .set({ catalogListed: false })

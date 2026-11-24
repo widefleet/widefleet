@@ -12,6 +12,7 @@ import { betterAuth } from "better-auth";
 import type { sveltekitCookies } from "better-auth/svelte-kit";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import { parseCompanyDomains } from "@platform/contracts";
 import {
   apiResource,
@@ -28,6 +29,7 @@ import { readSsoConfiguration } from "./sso-settings.ts";
 import { createAuthenticationAdmission } from "./auth-admission.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
+import { companySignInScopes } from "./member-groups.ts";
 import { pluginAuthentication, managedPluginPaths } from "./plugin-authentication.ts";
 import { cliLoginPlugin, createCliLogin } from "./cli-login.ts";
 import { createMcpCliLogin, mcpCliLoginPlugin, type CliLoginSettings } from "./mcp-cli-login.ts";
@@ -176,6 +178,30 @@ export const createAuthentication = (
             {
               matcher: (context) => managedPluginPaths.includes(context.path ?? ""),
               handler: authorizePlugin,
+            },
+            {
+              // A sign-in that names its own scopes keeps them.
+              matcher: (context) => context.path === "/sign-in/sso",
+              handler: createAuthMiddleware(async (context) => {
+                const input = z
+                  .looseObject({
+                    providerId: z.string().optional(),
+                    scopes: z.unknown().optional(),
+                  })
+                  .safeParse(context.body);
+
+                if (!input.success || !input.data.providerId || input.data.scopes) return undefined;
+
+                const scopes = await companySignInScopes(
+                  database,
+                  encryptionKey,
+                  input.data.providerId,
+                );
+
+                return scopes
+                  ? { context: { ...context, body: { ...input.data, scopes } } }
+                  : undefined;
+              }),
             },
           ],
         },

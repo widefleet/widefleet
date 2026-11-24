@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createAppService } from "../src/lib/server/apps.ts";
-import { apps } from "../src/lib/server/schema.ts";
+import { apps, memberGroups } from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
 
 describe("App catalog", () => {
@@ -164,5 +164,62 @@ describe("App catalog", () => {
 
     (await service.remove(creator, app.id)).unwrap();
     expect((await service.catalog(colleague)).unwrap()).toEqual([]);
+  });
+  it("shows a published app with group rules to the people who can open it", async () => {
+    const app = await createApp("payroll");
+    await activate(app.id);
+    (await service.setCatalogListing(creator, app.id, true)).unwrap();
+    await environment.database.db
+      .update(apps)
+      .set({ accessGroups: ["finance"] })
+      .where(eq(apps.id, app.id));
+
+    const listed = async (principal: Parameters<typeof service.catalog>[0]) =>
+      (await service.catalog(principal)).unwrap().map((entry) => entry.id);
+
+    // What a company sign-in leaves: the groups the member had then.
+    const signedIn = (userId: string, groups: string[]) =>
+      environment.database.db
+        .insert(memberGroups)
+        .values({ userId, organizationId: environment.application.organizationId, groups })
+        .onConflictDoUpdate({
+          target: [memberGroups.userId, memberGroups.organizationId],
+          set: { groups },
+        });
+
+    try {
+      // Without a company sign-in the groups are unknown, and the app stays listed.
+      expect(await listed(colleague)).toEqual([app.id]);
+
+      await signedIn(colleague.id, ["sales"]);
+      expect(await listed(colleague)).toEqual([]);
+      expect(await service.listing(colleague, app.id)).toMatchObject({
+        error: { code: "NOT_FOUND" },
+      });
+
+      // A member of many groups, more than an app's rules may name.
+      await signedIn(colleague.id, [
+        ...Array.from({ length: 150 }, (_, index) => `team-${index}`),
+        "finance",
+      ]);
+      expect(await listed(colleague)).toEqual([app.id]);
+      expect((await service.listing(colleague, app.id)).isOk()).toBe(true);
+
+      // The people who manage the app see it whatever its rules say.
+      await signedIn(creator.id, ["sales"]);
+      expect(await listed(creator)).toEqual([app.id]);
+      expect(await listed(admin())).toEqual([app.id]);
+
+      // An app without group rules is listed for everyone.
+      await signedIn(colleague.id, []);
+      expect(await listed(colleague)).toEqual([]);
+      await environment.database.db
+        .update(apps)
+        .set({ accessGroups: [] })
+        .where(eq(apps.id, app.id));
+      expect(await listed(colleague)).toEqual([app.id]);
+    } finally {
+      await environment.database.db.delete(memberGroups);
+    }
   });
 });
