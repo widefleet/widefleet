@@ -779,9 +779,11 @@ describe("Better Auth SSO provider integration", () => {
           z.string().min(1).parse(new URL(againTarget.url).searchParams.get("state")),
         );
         againCallback.searchParams.set("code", "synthetic-code");
+
         const returned = await environment.auth.handler(
           new Request(againCallback, { headers: { cookie: cookie(again) } }),
         );
+
         expect(returned.status).toBe(302);
         expect(
           await (
