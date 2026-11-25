@@ -29,6 +29,11 @@ const graphGroups = z.object({
 // status checks below, so credentials never leave the directory's own endpoints.
 const noRedirect = "manual";
 
+// Cleanup never delays or replaces the error a failed request reports.
+const releaseBody = (response: Response) => {
+  void response.body?.cancel().catch(() => undefined);
+};
+
 const createCompanyDirectory = (
   identity: z.infer<typeof companyIdentity> | null,
   request: typeof fetch,
@@ -76,7 +81,7 @@ const createCompanyDirectory = (
       );
 
       if (!response.ok) {
-        await response.body?.cancel();
+        releaseBody(response);
         throw new DirectoryUnavailable({
           message:
             "The directory connection could not authenticate. Ask an administrator to check its credentials and consent.",
@@ -119,7 +124,7 @@ const createCompanyDirectory = (
         });
 
         if (!response.ok) {
-          await response.body?.cancel();
+          releaseBody(response);
 
           if (response.status === 401) token = undefined;
           throw new DirectoryUnavailable({
