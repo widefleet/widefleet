@@ -39,6 +39,10 @@ describe("profile pictures", () => {
       [`${provider}/large`, () => new Response(png(maxPictureBytes + 1))],
       [`${provider}/gone`, () => new Response(null, { status: 404 })],
       [`${provider}/failing`, () => new Response(null, { status: 503 })],
+      [
+        `${provider}/moved`,
+        () => new Response(null, { status: 302, headers: { location: `${provider}/small` } }),
+      ],
       ["https://lh3.googleusercontent.com/a/photo", () => new Response(png(32))],
     ]);
 
@@ -68,6 +72,8 @@ describe("profile pictures", () => {
     expect(await read(`${provider}/large`)).toBeNull();
     expect(await read(`${provider}/gone`)).toBe("none");
     expect(await read(`${provider}/failing`)).toBeNull();
+    // A redirect is not followed: it reads as no picture available right now.
+    expect(await read(`${provider}/moved`)).toBeNull();
     // Without the sign-in's token the provider is not asked.
     expect(await fetchPictureUrl(new URL(`${provider}/small`), provider, undefined)).toBeNull();
     expect(await read("https://lh3.googleusercontent.com/a/photo")).toEqual({
@@ -85,14 +91,15 @@ describe("profile pictures", () => {
       `${provider}/large`,
       `${provider}/gone`,
       `${provider}/failing`,
+      `${provider}/moved`,
       "https://lh3.googleusercontent.com/a/photo",
     ]);
     // The provider's token goes only to the provider, and no redirect is followed.
     expect(requests.at(-1)?.authorization).toBeNull();
     expect(
-      requests.slice(0, 4).every((request) => request.authorization === "Bearer provider-token"),
+      requests.slice(0, 5).every((request) => request.authorization === "Bearer provider-token"),
     ).toBe(true);
-    expect(requests.every((request) => request.redirect === "error")).toBe(true);
+    expect(requests.every((request) => request.redirect === "manual")).toBe(true);
   });
 
   it("asks Graph for the signed-in user's photo", async () => {
