@@ -22,6 +22,12 @@ widefleet access
 `apps` lists the apps you can manage, including their IDs. `access` shows the
 access rules for the app named in `wrangler.jsonc`.
 
+In Widefleet, the same list is under **Manage**. A **Connector** tag marks the
+connectors, the apps that let colleagues connect their own accounts with other
+systems, and the tabs above the list show only apps or only connectors. An app
+counts as a connector once its active deployment offers such connections; in the
+CLI list, these have `"connector": true`.
+
 ## Choose who can open it
 
 Open the app in Widefleet and choose **Access → App access**. Sign-in is always
@@ -72,10 +78,37 @@ widefleet catalog publish APP_UUID
 widefleet catalog list
 ```
 
-Original apps with an active deployment can be listed. Colleagues can
-find them in **App catalog** and follow their launch URLs, subject to the app's
-SSO and group rules. Management permissions remain separate. Use
+Original apps with an active deployment can be listed. In the control plane, the
+same choice is **Show on Home** on the app's **Access** section. Colleagues who can
+open the app find it on **Home**, or under **My connections** when the app is a
+connector. With allowed groups, those are the members of the groups as of their last
+company sign-in. Management permissions remain separate. Use
 `widefleet catalog unpublish APP_UUID` to withdraw the listing without deleting the app.
+
+### The app's page
+
+A published app has a page that colleagues reach from its tile on **Home**. It shows
+the app's name, a longer text, the reader's own accounts with the app and with the
+apps it calls, and the owner's name. People who manage the app see the same page as
+the app's **Overview** and write the text there: choose the pencil beside the text,
+edit it and save. The text is Markdown of up to 2,000 characters, so it can hold a
+few sentences and a list. Images and raw HTML are not shown.
+
+```sh
+widefleet catalog about APP_UUID "Counts the stock per shelf.
+
+- Flags what runs low"
+widefleet catalog show APP_UUID
+```
+
+To show screenshots on the page, put up to three images among the app's static files
+as `screenshots/1.png`, `screenshots/2.png` and `screenshots/3.png` and deploy. JPEG
+(`.jpg`) and WebP (`.webp`) work too; an image may be up to 2 MiB. Static files are
+the directory that `assets.directory` in `wrangler.jsonc` names.
+
+`catalog show` prints the page as JSON. An empty text removes the longer text. The
+app's deployments and its source code are in the app's **Deployments** section. **API** and **Workflows** appear for an app that has them. The app's page
+requires platform and CLI **0.7.21 or newer**.
 
 ## Verify access
 

@@ -13,7 +13,7 @@ Check the template's instructions for any credentials or permissions it requires
 
 ## Start from the catalog
 
-1. Open **App catalog → Templates** in the control plane.
+1. Open **Manage** in the control plane and choose **Create app → Start from a template**.
 2. Choose a template and read its description and instructions.
 3. Copy the prompt under **Set up with your agent** and paste it into your agent.
 
@@ -46,7 +46,7 @@ Use `--organization ID` when you work across organizations. See
 
 Follow the template's setup steps and verify the result with its usage example.
 For an app that connects personal accounts, complete account sign-in in your
-browser. Provide credentials through the app's **Secrets** tab or the CLI's
+browser. Provide credentials under **Secrets** on the app's **Connections** tab or the CLI's
 protected-file input.
 
 If the app provides an API, follow its instructions to use it from another app.
@@ -57,8 +57,9 @@ catalog or `widefleet catalog list` to find their launch URLs.
 
 ## Create an app for another use case
 
-Open **App not here? Create one with your agent** below the templates. Copy the
-prompt and describe what you need. Your agent can also read this prompt from
+Open **Manage** and choose **Create app → Build with your agent**. This copies a
+prompt; paste it into your agent and describe what you need. **Copy prompt** above
+the template list copies the same prompt. Your agent can also read this prompt from
 `widefleet catalog templates list` as `createPrompt`.
 
 The [app development guide](/guides/app-development) covers building and

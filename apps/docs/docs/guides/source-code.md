@@ -29,7 +29,7 @@ follows Git and `.gitignore`, including Git's rules for files already tracked.
 Widefleet creates commits on your current branch. It initializes Git if needed;
 in a monorepo, it saves the whole repository and remembers the app's directory.
 
-Open the app's **Source** tab or run `widefleet source status` to see where the
+Open **Source code** on the app's **Deployments** tab or run `widefleet source status` to see where the
 code is saved. Both show the latest saved commit and the commit used by the
 running app. These can differ if you push code without deploying it.
 

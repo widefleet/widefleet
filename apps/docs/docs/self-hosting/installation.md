@@ -224,13 +224,13 @@ Widefleet provisions one installation organization automatically. No organizatio
 
 After the first verified management sign-in, the person appears under **Members**. Owners and admins can search by name or email and change their role there. Role changes apply to existing browser and CLI sessions on their next API request. At least one Owner must remain. Only Owners can change Owner assignments.
 
-On an app's **Access** tab, **Management access** lets you search members by name or email and grant or revoke app collaboration. A collaborator can deploy, roll back and delete that app; only its owner or an organization administrator can change its grants. Organization administrators retain access independently of individual grants. The CLI's existing `grant` and `revoke` commands remain compatible.
+On an app's **Access** tab, **Manage access** lets you search members by name or email and grant or revoke app collaboration. A collaborator can deploy, roll back and delete that app; only its owner or an organization administrator can change its grants. Organization administrators retain access independently of individual grants. The CLI's existing `grant` and `revoke` commands remain compatible.
 
 The first administrator is created by setup or the bootstrap file. Subsequent company sign-ins create Members. Role changes persist across restarts. Published apps have separate [access rules](/reference/app-access).
 
 ## App access
 
-The **App catalog** link opens the catalog for all signed-in management members. An app's owner or an administrator can publish it to the catalog from its management page and remove it again. Apps start unlisted; only active apps with a deployed version appear. Previews and apps being deleted are excluded. Catalog entries link directly to the running app and do not grant management or app permissions.
+**Home** lists the published apps for all signed-in management members. An app's owner or an administrator publishes it with **Show on Home** on the app's **Access** section and removes it there again. Apps start unlisted; only active apps with a deployed version appear. Previews and apps being deleted are excluded. An app with allowed groups appears for the members of those groups, as of their last company sign-in, and for the people who manage it. Being listed does not grant management or app permissions.
 
 The CLI offers the same operations as JSON: `widefleet catalog list`, `widefleet catalog publish APP_UUID` and `widefleet catalog unpublish APP_UUID`. The corresponding authenticated API endpoints are `GET /api/v1/catalog` and `PUT /api/v1/apps/{appId}/catalog` with `{ "listed": true }` or `{ "listed": false }`. Publication requires the app owner or an administrator through every interface.
 

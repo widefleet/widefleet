@@ -100,8 +100,8 @@ Start with a short description of what the method does. Add details as needed:
 Keep types in TypeScript signatures. You can also document interfaces and their
 properties to explain the data your API accepts and returns.
 
-After deploying, open **App APIs**, then **View API documentation** on the
-provider app. To read the same information as JSON, run:
+After deploying, open the provider app's **API** section in the control plane.
+To read the same information as JSON, run:
 
 ```sh
 widefleet services describe inventory-api
@@ -126,7 +126,8 @@ Use `--app CALLER` to select a caller by slug or UUID outside its project. The
 target accepts an app slug or UUID, including apps that the catalog does not list. Bindings default to the `default`
 entrypoint; the provider must export a default Worker handler or `WorkerEntrypoint` class.
 
-In the UI, open **App APIs** and choose **Set up connection** for the provider.
+In the UI, open the caller app's **Connections** section, choose **Browse app APIs**
+and then **Set up connection** for the provider.
 Choose an app you manage and continue to the connection settings. Select the API
 entrypoint, enter a binding name and choose **Connect API**. The result page shows
 whether the connection is saved, activating, active or needs attention.
@@ -300,7 +301,7 @@ Approval applies to the selected app, binding and entrypoint. Submitting the sam
 pending request again returns the existing request. Each binding has at most one
 pending request.
 
-Open **App APIs → Connection requests** to see **Awaiting approval**, **Approved**
+From **Browse app APIs**, open **Connection requests** to see **Awaiting approval**, **Approved**
 or **Rejected**. Members see their own requests; organization administrators see
 all requests in the selected organization and can choose **Approve and connect**
 or **Reject**. CLI administrators use:
@@ -349,7 +350,7 @@ widefleet connections
 
 ## Secrets
 
-App collaborators manage secrets in the app's **Secrets** tab or through the CLI:
+App collaborators manage secrets under **Secrets** on the app's **Connections** tab or through the CLI:
 
 ```sh
 widefleet secret list
