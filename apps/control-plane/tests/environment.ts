@@ -9,6 +9,7 @@ import { createOnboardingService } from "../src/lib/server/onboarding.ts";
 import { createDomainAccess } from "../src/lib/server/domain-access.ts";
 import { createInvitationService } from "../src/lib/server/members.ts";
 import { createAuthControl } from "./auth-control.ts";
+import { checkSecretContexts } from "./secret-contexts.fixture.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
 import { createReporting } from "../src/lib/server/reporting.ts";
@@ -172,17 +173,15 @@ export const createTestEnvironment = async (
   await initializeInstallation(database.db);
 
   const keys = await installationKeys(configuration);
+  const encryption = checkSecretContexts(keys.encryption);
 
-  const settings = createSettingsService(
-    configuration,
-    database.db,
-    keys.encryption,
-    (organizationId) => createAppSignIn(configuration, keys.cookie, organizationId),
+  const settings = createSettingsService(configuration, database.db, encryption, (organizationId) =>
+    createAppSignIn(configuration, keys.cookie, organizationId),
   );
 
   const auth = createAuthentication(configuration, database.db, {
     cliLoginSettings: settings,
-    encryption: keys.encryption,
+    encryption,
   });
 
   const owner = await createInstallationOwner(database.db, {
@@ -251,7 +250,7 @@ export const createTestEnvironment = async (
     reporting: createReporting(configuration, database.db),
     replacementClient,
     settings,
-    encryption: keys.encryption,
+    encryption,
     owner,
     ownerId: owner.id,
     ownerSubject,
