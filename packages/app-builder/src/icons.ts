@@ -83,7 +83,10 @@ export const renderIcons = (svg: string) => {
   const source = decodeBase64(svg);
   const module = instantiate();
 
-  new Uint8Array(module.memory.buffer).set(source, module.icons_input(source.byteLength));
+  // Allocating the input can grow memory, which detaches earlier views.
+  const pointer = module.icons_input(source.byteLength);
+
+  new Uint8Array(module.memory.buffer).set(source, pointer);
 
   return {
     icons: generatedAppIcons.map(({ path, size, opaque }) => {

@@ -516,6 +516,13 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
       }),
     ).toEqual(generatedAppIcons.map(({ path, size }) => [path, size, size]));
 
+    // An SVG near the size limit grows the module's memory while it is passed in.
+    const large = new TextEncoder().encode(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><!--${"x".repeat(250 * 1024)}--><rect width="1" height="1"/></svg>`,
+    );
+
+    expect((await post("/icons", { svg: encodeBase64(large) })).status).toBe(200);
+
     const invalid = await post("/icons", { svg: encodeBase64(new TextEncoder().encode("<p>")) });
 
     expect(invalid.status).toBe(422);

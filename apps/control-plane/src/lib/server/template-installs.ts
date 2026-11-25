@@ -10,8 +10,7 @@ import { Result } from "better-result";
 import { z } from "zod";
 import type { AppBuilder } from "./app-builder.ts";
 import { templateDescription, templateSources } from "./app-templates.ts";
-import { hashAsset } from "./asset-hash.ts";
-import { declaredSecrets, templateProject } from "./template-project.ts";
+import { addGeneratedAssets, declaredSecrets, templateProject } from "./template-project.ts";
 import type { createAppSecrets } from "./app-secrets.ts";
 import type { createAppService } from "./apps.ts";
 import type { Configuration } from "./config.ts";
@@ -169,7 +168,8 @@ export const createTemplateInstalls = (
       );
 
       // Home screens need PNG icons; a template that ships only its SVG icon gets
-      // them rendered, as the CLI does for its deployments.
+      // them rendered, as the CLI does for its deployments. They are optional:
+      // an SVG the builder cannot render leaves the template's assets as they are.
       const icon = assets.manifest[contract.appIconSource.path];
       const svg = icon && assets.bytes.get(icon.hash);
 
@@ -177,14 +177,15 @@ export const createTemplateInstalls = (
         svg &&
         svg.byteLength <= contract.appIconSource.maxBytes &&
         contract.wantsGeneratedIcons((path) => Object.hasOwn(assets.manifest, path))
-      )
-        for (const rendered of (yield* Result.await(builder.icons(svg))).icons) {
-          const png = decodeBase64(rendered.png);
-          const hash = hashAsset(rendered.path, png);
+      ) {
+        const rendered = await builder.icons(svg);
 
-          assets.bytes.set(hash, png);
-          assets.manifest[rendered.path] = { hash, size: png.byteLength };
-        }
+        if (rendered.isOk())
+          addGeneratedAssets(
+            assets,
+            rendered.value.icons.map(({ path, png }) => ({ path, bytes: decodeBase64(png) })),
+          );
+      }
 
       // The app exists only once its build succeeded, so a failed build leaves
       // the name free. An app without deployments is an earlier install that

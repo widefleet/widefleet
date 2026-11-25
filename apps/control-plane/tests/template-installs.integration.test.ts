@@ -105,6 +105,9 @@ let bundleResponse = () =>
     }),
   );
 
+// Tests that replace the build leave this one for builders of their own.
+const successfulBundle = bundleResponse;
+
 // A builder that records its requests and returns a fixed build.
 const builder = createAppBuilder({
   bundle: async (body) => {
@@ -908,6 +911,27 @@ it("ends a build that exceeds the deadline", async () => {
   const response = await install(runtime, "onedrive", { name: "file-reader" });
 
   expect(response.status).toBe(503);
+});
+
+it("installs a template without generated icons when its SVG cannot be rendered", async () => {
+  const unrenderable = createAppBuilder({
+    bundle: async () => successfulBundle(),
+    document: async () => Response.json({ documentation, warnings: [] }),
+    icons: async () =>
+      Response.json({ message: "/favicon.svg is not a valid SVG" }, { status: 422 }),
+  });
+
+  const runtime = await runtimeWith(unrenderable);
+  const response = await install(runtime, "onedrive", { name: "plain-icons" });
+
+  expect(response.status).toBe(200);
+  const result = contract.templateInstall.parse(await response.json());
+
+  const artifact = await environment.database.db.query.artifacts.findFirst({
+    where: (artifacts, { eq }) => eq(artifacts.id, result.deployment.artifactId),
+  });
+
+  expect(Object.keys(contract.assetManifest.parse(artifact?.manifest))).toEqual(["/favicon.svg"]);
 });
 
 it("keeps templates on agent setup when no builder is configured", async () => {
