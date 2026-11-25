@@ -1,4 +1,4 @@
-import { CompactEncrypt, compactDecrypt, importJWK } from "jose";
+import { CompactEncrypt, compactDecrypt, decodeProtectedHeader, importJWK } from "jose";
 import { z } from "zod";
 import { InvalidOperation } from "./errors.ts";
 import {
@@ -121,6 +121,15 @@ export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
 // with the key version's 32 bytes, A256GCM, and the version's ID as `kid`.
 const header = { alg: "dir", enc: "A256GCM" } as const;
 
+/** The key version a JWE ciphertext names, or `null` when it names none or is malformed. */
+export const ciphertextKeyVersion = (ciphertext: string) => {
+  try {
+    return decodeProtectedHeader(ciphertext).kid ?? null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Encrypts the customer secrets that the control plane stores. Callers name
  * what they protect and never handle key material. New values always use the
@@ -166,6 +175,10 @@ export const createSecretEncryption = ({
   };
 
   return {
+    /** The version that encrypts new values. */
+    activeKeyVersion: keyring[0].id,
+    /** Every version this installation can decrypt, active first. */
+    keyVersions: keyring.map((version) => version.id),
     // The context is not yet bound to the ciphertext. Callers already pass it,
     // so binding it in a later format changes only this module.
     encrypt: async (_context: SecretContext, value: string) => {
