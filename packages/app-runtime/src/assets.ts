@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { readApp } from "./catalog.ts";
+import { linksManifest } from "./web-app.ts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
 const contentTypes = new Map([
@@ -213,6 +214,11 @@ export const serveAsset = async (
   });
 
   applyHeaders(headerRules, new URL(request.url), headers);
+
+  // Pages served with a manifest link differ from the uploaded file, so browsers
+  // must not reuse a copy cached without it.
+  if (headers.get("etag") === `"${entry.hash}"` && linksManifest(app, headers.get("content-type")))
+    headers.set("etag", `"${entry.hash}-manifest"`);
   const etag = headers.get("etag");
 
   if (
