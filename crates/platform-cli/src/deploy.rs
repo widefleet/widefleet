@@ -90,6 +90,8 @@ struct AssetFiles {
     source_maps: BTreeMap<String, PathBuf>,
     manifest: AssetManifest,
     files: BTreeMap<String, PathBuf>,
+    /// Rendered app icons by hash, uploaded like files.
+    generated: BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Args)]
@@ -222,11 +224,51 @@ fn collect_assets(root: &Path) -> Result<AssetFiles> {
             }
         }
     }
-    Ok(AssetFiles {
+    let mut assets = AssetFiles {
         manifest,
         files,
         source_maps,
-    })
+        generated: BTreeMap::new(),
+    };
+    add_app_icons(&mut assets)?;
+    Ok(assets)
+}
+
+/// Home screens need PNG icons; an app that ships only its SVG icon gets them rendered.
+fn add_app_icons(assets: &mut AssetFiles) -> Result<()> {
+    let Some(path) = assets
+        .manifest
+        .get(platform_app_icons::SOURCE)
+        .and_then(|source| assets.files.get(&source.hash))
+    else {
+        return Ok(());
+    };
+    if !platform_app_icons::wanted(|name| assets.manifest.contains_key(name)) {
+        return Ok(());
+    }
+    let svg = std::fs::read(path)?;
+    let mut rendered = Vec::new();
+    for (name, size, opaque) in platform_app_icons::ICONS {
+        match platform_app_icons::render(&svg, size, opaque) {
+            Ok(png) => rendered.push((name, png)),
+            Err(error) => {
+                eprintln!("App icons were not generated: {error}");
+                return Ok(());
+            }
+        }
+    }
+    for (name, png) in rendered {
+        let hash = asset_hash(name, &png);
+        assets.manifest.insert(
+            name.to_owned(),
+            Asset {
+                hash: hash.clone(),
+                size: png.len() as u64,
+            },
+        );
+        assets.generated.insert(hash, png);
+    }
+    Ok(())
 }
 
 async fn local_command(project: &Path, arguments: &[&str]) -> Result<()> {
@@ -414,6 +456,7 @@ async fn publish(
             source_maps: BTreeMap::new(),
             manifest: BTreeMap::new(),
             files: BTreeMap::new(),
+            generated: BTreeMap::new(),
         },
     };
     let mut map_files = assets.source_maps.clone();
@@ -494,11 +537,16 @@ async fn publish(
         Error::invalid("The management server does not provide app URLs in upload sessions. Upgrade the server before deploying with this CLI".into())
     })?;
     for hash in &session.missing {
-        let path = assets.files.get(hash).ok_or_else(|| {
-            Error::invalid("Server requested an asset outside the manifest".into())
-                .with_reason(FailureReason::AssetManifestMismatch)
-        })?;
-        let bytes = std::fs::read(path)?;
+        let bytes = match (assets.files.get(hash), assets.generated.get(hash)) {
+            (Some(path), _) => std::fs::read(path)?,
+            (None, Some(bytes)) => bytes.clone(),
+            (None, None) => {
+                return Err(Error::invalid(
+                    "Server requested an asset outside the manifest".into(),
+                )
+                .with_reason(FailureReason::AssetManifestMismatch));
+            }
+        };
         let token = auth::access_token(api, credentials).await?;
         let _: serde_json::Value = json(
             api.authenticated(
@@ -1075,6 +1123,30 @@ mod tests {
         assert!(assets.manifest.contains_key("/chunks/app.js"));
         assert_eq!(assets.source_maps.len(), 1);
         assert!(assets.source_maps.contains_key("/chunks/app.js"));
+        Ok(())
+    }
+
+    #[test]
+    fn asset_inventory_renders_png_icons_from_an_svg_icon() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(
+            directory.path().join("favicon.svg"),
+            br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><rect width="4" height="4"/></svg>"#,
+        )?;
+        let assets = collect_assets(directory.path())?;
+        for (name, _, _) in platform_app_icons::ICONS {
+            let asset = assets
+                .manifest
+                .get(name)
+                .ok_or_else(|| Error::invalid(format!("{name} is missing")))?;
+            assert!(assets.generated.contains_key(&asset.hash));
+        }
+
+        // An app with a PNG icon of its own keeps it.
+        std::fs::write(directory.path().join("favicon.png"), b"png")?;
+        let assets = collect_assets(directory.path())?;
+        assert!(assets.generated.is_empty());
+        assert!(!assets.manifest.contains_key("/apple-touch-icon.png"));
         Ok(())
     }
 

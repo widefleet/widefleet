@@ -1,0 +1,15 @@
+[package]
+name = "platform-app-icons-wasm"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# App icon rendering as a wasm32-wasip1 module for the app builder.
+# The exported ABI needs `unsafe`, which the workspace lints forbid.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+platform-app-icons.workspace = true

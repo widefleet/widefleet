@@ -1,6 +1,6 @@
 // Builds the app builder Worker: dist/builder.js and the WebAssembly modules it
-// imports. The service documentation module comes from
-// `cargo build --profile wasm -p platform-service-docs-wasm --target wasm32-wasip1`.
+// imports. The service documentation and app icon modules come from
+// `cargo build --profile wasm -p platform-service-docs-wasm -p platform-app-icons-wasm --target wasm32-wasip1`.
 import { build } from "esbuild";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,12 @@ await Promise.all([
         .href,
     ),
     path("service-docs.wasm"),
+  ),
+  copyFile(
+    fileURLToPath(
+      new URL("../../target/wasm32-wasip1/wasm/platform_app_icons_wasm.wasm", import.meta.url).href,
+    ),
+    path("app-icons.wasm"),
   ),
 ]);
 
