@@ -4,6 +4,13 @@ description: Declare durable background work and manage Workflow instances.
 lastModified: 2026-11-18
 ---
 
+Use a Workflow for multi-step background work that must survive restarts, wait
+for events or timers, and retry individual steps. Apps use the standard
+Cloudflare Workflows API; you manage instances from app code, the CLI, the app
+detail page or the HTTP API.
+
+You need the Widefleet CLI and permission to deploy and manage the app.
+
 ## Declare and export a Workflow
 
 Add a standard `workflows` entry to the app's Wrangler configuration:
@@ -53,7 +60,7 @@ mkdir -p public
 widefleet deploy --skip-build
 ```
 
-`--skip-build` skips a project build script; the CLI still bundles `worker.ts`. For generated framework Workers, use a main-module wrapper that re-exports the generated default handler and your Workflow classes. Ensure the framework build runs before `widefleet deploy`. The platform validates every declared Workflow export before activating a deployment. Cross-script Workflow declarations are not supported; each app owns its bindings.
+`--skip-build` skips a project build script; the CLI still bundles `worker.ts`. For generated framework Workers, use a main-module wrapper that re-exports the generated default handler and your Workflow classes, and run the framework build before `widefleet deploy`. Widefleet validates every declared Workflow export before it activates a deployment. Each app declares and runs its own Workflows; bindings to another app's Workflows are not supported.
 
 ## Manage instances
 
@@ -89,9 +96,17 @@ widefleet workflows delete process example-1
 
 Commands print JSON. `--no-wait` returns a queued operation; `widefleet workflows operation OPERATION_UUID` retrieves its outcome. `list --cursor CURSOR` requests the next page. Restart without a step selector begins again from the first step on the instance's original code version and may repeat side effects.
 
-The app detail page exposes the same operations. Requests remain visibly pending until the fleet agent confirms their outcome. Workflow names from earlier deployments can still be entered to manage their existing instances.
+The app detail page offers the same operations and shows each request as pending until it completes. You can also enter Workflow names from earlier deployments to manage their existing instances.
 
-HTTP management endpoints are:
+### Deployments and deletion
+
+- Each instance runs the app version it started with. Redeployments and rollbacks apply to new instances; to run a fix, create a new instance.
+- Existing instances keep their declared storage resources, even if a later deployment removes the Workflow or storage declaration.
+- When an instance resumes, it uses the app's current network permissions, connections and secrets.
+- Listings can show `expired` for instances whose results are past retention. Deleting an expired instance releases its ID for reuse.
+- Deleting the app deletes its Workflow instances.
+
+### HTTP API
 
 | Endpoint under `/api/v1/apps/{appId}` | Purpose                                           |
 | ------------------------------------- | ------------------------------------------------- |
@@ -100,13 +115,13 @@ HTTP management endpoints are:
 | `POST /workflows`                     | Queue a mutation; `platform:write`                |
 | `GET /workflows/operations/{jobId}`   | Read a queued operation's state and result        |
 
-POST bodies contain a `request` object, for example `{"request":{"action":"create","workflow":"process","id":"example-1","params":{"message":"Example"}}}`. Supply a UUID `Idempotency-Key` header. All endpoints require management access to the app. Management payloads are JSON and bounded to 64 KiB; app-side bindings retain native structured-clone values. Management renders non-JSON outputs with `$type` tags (for example `BigInt`, `Map`, and binary values); repeated object references use `$ref` indices. Listings return instance summaries; use `status` for the output.
+POST bodies contain a `request` object, for example `{"request":{"action":"create","workflow":"process","id":"example-1","params":{"message":"Example"}}}`. All endpoints require management access to the app. Management payloads are JSON of up to 64 KiB; app-side bindings accept native structured-clone values. Non-JSON outputs are tagged with `$type` (for example `BigInt`, `Map` and binary values), and repeated object references use `$ref` indices. Listings return instance summaries; use `status` for the output.
+
+Supply a UUID `Idempotency-Key` header. Retrying with the same key returns the recorded result. If the response says the previous outcome is unknown, check the instance's `status` before you submit the change with a new key, especially for events and restarts.
 
 ## Restart from a step
 
-Selective restart requires CLI and control plane 0.3.2 or newer and app runtime 0.2.2 or newer. Existing fleets retain their selected runtime when the control plane is upgraded; an administrator must [update the app runtime](/reference/runtime) with `widefleet runtime update 0.2.2`. Confirm the active version with `widefleet runtime status` before using selective restart.
-
-Use selective restart to repeat part of an instance while retaining earlier step results. The target must already exist in that instance's execution history. These examples use the Workflow definition and JSON files above; create a separate instance so that it has not been deleted by the lifecycle example:
+Use selective restart to repeat part of an instance while keeping earlier step results. The target must already exist in that instance's execution history. These examples use the Workflow definition and JSON files above; create a separate instance so that it has not been deleted by the lifecycle example:
 
 ```sh
 widefleet workflows create process --id example-restart-1 --params parameters.json
@@ -145,9 +160,9 @@ widefleet workflows send-event process example-restart-1 approval --payload appr
 widefleet workflows status process example-restart-1
 ```
 
-In the app's **Workflows** section, choose **Restart from a step**, enter the instance ID and step name, and select the occurrence and type. The request remains pending until the agent confirms it.
+In the app's **Workflows** section, choose **Restart from a step**, enter the instance ID and step name, and select the occurrence and type.
 
-For HTTP management, send the same selector to `POST /api/v1/apps/{appId}/workflows` with the authorization and `Idempotency-Key` header described above:
+For HTTP management, send the same selector to `POST /api/v1/apps/{appId}/workflows` with the `Idempotency-Key` header described above:
 
 ```json
 {
@@ -160,30 +175,25 @@ For HTTP management, send the same selector to `POST /api/v1/apps/{appId}/workfl
 }
 ```
 
-The selected step and subsequent steps in execution history run again, including later steps in parallel branches. Earlier completed results are reused. Restart keeps the original instance input and pinned app code; deploying a fix does not change the code of this instance. Repeated external writes must tolerate repetition. Buffered, unconsumed events are cleared on restart; restarting an event wait requires a fresh event.
+The selected step and every later step in the execution history run again, including later steps in parallel branches. Earlier results are reused, and the instance keeps its original input and app version. Buffered, unconsumed events are cleared, so a restarted event wait needs a fresh event.
 
-Step options are evaluated again on selective restart. A restarted `sleep` waits its duration again. For `sleepUntil`, an expression such as `Date.now() + 60000` produces a new future deadline. A fixed deadline returned by an earlier retained step remains unchanged and fails if it has expired. Ordinary recovery after a runtime crash retains the already scheduled options and deadlines.
+Step options are evaluated again. A restarted `sleep` waits its full duration again. For `sleepUntil`, an expression such as `Date.now() + 60000` produces a new future deadline, while a fixed deadline returned by an earlier retained step stays the same and fails if it has passed. Ordinary recovery after a crash keeps the deadlines already scheduled.
 
-If the target is missing, the request fails without resetting the instance. Check the exact name, type and occurrence against the path that ran; a step in an unvisited branch cannot be selected. After restart, use `status` to observe the new run. Delete the instance with `widefleet workflows delete process example-restart-1` when its retained results are no longer needed.
+If the target is missing, the request fails and the instance stays as it was. Check the exact name, type and occurrence against the path that ran; steps in a branch that did not run cannot be selected. Use `status` to follow the new run, and delete the instance with `widefleet workflows delete process example-restart-1` when you no longer need its results.
 
-## Persistence and permissions
+## Write replay-safe Workflows
 
-A trusted native Workflow drives the app coroutine through a scoped RPC session. App code and callbacks execute inside a separate Dynamic Worker with the existing storage facades, app connection grants, telemetry and egress policy. celld owns retries, durable step results, event buffering and timers.
+Widefleet records each step's result and replays `run()` to continue an instance after a wait, retry, crash or restart. Replay matches each step by its name, type and occurrence count. Follow these rules so replay finds the recorded results:
 
-Native checkpoints record command identities, their batch order and which parallel result was delivered next. Replay matches each step by its name, type and occurrence count, holding early commands until their recorded turn. Committed callback results reconstruct the app coroutine without re-executing committed callbacks. Step names and occurrence counts exposed to app callbacks retain their original values. Parallel branches whose registration order can vary must use distinct step names; repeated uses of the same name and type must retain their order across replay. Side effects outside steps can repeat during replay; side effects inside an uncommitted or retried step must also tolerate repetition.
+1. Put side effects such as database writes, emails and external API calls inside `step.do`, and make them safe to repeat. A step can run again after a failed attempt, a crash or a selective restart.
+2. Treat code outside steps as repeatable. It runs again on every replay, including short `fetch` calls and `setTimeout` waits between steps.
+3. Give parallel branches distinct step names when the order in which they start can vary.
+4. When you reuse a step name, call those steps in the same order on every run.
+5. Call steps from `run()` or its branches, not from inside a `step.do` callback.
+6. Reach the next step call within 60 seconds. Put longer work, direct app service calls, Node APIs and manual stream reads inside `step.do`, and use `step.sleep` for durable delays.
 
-Each instance pins its immutable app version. Redeployment and rollback affect new instances. Existing instances keep their code and declared storage resources, even if a later deployment removes the Workflow or storage declaration. The current network policy and still-granted app connections are selected when a Workflow session is reconstructed.
+## Supported step API
 
-The agent retains resource declarations from Workflow-bearing app versions until the app is deleted. App deletion gates new creation, deletes the app's native Workflow instances, and then removes published files and resources through the existing removal process. Instance metadata can outlive the native engine's result retention and appear as `expired` in listings. Deleting an expired instance removes its catalog entry and releases its ID for reuse. Runtime limits, including native value-size bounds, still apply; internal checkpoint and start envelopes consume part of those bounds.
+Workflows support `step.do`, `step.sleep`, `step.sleepUntil` and `step.waitForEvent`, including parallel branches, repeated step names, retry policies with a static delay (a number or duration string) and optional backoff, the callback's attempt context and `NonRetryableError`. Schedule `sleepUntil` with a deadline in the future.
 
-Management request IDs have durable receipts. A retry returns the recorded result. If a process dies after recording intent but before recording the native operation's outcome, the retry reports an unknown outcome and does not repeat the mutation. Inspect the instance before submitting a new request ID, especially for events and restarts.
-
-## Supported step API and limits
-
-Supported operations are `step.do`, `step.sleep`, `step.sleepUntil` and `step.waitForEvent`, including parallel branches, repeated step names, native static-delay retry policies, callback attempt context and `NonRetryableError`. `sleepUntil` requires a future deadline when scheduled, as in celld. Do not nest step calls inside a `step.do` callback.
-
-Short global `setTimeout` waits and `fetch` calls (including response body methods such as `json()` and `text()`) can run between steps while another branch waits for an event. They repeat on replay. Command delivery has a 60-second timeout; use durable steps for longer work. Put other asynchronous I/O, such as direct app service calls, Node APIs and manual stream reads, inside `step.do`, and use `step.sleep` for durable delays.
-
-Function-valued retry delays, step rollback handlers and rollback-on-termination are not supported. Unsupported options are rejected. Workflow scheduling/facets and cross-app bindings are not part of this interface.
-
-Cloudflare's `@cloudflare/dynamic-workflows` helper cannot directly supply this transport on celld 0.6.2: dynamic Workflow entrypoint lookup and native step-object transport are unavailable. The platform preserves the supported app API with its own transport.
+Widefleet rejects options outside this set at the step call: function-valued retry delays, step rollback handlers and rollback on termination. Workflow scheduling and facets are not part of this interface. Step parameters and results must fit the runtime's value-size limits, and internal bookkeeping uses part of that space.

@@ -1,7 +1,7 @@
 ---
 title: Installation
 description: Set up the Widefleet CLI and create an app for an existing installation.
-lastModified: 2026-10-29
+lastModified: 2026-11-18
 ---
 
 Use the Widefleet CLI to create and deploy apps from your own machine. You need
@@ -17,11 +17,10 @@ confirm the six-digit code sent to your inbox.
 Choose an organization or select **Create organization** when offered. Enter a
 name and a URL name using lowercase letters, numbers and hyphens; the URL name
 appears in app addresses. **Publish your first app** then shows the connection
-and deployment commands for your workspace. If setup asks you to retry, repeat
-the action to finish preparing that organization.
+and deployment commands for your workspace.
 
 Installing Widefleet yourself? Start with
-[first setup](/self-hosting/installation#infrastructure-and-first-start), then
+[first setup](/self-hosting/installation#complete-first-setup), then
 invite colleagues or configure company sign-in.
 
 ## Install the CLI
@@ -37,11 +36,10 @@ widefleet --version
 
 If pnpm reports that its global bin directory is missing from PATH, run `pnpm setup`, open a new terminal, and retry the installation. This configures pnpm's global command directory for your shell.
 
-To update, rerun the install command. To uninstall, run `pnpm remove --global widefleet`. pnpm owns the complete installation directory; keep its package contents together.
+To update, rerun the install command. To uninstall, run `pnpm remove --global widefleet`.
 
-The CLI includes its native executable, bundler and app starters. App
-developers do not need Docker or a checkout of the platform repository when
-connecting to an existing installation.
+The CLI includes its native executable, bundler and app starters, so Node.js and
+pnpm are all you need to build apps for an existing installation.
 
 ## Create an app
 
@@ -55,11 +53,8 @@ pnpm dev
 This creates the default SvelteKit project. For React, see the
 [TanStack Start template and release requirements](/reference/cli#create-a-project).
 
-Both projects pin pnpm 12.4.2 in `packageManager`. With pnpm's default version
-management, an existing pnpm 10.34.5 or newer installation automatically downloads
-and runs that version when you run a command inside the project.
-pnpm 10.34.5 includes the [version-switching fix](https://github.com/pnpm/pnpm/releases/tag/v10.34.5)
-needed to start pnpm 12 on macOS and Windows.
+Both projects pin pnpm 12.4.2 in `packageManager`; your pnpm installation
+switches to that version automatically inside the project.
 
 The starter includes a notes app, a D1 database, private R2 file storage and a
 server-side identity helper. Local development uses a synthetic user. Open the
@@ -67,8 +62,7 @@ local URL printed by `pnpm dev`, then stop that server with Ctrl-C before contin
 
 ## Connect and deploy
 
-Connect and deploy using CLI **0.4.3 or newer** and
-[browser login](/reference/cli-configuration):
+Connect with [browser login](/reference/cli-configuration) and deploy:
 
 ```sh
 widefleet login
@@ -101,16 +95,6 @@ photo to verify the deployed app's database and file storage.
 
 For ongoing development, follow [app development](/guides/app-development).
 
-## Headless login
-
-The CLI stores logins in your operating system's credential store. On Linux and
-macOS, CLI 0.4.3 or newer automatically uses a private credential file when that
-store is unavailable and prints its location. Windows uses Credential Manager.
-
-Credential files contain unencrypted tokens; keep them outside app projects and
-shared folders. See [CLI authentication](/reference/authentication#headless-login)
-to choose a file location, manage saved logins or use an external access token.
-
 ## Inspect runtime logs
 
 ```sh
@@ -121,11 +105,20 @@ widefleet logs --level error
 Runtime logs require telemetry services enabled by the operator; the local demo
 includes them.
 
+## Headless login
+
+The CLI stores logins in your operating system's credential store. On Linux and
+macOS, the CLI automatically uses a private credential file when that
+store is unavailable and prints its location. Windows uses Credential Manager.
+
+Credential files contain unencrypted tokens; keep them outside app projects and
+shared folders. See [CLI authentication](/reference/authentication#headless-login)
+to choose a file location, manage saved logins or use an external access token.
+
 ## If setup fails
 
 | Symptom                                  | Next step                                                                                                                                                       |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet).                                                                 |
 | `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `Get-Command widefleet -All` in PowerShell or `type -a widefleet` in Bash/Fish for an older installation on PATH. |
 | Login cannot access the credential store | Check your operating system's credential store; see [headless login](#headless-login) for alternatives.                                                         |
 | Company discovery fails                  | Check the email domain and ask IT to publish a discovery record or configure the agent; see [company setup](/self-hosting/company-setup).                       |

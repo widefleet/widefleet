@@ -1,12 +1,11 @@
 ---
 title: Save and recover source code
 description: Keep your app's code in Git and continue working from another session or machine.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 Widefleet keeps your app's source code so you or your agent can pick up where you
-left off, even in a new workspace. Source storage is available on Widefleet Cloud.
-Support for self-hosted installations is coming soon.
+left off, even in a new workspace. Source storage is included in Widefleet Cloud.
 
 Install Git and the [Widefleet CLI](/getting-started/installation), sign in and
 select your organization. You need management access to the app.
@@ -63,8 +62,8 @@ Widefleet saves your code to `feature/review` in the app's repository and uses
 that branch to name the preview. Deploying from the same branch updates the same
 preview. Another branch gets its own preview.
 
-A preview keeps its branch. To update it, check out that branch again. The main
-app uses `main`, so preview deployments from `main` are rejected.
+A preview keeps its branch. To update it, check out that branch again. Run
+previews from any branch except `main`, which belongs to the main app.
 
 When you're ready to publish the changes to the main app:
 
@@ -139,8 +138,8 @@ Widefleet stops so the saved code and the build stay in sync. If a Git commit ho
 or signing fails, fix the reported error and retry; your previous staging
 selection is preserved.
 
-If Git is temporarily unavailable, retry once it recovers. A failed status
-request does not mean your saved code is gone.
+If Git is temporarily unavailable, retry once it recovers; code that was already
+saved stays in place.
 
 ## Delete an app or preview
 

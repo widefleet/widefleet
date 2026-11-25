@@ -1,7 +1,7 @@
 ---
 title: Quickstart
 description: Run Widefleet locally with a working notes app and synthetic test identities.
-lastModified: 2026-10-09
+lastModified: 2026-11-18
 ---
 
 Try the complete platform locally. The demo starts Widefleet, a local identity
@@ -13,8 +13,9 @@ provider and the **Team Notes** app with a database and private photo uploads.
 - Bash, Git and an internet connection for the pinned dependencies.
 - Available ports `25450`, `25452` and `25453`.
 
-Rootless Docker is supported. You do not need a local Node.js, pnpm or Rust
-installation, a company identity-provider registration, or a domain.
+Rootless Docker is supported. Docker provides the Node.js, pnpm and Rust toolchain
+and a local identity provider, so you need no local installs, company
+identity-provider registration or domain.
 
 ## Start the demo
 
@@ -33,8 +34,8 @@ account. Add a note and a photo to try the app's database and private file stora
 :::note[Local HTTPS]
 The demo uses self-signed certificates. On the first visit, accept the browser's
 certificate exception for `https://auth.apps.localhost:25453` and
-`https://team-notes.apps.localhost:25453`. These hosts are local to your machine;
-the demo does not install a system certificate.
+`https://team-notes.apps.localhost:25453`. These hosts are local to your machine,
+and your system trust store stays unchanged.
 :::
 
 ## Make a change

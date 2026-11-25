@@ -1,43 +1,119 @@
 ---
 title: Runtime logs
 description: Enable app telemetry and query errors with private source maps.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
-Runtime logs stay in your infrastructure.
-
-Widefleet uses ClickHouse as its telemetry store. The starter captures browser and server errors automatically; app authors and coding agents query the same authorized API through `widefleet logs`. The local `./dev` installation starts ClickHouse and the Collector automatically. For an existing installation, use matching CLI, management and agent builds with telemetry support and enable the versioned configuration below.
+Runtime logs collect app errors and console output in ClickHouse inside your
+infrastructure. The starter reports browser and server errors automatically, and
+app authors and coding agents query them with `widefleet logs`, including
+original source locations from private source maps. The local `./dev`
+installation starts runtime logs automatically.
 
 ```mermaid
 flowchart LR
-    Browser[Browser error hook] --> App[Authenticated app endpoint]
-    App --> Console[Structured console errors]
-    Console --> Celld[Dynamic Worker HTTP tail]
-    Celld --> Ingress[Management ingress\nApp-specific credentials]
-    Ingress --> Collector[Private OpenTelemetry Collector]
+    App[Apps and browsers] --> Mgmt[Management ingest]
+    Mgmt --> Collector[Private OpenTelemetry Collector]
     Collector --> CH[(ClickHouse)]
-    CLI[widefleet logs] --> API[Management API\nCurrent app permissions]
+    CLI[widefleet logs] --> API[Management API]
     API --> CH
-    API --> Maps[Private artifact source maps]
+    API --> Maps[Private source maps]
 ```
 
-## Installation
+## Enable runtime logs
 
-Add `infra/compose.telemetry.yaml` to an explicit Compose selection. For example, an Azure installation can use:
+1. Add `infra/compose.telemetry.yaml` to the explicit `COMPOSE_FILE` list and set
+   two different random passwords. With local PostgreSQL and RustFS:
 
-```dotenv
-COMPOSE_FILE=infra/compose.base.yaml:infra/compose.azure.yaml:infra/compose.acme-cloudflare.yaml:infra/compose.telemetry.yaml
-CLICKHOUSE_READ_PASSWORD=REPLACE_WITH_RANDOM_HEX
-CLICKHOUSE_INGEST_PASSWORD=REPLACE_WITH_DIFFERENT_RANDOM_HEX
+   ```dotenv
+   COMPOSE_FILE=infra/compose.base.yaml:infra/compose.postgres.yaml:infra/compose.s3.yaml:infra/compose.rustfs.yaml:infra/compose.telemetry.yaml
+   CLICKHOUSE_READ_PASSWORD=REPLACE_WITH_RANDOM_HEX
+   CLICKHOUSE_INGEST_PASSWORD=REPLACE_WITH_DIFFERENT_RANDOM_HEX
+   ```
+
+   For other selections, append the file as in
+   [external services](/self-hosting/external-services#select-the-installation).
+
+2. Create `${PLATFORM_DATA_DIRECTORY}/clickhouse` and
+   `${PLATFORM_DATA_DIRECTORY}/otel-queue`, and give the Collector's container user
+   (UID and GID `10001`) ownership of `otel-queue`. ClickHouse prepares its own
+   directory.
+
+   ```sh
+   mkdir -p /srv/app-platform/clickhouse /srv/app-platform/otel-queue
+   docker run --rm --user 0 \
+     -v /srv/app-platform/otel-queue:/data \
+     debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 \
+     chown 10001:10001 /data
+   ```
+
+3. Pull and start ClickHouse and the Collector. Compose recreates management with
+   the telemetry settings:
+
+   ```sh
+   docker compose --env-file widefleet-images-0.7.6.env --env-file /absolute/path/deployment.env pull clickhouse otel-collector
+   docker compose --env-file widefleet-images-0.7.6.env --env-file /absolute/path/deployment.env up -d clickhouse otel-collector control-plane
+   ```
+
+4. Redeploy each app. The next deployment turns on log capture for that app.
+   Existing apps based on an older starter first need the starter's current hooks
+   and Vite source maps.
+
+## Verify
+
+From an app project, open the redeployed app in a browser, then run:
+
+```sh
+widefleet logs --since 15m
 ```
 
-The original `infra/compose.yaml` include wrapper remains usable without telemetry. To enable it with local PostgreSQL/RustFS, select `compose.base.yaml`, `compose.postgres.yaml`, `compose.s3.yaml`, `compose.rustfs.yaml` and `compose.telemetry.yaml` explicitly. Do not layer overrides over the include wrapper.
+The output includes the starter's request records, such as `GET /: 200`. If the
+command reports that runtime logging is not configured, check that management was
+recreated with the telemetry file selected.
 
-Prepare `${PLATFORM_DATA_DIRECTORY}/clickhouse` and `${PLATFORM_DATA_DIRECTORY}/otel-queue`. The Collector runs as container UID/GID 10001; that identity must own `otel-queue`. ClickHouse's entrypoint prepares ownership of its data directory. For rootless Docker, set ownership through a temporary container on the same daemon, as in the storage setup in [operations](/self-hosting/installation). Retain both directories across updates and include them in the installation's stopped, consistent backups.
+## Operate runtime logs
 
-Using the intended private environment file and matching image manifest, pull and start `clickhouse` and `otel-collector`, then recreate management and the agent. No telemetry port is published. Only management connects to the internal telemetry network; app runtimes send OTLP to the management origin over HTTPS. `infra/telemetry/schema.sql` initializes a new ClickHouse data directory. Existing directories need explicitly applied, versioned schema updates; startup initialization does not migrate an existing schema.
+- ClickHouse and the Collector publish no ports. Only management joins their
+  private network; apps send logs to management over HTTPS.
+- Keep the `clickhouse` and `otel-queue` directories across updates and include
+  them in [backups](/self-hosting/operations#back-up-and-restore).
+- `infra/telemetry/schema.sql` initializes a new ClickHouse directory. Apply
+  versioned schema updates to an existing directory explicitly.
+- Records are kept for 30 days after ingestion. Changing retention is a versioned
+  schema change. Deleting an app ends its log access and ingestion immediately;
+  stored records expire with the retention period.
+- Published apps keep sending logs while the agent is stopped or disabled.
+  Rotating `BETTER_AUTH_SECRET` rotates the apps' ingestion credentials; redeploy
+  existing apps afterwards.
+- Logs contain application-controlled messages and stack traces, which can
+  include app data. Management reads them with a read-only ClickHouse account,
+  and CLI users never receive ClickHouse credentials or SQL access.
 
-The next app deployment enables telemetry for that app by including its destination in the app snapshot. This does not recreate the shared container. Rotating `BETTER_AUTH_SECRET` rotates app ingestion credentials and requires redeploying existing apps. Disabling the deployment executor does not revoke telemetry for an already published app.
+Telemetry runs independently of app requests, so apps keep serving while logging
+is unavailable. The Collector buffers up to 10,000 requests per signal on disk
+and retries while ClickHouse is unavailable. Apps and browsers send each record
+once, so records sent during a management outage or runtime crash, or while the
+Collector's queue is full, are not stored. Monitor disk space, Collector export errors and delivery errors in the
+runtime log. Retries can occasionally store a record twice.
+
+## What is captured
+
+Widefleet captures console records and exceptions from HTTP requests. Each app
+writes only to its own logs. Cron, Queue and service (RPC) executions do not
+appear in app logs, and distributed traces are not exported; use the
+[container logs](/self-hosting/operations#logs-and-troubleshooting) for those.
+
+The starter also reports unexpected SvelteKit errors, server HTTP 5xx responses,
+browser `error` and `unhandledrejection` events, and explicit `captureError`
+calls. Report deliberately caught failures with `captureError`. Browser reports
+require app sign-in, are rate-limited and keep the build ID of the running tab.
+Server records carry the deployment ID; filtering by deployment also includes
+browser errors from that deployment's build.
+
+Source maps stay in private artifact storage. Stack frames show the generated
+location and, when a matching map exists, the original file, function, line and
+column. Without a valid map, the generated stack remains available. Each query
+loads up to 32 MiB of maps and resolves up to 64 stack lines per record.
 
 ## Querying
 
@@ -51,32 +127,19 @@ widefleet logs --query "connection refused" --since 30m --json
 widefleet logs --follow --json
 ```
 
-The default is the latest 100 ingested records whose event timestamps fall within the last hour. `--limit` accepts 1–500, `--since` accepts a duration (`s`, `m`, `h`, `d`) or an ISO timestamp, and `--until` closes a historical range. Ranges are limited to 30 days. Severity is a minimum threshold. Sources are `browser`, `server`, and `runtime`. The current app-tail channel does not export native spans. Without an app UUID, the CLI performs a read-only lookup using `name` from the selected Wrangler config. Redirected output is JSON lines by default; diagnostics go to stderr.
+By default, the command returns the latest 100 records from the last hour.
+`--limit` accepts 1–500. `--since` accepts a duration (`s`, `m`, `h`, `d`) or an
+ISO timestamp, and `--until` ends a historical range; ranges cover up to 30 days.
+`--level` sets a minimum severity. Sources are `browser`, `server` and `runtime`.
+Without an app argument, the CLI uses `name` from the project's Wrangler
+configuration. Redirected output is JSON lines; diagnostics go to stderr.
 
-Deployment filtering includes browser errors from that deployment's build. Browser records retain a null deployment ID because the same build can be deployed more than once; the current ingestion server's deployment must not be attributed to an older tab.
+`--follow` prints recent history, then streams newly received records until
+Ctrl-C. For a complete range, query with `--since` and `--until`.
 
-Relative lookbacks are measured from `--until` when supplied, otherwise from one current-time boundary. Absolute timestamps support timezone offsets and up to nine fractional digits (nanoseconds); filtering, range validation and pagination preserve that precision. Pagination preserves both event-time boundaries. Each new follow window advances its upper boundary and, when necessary, its lower boundary to keep the event-time range within 30 days.
-
-`GET /api/v1/apps/{appId}/logs` requires `platform:read` and current app ownership, collaboration rights or administrator access. It returns `entries`, `nextCursor`, `receivedThrough` (microseconds since epoch) and the resolved `since` timestamp. Filters match the CLI, with `deploymentId`, `requestId`, and `traceId` in the API. Cursors are signed and bound to the filters and app; every page rechecks current access. CLI users never receive ClickHouse credentials or arbitrary SQL access. OpenAPI describes the query contract.
-
-Log queries return HTTP 503 with code `TELEMETRY_NOT_CONFIGURED` when runtime logging has not been enabled; ask an administrator to enable it. A configured logging service that fails returns `TELEMETRY_UNAVAILABLE` with a message to try again later. App authorization is checked before either response. The CLI displays these messages and exits unsuccessfully, including in follow mode. Backend error details stay in management server logs.
-
-`--follow` first prints bounded history, then polls every second. It follows **ingestion time**, so a delayed export with an older event timestamp still appears. Each polling window uses keyset pagination and a 60-second overlap; record IDs suppress repeat output within that overlap. Arrival order can differ from event-time order, and the first overlap can backfill extra historical entries. The deduplication buffer is capped at 100,000 IDs; exceeding it stops with an explicit error so filters can be narrowed. Failed API calls stop with a nonzero status. Writes taking longer than the overlap can be missed by a running follower; query history to retrieve them. OTLP retries can produce duplicate stored events.
-
-## Capture, correlation and source maps
-
-A tail is a trusted handler receiving console records and exceptions after a Dynamic Worker HTTP request. The loader attaches an app-specific handler, which sends OTLP JSON to management using credentials unavailable to app code. Ingress verifies the credential and that the app still exists and is not deleting; the Collector overwrites the resource app ID from a trusted ingress header before queuing. An application's message cannot choose another app's partition.
-
-Dynamic Worker tails cover HTTP requests. RPC, Cron and Queue console logs and exceptions are outside this capture channel in celld 0.6.1. Native fleet OTLP export is disabled to keep ingestion scoped to individual apps, so native distributed traces are also absent. Operators can inspect container logs for fleet diagnostics.
-
-The starter reports unexpected SvelteKit errors, server HTTP 5xx outcomes, browser `error` and `unhandledrejection` events, and explicit `captureError` calls. Browser reporting requires existing app authentication, same-origin requests, bounded payloads, rate limits and duplicate suppression. Browser reports preserve the build ID of the running tab. The loader injects the server deployment ID. The trusted tail adds the executing snapshot’s build and deployment IDs to ordinary console records and unhandled exceptions; structured reports keep their own context. HTTP tails do not provide native trace/span IDs, so ordinary console records cannot inherit request IDs from the starter’s structured request records.
-
-Source maps stay in private artifact storage and are never placed in the public asset manifest or runtime module directory. Matching build IDs select immutable source maps; stack frames include the generated location and, when available, the original file, function, line and column. Both displayed lines and columns are one-based. Missing or invalid maps leave the generated stack available. Resolution bounds map downloads per query to 32 MiB and inspects at most 64 stack lines per record.
-
-SvelteKit handles exceptions internally, so the starter hooks capture framework-level errors independently of native span status. Report deliberately caught failures with `captureError`. Existing apps must merge the starter hooks and enable Vite source maps before redeploying.
-
-## Storage and failure behavior
-
-The pinned Collector sends logs and traces to the versioned `otel_logs` and `otel_traces` tables. `runtime_logs` combines console records with failed spans. ClickHouse retains records for 30 days from ingestion; TTL deletion is asynchronous. Changing retention is a versioned schema change. Deleting an app removes API access and ingestion authorization immediately, while already stored telemetry expires according to this retention policy.
-
-Management uses a read-only ClickHouse account; the Collector has insert/select access. Its persistent export queues hold up to 10,000 requests per signal and retry unavailable ClickHouse indefinitely while capacity remains. The app-tail sender has no durable queue or retry. Browser delivery is best-effort with no retry. Full queues, runtime crashes, management outages and client disconnection can therefore lose telemetry without blocking application requests. Monitor disk space, Collector export failures and tail delivery errors. Telemetry includes application-controlled messages and stacks; normal app data may occur in them.
+Queries use current app permissions: the app's owner, its collaborators and
+administrators. Ordinary app users get no log access. If logging is not set up,
+queries return `503` with `TELEMETRY_NOT_CONFIGURED`; if it is temporarily
+unavailable, they return `TELEMETRY_UNAVAILABLE`, and details appear in the
+management log. The API is `GET /api/v1/apps/{appId}/logs` with the same filters
+and `platform:read`; see the OpenAPI description for the full contract.

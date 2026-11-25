@@ -3,11 +3,11 @@ title: Self-hosting
 description: Requirements and installation guidance for operating Widefleet on your own infrastructure.
 sidebar:
   label: Overview
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 Run the Widefleet platform in your own environment. Your team builds and deploys
-apps; you operate management, app runtimes, identity integration, updates and
+apps; you operate management, the app runtime, identity integration, updates and
 backups.
 
 For a first look without company SSO or DNS configuration, use the
@@ -16,44 +16,29 @@ For a first look without company SSO or DNS configuration, use the
 ## Requirements
 
 - A Linux x86-64 host with Docker Engine 29.8.1 and Docker Compose 2.20.0 or newer.
+  The host only needs Docker; the published images contain all runtime and setup tools.
 - A management hostname and a separate app domain with DNS and HTTPS configured.
 - PostgreSQL and object storage, either on the host or supplied by external services.
-- Microsoft Entra or another supported OpenID Connect provider for company sign-in.
-- An operator responsible for upgrades, monitoring, backups and recovery.
-
-Published platform images include the required runtime and setup tools. The
-operator host does not need a local Node.js, pnpm or Rust installation.
+- Microsoft Entra, Google Workspace or another OpenID Connect provider for company sign-in.
+- An operator responsible for updates, monitoring, backups and recovery.
 
 ## Install the platform
 
-Follow the [single-host installation guide](/self-hosting/installation)
-for the maintained Compose configuration and commands. Run its commands from a
-checkout of the matching release. It covers:
-
-1. Configuring domains, database and storage credentials, persistent data and TLS.
-2. Starting the platform and creating the first administrator.
-3. Connecting management and app sign-in to your identity provider.
-4. Verifying company sign-in before completing setup.
-5. Operating, upgrading and recovering the installation.
-
-Keep first setup accessible only to the installing administrator, or configure
-the documented bootstrap file before exposing it. The first person who completes
-setup becomes the installation owner.
-
-Use [company setup](/self-hosting/company-setup) to configure employee agents and
-computers so they can connect without knowing the management URL.
-
-## External services
-
-The default Compose configuration uses PostgreSQL and RustFS. See
-[external services and automatic HTTPS](/self-hosting/external-services)
-for external PostgreSQL, cloud storage and certificate options, and
-[storage backends](/self-hosting/storage)
-for authentication options and provider-specific configuration.
+1. [Install Widefleet](/self-hosting/installation) on one host with the
+   maintained Compose configuration, connect the deployment agent and deploy a
+   first app.
+2. Optionally use [external services and HTTPS](/self-hosting/external-services)
+   for external PostgreSQL, cloud storage and automatic certificates, with
+   [storage backends](/self-hosting/storage) for provider details.
+3. [Set up company sign-in](/guides/company-sign-in) and review
+   [sign-in and settings](/self-hosting/sign-in-and-settings).
+4. Let employees and their agents connect with `widefleet login` alone through
+   [company setup](/self-hosting/company-setup).
 
 ## Operate the installation
 
-- [Versions and updates](/self-hosting/installation#versions-and-updates): select matching platform components and manage runtime versions.
-- [Backup and restore](/self-hosting/installation#whole-installation-backup-and-restore): preserve and recover the coordinated installation state.
+- [Versions and updates](/self-hosting/operations#versions-and-updates): update platform components and the app runtime together.
+- [Backup and restore](/self-hosting/operations#back-up-and-restore): preserve and recover the complete installation.
+- [Logs and troubleshooting](/self-hosting/operations#logs-and-troubleshooting): find the right logs for a failure.
 - [Runtime logs](/self-hosting/runtime-logs): enable telemetry and investigate app failures.
-- [Runtime updates](/reference/runtime#versions-and-updates): select, verify and roll back runtime packages.
+- [Installation reporting](/self-hosting/installation-reporting): choose which usage insights to share.

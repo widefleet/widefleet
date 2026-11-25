@@ -1,18 +1,17 @@
 ---
 title: CLI authentication
 description: Credential stores, headless sessions, token renewal and external credentials.
-lastModified: 2026-10-23
+lastModified: 2026-11-18
 ---
 
 Run `widefleet login`, open the printed link and approve the device code in your
 browser. The CLI uses a configured address or finds your installation through
-your email. See [CLI configuration](/reference/cli-configuration) for discovery
-and version requirements. The default scopes are `platform:read platform:write`;
+your email. See [CLI configuration](/reference/cli-configuration) for discovery.
+The default scopes are `platform:read platform:write`;
 select additional scopes explicitly when needed.
 
-With platform and CLI 0.4.0 or newer, company SSO grants the CLI access within
-that organization. Widefleet email login uses the account's admitted memberships.
-Sign in again after upgrading from an earlier version. See
+A company SSO login covers that company's organization. Email login covers every
+organization you belong to that does not require company sign-in. See
 [members and company sign-in](/guides/members) for linking and invitations.
 
 ## Agent login
@@ -29,9 +28,8 @@ command is stopped, start `widefleet login` again.
 
 The CLI uses Keychain on macOS, Credential Manager on Windows and Secret Service
 on Linux. Linux Secret Service needs an unlocked store and a session D-Bus.
-With CLI 0.4.3 or newer, Unix systems automatically use a private, unencrypted
-credential file when the OS store is unavailable. The CLI prints its location
-and reuses it for later commands.
+Without an available OS store, the CLI on Unix saves a private, unencrypted
+credential file, prints its location and reuses it for later commands.
 
 Automatic files live under `$XDG_STATE_HOME/widefleet/credentials/`, or
 `~/.local/state/widefleet/credentials/` when that variable is unset.
@@ -39,8 +37,7 @@ Automatic files live under `$XDG_STATE_HOME/widefleet/credentials/`, or
 ### Choose a session file
 
 On Unix, use `PLATFORM_SESSION_FILE` or `--session-file` to choose a location
-explicitly. This option requires CLI 0.2.1 or newer. Keep the setting for later
-commands, including logout:
+explicitly. Keep the setting for later commands, including logout:
 
 ```sh
 export PLATFORM_SESSION_FILE="$HOME/.local/state/widefleet/session.json"
@@ -56,9 +53,9 @@ when the session also needs to deploy apps. In Fish, replace `export` with
 Credential files contain **unencrypted access and refresh tokens**. Keep them
 outside app projects and shared folders, with one file per platform address.
 The CLI creates directories with mode `0700` and files with mode `0600`. Existing
-paths must also be owner-only, with regular files rather than symbolic or hard
-links. Use `--session-file /absolute/path/session.json` to override the environment
-setting for a command. On Windows, use Credential Manager for saved logins or
+paths must also be owner-only regular files, not symbolic or hard links. Use
+`--session-file /absolute/path/session.json` to override the environment setting
+for a command. On Windows, use Credential Manager for saved logins or
 an external access token for API commands.
 
 ## Token renewal and logout

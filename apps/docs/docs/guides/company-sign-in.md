@@ -1,7 +1,7 @@
 ---
 title: Set up company sign-in
 description: Connect Microsoft Entra, Google Workspace or another identity provider, then check that colleagues can sign in and open the right apps.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 Connect your company's login so colleagues can use their work accounts for
@@ -79,8 +79,8 @@ Continue with [verify and activate](#verify-and-activate).
 ## Google Workspace
 
 You need a Google Cloud project belonging to your Workspace organization and
-permission to create an OAuth client. Personal Gmail accounts cannot use this
-connection.
+permission to create an OAuth client. Colleagues sign in with accounts from your
+Workspace organization; personal Gmail accounts are not part of this connection.
 
 ### Set up Google sign-in
 
@@ -121,7 +121,7 @@ the relevant groups' settings. No service account or private key is needed.
    See Google's [group permissions guide](https://support.google.com/groups/answer/2464975).
 5. Add the intended users **directly** to that group and copy its primary email
    address, such as `finance@example.com`. You will enter that address in the
-   app's allowed groups; Google group-name search is not available in Widefleet.
+   app's allowed groups.
 
 At sign-in, users may be asked to allow Widefleet to read their Google groups.
 If your organization blocks that request, a Workspace administrator needs to
@@ -129,10 +129,10 @@ approve the OAuth app and scope under its API access policy. A user who declines
 the group permission can still sign in and use apps open to all signed-in users,
 but cannot open group-restricted apps.
 
-Widefleet checks the user's direct memberships using that permission. A nested
-group does not grant access, and a group hidden from the user is not returned.
-For example, if the app allows Finance, add the person to Finance itself and
-allow Finance members to view its membership list.
+Widefleet checks the user's direct memberships in groups whose membership list the
+user may view; membership through a nested group is not included. For example, if
+the app allows Finance, add the person to Finance itself and allow Finance members
+to view its membership list.
 
 Continue with [verify and activate](#verify-and-activate).
 
@@ -197,6 +197,6 @@ expected result. Next, [share the app with colleagues](/guides/applications).
 | Settings are saved, but app sign-in activation fails | Check the activation error in Settings. Ask the installation operator to resolve it, then save again and repeat the app test.                                                                   |
 
 If company sign-in locks you out of a self-hosted installation, use
-[administrator recovery](/self-hosting/installation#secrets-and-administrator-recovery).
+[administrator recovery](/self-hosting/sign-in-and-settings#secrets-and-administrator-recovery).
 For credential changes and automated configuration, see the
 [company sign-in reference](/reference/company-sign-in).

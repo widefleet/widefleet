@@ -1,47 +1,133 @@
 ---
 title: Network permissions
 description: Allow external destinations and understand backend and browser enforcement.
-lastModified: 2026-10-23
+lastModified: 2026-11-18
 ---
 
-New apps start with no external destinations allowed. The trusted runtime checks backend requests; browser responses carry a platform-controlled Content Security Policy (CSP). D1, R2, KV, Queues and static asset bindings continue to work without granting a network origin.
+Allow an app to call external APIs from its backend code or to load resources
+from external origins in the browser. Each app has its own list of allowed
+origins, which starts empty. D1, R2, KV, Queues and static asset bindings work
+without a network grant.
 
-## CLI
+You need:
 
-Use one ordinary login with the scopes needed by your work:
+- To be the app's owner or an organization administrator.
+- A CLI login with the `network:manage` scope. Reading permissions needs `platform:read`.
+
+## Allow an origin
+
+1. Log in with the scopes your work needs:
+
+   ```sh
+   widefleet login --scope platform:read platform:write network:manage
+   ```
+
+   Without `--scope`, login requests `platform:read platform:write`. Explicit
+   scopes replace that default and can be repeated or comma-separated.
+
+2. From the app's project directory, allow the origin:
+
+   ```sh
+   widefleet network allow https://api.example.com
+   ```
+
+   The command waits until the change is active.
+
+3. Check the permissions:
+
+   ```sh
+   widefleet network
+   ```
+
+   ```text
+   Network permissions: active
+   Backend:
+     https://api.example.com
+   Browser:
+     No external origins allowed
+   ```
+
+4. Verify with a request from the app's backend, such as a `fetch()` to
+   `https://api.example.com` in a route you can open. Requests to origins that are
+   not on the list return `403` with `Network destination is not permitted`.
+
+The CLI selects the app named in the current `wrangler.jsonc`. Use `--app NAME`
+for another app or `--config PATH` for another project file. To allow a browser
+origin or remove one:
 
 ```sh
-widefleet login --scope platform:read platform:write network:manage
-widefleet network
-widefleet network allow https://api.example.com
-widefleet network deny https://api.example.com
 widefleet network allow https://assets.example.com --browser
-widefleet network show --app inventory
+widefleet network deny https://api.example.com
 ```
 
-Select an existing app using `name` from the current `wrangler.jsonc`, or an explicit `--app NAME`. `--config PATH` selects another project file. Without `--scope`, login requests `platform:read platform:write`; explicit scopes replace that default and can be repeated or comma-separated. Identity and refresh scopes are added automatically. The approval page shows the requested scopes. API access requires the signed-in user's current app permissions.
+`allow` and `deny` accept several origins. Repeating an applied change has no
+effect. `--json` returns the full state, and redirected output is JSON by default.
+Automation can use the same API token through `PLATFORM_ACCESS_TOKEN`.
 
-`allow` and `deny` accept multiple origins and update the selected entries. Repeating an already applied change has no effect. Backend and browser permissions are independent: `--browser` changes the browser list, otherwise the backend list is selected.
+## Check activation
 
-Changes wait for activation by default. `--no-wait` returns after saving. `widefleet network` shows `saved` before the first deployment, `pending` during activation, `active` after acknowledgment, or `failed` with the reason. A failed activation returns a nonzero exit status; repeating the change retries it. If another change supersedes a waiting command, it stops with an explicit message. `--json` returns the full state; redirected output is JSON by default. Automation can use the same API token via `PLATFORM_ACCESS_TOKEN`.
+`widefleet network` shows one of these states:
 
-Only the app owner or an administrator may change network permissions. A token additionally needs `network:manage`; reading requires `platform:read`. These scopes can coexist with deployment permissions in one token.
+| State     | Meaning                                                             |
+| --------- | ------------------------------------------------------------------- |
+| `saved`   | Saved before the app's first deployment; applies when it deploys.   |
+| `pending` | Activation is in progress.                                          |
+| `active`  | New requests use the change.                                        |
+| `failed`  | Activation failed; the reason is shown. Repeat the change to retry. |
 
-## Destinations and enforcement
+Changes wait for activation by default; `--no-wait` returns after saving. A
+failed activation returns a nonzero exit status, and the app keeps its current
+permissions. If another change supersedes a waiting command, the command stops and
+tells you to inspect the status.
 
-Origins are exact, canonical HTTPS origins, for example `https://api.example.com` or `https://erp.example.com:8443`. Paths, credentials, trailing slashes and wildcards are rejected. Grant only the origins you intend the app to reach, including any private addresses. No fixed count limit is imposed on the lists; transport and browser header limits still apply.
+Requests already in flight finish under their previous permissions. A code
+rollback keeps the current network permissions, and previews have their own lists.
 
-The Dynamic Worker's native `globalOutbound` binding sends requests to a trusted gateway carrying that app snapshot's allowed origins. The gateway checks the URL and removes authority/proxy headers controlled by the app. Every followed redirect is checked again; credentials are removed when the origin changes. Unapproved destinations return 403. With this outbound binding, celld 0.6.2 rejects TCP connections and outgoing WebSockets. See the [celld/Cloudflare comparison](/reference/runtime-compatibility).
+## Origins
 
-Redirect handling preserves manual/error modes and standard method rewriting. A body-preserving redirect can replay a fully sent body up to 1 MiB; larger or incomplete bodies fail that redirect. This bound is for the replay copy, not the original upload, which continues through native streaming transport.
+Enter exact, canonical HTTPS origins, for example `https://api.example.com` or
+`https://erp.example.com:8443`. Paths, credentials, trailing slashes and
+wildcards are rejected. Grant only the origins you intend the app to reach,
+including any private addresses. The lists have no fixed size limit beyond HTTP and
+browser header limits.
 
-One browser list permits that origin for connections, scripts, styles, images, fonts, media and forms. Same-origin resources and inline scripts/styles work by default, alongside data images/fonts and blob images/media. Frames, objects and Web Workers are blocked. The trusted parent enforces the CSP on both static and Worker responses.
+## Backend and browser access
 
-Top-level navigation to external pages remains possible. Reload open pages to receive a changed CSP. A browser grant also permits executable resources from that origin; use the backend list when only server-side access is needed.
+Backend and browser lists are independent. Commands change the backend list unless
+you pass `--browser`.
 
-## Activation and API
+**Backend** permissions apply to `fetch()` from server-side code:
 
-`GET /api/v1/apps/{appId}/network` reads the policy and activation state. `PATCH` makes an atomic incremental change:
+- Widefleet checks every request against the list, including each followed
+  redirect. The host comes from the checked URL; host and proxy headers set by
+  the app are removed.
+- When a redirect changes the origin, `Authorization`, `Cookie` and
+  `Proxy-Authorization` headers are removed.
+- `redirect: "manual"` and `redirect: "error"` work as usual, and followed
+  redirects use standard method rewriting. A redirect
+  that preserves the body can resend a fully sent body of up to 1 MiB; larger or
+  incomplete bodies fail that redirect.
+- Use HTTPS requests through `fetch()`. Outbound TCP connections and WebSockets are
+  rejected. See [runtime compatibility](/reference/runtime-compatibility).
+
+**Browser** permissions set the Content Security Policy (CSP) on the app's static
+and Worker responses:
+
+- An allowed origin is permitted for connections, scripts, styles, images, fonts,
+  media and forms.
+- Same-origin resources, inline scripts and styles, data images and fonts, and
+  blob images and media work without a grant.
+- Frames, objects and Web Workers are blocked. Top-level navigation to external
+  pages works.
+- Reload open pages to receive a changed CSP.
+
+A browser grant also permits executable resources from that origin. Use the backend
+list when only server-side access is needed.
+
+## API
+
+`GET /api/v1/apps/{appId}/network` reads the permissions and activation state.
+`PATCH` makes an atomic incremental change:
 
 ```json
 {
@@ -51,8 +137,5 @@ Top-level navigation to external pages remains possible. Reload open pages to re
 }
 ```
 
-Use `target: "browser"` or `action: "deny"` as appropriate. The server locks the app row while applying additions/removals, so concurrent changes do not replace unrelated grants. Revisions are maintained internally and returned for diagnostics; clients need not supply them.
-
-A configuration job takes the serving code when it runs, after earlier fleet jobs. It creates an immutable app snapshot and validates its network revision before activation. Failed evaluation retains the serving snapshot. New requests use the selected snapshot; in-flight requests can finish under their previous permissions. Activation does not interrupt those requests. A code rollback keeps current network permissions, and previews have independent lists. Ordinary network edits do not require a celld reload.
-
-Install matching management, executor and runtime components. The runtime reports the network revision during readiness checks before activation. Published snapshots enforce their rules with the control plane and executor stopped.
+Use `target: "browser"` or `action: "deny"` as needed. Concurrent changes do not
+replace each other's grants.
