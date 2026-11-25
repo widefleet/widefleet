@@ -10,10 +10,10 @@
 
   onMount(startBrowserReporting);
 
-  // Signed-in workspace pages identify the member; see Workspace.svelte.
+  // Every signed-in page identifies the person; workspace pages add the organization in Workspace.svelte.
   $effect(() => {
     updateClientContext({
-      user: null,
+      user: page.data.analyticsUser ?? null,
       organization: null,
       role: null,
       analytics: page.data.analytics ?? null,

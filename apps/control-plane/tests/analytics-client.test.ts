@@ -52,7 +52,7 @@ it("stays inactive without configuration and on previews", () => {
   expect(sdk.captureException).not.toHaveBeenCalled();
 });
 
-it("captures errors before sign-in or organization selection and identifies after entry", () => {
+it("captures errors before sign-in, identifies after sign-in and groups after organization entry", () => {
   sdk.get_distinct_id.mockReturnValue("anonymous-id");
   analytics.updateClientContext({ ...context, user: null, organization: null, role: null });
   const error = new Error("Sign-in failed");
@@ -63,9 +63,14 @@ it("captures errors before sign-in or organization selection and identifies afte
   expect(sdk.identify).not.toHaveBeenCalled();
   expect(sdk.group).not.toHaveBeenCalled();
 
-  analytics.updateClientContext({ ...context, organization: null });
+  analytics.updateClientContext({ ...context, organization: null, role: null });
   expect(sdk.init).toHaveBeenCalledOnce();
+  expect(sdk.identify).toHaveBeenCalledWith("user:a", {
+    name: "Alex Example",
+    email: "alex@example.test",
+  });
   expect(sdk.group).not.toHaveBeenCalled();
+  expect(sdk.register).toHaveBeenLastCalledWith({ scope: config.scope });
   analytics.updateClientContext(context);
   expect(sdk.identify).toHaveBeenCalledWith("user:a", {
     name: "Alex Example",

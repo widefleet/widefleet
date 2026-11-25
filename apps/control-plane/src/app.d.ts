@@ -1,4 +1,5 @@
 import type { AnalyticsConfiguration } from "#lib/analytics-config";
+import type { ClientContext } from "#lib/analytics-client";
 import type { Runtime } from "#server/runtime-services";
 import type { Authentication } from "#server/auth";
 
@@ -6,6 +7,7 @@ declare global {
   namespace App {
     interface PageData {
       analytics?: AnalyticsConfiguration | null;
+      analyticsUser?: ClientContext["user"];
     }
 
     interface Locals {
