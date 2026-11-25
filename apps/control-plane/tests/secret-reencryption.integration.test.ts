@@ -242,6 +242,56 @@ describe("re-encryption", () => {
     }
   });
 
+  it("counts key versions by ID, even IDs named legacy, constructor or __proto__", async () => {
+    const database = environment.database.db;
+    const named = keyVersion("legacy");
+    const encryption = service([named, current, ...environmentKeys(), previous]);
+    const entry = await seedDeployment(database, { bindings: [] });
+
+    const context = {
+      kind: "app-secret",
+      organizationId: entry.organizationId,
+      appId: entry.appId,
+    } as const;
+
+    const before = await readSecretEncryption(database, encryption);
+
+    // Values that name key versions the keyring does not hold.
+    const missing = (kid: string) =>
+      new CompactEncrypt(new TextEncoder().encode("value"))
+        .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid })
+        .encrypt(randomBytes(32));
+
+    await database
+      .update(apps)
+      .set({
+        secrets: {
+          ACTIVE: await encryption.encrypt({ ...context, name: "ACTIVE" }, "active"),
+          CONSTRUCTOR: await missing("constructor"),
+          PROTO: await missing("__proto__"),
+        },
+        secretRevision: 1,
+      })
+      .where(eq(apps.id, entry.appId));
+
+    try {
+      const status = await readSecretEncryption(database, encryption);
+      const counts = new Map(Object.entries(status.keyVersions));
+
+      expect(status.legacy).toBe(before.legacy);
+      expect(status.failed).toBe(before.failed + 2);
+      expect([counts.get("legacy"), counts.get("constructor"), counts.get("__proto__")]).toEqual([
+        1, 1, 1,
+      ]);
+      expect(JSON.stringify(status.keyVersions)).toContain('"__proto__":1');
+    } finally {
+      await database
+        .update(apps)
+        .set({ secrets: {}, secretRevision: 0 })
+        .where(eq(apps.id, entry.appId));
+    }
+  });
+
   it("pages past rows without a secret", async () => {
     const database = environment.database.db;
     const encryption = rotated();

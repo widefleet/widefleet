@@ -266,31 +266,36 @@ const eachRow = async function* (database: Database) {
     }
 };
 
-/** Counts per JWE key version, plus legacy values and values that do not decrypt. */
-type Counts = { keyVersions: Record<string, number>; legacy: number; failed: number };
-
-const label = (ciphertext: string) =>
-  isLegacyCiphertext(ciphertext) ? "legacy" : (ciphertextKeyVersion(ciphertext) ?? "unknown");
+/**
+ * Counts per JWE key version, plus legacy values and values that do not
+ * decrypt. Key version IDs are operator-chosen, so they are kept in a `Map`:
+ * no ID can collide with the legacy count or an inherited object property.
+ */
+type Counts = { keyVersions: Map<string, number>; legacy: number; failed: number };
 
 const tally = (counts: Counts, ciphertext: string) => {
-  const version = label(ciphertext);
+  if (isLegacyCiphertext(ciphertext)) {
+    counts.legacy += 1;
 
-  if (version === "legacy") counts.legacy += 1;
-  else counts.keyVersions[version] = (counts.keyVersions[version] ?? 0) + 1;
+    return;
+  }
+
+  // A value without a readable `kid` cannot decrypt, so it counts only as failed.
+  const version = ciphertextKeyVersion(ciphertext);
+
+  if (version !== null) counts.keyVersions.set(version, (counts.keyVersions.get(version) ?? 0) + 1);
 };
-
-const emptyCounts = (encryption: SecretEncryption): Counts => ({
-  keyVersions: Object.fromEntries(encryption.keyVersions.map((id) => [id, 0])),
-  legacy: 0,
-  failed: 0,
-});
 
 /**
  * Counts every stored secret by the key version that encrypted it. Each value
  * is decrypted, so `failed` counts values the installation cannot read.
  */
 export const readSecretEncryption = async (database: Database, encryption: SecretEncryption) => {
-  const counts = emptyCounts(encryption);
+  const counts: Counts = {
+    keyVersions: new Map(encryption.keyVersions.map((id) => [id, 0])),
+    legacy: 0,
+    failed: 0,
+  };
 
   for await (const row of eachRow(database))
     for (const { context, ciphertext } of row.slots) {
@@ -303,7 +308,13 @@ export const readSecretEncryption = async (database: Database, encryption: Secre
       }
     }
 
-  return { activeKeyVersion: encryption.activeKeyVersion, ...counts };
+  return {
+    activeKeyVersion: encryption.activeKeyVersion,
+    // Own properties, even for IDs such as `__proto__`, so they reach the JSON output.
+    keyVersions: Object.fromEntries(counts.keyVersions),
+    legacy: counts.legacy,
+    failed: counts.failed,
+  };
 };
 
 /**
