@@ -29,6 +29,9 @@ export const managedPluginPaths = [
   "/sso/verify-domain",
 ];
 
+// The saved client secret and the endpoints that decide where sign-in sends it.
+const secretDestination = oidcConfiguration.extend({ clientSecret: z.string().optional() });
+
 export const pluginAuthentication = (
   database: DatabaseExecutor,
   configuration: Configuration,
@@ -173,6 +176,33 @@ export const pluginAuthentication = (
       throw new APIError("FORBIDDEN", { message: "Sign in with this organization's company SSO" });
 
     context.context.session = current;
+
+    // The plugin keeps a saved client secret when an update omits it, and sign-in sends
+    // that secret to the token endpoint. An update that moves the secret's destination
+    // must therefore supply the secret itself, so a saved one never follows to a new host.
+    if (context.path === "/sso/update-provider" && provider?.oidcConfig) {
+      const saved = secretDestination.parse(
+        JSON.parse(
+          await encryption.decrypt(
+            { kind: "sso-provider-config", field: "oidcConfig" },
+            provider.oidcConfig,
+          ),
+        ),
+      );
+
+      const requested = secretDestination.parse(input.oidcConfig ?? {});
+
+      const moved =
+        (input.issuer !== undefined && input.issuer !== provider.issuer) ||
+        (["tokenEndpoint", "discoveryEndpoint"] as const).some(
+          (field) => requested[field] !== undefined && requested[field] !== saved[field],
+        );
+
+      if (moved && saved.clientSecret !== undefined && requested.clientSecret === undefined)
+        throw new APIError("BAD_REQUEST", {
+          message: "Enter the client secret again to change the issuer or token endpoint",
+        });
+    }
 
     // Prepare endpoints once and let the native plugin persist them. Existing
     // endpoints survive ordinary updates; changing issuer requires fresh discovery.
