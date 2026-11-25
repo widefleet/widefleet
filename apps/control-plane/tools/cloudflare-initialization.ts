@@ -19,7 +19,7 @@ import type { Observation } from "../src/lib/server/observation.ts";
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { configuredAppSignInOrganizations } from "../src/lib/server/settings.ts";
-import { createSecretEncryption } from "../src/lib/server/secret-encryption.ts";
+import { configuredSecretEncryption } from "../src/lib/server/secret-encryption.ts";
 import { createCloudflareSettings } from "./cloudflare-settings.ts";
 import { loadRuntimeExtension } from "./runtime-extension.ts";
 
@@ -55,7 +55,10 @@ export const initializeCloudflareInstallation = async ({
   await initializeOrganization(database);
   await initializeInstallation(database);
 
-  const encryption = createSecretEncryption({ legacyKey: configuration.PLATFORM_ENCRYPTION_KEY });
+  const encryption = configuredSecretEncryption(
+    configuration.PLATFORM_ENCRYPTION_KEY,
+    configuration.PLATFORM_ENCRYPTION_KEYS,
+  );
 
   await migrateSsoSettings(database, encryption);
   await registerCli(database, configuration);

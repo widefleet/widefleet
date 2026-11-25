@@ -1,5 +1,5 @@
 import { appUrl } from "./apps.ts";
-import { createSecretEncryption } from "./secret-encryption.ts";
+import { configuredSecretEncryption } from "./secret-encryption.ts";
 import { migrateAppServices } from "./app-services-migration.ts";
 import { storedAppSecrets } from "./app-secrets.ts";
 import { checkServiceConsumers } from "./app-services.ts";
@@ -56,7 +56,10 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
 
   if (!runtime) throw new Error("The app runtime service binding is missing");
 
-  const encryption = createSecretEncryption({ legacyKey: bindings.PLATFORM_ENCRYPTION_KEY });
+  const encryption = configuredSecretEncryption(
+    bindings.PLATFORM_ENCRYPTION_KEY,
+    bindings.PLATFORM_ENCRYPTION_KEYS,
+  );
 
   const provisioner = createCloudflareProvisioner(
     {

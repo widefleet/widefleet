@@ -19,6 +19,7 @@ import {
   validateCloudflareRuntime,
 } from "../src/lib/server/cloudflare-runtime-package.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
+import { parseKeyring } from "../src/lib/server/secret-encryption.ts";
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeInstallation, readInstallation } from "../src/lib/server/installation-store.ts";
 import { StorageUnavailable } from "../src/lib/server/errors.ts";
@@ -80,6 +81,11 @@ const secrets = z
       .refine((value) => ["postgres:", "postgresql:"].includes(new URL(value).protocol)),
     BETTER_AUTH_SECRET: z.string().min(32),
     PLATFORM_ENCRYPTION_KEY: z.string().min(32),
+    // Optional: without it, the deployed secret stays as it is.
+    PLATFORM_ENCRYPTION_KEYS: z
+      .string()
+      .optional()
+      .transform((value) => value?.trim() || undefined),
     WIDEFLEET_CONTROL_TOKEN: z.string().min(32),
     WIDEFLEET_SECRETS_KEY: z.string().regex(/^[a-f0-9]{64}$/),
     APP_COOKIE_SECRET: z.string().min(32),
@@ -89,6 +95,10 @@ const secrets = z
       .transform((value) => value || undefined),
   })
   .parse(process.env);
+
+// Reject a malformed keyring before any resource changes.
+if (secrets.PLATFORM_ENCRYPTION_KEYS)
+  parseKeyring(secrets.PLATFORM_ENCRYPTION_KEYS, "PLATFORM_ENCRYPTION_KEYS");
 
 // A trusted installation may supply additional Wrangler configuration.
 const runtimeOverrides = z
@@ -295,6 +305,9 @@ try {
       ...socialCredentials,
       BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET,
       PLATFORM_ENCRYPTION_KEY: secrets.PLATFORM_ENCRYPTION_KEY,
+      ...(secrets.PLATFORM_ENCRYPTION_KEYS && {
+        PLATFORM_ENCRYPTION_KEYS: secrets.PLATFORM_ENCRYPTION_KEYS,
+      }),
       APP_COOKIE_SECRET: secrets.APP_COOKIE_SECRET,
       CLOUDFLARE_API_TOKEN: secrets.WIDEFLEET_PROVISIONING_TOKEN,
     }),

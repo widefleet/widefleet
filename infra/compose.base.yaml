@@ -16,6 +16,7 @@ x-control-plane: &control-plane
     PLATFORM_CONFIG_DIRECTORY: /var/lib/widefleet/edge
     PLATFORM_RUNTIME_DIRECTORY: /var/lib/widefleet/runtime
     PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:-}
+    PLATFORM_ENCRYPTION_KEYS: ${PLATFORM_ENCRYPTION_KEYS:-}
     PLATFORM_APP_BUILDER_URL: http://builder:8080
   volumes:
     - platform-state:/var/lib/widefleet

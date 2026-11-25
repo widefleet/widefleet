@@ -37,6 +37,8 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   BETTER_AUTH_SECRET: string;
   GITHUB_TOKEN?: string;
   PLATFORM_ENCRYPTION_KEY: string;
+  /** The keyring for new secrets; without it they keep the legacy format. */
+  PLATFORM_ENCRYPTION_KEYS?: string;
   DEPLOYMENTS?: Workflow<z.infer<typeof deploymentWorkflowCommand>>;
   APP_OPERATIONS?: Workflow<z.infer<typeof cloudflareAppOperation>>;
   APP_RUNTIME?: Fetcher;
