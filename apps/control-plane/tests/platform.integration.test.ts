@@ -18,7 +18,7 @@ import {
 } from "@aws-sdk/client-s3";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -2402,6 +2402,105 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       groups: [],
       appliedRevision: 4,
     });
+  });
+
+  it("delivers and records the app's current secrets without storing their values on the job", async () => {
+    // Earlier tests also exercise the queue without running a real agent.
+    await environment.database.db.update(jobs).set({ state: "succeeded" });
+    const app = await createApp("job-secrets");
+    const secrets = `/apps/${app.id}/secrets`;
+    const session = await start(app.id);
+    const deployment = contract.deployment.parse(await (await publish(app.id, session.id)).json());
+    expect((await json(`${secrets}/SYNTHETIC_TOKEN`, "PUT", { value: "first" })).status).toBe(200);
+
+    const claim = async () =>
+      contract.job.parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
+
+    const packages = (job: z.infer<typeof contract.job>) =>
+      json(
+        `/agent/jobs/${job.id}/packages?leaseToken=${job.leaseToken}`,
+        "GET",
+        undefined,
+        agentHeaders,
+      );
+
+    const stored = async (jobId: string) => {
+      const [record] = await environment.database.db
+        .select({ appSecrets: jobs.appSecrets })
+        .from(jobs)
+        .where(eq(jobs.id, jobId));
+
+      return record?.appSecrets;
+    };
+
+    const complete = (job: z.infer<typeof contract.job>) =>
+      json(
+        `/agent/jobs/${job.id}/complete`,
+        "POST",
+        {
+          leaseToken: job.leaseToken,
+          outcome: "succeeded",
+          message: "Synthetic secret activation",
+        },
+        agentHeaders,
+      );
+
+    const first = await claim();
+    expect(first).toMatchObject({ kind: "deploy", deploymentId: deployment.id, attempt: 1 });
+    expect(await stored(first.id)).toEqual({ appId: app.id, revision: 1 });
+
+    // A change after the claim reaches the agent through packages.
+    expect((await json(`${secrets}/SYNTHETIC_TOKEN`, "PUT", { value: "second" })).status).toBe(200);
+    expect((await json(`${secrets}/SYNTHETIC_KEY`, "PUT", { value: "key" })).status).toBe(200);
+    const delivered = await packages(first);
+    expect(delivered.status).toBe(200);
+    expect(contract.runtimePackages.parse(await delivered.json()).appSecrets).toEqual({
+      appId: app.id,
+      revision: 3,
+      values: { SYNTHETIC_KEY: "key", SYNTHETIC_TOKEN: "second" },
+    });
+    expect(await stored(first.id)).toEqual({ appId: app.id, revision: 3 });
+
+    // A new attempt delivers the secrets current at its own packages request.
+    await environment.database.db
+      .update(jobs)
+      .set({ leaseUntil: new Date(0) })
+      .where(eq(jobs.id, first.id));
+    expect((await json(`${secrets}/SYNTHETIC_TOKEN`, "DELETE")).status).toBe(200);
+    const retry = await claim();
+    expect(retry).toMatchObject({ id: first.id, attempt: 2 });
+    expect((await packages(first)).status).toBe(409);
+    expect(await stored(first.id)).toEqual({ appId: app.id, revision: 4 });
+    expect((await json(`${secrets}/SYNTHETIC_KEY`, "PUT", { value: "rotated" })).status).toBe(200);
+    expect(contract.runtimePackages.parse(await (await packages(retry)).json()).appSecrets).toEqual(
+      { appId: app.id, revision: 5, values: { SYNTHETIC_KEY: "rotated" } },
+    );
+    expect(await stored(first.id)).toEqual({ appId: app.id, revision: 5 });
+    expect((await complete(first)).status).toBe(409);
+    expect((await complete(retry)).status).toBe(200);
+    expect(await (await json(secrets, "GET")).json()).toMatchObject({
+      names: ["SYNTHETIC_KEY"],
+      revision: 5,
+      appliedRevision: 5,
+    });
+
+    // A job that completes without requesting packages applies its claim revision.
+    const redeploy = await claim();
+    expect(redeploy).toMatchObject({ kind: "deploy", attempt: 1 });
+    expect(await stored(redeploy.id)).toEqual({ appId: app.id, revision: 5 });
+    expect((await json(`${secrets}/SYNTHETIC_KEY`, "DELETE")).status).toBe(200);
+    expect((await complete(redeploy)).status).toBe(200);
+    expect(await (await json(secrets, "GET")).json()).toMatchObject({
+      revision: 6,
+      appliedRevision: 5,
+    });
+
+    expect(
+      await environment.database.db
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(and(eq(jobs.appId, app.id), sql`${jobs.appSecrets} ? 'values'`)),
+    ).toEqual([]);
   });
 
   it("exposes catalog discovery without management access and restricts publication to owners or administrators", async () => {

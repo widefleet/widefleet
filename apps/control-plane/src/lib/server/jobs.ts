@@ -221,13 +221,9 @@ export const createJobService = (
           access,
           network,
           capabilities,
-          appSecrets: app
-            ? {
-                appId: app.id,
-                revision: app.secretRevision,
-                values: storedAppSecrets.parse(app.secrets),
-              }
-            : null,
+          // Only the revision: packages reads the values from the app and
+          // replaces it with the revision it delivers.
+          appSecrets: app ? { appId: app.id, revision: app.secretRevision } : null,
           attempt: sql`${jobs.attempt} + 1`,
           leaseToken: crypto.randomUUID(),
           leaseUntil: sql`now() + interval '90 seconds'`,
@@ -311,11 +307,29 @@ export const createJobService = (
 
       const runtime = await loadRuntime(storage, runtimeReference.parse(lease.value.runtime));
 
-      const secretSnapshot = lease.value.appSecrets
-        ? z
-            .object({ appId: z.uuid(), revision: z.number(), values: storedAppSecrets })
-            .parse(lease.value.appSecrets)
+      // Deliver the secrets the app has now, not those it had at claim, and
+      // record their revision for completion to apply. The job row never
+      // holds the values.
+      const [app] = lease.value.appId
+        ? await transaction
+            .select({ id: apps.id, secrets: apps.secrets, secretRevision: apps.secretRevision })
+            .from(apps)
+            .where(eq(apps.id, lease.value.appId))
+        : [];
+
+      const secretSnapshot = app
+        ? {
+            appId: app.id,
+            revision: app.secretRevision,
+            values: storedAppSecrets.parse(app.secrets),
+          }
         : null;
+
+      if (secretSnapshot)
+        await transaction
+          .update(jobs)
+          .set({ appSecrets: { appId: secretSnapshot.appId, revision: secretSnapshot.revision } })
+          .where(eq(jobs.id, jobId));
 
       const appSecrets = secretSnapshot
         ? {
