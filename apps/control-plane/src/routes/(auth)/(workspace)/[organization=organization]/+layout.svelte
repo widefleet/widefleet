@@ -10,6 +10,7 @@
 
 <Workspace
   principal={workspace.principal}
+  image={workspace.image}
   organization={workspace.organization}
   organizations={workspace.organizations}>{@render children()}</Workspace
 >

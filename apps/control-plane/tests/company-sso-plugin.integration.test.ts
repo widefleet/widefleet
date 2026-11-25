@@ -566,7 +566,11 @@ describe("Better Auth SSO provider integration", () => {
         email_verified: true,
       };
 
-      const idToken = await new SignJWT(profile)
+      const picture = `https://pictures.example.test/${kind}`;
+
+      // The picture is only in the ID token, which the sign-in hook reads after Better Auth
+      // has created the user from the user-info response.
+      const idToken = await new SignJWT({ ...profile, picture })
         .setProtectedHeader({ alg: "RS256", kid: publicKey.kid })
         .setIssuer(issuer)
         .setAudience("synthetic-client")
@@ -758,7 +762,7 @@ describe("Better Auth SSO provider integration", () => {
 
         expect(authenticated.status).toBe(200);
         expect(await authenticated.json()).toMatchObject({
-          user: { email: profile.email, name: profile.name },
+          user: { email: profile.email, name: profile.name, image: picture },
           session: { identityOrganizationId: "widefleet" },
         });
 

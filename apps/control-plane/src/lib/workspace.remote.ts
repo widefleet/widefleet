@@ -1,6 +1,6 @@
 import { getRequestEvent, query } from "$app/server";
 import { z } from "zod";
-import { organizationSlug } from "@platform/contracts";
+import { organizationSlug, profileImage } from "@platform/contracts";
 import { remoteContext, queryValue } from "#server/remote-support";
 import { getRuntime } from "#server/runtime";
 import { sessionSignIn } from "#server/identity";
@@ -27,6 +27,14 @@ export const getWorkspace = query(
 
     const { principal, organization } = await remoteContext({ organizationId: selected.id });
 
-    return { principal, organization, organizations };
+    return {
+      principal,
+      image: profileImage
+        .nullable()
+        .catch(null)
+        .parse(user.image ?? null),
+      organization,
+      organizations,
+    };
   },
 );
