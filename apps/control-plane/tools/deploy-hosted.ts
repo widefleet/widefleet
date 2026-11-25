@@ -29,7 +29,7 @@ import {
   hostedResourceNames,
   readHostedInstallation,
 } from "./hosted-configuration.ts";
-import { provisionHostedResources } from "./hosted-resources.ts";
+import { provisionHostedResources, requireHostedKeyring } from "./hosted-resources.ts";
 import {
   initializeCloudflareInstallation,
   type InitializationPlatform,
@@ -81,7 +81,7 @@ const secrets = z
       .refine((value) => ["postgres:", "postgresql:"].includes(new URL(value).protocol)),
     BETTER_AUTH_SECRET: z.string().min(32),
     PLATFORM_ENCRYPTION_KEY: z.string().min(32),
-    // Optional: without it, the deployed secret stays as it is.
+    // Optional until the control plane has one; omitting it keeps the deployed secret.
     PLATFORM_ENCRYPTION_KEYS: z
       .string()
       .optional()
@@ -240,6 +240,7 @@ let proxy: Awaited<ReturnType<typeof getPlatformProxy<InitializationPlatform>>> 
 
 try {
   console.info(`Preparing Hosted installation ${installation.name}`);
+  await requireHostedKeyring(installation, cloudflare, secrets.PLATFORM_ENCRYPTION_KEYS);
   await migrate(database.db, { migrationsFolder: resolve(controlDirectory, "migrations") });
   const initialized = await initializeCloudflareRuntime(database.db);
 
