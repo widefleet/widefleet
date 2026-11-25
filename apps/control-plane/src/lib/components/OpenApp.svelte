@@ -11,6 +11,7 @@
   // Chrome and Edge on computers install another site's web app with <install>, which
   // they label Launch once it is installed. Pages cannot read whether an app is
   // installed, so this browser remembers the installs it saw and whether to ask.
+  // Open app stays a link: Chrome opens it in the installed app's window.
   const promptKey = "widefleet:install-prompt";
 
   const installedKey = $derived(`widefleet:installed:${app.id}`);
@@ -33,15 +34,12 @@
 
   let supported = $state(false);
 
-  let installed = $state(false);
-
   let open = $state(false);
 
   let quiet = $state(false);
 
   $effect(() => {
     supported = "HTMLInstallElement" in window;
-    installed = read(installedKey) === "installed";
   });
 
   // The installresult event of <install>.
@@ -56,7 +54,6 @@
   const finished = (event: Event) => {
     if (!installResult.safeParse(event).success) return;
     write(installedKey, "installed");
-    installed = true;
     open = false;
   };
 
@@ -65,27 +62,19 @@
   const manifestid = $derived(new URL("/", app.url).href);
 </script>
 
-{#if supported && installed}
-  <install
-    {manifest}
-    {manifestid}
-    class="bg-background text-foreground h-8 rounded-md px-3 text-sm font-medium"
-  ></install>
-{:else}
-  <Button
-    href={app.url}
-    target="_blank"
-    rel="noreferrer"
-    variant="ghost"
-    size="sm"
-    onclick={(event: MouseEvent) => {
-      // Read on each click: another card may have turned the question off.
-      if (!supported || read(promptKey) === "off") return;
-      event.preventDefault();
-      open = true;
-    }}>Open app<ArrowUpRight /><span class="sr-only"> {app.displayName} in a new tab</span></Button
-  >
-{/if}
+<Button
+  href={app.url}
+  target="_blank"
+  rel="noreferrer"
+  variant="ghost"
+  size="sm"
+  onclick={(event: MouseEvent) => {
+    // Read on each click: another card may have turned the question off.
+    if (!supported || read(promptKey) === "off" || read(installedKey) === "installed") return;
+    event.preventDefault();
+    open = true;
+  }}>Open app<ArrowUpRight /><span class="sr-only"> {app.displayName} in a new tab</span></Button
+>
 
 <Dialog.Root
   bind:open
@@ -95,9 +84,9 @@
 >
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Install {app.displayName}?</Dialog.Title>
+      <Dialog.Title>Use {app.displayName} as an app?</Dialog.Title>
       <Dialog.Description>
-        It opens in its own window and stays in your Dock or taskbar.
+        Installed apps open in their own window and stay in your Dock or taskbar.
       </Dialog.Description>
     </Dialog.Header>
     <div class="flex items-center gap-2">
