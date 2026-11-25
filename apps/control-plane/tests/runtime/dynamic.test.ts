@@ -277,6 +277,27 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         { path: "/static/index.html", text: "<p>home</p>", hash: "4".repeat(32) },
         { path: "/loop", text: "same asset", hash: "5".repeat(32) },
         {
+          path: "/page.html",
+          text: "<!doctype html><html><head><title>Page</title></head><body></body></html>",
+          hash: "7".repeat(32),
+        },
+        {
+          path: "/own.html",
+          text: '<html><head><link rel="manifest" href="/own.webmanifest"></head></html>',
+          hash: "8".repeat(32),
+        },
+        {
+          path: "/favicon.svg",
+          text: "<svg xmlns='http://www.w3.org/2000/svg'/>",
+          hash: "9".repeat(32),
+        },
+        // Only the IHDR dimensions are read: 120 ("x") by 120 pixels.
+        {
+          path: "/apple-touch-icon.png",
+          text: "PNG-HEADER-IHDR-\0\0\0x\0\0\0x",
+          hash: "a".repeat(32),
+        },
+        {
           path: "/_headers",
           text: '/asset.txt\n  Cache-Control: public, max-age=3600\n  X-Fixture: preserved\n  Content-Length: 999\n  ETag: "release-1"\n/no-tag.txt\n  ! ETag\n/weak-tag.txt\n  ETag: W/"release-weak"\n',
           hash: "2".repeat(32),
@@ -294,6 +315,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         version,
         deploymentId,
         hostname: "fixture.apps.example.test",
+        displayName: "Fixture",
         metadata: {
           ...metadata,
           debug: { build_id: "fixture-current-build", source_maps: {} },
@@ -831,6 +853,34 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       expect(canonical.status).toBe(307);
       expect(canonical.headers.get("location")).toBe("https://fixture.apps.example.test/about/");
       expect(await (await fetch(`${origin}/about/`)).text()).toBe("<p>about</p>");
+    });
+
+    it("links pages to a web app manifest unless they link their own", async () => {
+      const page = await fetch(`${origin}/page`);
+
+      expect(page.headers.has("content-length")).toBe(false);
+      expect(await page.text()).toBe(
+        '<!doctype html><html><head><title>Page</title><link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials"></head><body></body></html>',
+      );
+      expect(await (await fetch(`${origin}/own`)).text()).toBe(
+        '<html><head><link rel="manifest" href="/own.webmanifest"></head></html>',
+      );
+      expect(await (await fetch(`${origin}/asset.txt`)).text()).toBe("fixture asset");
+
+      const manifest = await fetch(`${origin}/manifest.webmanifest`);
+
+      expect(manifest.headers.get("content-type")).toBe("application/manifest+json");
+      expect(manifest.headers.has("content-security-policy")).toBe(true);
+      expect(await manifest.json()).toEqual({
+        name: "Fixture",
+        start_url: "/",
+        scope: "/",
+        display: "standalone",
+        icons: [
+          { src: "/favicon.svg", type: "image/svg+xml", sizes: "any" },
+          { src: "/apple-touch-icon.png", type: "image/png", sizes: "120x120" },
+        ],
+      });
     });
 
     it("serves rewrite targets once without redirecting the original URL", async () => {

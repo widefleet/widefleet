@@ -257,6 +257,7 @@ export const createJobService = (
           origin: candidate.hostname
             ? new URL(appUrl(candidate.hostname, appHttpsPort)).origin
             : null,
+          displayName: app?.displayName ?? null,
           deploymentId: claimed.deploymentId,
           artifactId,
           access,

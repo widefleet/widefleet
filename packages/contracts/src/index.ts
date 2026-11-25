@@ -625,6 +625,8 @@ export const runtimeUpdate = z.strictObject({ version: runtimeVersion });
 
 export const publishedApp = artifact.extend({
   origin: z.url().optional(),
+  // Installed apps show this name.
+  displayName: appDisplayName.optional(),
   secretRevision: z.number().int().nonnegative().optional(),
   organizationId: organizationIdentifier.optional(),
   network: networkSnapshot,
@@ -677,6 +679,7 @@ export const job = z.strictObject({
   appId: identifier.nullable(),
   hostname: z.string().nullable(),
   origin: z.url().nullable().default(null),
+  displayName: appDisplayName.nullable().default(null),
   deploymentId: identifier.nullable(),
   artifactId: identifier.nullable(),
   attempt: z.number().int().positive(),

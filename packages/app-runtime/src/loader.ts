@@ -33,6 +33,7 @@ import { organizationIdentifier, workflowRequest } from "@platform/contracts";
 import { appWorker, workerCode } from "./worker.ts";
 import { browserPolicy } from "./csp.ts";
 import { serveAsset } from "./assets.ts";
+import { linkManifest, manifestPath, webManifest } from "./web-app.ts";
 import { readApp } from "./catalog.ts";
 import { refreshServiceIndex } from "./service-index.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
@@ -232,7 +233,11 @@ const dispatchApp = async (
     const asset = await serveAsset(request, environment, app);
 
     if (asset.status !== 404)
-      return browserPolicy(asset, app.network.policy.browser, authenticated?.frameAncestors);
+      return browserPolicy(
+        linkManifest(app, asset),
+        app.network.policy.browser,
+        authenticated?.frameAncestors,
+      );
   }
 
   const proof = authenticated
@@ -244,17 +249,35 @@ const dispatchApp = async (
       )
     : undefined;
 
+  // celld forwards incoming request cancellation only when the signal is
+  // explicitly supplied to the subrequest.
+  const response = await run(app, environment, context, (worker) =>
+    worker
+      .getEntrypoint(undefined, {
+        ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"),
+        props: { caller: authenticated?.caller ?? null, appCaller: proof },
+      })
+      .fetch(request, { signal: request.signal }),
+  );
+
+  // An app that serves no manifest of its own gets one with its Widefleet name.
+  if (
+    app.displayName &&
+    url.pathname === manifestPath &&
+    request.method === "GET" &&
+    response.status === 404
+  ) {
+    await response.body?.cancel();
+
+    return browserPolicy(
+      await webManifest(environment, app, app.displayName),
+      app.network.policy.browser,
+      authenticated?.frameAncestors,
+    );
+  }
+
   return browserPolicy(
-    // celld forwards incoming request cancellation only when the signal is
-    // explicitly supplied to the subrequest.
-    await run(app, environment, context, (worker) =>
-      worker
-        .getEntrypoint(undefined, {
-          ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"),
-          props: { caller: authenticated?.caller ?? null, appCaller: proof },
-        })
-        .fetch(request, { signal: request.signal }),
-    ),
+    linkManifest(app, response),
     app.network.policy.browser,
     authenticated?.frameAncestors,
   );

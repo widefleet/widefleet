@@ -283,6 +283,7 @@ pub async fn prepare(
     let mut candidate = match artifact {
         Some(artifact) => Some(PublishedApp {
             origin: job.origin.clone(),
+            display_name: job.display_name.clone(),
             secret_revision: packages
                 .app_secrets
                 .as_ref()
