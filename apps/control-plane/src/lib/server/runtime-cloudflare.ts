@@ -57,6 +57,7 @@ const observation: Observation = {
   capture: (event) => current().observation.capture(event),
   exception: (error, distinctId, properties) =>
     current().observation.exception(error, distinctId, properties),
+  alias: (userId, aliases) => current().observation.alias(userId, aliases),
   close: () => current().observation.close(),
 };
 

@@ -173,8 +173,8 @@ describe("App identity of management accounts", () => {
       },
       observation: {
         capture: () => {},
-        alias: (userId, alias) => {
-          aliases.push([userId, alias]);
+        alias: async (userId, linked) => {
+          for (const alias of await linked()) aliases.push([userId, alias]);
         },
         close: async () => {},
       },

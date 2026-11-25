@@ -224,14 +224,15 @@ export const createAuthentication = (
               userId: record.userId,
             });
 
-            const { observation, appIdentityLinks } = options;
+            const { appIdentityLinks } = options;
 
-            if (!observation?.alias || !appIdentityLinks) return;
+            if (!appIdentityLinks) return;
 
             // Awaited so the links are captured before the request's analytics drain.
             try {
-              for (const alias of await appIdentityLinks(record.userId))
-                await observation.alias(record.userId, alias);
+              await options.observation?.alias?.(record.userId, () =>
+                appIdentityLinks(record.userId),
+              );
             } catch {
               // Analytics must not fail sign-in.
             }

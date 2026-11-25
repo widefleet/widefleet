@@ -65,13 +65,22 @@ it("sends immediately with the browser user ID and organization group", async ()
   await observer.close();
 });
 
-it("links another distinct ID to the user's person", async () => {
+it("links other distinct IDs to the user's person", async () => {
   const { events, observer } = fixture();
-  observer.alias("a", "app-user:hash");
+  await observer.alias("a", async () => ["app-user:hash"]);
   await observer.close();
   expect(events).toMatchObject([
     { event: "$create_alias", distinct_id: "user:a", properties: { alias: "app-user:hash" } },
   ]);
+});
+
+it("does not read the IDs to link when analytics is disabled", async () => {
+  const aliases = vi.fn(async () => ["app-user:hash"]);
+  await createProductAnalytics({ ...analyticsEnvironment, PLATFORM_URL: "http://localhost" }).alias(
+    "a",
+    aliases,
+  );
+  expect(aliases).not.toHaveBeenCalled();
 });
 
 it("stays inactive without configuration or on a different origin", async () => {

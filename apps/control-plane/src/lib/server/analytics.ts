@@ -55,8 +55,10 @@ export const createProductAnalytics = (
         ...properties,
       });
     },
-    alias: (userId: string, alias: string) => {
-      sdk?.alias({ distinctId: `user:${userId}`, alias });
+    alias: async (userId: string, aliases: () => Promise<string[]>) => {
+      if (!sdk) return;
+
+      for (const alias of await aliases()) sdk.alias({ distinctId: `user:${userId}`, alias });
     },
     close: async () => {
       try {
