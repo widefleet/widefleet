@@ -30,7 +30,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
 import { pluginAuthentication, managedPluginPaths } from "./plugin-authentication.ts";
 import { cliLoginPlugin, createCliLogin } from "./cli-login.ts";
-import { createSecretEncryption, type SecretEncryption } from "./secret-encryption.ts";
+import { configuredSecretEncryption, type SecretEncryption } from "./secret-encryption.ts";
 import { createMcpCliLogin, mcpCliLoginPlugin, type CliLoginSettings } from "./mcp-cli-login.ts";
 
 export const companyLoginRevision = (
@@ -88,7 +88,10 @@ export const createAuthentication = (
   const legacyKey = configuration.PLATFORM_ENCRYPTION_KEY ?? configuration.BETTER_AUTH_SECRET;
 
   const encryption =
-    options.encryption ?? (legacyKey ? createSecretEncryption({ legacyKey }) : undefined);
+    options.encryption ??
+    (legacyKey
+      ? configuredSecretEncryption(legacyKey, configuration.PLATFORM_ENCRYPTION_KEYS)
+      : undefined);
 
   if (!encryption) throw new Error("An encryption key is required for authentication");
 

@@ -122,6 +122,8 @@ export const createTestEnvironment = async (
     PLATFORM_RUNTIME_DIRECTORY: join(directory, "auth"),
     PLATFORM_APP_RUNTIME_URL: authControl.url,
     PLATFORM_ENCRYPTION_KEY: "local-integration-test-encryption-key-only",
+    // Synthetic key material, shared with Cloudflare bindings and the built server.
+    PLATFORM_ENCRYPTION_KEYS: "test:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
     DATABASE_URL: `postgres://platform_test:local-test-only@127.0.0.1:25432/${name}`,
     PLATFORM_URL: platformUrl,
     APP_DOMAIN: "apps.localhost",
