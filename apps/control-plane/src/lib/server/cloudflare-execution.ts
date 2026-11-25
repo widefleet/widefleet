@@ -14,6 +14,7 @@ import { validateAccessChange } from "./app-access.ts";
 import { presentDeployment } from "./apps.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { registerCloudflareOperation } from "./cloudflare-operations.ts";
+import { readPendingDeploymentSecrets } from "./cloudflare-pending-secrets.ts";
 import type { Database } from "./database.ts";
 import { deploymentCommand, type HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
@@ -66,6 +67,8 @@ export const createCloudflareExecution = (
   return {
     runtime: createCloudflareRuntimeReleases(bindings, database, storage),
     remove: createCloudflareRemoval(bindings, database),
+    pendingSecrets: () =>
+      readPendingDeploymentSecrets(database, bindings.ARTIFACTS, bindings.DEPLOYMENTS),
     connections: {
       bind: async (actor, appId, name, grant) => {
         const valid = await transact(database, (transaction) =>

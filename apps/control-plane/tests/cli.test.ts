@@ -73,6 +73,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     const requests: string[] = [];
+    const reencryptBodies: z.infer<ReturnType<typeof z.json>>[] = [];
     const organizations: (string | string[] | undefined)[] = [];
     let requiredOrganization: string | undefined;
     const catalogUpdates: z.infer<typeof contract.catalogListing>[] = [];
@@ -449,20 +450,43 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
-      if (request.url === "/api/v1/encryption" || request.url === "/api/v1/encryption/reencrypt") {
-        const status = {
-          activeKeyVersion: "current",
-          keyVersions: [
-            { id: "current", values: 3, active: true, available: true },
-            { id: null, values: request.method === "POST" ? 0 : 3, active: false, available: true },
-          ],
-        };
-
+      if (request.url === "/api/v1/encryption") {
         response.end(
-          JSON.stringify(
-            request.method === "POST" ? { reencrypted: 3, changed: 0, failed: 0, status } : status,
-          ),
+          JSON.stringify({
+            activeKeyVersion: "current",
+            pendingDeployments: 0,
+            keyVersions: [
+              { id: "current", values: 3, pending: 0, active: true, available: true },
+              {
+                id: null,
+                values: reencryptBodies.length > 1 ? 0 : 3,
+                pending: 0,
+                active: false,
+                available: true,
+              },
+            ],
+          }),
         );
+
+        return;
+      }
+
+      if (request.url === "/api/v1/encryption/reencrypt") {
+        // Two bounded batches: the first returns a cursor, the second finishes.
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          reencryptBodies.push(z.json().parse(JSON.parse(body)));
+          response.end(
+            JSON.stringify(
+              reencryptBodies.length === 1
+                ? { reencrypted: 2, changed: 0, failed: 0, cursor: "synthetic-cursor" }
+                : { reencrypted: 1, changed: 0, failed: 0, cursor: null },
+            ),
+          );
+        });
 
         return;
       }
@@ -1761,11 +1785,16 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         activeKeyVersion: "current",
         keyVersions: [{ id: "current" }, { id: null, values: 3 }],
       });
-      expect(JSON.parse((await encryptionCli("reencrypt")).stdout)).toMatchObject({
+
+      const reencrypted = await encryptionCli("reencrypt");
+
+      expect(reencrypted.stderr).toContain("Re-encrypted 2 secrets so far");
+      expect(reencrypted.stderr).toContain("Re-encrypted 3 secrets so far");
+      expect(JSON.parse(reencrypted.stdout)).toMatchObject({
         reencrypted: 3,
         status: { keyVersions: [{ id: "current" }, { id: null, values: 0 }] },
       });
-      expect(requests).toContain("POST /api/v1/encryption/reencrypt");
+      expect(reencryptBodies).toEqual([{}, { cursor: "synthetic-cursor" }]);
     });
 
     it("reports runtime activation failure", async () => {

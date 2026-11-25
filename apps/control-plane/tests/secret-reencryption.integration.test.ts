@@ -4,7 +4,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readAppLogin } from "../src/lib/server/app-login-client.ts";
 import { storedAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
-import { apps, organizationSettings } from "../src/lib/server/schema.ts";
+import {
+  apps,
+  cloudflareOperations,
+  deployments,
+  organizationSettings,
+} from "../src/lib/server/schema.ts";
 import {
   createSecretEncryption,
   parseKeyring,
@@ -13,8 +18,13 @@ import {
 import {
   createSecretMaintenance,
   readSecretEncryption,
-  reencryptSecrets,
+  reencryptAllSecrets,
 } from "../src/lib/server/secret-reencryption.ts";
+import {
+  readPendingDeploymentSecrets,
+  type CommandStore,
+  type DeploymentWorkflows,
+} from "../src/lib/server/cloudflare-pending-secrets.ts";
 import { readSsoConfiguration } from "../src/lib/server/sso-settings.ts";
 import { organization } from "../src/lib/server/auth-schema.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
@@ -142,7 +152,7 @@ describe("re-encryption", () => {
     expect(before.activeKeyVersion).toBe("current");
     expect(before.keyVersions).toEqual(
       expect.arrayContaining([
-        { id: "current", values: 0, active: true, available: true },
+        { id: "current", values: 0, pending: 0, active: true, available: true },
         expect.objectContaining({ id: null, active: false, available: true }),
         expect.objectContaining({ id: "previous", active: false, available: true }),
       ]),
@@ -151,16 +161,16 @@ describe("re-encryption", () => {
     expect(before.keyVersions.find((version) => version.id === "previous")?.values).toBe(3);
 
     const total = remaining(before);
-    const result = await reencryptSecrets(database, encryption);
+    const result = await reencryptAllSecrets(database, encryption);
 
-    expect(result).toMatchObject({ reencrypted: total, changed: 0, failed: 0 });
-    expect(result.status.keyVersions).toEqual([
-      { id: "current", values: total, active: true, available: true },
-      { id: "test", values: 0, active: false, available: true },
-      { id: "previous", values: 0, active: false, available: true },
-      { id: null, values: 0, active: false, available: true },
+    expect(result).toEqual({ reencrypted: total, changed: 0, failed: 0 });
+    expect((await readSecretEncryption(database, encryption)).keyVersions).toEqual([
+      { id: "current", values: total, pending: 0, active: true, available: true },
+      { id: "test", values: 0, pending: 0, active: false, available: true },
+      { id: "previous", values: 0, pending: 0, active: false, available: true },
+      { id: null, values: 0, pending: 0, active: false, available: true },
     ]);
-    expect((await reencryptSecrets(database, encryption)).reencrypted).toBe(0);
+    expect((await reencryptAllSecrets(database, encryption)).reencrypted).toBe(0);
 
     // Readers find every value, with the contexts re-encryption used.
     const [app] = await database.select().from(apps).where(eq(apps.id, entry.appId));
@@ -233,10 +243,10 @@ describe("re-encryption", () => {
       },
     };
 
-    const first = await reencryptSecrets(database, racing);
+    const first = await reencryptAllSecrets(database, racing);
 
     expect(first).toMatchObject({ changed: 1, failed: 1 });
-    expect(first.status.keyVersions).toEqual(
+    expect((await readSecretEncryption(database, target)).keyVersions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "previous", values: 1 }),
         expect.objectContaining({ id: "missing", values: 1, available: false }),
@@ -250,7 +260,7 @@ describe("re-encryption", () => {
 
     expect(kept?.value).toBe(written);
 
-    const second = await reencryptSecrets(database, target);
+    const second = await reencryptAllSecrets(database, target);
 
     expect(second).toMatchObject({ reencrypted: 1, changed: 0, failed: 1 });
     expect(
@@ -278,7 +288,197 @@ describe("re-encryption", () => {
     };
 
     expect((await maintenance.status(principal)).isErr()).toBe(true);
-    expect((await maintenance.reencrypt(principal)).isErr()).toBe(true);
+    expect((await maintenance.reencrypt(principal, null)).isErr()).toBe(true);
     expect((await maintenance.status({ ...principal, admin: true })).isOk()).toBe(true);
+    expect(
+      (await maintenance.reencrypt({ ...principal, admin: true }, "not-a-cursor")).isErr(),
+    ).toBe(true);
+  });
+
+  it("pages past rows without ciphertexts and resumes each batch where the last stopped", async () => {
+    const database = environment.database.db;
+    const legacyKey = environment.environment.PLATFORM_ENCRYPTION_KEY;
+    const legacy = createSecretEncryption({ legacyKey });
+    const encryption = service(`${current},${environment.environment.PLATFORM_ENCRYPTION_KEYS}`);
+
+    const count = async () =>
+      (await readSecretEncryption(database, encryption)).keyVersions.find(
+        (version) => version.id === null,
+      )?.values ?? 0;
+
+    const before = await count();
+
+    // A full first page of documents without a readable secret, then 40 legacy ones.
+    const ids = Array.from(
+      { length: 150 },
+      (_, index) => `paging-${String(index).padStart(3, "0")}`,
+    );
+
+    await database
+      .insert(organization)
+      .values(ids.map((id) => ({ id, name: id, slug: id, createdAt: new Date() })));
+    await database.insert(organizationSettings).values(
+      await Promise.all(
+        ids.map(async (id, index) => ({
+          organizationId: id,
+          settings: {
+            externallyManaged: false,
+            identity:
+              index < 110
+                ? null
+                : {
+                    management: {
+                      clientId: id,
+                      secret: {
+                        ciphertext: await legacy.encrypt(
+                          { kind: "legacy-sso-client-secret", organizationId: id },
+                          id,
+                        ),
+                      },
+                    },
+                  },
+          },
+        })),
+      ),
+    );
+
+    expect(await count()).toBe(before + 40);
+
+    const batches: number[] = [];
+
+    const result = await reencryptAllSecrets(database, encryption, (batch) =>
+      batches.push(batch.reencrypted),
+    );
+
+    expect(result.reencrypted).toBeGreaterThanOrEqual(40);
+    expect(batches.length).toBeGreaterThan(1);
+    expect(await count()).toBe(0);
+  });
+
+  it("counts secrets of hosted deployments that their Workflow has not registered yet", async () => {
+    const database = environment.database.db;
+    const pendingApp = await seedDeployment(database, { bindings: [] });
+    const deployedApp = await seedDeployment(database, { bindings: [] });
+
+    await database.insert(deployments).values({
+      id: deployedApp.command.id,
+      appId: deployedApp.appId,
+      artifactId: deployedApp.artifact.id,
+      requestId: deployedApp.command.requestId,
+    });
+
+    const earlier = service(previous);
+
+    const legacy = createSecretEncryption({
+      legacyKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+    });
+
+    const secrets = async (appId: string) => ({
+      kind: "deploy",
+      secrets: {
+        TOKEN: await earlier.encrypt(
+          { kind: "app-secret", organizationId: "widefleet", appId, name: "TOKEN" },
+          "token",
+        ),
+        OTHER: await legacy.encrypt(
+          { kind: "app-secret", organizationId: "widefleet", appId, name: "OTHER" },
+          "other",
+        ),
+      },
+    });
+
+    const ids = {
+      waiting: crypto.randomUUID(),
+      unreadable: crypto.randomUUID(),
+      registered: crypto.randomUUID(),
+      finished: crypto.randomUUID(),
+      unknown: crypto.randomUUID(),
+      network: crypto.randomUUID(),
+      deployed: crypto.randomUUID(),
+    };
+
+    const command = (appId: string, id: string) => `apps/${appId}/commands/${id}.json`;
+
+    const objects = new Map<string, string>([
+      [command(pendingApp.appId, ids.waiting), JSON.stringify(await secrets(pendingApp.appId))],
+      [command(pendingApp.appId, ids.unreadable), "{"],
+      [command(pendingApp.appId, ids.registered), JSON.stringify(await secrets(pendingApp.appId))],
+      [command(pendingApp.appId, ids.finished), JSON.stringify(await secrets(pendingApp.appId))],
+      [command(pendingApp.appId, ids.unknown), JSON.stringify(await secrets(pendingApp.appId))],
+      [command(pendingApp.appId, ids.network), JSON.stringify({ kind: "network" })],
+      [command(deployedApp.appId, ids.deployed), JSON.stringify(await secrets(deployedApp.appId))],
+    ]);
+
+    await database.insert(cloudflareOperations).values({
+      id: ids.registered,
+      appId: pendingApp.appId,
+      command: {},
+      targets: [],
+      result: {},
+      createdAt: new Date(),
+    });
+
+    // Lists two objects per page, so the reader follows R2 cursors.
+    const store: CommandStore = {
+      list: async ({ prefix, cursor }) => {
+        const keys = [...objects.keys()].filter((key) => key.startsWith(prefix)).sort();
+        const offset = Number(cursor ?? 0);
+        const page = keys.slice(offset, offset + 2);
+
+        return offset + 2 < keys.length
+          ? { objects: page.map((key) => ({ key })), truncated: true, cursor: String(offset + 2) }
+          : { objects: page.map((key) => ({ key })), truncated: false };
+      },
+      get: async (key) => {
+        const body = objects.get(key);
+
+        return body === undefined ? null : { text: async () => body };
+      },
+    };
+
+    const statuses = new Map<string, string>([
+      [ids.waiting, "running"],
+      [ids.unreadable, "queued"],
+      [ids.registered, "running"],
+      [ids.finished, "errored"],
+      [ids.network, "running"],
+      [ids.deployed, "running"],
+    ]);
+
+    const workflows: DeploymentWorkflows = {
+      get: async (id) => {
+        const status = statuses.get(id);
+
+        if (status === undefined) throw new Error("Workflow instance not found");
+
+        return { status: async () => ({ status }) };
+      },
+    };
+
+    const encryption = service(`${current},${previous}`);
+
+    const status = (
+      await createSecretMaintenance(database, encryption, () =>
+        readPendingDeploymentSecrets(database, store, workflows),
+      ).status({
+        ...environment.owner,
+        role: "owner",
+        admin: true,
+        creator: true,
+        application: { organizationId: "widefleet", admin: true },
+      })
+    ).unwrap();
+
+    expect(status.pendingDeployments).toBe(2);
+    expect(status.keyVersions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "previous", pending: 1 }),
+        expect.objectContaining({ id: null, pending: 1 }),
+      ]),
+    );
+    expect(await readPendingDeploymentSecrets(database, store, undefined)).toEqual({
+      deployments: 0,
+      ciphertexts: [],
+    });
   });
 });

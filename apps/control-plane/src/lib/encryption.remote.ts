@@ -1,6 +1,7 @@
-import { form, query } from "$app/server";
+import { command, query } from "$app/server";
 import { organizationSelection } from "@platform/contracts";
-import { formValue, queryValue, remoteContext } from "#server/remote-support";
+import { z } from "zod";
+import { commandContext, queryValue, remoteContext } from "#server/remote-support";
 
 export const getSecretEncryption = query(organizationSelection, async (selection) => {
   const { runtime, principal } = await remoteContext(selection);
@@ -8,12 +9,16 @@ export const getSecretEncryption = query(organizationSelection, async (selection
   return queryValue(await runtime.secretEncryption.status(principal));
 });
 
-export const reencryptSecrets = form(organizationSelection, async ({ organizationId }) => {
-  const { runtime, principal } = await remoteContext({ organizationId });
-  const result = formValue(await runtime.secretEncryption.reencrypt(principal));
+// The page repeats this until the cursor is null, as the CLI does with the API.
+export const reencryptSecretBatch = command(
+  z.object({ ...organizationSelection.shape, cursor: z.string().min(1).nullable() }),
+  async ({ organizationId, cursor }) => {
+    const { runtime, principal } = await commandContext({ organizationId });
+    const batch = queryValue(await runtime.secretEncryption.reencrypt(principal, cursor));
 
-  // The result already counts what remains, so the page needs no second read.
-  getSecretEncryption({ organizationId }).set(result.status);
+    // The last batch returns the updated counts in the same response.
+    if (batch.cursor === null) await getSecretEncryption({ organizationId }).refresh();
 
-  return result;
-});
+    return batch;
+  },
+);

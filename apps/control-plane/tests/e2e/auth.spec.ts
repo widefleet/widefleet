@@ -1097,29 +1097,40 @@ test("shows deployment agents only to administrators", async ({ browser }) => {
 });
 
 test("lets installation administrators re-encrypt stored secrets", async ({ browser }) => {
-  // A value that an earlier release stored with the legacy key.
+  // Values that an earlier release stored with the legacy key, in more apps than one batch.
   const entry = await seedDeployment(environment.database.db, { bindings: [] });
 
   const legacy = createSecretEncryption({
     legacyKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
   });
 
+  const stored = async (appId: string) => ({
+    TOKEN: await legacy.encrypt(
+      { kind: "app-secret", organizationId: entry.organizationId, appId, name: "TOKEN" },
+      "synthetic-token",
+    ),
+  });
+
   await environment.database.db
     .update(apps)
-    .set({
-      secrets: {
-        TOKEN: await legacy.encrypt(
-          {
-            kind: "app-secret",
-            organizationId: entry.organizationId,
-            appId: entry.appId,
-            name: "TOKEN",
-          },
-          "synthetic-token",
-        ),
-      },
-    })
+    .set({ secrets: await stored(entry.appId) })
     .where(eq(apps.id, entry.appId));
+
+  const ids = Array.from({ length: 120 }, () => crypto.randomUUID());
+
+  await environment.database.db.insert(apps).values(
+    await Promise.all(
+      ids.map(async (id) => ({
+        id,
+        slug: `reencryption-${id}`,
+        displayName: "Re-encryption fixture",
+        organizationId: entry.organizationId,
+        ownerId: "fixture-owner",
+        hostname: `reencryption-${id}.example.test`,
+        secrets: await stored(id),
+      })),
+    ),
+  );
 
   const context = await browser.newContext({
     baseURL: environment.configuration.PLATFORM_URL,
@@ -1138,6 +1149,11 @@ test("lets installation administrators re-encrypt stored secrets", async ({ brow
 
   try {
     const page = await context.newPage();
+    const batches: string[] = [];
+
+    page.on("request", (request) => {
+      if (request.url().includes("reencryptSecretBatch")) batches.push(request.url());
+    });
     await page.goto("/widefleet/settings/company-sign-in");
     await page.getByRole("link", { name: "Encryption keys" }).click();
     await expect(page.getByRole("heading", { name: "Encryption keys" })).toBeVisible();
@@ -1146,12 +1162,14 @@ test("lets installation administrators re-encrypt stored secrets", async ({ brow
     await expect(versions.getByRole("listitem").first()).toContainText("Encrypts new secrets");
     await expect(
       versions.getByRole("listitem").filter({ hasText: "Key of earlier releases" }),
-    ).toContainText("1 secret");
+    ).toContainText("121 secrets");
     await page.getByRole("button", { name: "Re-encrypt secrets" }).click();
     await expect(page.getByRole("status")).toContainText(
-      "Re-encrypted 1 secret with the active key version.",
+      "Re-encrypted 121 secrets with the active key version.",
     );
     await expect(page.getByText("All stored secrets use the active key version.")).toBeVisible();
+    // The page repeats bounded batches until the server reports no more work.
+    expect(batches.length).toBeGreaterThan(1);
 
     const [saved] = await environment.database.db
       .select()
@@ -1161,6 +1179,8 @@ test("lets installation administrators re-encrypt stored secrets", async ({ brow
     expect(storedAppSecrets.parse(saved?.secrets)["TOKEN"]).toMatch(/^v1:test:/);
   } finally {
     await context.close();
+    // Later tests list the organization's apps.
+    await environment.database.db.delete(apps).where(inArray(apps.id, ids));
   }
 });
 

@@ -660,6 +660,8 @@ export const secretKeyVersion = z.strictObject({
   /** The key version's ID, or `null` for the key that earlier releases used. */
   id: z.string().nullable(),
   values: z.number().int().nonnegative(),
+  /** Secrets of this version in accepted deployments that have not saved them yet. */
+  pending: z.number().int().nonnegative(),
   /** Whether new secrets use this version. */
   active: z.boolean(),
   /** Whether the installation holds this key and can decrypt its values. */
@@ -668,9 +670,12 @@ export const secretKeyVersion = z.strictObject({
 
 export const secretEncryptionStatus = z.strictObject({
   activeKeyVersion: z.string().nullable(),
+  /** Accepted deployments whose secrets are not saved on their app yet. */
+  pendingDeployments: z.number().int().nonnegative(),
   keyVersions: z.array(secretKeyVersion),
 });
 
+/** One bounded batch of re-encryption. */
 export const secretReencryption = z.strictObject({
   /** Secrets now encrypted with the active key version. */
   reencrypted: z.number().int().nonnegative(),
@@ -678,8 +683,11 @@ export const secretReencryption = z.strictObject({
   changed: z.number().int().nonnegative(),
   /** Secrets that could not be decrypted, such as values of a missing key version. */
   failed: z.number().int().nonnegative(),
-  status: secretEncryptionStatus,
+  /** Pass this to continue with the next batch; `null` once every location is done. */
+  cursor: z.string().nullable(),
 });
+
+export const secretReencryptionInput = z.strictObject({ cursor: z.string().min(1).optional() });
 
 export const migrationArtifact = z.strictObject({
   sha256: checksum,

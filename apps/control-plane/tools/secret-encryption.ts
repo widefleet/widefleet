@@ -1,7 +1,10 @@
 import { readConfiguration } from "../src/lib/server/config.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
-import { readSecretEncryption, reencryptSecrets } from "../src/lib/server/secret-reencryption.ts";
+import {
+  readSecretEncryption,
+  reencryptAllSecrets,
+} from "../src/lib/server/secret-reencryption.ts";
 
 const command = process.argv[2];
 
@@ -15,12 +18,18 @@ const { encryption } = await installationKeys(configuration);
 const database = createDatabase(configuration);
 
 try {
-  const result =
-    command === "status"
-      ? await readSecretEncryption(database.db, encryption)
-      : await reencryptSecrets(database.db, encryption);
+  if (command === "reencrypt") {
+    let done = 0;
 
-  console.info(JSON.stringify(result, null, 2));
+    const total = await reencryptAllSecrets(database.db, encryption, (batch) => {
+      done += batch.reencrypted;
+      console.error(`Re-encrypted ${done} secrets so far`);
+    });
+
+    console.info(JSON.stringify(total, null, 2));
+  }
+
+  console.info(JSON.stringify(await readSecretEncryption(database.db, encryption), null, 2));
 } finally {
   await database.close();
 }

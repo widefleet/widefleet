@@ -73,6 +73,8 @@ export type HostedExecution = {
     ) => ExecutionResult<z.infer<typeof contract.runtimeStatus>>;
   };
   remove: (principal: Principal, appId: string) => ExecutionResult<{ accepted: boolean }>;
+  /** Secrets of accepted deployments that are not saved on their app yet. */
+  pendingSecrets: () => Promise<{ deployments: number; ciphertexts: string[] }>;
   connections: {
     bind: (
       principal: Principal,

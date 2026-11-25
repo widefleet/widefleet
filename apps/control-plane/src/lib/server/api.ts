@@ -956,9 +956,11 @@ export const createApi = (runtime: Runtime) => {
       ),
     reencryptSecrets: write
       .route({ method: "POST", path: "/encryption/reencrypt" })
+      // Without a body, re-encryption starts from the beginning.
+      .input(contract.secretReencryptionInput.optional())
       .output(contract.secretReencryption)
-      .handler(async ({ context }) =>
-        unwrap(await runtime.secretEncryption.reencrypt(context.principal)),
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.secretEncryption.reencrypt(context.principal, input?.cursor ?? null)),
       ),
     listAgents: read
       .route({ method: "GET", path: "/agents" })

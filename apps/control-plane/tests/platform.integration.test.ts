@@ -269,15 +269,34 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect(status.activeKeyVersion).toBe("test");
 
-    const result = contract.secretReencryption.parse(
-      await (await json("/encryption/reencrypt", "POST")).json(),
-    );
+    // Each call handles one bounded batch; the cursor continues until it is null.
+    let cursor: string | null = null;
+    let calls = 0;
 
-    expect(result.failed).toBe(0);
-    expect(result.status.keyVersions).toEqual([
-      expect.objectContaining({ id: "test", active: true, available: true }),
-      { id: null, values: 0, active: false, available: true },
-    ]);
+    do {
+      const batch = contract.secretReencryption.parse(
+        await (await json("/encryption/reencrypt", "POST", cursor ? { cursor } : {})).json(),
+      );
+
+      expect(batch.failed).toBe(0);
+      cursor = batch.cursor;
+      calls += 1;
+    } while (cursor !== null && calls < 20);
+
+    expect(cursor).toBeNull();
+    expect((await json("/encryption/reencrypt", "POST", { cursor: "not-a-cursor" })).status).toBe(
+      400,
+    );
+    expect(
+      contract.secretEncryptionStatus.parse(await (await json("/encryption", "GET")).json()),
+    ).toEqual({
+      activeKeyVersion: "test",
+      pendingDeployments: 0,
+      keyVersions: [
+        expect.objectContaining({ id: "test", pending: 0, active: true, available: true }),
+        { id: null, values: 0, pending: 0, active: false, available: true },
+      ],
+    });
   });
 
   it("installs and rolls back runtime releases on an empty execution through replaceable executors", async () => {

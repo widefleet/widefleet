@@ -207,7 +207,7 @@ export const createRuntime = ({
     migrations: createMigrationService(database.db, storage, execution),
     connections: createConnectionService(database.db, storage, execution),
     appSecrets,
-    secretEncryption: createSecretMaintenance(database.db, encryption),
+    secretEncryption: createSecretMaintenance(database.db, encryption, execution?.pendingSecrets),
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads,
     templates: createTemplateInstalls(configuration, apps, uploads, network, appSecrets, builder),
