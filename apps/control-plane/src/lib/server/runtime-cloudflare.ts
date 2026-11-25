@@ -13,7 +13,7 @@ import type { Observation } from "./observation.ts";
 import { createReporting } from "./reporting.ts";
 import { createRuntime, createRequestRuntime } from "./runtime-services.ts";
 import { createSettingsService } from "./settings.ts";
-import { createSecretEncryption } from "./secret-encryption.ts";
+import { configuredSecretEncryption } from "./secret-encryption.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createCloudflareExecution } from "./cloudflare-execution.ts";
@@ -90,7 +90,7 @@ const createSharedRuntime = (
 
   const sendEmail = extension.sendEmail ?? createCloudflareEmail(bindings);
 
-  const encryption = createSecretEncryption({ legacyKey: configuration.PLATFORM_ENCRYPTION_KEY });
+  const encryption = configuredSecretEncryption(configuration);
 
   const settings = createSettingsService(
     configuration,

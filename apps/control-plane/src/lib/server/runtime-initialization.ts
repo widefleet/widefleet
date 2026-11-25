@@ -133,7 +133,7 @@ export const initializeRuntime = async (
       });
     }
 
-    await registerCli(database.db, configuration);
+    await registerCli(database.db, configuration, keys.encryption);
 
     return {
       configuration,

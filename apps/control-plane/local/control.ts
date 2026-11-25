@@ -104,7 +104,8 @@ if (command === "agent") {
       });
     }
 
-    const auth = createAuthentication(configuration, database.db);
+    const keys = await installationKeys(configuration);
+    const auth = createAuthentication(configuration, database.db, { encryption: keys.encryption });
 
     const identities = await database.db
       .select()
@@ -118,7 +119,6 @@ if (command === "agent") {
         .update(member)
         .set({ role: "owner" })
         .where(eq(member.userId, "local-admin"));
-      const keys = await installationKeys(configuration);
 
       const settings = createSettingsService(
         configuration,
