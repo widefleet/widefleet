@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 import { readOrganizationAvailability } from "./availability.ts";
 import { mcpOAuthStorage } from "./mcp-grants.ts";
+import { appUserAnalytics } from "./app-user-analytics.ts";
 
 export const mcpGrant = z.object({
   organizationId: organizationIdentifier,
@@ -174,6 +175,13 @@ export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
           description: "Company authorization is no longer valid",
         });
       const identity = credential.authorization.identity;
+
+      appUserAnalytics(environment)?.({
+        trigger: grantType === "refresh_token" ? "mcp_renewal" : "mcp_sign_in",
+        organizationId: grant.organizationId,
+        issuer: issuer(configuration.provider),
+        identity,
+      });
 
       const result = {
         newProps: { ...grant, credential },

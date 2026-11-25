@@ -1,4 +1,4 @@
-import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
+import { authConfiguration, createAuthProxy, type AppUserActivity } from "@platform/auth-proxy";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createIdentityProvider, tenantId } from "./auth-proxy-idp.ts";
@@ -27,7 +27,11 @@ describe("Auth proxy session lifecycle", () => {
         : Promise.resolve(Response.json(Object.fromEntries(request.headers))),
   };
 
-  const login = async (settings = configuration, target = app, destinations = apps) => {
+  const login = async (
+    settings = configuration,
+    target = app,
+    destinations: Parameters<typeof createAuthProxy>[1] = apps,
+  ) => {
     const proxy = createAuthProxy(settings, destinations);
 
     const started = await proxy.fetch(
@@ -199,6 +203,44 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit(configuration, next)).status).toBe(200);
     expect(idp.refreshRequests).toHaveLength(2);
     expect(idp.refreshRequests[0]).not.toBe(idp.refreshRequests[1]);
+  });
+
+  it("reports sign-in and renewal as app user activity, not every request", async () => {
+    const reported: AppUserActivity[] = [];
+    const observed = { ...apps, observe: (activity: AppUserActivity) => reported.push(activity) };
+    const session = await login(configuration, app, observed);
+    const proxy = createAuthProxy(configuration, observed);
+
+    const person = {
+      issuer: idp.origin,
+      identity: { id: "pairwise-subject", name: "Example User" },
+    };
+
+    expect(reported).toMatchObject([{ trigger: "sign_in", ...person }]);
+    expect(reported[0]?.hostname).toBeUndefined();
+    expect((await proxy.fetch(new Request(app, { headers: { cookie: session } }))).status).toBe(
+      200,
+    );
+    expect(reported).toHaveLength(1);
+    expireIdentity();
+    expect((await proxy.fetch(new Request(app, { headers: { cookie: session } }))).status).toBe(
+      200,
+    );
+    expect(reported).toMatchObject([
+      { trigger: "sign_in", ...person },
+      { trigger: "renewal", hostname: new URL(app).hostname, ...person },
+    ]);
+  });
+
+  it("keeps sign-in working when observation fails", async () => {
+    const session = await login(configuration, app, {
+      ...apps,
+      observe: () => {
+        throw new Error("Analytics unavailable");
+      },
+    });
+
+    expect((await visit(configuration, session)).status).toBe(200);
   });
 
   it("uses newly verified groups and forwards renewal cookies even when access is denied", async () => {

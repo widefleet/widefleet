@@ -1,4 +1,4 @@
-import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
+import { authConfiguration, createAuthProxy, type AppUserActivity } from "@platform/auth-proxy";
 import { embeddingOrigin } from "@platform/contracts";
 import { chromium } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -234,6 +234,31 @@ describe("embedded app sign-in", () => {
     expect(forwarded["x-auth-request-email"]).toBe("user@example.test");
     expect(forwarded["x-auth-request-groups"]).toBe("00000000-0000-4000-8000-0000000000aa");
     expect(forwarded["cookie"]).toBeUndefined();
+  });
+
+  it("reports embedded sign-in as app user activity", async () => {
+    const reported: AppUserActivity[] = [];
+    const observe = (activity: AppUserActivity) => reported.push(activity);
+
+    const signedIn = await createAuthProxy(configuration, { ...apps, observe }).fetch(
+      new Request(signIn, {
+        method: "POST",
+        headers: {
+          origin: "https://auth.apps.example.test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ token: await hostToken() }),
+      }),
+    );
+
+    expect(signedIn.status).toBe(204);
+    expect(reported).toMatchObject([
+      {
+        trigger: "embedded_sign_in",
+        issuer: `${authority}/${tenantId}/v2.0`,
+        identity: { id: userId, email: "user@example.test" },
+      },
+    ]);
   });
 
   it("splits sessions with many groups across cookies and replaces them cleanly", async () => {

@@ -312,14 +312,17 @@ export const signInEmbedded = async (
   const attributes = cookieAttributes(configuration, Math.floor((expiresAt - Date.now()) / 1000));
   const written = new Set(parts.map((part) => part.name));
 
-  return [
-    ...parts.map((part) => `${part.name}=${part.value}; ${attributes}`),
-    // A shorter session must not leave chunks of the previous one behind.
-    ...requestCookies(headers)
-      .map((cookie) => cookie.name)
-      .filter((candidate) => sessionPart(name, candidate) && !written.has(candidate))
-      .map((stale) => expire(configuration, stale)),
-  ];
+  return {
+    identity,
+    cookies: [
+      ...parts.map((part) => `${part.name}=${part.value}; ${attributes}`),
+      // A shorter session must not leave chunks of the previous one behind.
+      ...requestCookies(headers)
+        .map((cookie) => cookie.name)
+        .filter((candidate) => sessionPart(name, candidate) && !written.has(candidate))
+        .map((stale) => expire(configuration, stale)),
+    ],
+  };
 };
 
 const sessionValue = (headers: Headers, name: string) => {
