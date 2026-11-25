@@ -33,14 +33,18 @@ export const updateClientContext = ({ user, organization, role, analytics }: Cli
     configuration = analytics;
   }
 
-  if (!user || !organization) return;
+  if (!user) return;
 
   const distinctId = `user:${user.id}`;
   const previousUser = posthog.get_distinct_id();
 
   if (previousUser.startsWith("user:") && previousUser !== distinctId) resetClientContext();
 
+  // Signed-in pages outside a workspace, such as the organization chooser, link the visit too.
   posthog.identify(distinctId, { name: user.name, email: user.email });
+
+  if (!organization) return;
+
   posthog.group("organization", organization.id, { name: organization.name });
   posthog.register({ scope: analytics.scope, organization_role: role });
 };
