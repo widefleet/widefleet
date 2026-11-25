@@ -43,6 +43,7 @@ export const hostedResourceNames = (installation: z.infer<typeof hostedInstallat
   // location is part of the name and a new location gets a new bucket.
   artifacts: `${installation.name}-artifacts-${installation.storageLocation}`,
   auth: `${installation.name}-auth`,
+  pictures: `${installation.name}-user-pictures`,
   // The app builder runs once per build phase, so each phase has its own isolate.
   builder: `${installation.name}-app-builder`,
   documenter: `${installation.name}-app-documenter`,
@@ -51,6 +52,7 @@ export const hostedResourceNames = (installation: z.infer<typeof hostedInstallat
 export const hostedResourceIds = z.object({
   account: z.string().regex(/^[a-f0-9]{32}$/),
   auth: z.string().regex(/^[a-f0-9]{32}$/),
+  pictures: z.string().regex(/^[a-f0-9]{32}$/),
 });
 
 interface HostedEmailBindings {
@@ -188,7 +190,10 @@ export const hostedConfigurations = async (
       account_id: ids.account,
       name: names.runtime,
       routes: [{ pattern: `*.${installation.appDomain}/*`, zone_name: installation.appZone }],
-      kv_namespaces: [{ binding: "AUTH_CONFIG", id: ids.auth }],
+      kv_namespaces: [
+        { binding: "AUTH_CONFIG", id: ids.auth },
+        { binding: "USER_PICTURES", id: ids.pictures },
+      ],
       r2_buckets: [{ binding: "WIDEFLEET_PACKAGES", bucket_name: names.artifacts }],
       workflows: workflows(runtime),
       // Retain bindings provisioned by app deployments. This overrides Wrangler's

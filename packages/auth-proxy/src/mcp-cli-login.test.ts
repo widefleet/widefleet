@@ -72,6 +72,9 @@ describe("MCP CLI login codes", () => {
       get AUTH_CONFIG(): never {
         throw new Error("Verification must not read KV");
       },
+      get USER_PICTURES(): never {
+        throw new Error("Verification must not read KV");
+      },
     };
 
     const handler = createAuthHandler(environment, async () => new Response("App"));

@@ -28,12 +28,17 @@ export const provisionHostedResources = async (
     ]);
   }
 
-  let auth = await cloudflare.findNamespace(names.auth);
+  const namespace = async (name: string) => {
+    const existing = await cloudflare.findNamespace(name);
 
-  if (!auth) {
-    await wrangler(["kv", "namespace", "create", names.auth, "--no-update-config"]);
-    auth = await cloudflare.findNamespace(names.auth);
-  }
+    if (existing) return existing;
+    await wrangler(["kv", "namespace", "create", name, "--no-update-config"]);
+
+    return cloudflare.findNamespace(name);
+  };
+
+  const auth = await namespace(names.auth);
+  const pictures = await namespace(names.pictures);
 
   // Preserve the existing Hyperdrive's credentials and TLS configuration.
   // Custom verify modes require an uploaded CA; setup only manages caching.
@@ -41,5 +46,7 @@ export const provisionHostedResources = async (
 
   if (!auth) throw new Error("The created Auth KV namespace could not be found");
 
-  return { auth };
+  if (!pictures) throw new Error("The created user picture KV namespace could not be found");
+
+  return { auth, pictures };
 };

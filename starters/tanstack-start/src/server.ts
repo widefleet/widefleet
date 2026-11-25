@@ -23,7 +23,13 @@ export default createServerEntry({
 
     const context: PlatformContext = {
       user: import.meta.env.DEV
-        ? { id: "local-development", name: "Lokale Entwicklung", email: null, groups: [] }
+        ? {
+            id: "local-development",
+            name: "Lokale Entwicklung",
+            email: null,
+            groups: [],
+            picture: null,
+          }
         : identity.unwrap(),
       requestId: crypto.randomUUID(),
       reportedErrors: new Set(),

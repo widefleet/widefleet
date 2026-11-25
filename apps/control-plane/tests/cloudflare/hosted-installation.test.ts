@@ -34,7 +34,7 @@ const installation = hostedInstallation.parse({
   storageLocation: "weur",
 });
 
-const ids = { account: "0".repeat(32), auth: "1".repeat(32) };
+const ids = { account: "0".repeat(32), auth: "1".repeat(32), pictures: "2".repeat(32) };
 
 const configuration = {
   accountId: ids.account,
@@ -114,10 +114,13 @@ describe("Hosted resource provisioning", () => {
     }
   });
 
-  it("shares the existing configuration namespace between runtime and control plane", async () => {
+  it("shares the configuration namespace and gives app sign-in its picture namespace", async () => {
     const configs = await hostedConfigurations(installation, ids);
-    expect(configs.controlPlane.kv_namespaces).toEqual(configs.runtime.kv_namespaces);
     expect(configs.controlPlane.kv_namespaces).toEqual([{ binding: "AUTH_CONFIG", id: ids.auth }]);
+    expect(configs.runtime.kv_namespaces).toEqual([
+      { binding: "AUTH_CONFIG", id: ids.auth },
+      { binding: "USER_PICTURES", id: ids.pictures },
+    ]);
   });
   it("defaults to email and preserves explicit sign-in delivery in the deployed Worker", async () => {
     expect(

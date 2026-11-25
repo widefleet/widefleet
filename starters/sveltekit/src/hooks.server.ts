@@ -13,6 +13,7 @@ export const handle: Handle = async ({ event, resolve }) => {
       id: "local-development",
       name: "Lokale Entwicklung",
       email: null,
+      picture: null,
       groups: [],
     };
   } else {

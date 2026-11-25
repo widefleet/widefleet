@@ -11,6 +11,7 @@ import {
   signInEmbedded,
 } from "./embedded.ts";
 import { issuer, proxyIdentity } from "./identity.ts";
+import { pictureStore, type PictureStorage } from "./picture.ts";
 import { authorization, failureSummary } from "./renewal.ts";
 
 // A person proved their identity to the organization: at sign-in, when an expired
@@ -24,6 +25,7 @@ export interface AppUserActivity {
 
 interface Apps {
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
+  pictures: PictureStorage;
   fetch: (request: Request, caller: z.infer<typeof appCaller>) => Promise<Response>;
   observe?: (activity: AppUserActivity) => void;
 }
@@ -33,6 +35,15 @@ const response = (status: number, message: string) =>
     status,
     headers: { "cache-control": "no-store", "content-type": "text/plain; charset=utf-8" },
   });
+
+// The subject in a picture path, as the app received it in `x-auth-request-picture`.
+const pictureSubject = (segment: string) => {
+  try {
+    return decodeURIComponent(segment) || null;
+  } catch {
+    return null;
+  }
+};
 
 const redirect = (url: string, headers = new Headers()) => {
   headers.set("location", url);
@@ -88,6 +99,12 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
   };
 
   const embedded = embeddedPath(configuration.organizationId);
+
+  const pictures = pictureStore(
+    apps.pictures,
+    configuration.organizationId,
+    issuer(configuration.provider),
+  );
 
   const observe = (activity: Omit<AppUserActivity, "issuer">) => {
     try {
@@ -194,9 +211,14 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
         return response(400, "Invalid sign-in callback.");
       let verified: z.infer<typeof authorization> | undefined;
 
-      const auth = await createAuthentication(configuration, true, (value) => {
-        verified = value;
-      });
+      const auth = await createAuthentication(
+        configuration,
+        true,
+        (value) => {
+          verified = value;
+        },
+        pictures,
+      );
 
       const internal = new URL(url);
 
@@ -262,7 +284,9 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       if (!resolved) return response(404, "Not found");
       const access = appAccessSnapshot.parse(resolved);
 
-      if (url.pathname.startsWith("/oauth2/")) {
+      const picture = /^\/oauth2\/pictures\/([^/]+)$/.exec(url.pathname);
+
+      if (url.pathname.startsWith("/oauth2/") && !picture) {
         if (url.pathname !== "/oauth2/start" || request.method !== "GET")
           return response(404, "Not found");
         const target = await returnUrl(url.searchParams.get("rd") ?? url.origin);
@@ -289,7 +313,7 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
       if (verified.success && verified.data.expiresAt <= Date.now()) {
         try {
-          const refreshing = await createAuthentication(configuration, true);
+          const refreshing = await createAuthentication(configuration, true, undefined, pictures);
           renewed = await refreshing.api.renewAppSession({
             headers: request.headers,
             asResponse: true,
@@ -341,6 +365,33 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       if (!hasAppAccess(access.groups, user.data.groups))
         return finish(response(403, "You do not have access to this app."));
 
+      // Everyone who may use an app sees the pictures of the organization's people.
+      if (picture) {
+        if (request.method !== "GET") return finish(response(405, "Method not allowed"));
+
+        const subject = pictureSubject(picture[1] ?? "");
+        const stored = subject ? await pictures.read(subject) : null;
+
+        if (!stored) return finish(response(404, "Picture not found"));
+        const etag = `"${stored.version}"`;
+
+        const headers = {
+          etag,
+          "cache-control": "private, no-cache",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; sandbox",
+          "cross-origin-resource-policy": "same-origin",
+        };
+
+        return finish(
+          request.headers.get("if-none-match") === etag
+            ? new Response(null, { status: 304, headers })
+            : new Response(stored.bytes, {
+                headers: { ...headers, "content-type": stored.contentType },
+              }),
+        );
+      }
+
       const headers = new Headers(request.headers);
 
       for (const key of request.headers.keys()) {
@@ -356,6 +407,12 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       headers.set("x-auth-request-preferred-username", user.data.name);
       headers.set("x-auth-request-email", user.data.email);
       headers.set("x-auth-request-groups", user.data.groups.join(","));
+
+      if (user.data.picture)
+        headers.set(
+          "x-auth-request-picture",
+          `/oauth2/pictures/${encodeURIComponent(user.data.id)}?v=${user.data.picture}`,
+        );
 
       const caller = appCaller.parse({
         issuer: issuer(configuration.provider),

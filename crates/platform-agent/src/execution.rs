@@ -527,6 +527,10 @@ pub async fn prepare(
         "AUTH_CONFIG".into(),
         json!({ "binding": "AUTH_CONFIG", "id": "widefleet-auth" }),
     );
+    namespaces.insert(
+        "USER_PICTURES".into(),
+        json!({ "binding": "USER_PICTURES", "id": "widefleet-user-pictures" }),
+    );
     let project = directory.join("runtime");
     tokio::fs::create_dir_all(&project).await?;
     write_modules(&project, &packages.runtime.modules).await?;

@@ -1,6 +1,7 @@
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { z } from "zod";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
+import { memoryPictures } from "./memory-pictures.fixture.ts";
 
 const cookies = (response: Response) =>
   response.headers
@@ -41,6 +42,7 @@ export const runtimeIdentity = async (
     const app = `https://fixture.${domain}/`;
 
     const proxy = createAuthProxy(configuration, {
+      pictures: memoryPictures(),
       resolve: async () => ({ revision: 1, groups: [] }),
       fetch: async () => new Response("Fixture"),
     });

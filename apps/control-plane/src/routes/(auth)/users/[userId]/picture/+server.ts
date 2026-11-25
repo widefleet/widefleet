@@ -2,26 +2,30 @@ import { error } from "@sveltejs/kit";
 import { sessionSignIn } from "#server/identity";
 import { queryValue } from "#server/remote-support";
 import { getRuntime } from "#server/runtime";
-import { readUserPicture } from "#server/user-pictures";
+import { readUserPicture, tokenViewer } from "#server/user-pictures";
 import type { RequestHandler } from "./$types";
 
 // Pictures are copies of what sign-in providers report. The bytes were checked to be PNG,
 // JPEG, GIF or WebP; they are never sniffed, scripted or embedded on another site.
 export const GET: RequestHandler = async ({ params, locals, request }) => {
   const { user, session } = locals;
-
-  if (!user || !session) error(401, "Sign in to see this picture.");
   const runtime = await getRuntime();
 
-  const organizations = queryValue(
-    await runtime.identity.listOrganizations(sessionSignIn(user, session)),
-  );
+  const viewer =
+    user && session
+      ? {
+          id: user.id,
+          organizations: queryValue(
+            await runtime.identity.listOrganizations(sessionSignIn(user, session)),
+          ),
+        }
+      : request.headers.get("authorization")?.startsWith("Bearer ")
+        ? await tokenViewer(runtime.auth, request.headers)
+        : null;
 
-  const picture = await readUserPicture(
-    runtime.database.db,
-    { id: user.id, organizations },
-    params.userId,
-  );
+  if (!viewer) error(401, "Sign in to see this picture.");
+
+  const picture = await readUserPicture(runtime.database.db, viewer, params.userId);
 
   if (!picture) error(404, "Picture not found");
   const etag = `"${picture.version}"`;

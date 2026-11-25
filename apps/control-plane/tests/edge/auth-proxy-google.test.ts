@@ -3,6 +3,7 @@ import { googleGroupsScope } from "@platform/contracts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createIdentityProvider } from "./auth-proxy-idp.ts";
+import { memoryPictures } from "../memory-pictures.fixture.ts";
 
 const app = "https://ledger.apps.example.test/";
 
@@ -24,6 +25,7 @@ describe("Google Workspace app identity", () => {
   let invalidGroup = false;
 
   const apps = {
+    pictures: memoryPictures(),
     resolve: (hostname: string) =>
       Promise.resolve(
         hostname === new URL(app).hostname ? { revision: 0, groups: allowedGroups } : null,

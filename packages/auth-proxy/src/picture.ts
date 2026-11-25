@@ -1,4 +1,7 @@
+import type { companyProvider } from "@platform/contracts";
+import type { JWTPayload } from "jose";
 import { z } from "zod";
+import { issuer } from "./identity.ts";
 
 // Provider pictures are small thumbnails. A larger response is not a profile picture.
 export const maxPictureBytes = 100 * 1024;
@@ -183,5 +186,104 @@ export const claimedPicture = (
 
   return url.success
     ? fetchPictureUrl(new URL(url.data), providerOrigin, accessToken)
+    : Promise.resolve(null);
+};
+
+// A copy lives as long as its owner keeps signing in to the organization's apps.
+const pictureLifetime = 30 * 24 * 60 * 60;
+
+// Sign-in and session renewal ask the provider again at most once a day.
+const pictureRecheck = 24 * 60 * 60 * 1000;
+
+const pictureMetadata = z.object({
+  contentType: z.string(),
+  version: z.string(),
+  checkedAt: z.number(),
+});
+
+// The parts of a KV namespace the store uses.
+export interface PictureStorage {
+  getWithMetadata(
+    key: string,
+    type: "arrayBuffer",
+  ): Promise<{ value: ArrayBuffer | null; metadata: unknown }>;
+  put(
+    key: string,
+    value: Uint8Array<ArrayBuffer>,
+    options: { expirationTtl: number; metadata: z.infer<typeof pictureMetadata> },
+  ): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+/** Copies of the pictures that people of one organization's sign-in report. */
+export const pictureStore = (storage: PictureStorage, organizationId: string, issuer: string) => {
+  const key = async (subject: string) => {
+    const digest = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(issuer)),
+    );
+
+    const issuerId = Array.from(digest.slice(0, 8), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+
+    return `${organizationId}/${issuerId}/${subject}`;
+  };
+
+  const read = async (subject: string) => {
+    const stored = await storage.getWithMetadata(await key(subject), "arrayBuffer");
+    const metadata = pictureMetadata.safeParse(stored.metadata);
+
+    return stored.value && metadata.success
+      ? { bytes: new Uint8Array(stored.value), ...metadata.data }
+      : null;
+  };
+
+  return {
+    read,
+    /** The version of the subject's copy, after asking the provider when it is due. */
+    refresh: async (subject: string, fetchPicture: () => Promise<PictureResult>) => {
+      const current = await read(subject);
+
+      if (current && Date.now() - current.checkedAt < pictureRecheck) return current.version;
+      const picture = await fetchPicture();
+
+      if (picture === null) return current?.version;
+
+      if (picture === "none") {
+        if (current) await storage.delete(await key(subject));
+
+        return undefined;
+      }
+
+      const version = await pictureVersion(picture);
+
+      await storage.put(await key(subject), picture.bytes, {
+        expirationTtl: pictureLifetime,
+        metadata: { contentType: picture.contentType, version, checkedAt: Date.now() },
+      });
+
+      return version;
+    },
+  };
+};
+
+export type PictureStore = ReturnType<typeof pictureStore>;
+
+/**
+ * The picture a company sign-in reports. Entra has no picture URL; Graph returns the photo.
+ * Other providers name one in the ID token.
+ */
+export const providerPicture = (
+  provider: z.infer<typeof companyProvider>,
+  claims: JWTPayload,
+  accessToken: string | undefined,
+): Promise<PictureResult> => {
+  if (provider.type === "entra")
+    return accessToken ? fetchGraphPicture(accessToken) : Promise.resolve(null);
+
+  const url = pictureUrl.safeParse(claims["picture"]);
+
+  return url.success
+    ? fetchPictureUrl(new URL(url.data), new URL(issuer(provider)).origin, accessToken)
     : Promise.resolve(null);
 };

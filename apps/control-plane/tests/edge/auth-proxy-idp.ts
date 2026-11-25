@@ -18,6 +18,9 @@ export const tenantId = "00000000-0000-4000-8000-000000000001";
 
 export const objectId = "00000000-0000-4000-8000-000000000002";
 
+// A PNG signature followed by fixture bytes: the provider's picture of every test identity.
+export const pictureBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7]);
+
 export const createIdentityProvider = async (
   redirectUrl: string | string[] = "https://auth.apps.example.test/oauth2/widefleet/callback",
   requireNonce = true,
@@ -51,6 +54,7 @@ export const createIdentityProvider = async (
     omitRefreshIdToken: false,
     grantedScopes: "",
     omitRefreshScopes: false,
+    picture: false,
   };
 
   const graphRequests: string[] = [];
@@ -219,6 +223,7 @@ export const createIdentityProvider = async (
                 name: parameters.person ?? settings.name,
                 email: settings.email,
                 roles: settings.groups,
+                picture: settings.picture ? `${origin}/picture` : undefined,
               }),
         })
           .setProtectedHeader({ alg: "RS256", kid: "test" })
@@ -273,6 +278,15 @@ export const createIdentityProvider = async (
         }
 
         response.end(result);
+      } else if (url.pathname === "/picture" || url.pathname === "/v1.0/me/photos/120x120/$value") {
+        if (!settings.picture || request.headers.authorization !== "Bearer fixture-access-token") {
+          response.writeHead(404).end();
+
+          return;
+        }
+
+        response.setHeader("content-type", "image/png");
+        response.end(Buffer.from(pictureBytes));
       } else if (url.pathname === "/v1.0/me/transitiveMemberOf") {
         graphRequests.push(url.href);
 

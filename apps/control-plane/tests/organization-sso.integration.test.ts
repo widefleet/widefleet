@@ -19,7 +19,7 @@ import {
 } from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
 import { registerAppLogin, readAppLogin } from "../src/lib/server/app-login-client.ts";
-import { saveUserPicture } from "../src/lib/server/user-pictures.ts";
+import { readUserPicture, saveUserPicture, tokenViewer } from "../src/lib/server/user-pictures.ts";
 import {
   createInvitationService,
   prepareOrganizationInvitation,
@@ -1048,6 +1048,24 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
 
     expect(userInfo.status, await userInfo.clone().text()).toBe(200);
     expect(await userInfo.json()).toMatchObject({ picture });
+
+    // The app proxy fetches that URL with the sign-in's access token: its own picture only.
+    const bearer = new Headers({ authorization: `Bearer ${grant.access_token}` });
+    const viewer = await tokenViewer(auth, bearer);
+
+    if (!viewer) throw new Error("Expected the access token's subject");
+    expect(viewer).toEqual({ id: userId, organizations: [] });
+    expect(await readUserPicture(environment.database.db, viewer, userId)).toMatchObject({
+      contentType: "image/png",
+    });
+    await saveUserPicture(environment.database.db, environment.owner.id, {
+      bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]),
+      contentType: "image/png",
+    });
+    expect(await readUserPicture(environment.database.db, viewer, environment.owner.id)).toBeNull();
+    expect(
+      await tokenViewer(auth, new Headers({ authorization: "Bearer not-a-token" })),
+    ).toBeNull();
 
     const renew = (refreshToken: string) =>
       request(

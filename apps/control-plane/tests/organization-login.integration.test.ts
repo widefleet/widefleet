@@ -27,6 +27,7 @@ import {
 } from "../src/lib/server/members.ts";
 import type { EmailMessage } from "../src/lib/server/email.ts";
 import { createTestEnvironment } from "./environment.ts";
+import { memoryPictures } from "./memory-pictures.fixture.ts";
 
 const navigate = (url: string, cookie: string) =>
   new Promise<Response>((resolve, reject) => {
@@ -253,6 +254,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
     const app = `https://notes-${person.email.split("@")[0]}.${configuration.domain}/`;
 
     const proxy = createAuthProxy(configuration, {
+      pictures: memoryPictures(),
       resolve: async (hostname) =>
         hostname === new URL(app).hostname ? { revision: 0, groups: [] } : null,
       fetch: async () => new Response("App response"),

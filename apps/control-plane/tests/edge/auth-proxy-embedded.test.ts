@@ -8,6 +8,7 @@ import { SignJWT, exportJWK, generateKeyPair, type CryptoKey, type JWK } from "j
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createBrowserServer } from "./auth-proxy-https.ts";
+import { memoryPictures } from "../memory-pictures.fixture.ts";
 
 const tenantId = "00000000-0000-4000-8000-000000000001";
 
@@ -59,6 +60,7 @@ describe("embedded app sign-in", () => {
   const exchanges: URLSearchParams[] = [];
 
   const apps = {
+    pictures: memoryPictures(),
     resolve: (hostname: string) =>
       Promise.resolve(
         hostname === new URL(app).hostname ? { revision: 0, groups: allowedGroups } : null,

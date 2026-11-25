@@ -1,7 +1,8 @@
 import { authConfiguration, createAuthProxy, type AppUserActivity } from "@platform/auth-proxy";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createIdentityProvider, tenantId } from "./auth-proxy-idp.ts";
+import { createIdentityProvider, pictureBytes, tenantId } from "./auth-proxy-idp.ts";
+import { memoryPictures } from "../memory-pictures.fixture.ts";
 
 const app = "https://ledger.apps.example.test/";
 
@@ -19,6 +20,7 @@ describe("Auth proxy session lifecycle", () => {
   const access = { revision: 0, groups: ["accounting"] };
 
   const apps = {
+    pictures: memoryPictures(),
     resolve: (hostname: string) =>
       Promise.resolve(hostname === new URL(app).hostname ? access : null),
     fetch: (request: Request) =>
@@ -383,6 +385,75 @@ describe("Auth proxy session lifecycle", () => {
     expect(renewed.status).toBe(200);
     expect(Buffer.byteLength(cookies(renewed))).toBeLessThan(16_000);
   });
+
+  it.each(["oidc", "entra"] as const)(
+    "copies the %s sign-in's picture and shows it on the app's origin",
+    async (provider) => {
+      const originalFetch = globalThis.fetch;
+      vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+        const requested = new Request(input, init);
+        const url = new URL(requested.url);
+
+        return originalFetch(
+          url.origin === "https://graph.microsoft.com"
+            ? new Request(new URL(url.pathname + url.search, idp.origin), requested)
+            : requested,
+        );
+      });
+      const original = configuration;
+      const destinations = { ...apps, pictures: memoryPictures() };
+      idp.settings.picture = true;
+
+      if (provider === "entra") {
+        idp.settings.entra = true;
+        idp.settings.groups = ["00000000-0000-4000-8000-000000000003"];
+        access.groups = [...idp.settings.groups];
+        configuration = {
+          ...configuration,
+          provider: { type: "entra", tenantId, authority: idp.origin, label: "Company" },
+        };
+      }
+
+      try {
+        const session = await login(configuration, app, destinations);
+        const proxy = createAuthProxy(configuration, destinations);
+        const forwarded = await proxy.fetch(new Request(app, { headers: { cookie: session } }));
+
+        const path = z
+          .string()
+          .regex(/^\/oauth2\/pictures\/[^/?]+\?v=[0-9a-f]{16}$/)
+          .parse(
+            z.record(z.string(), z.string()).parse(await forwarded.json())[
+              "x-auth-request-picture"
+            ],
+          );
+
+        const picture = await proxy.fetch(
+          new Request(new URL(path, app), { headers: { cookie: session } }),
+        );
+
+        expect(picture.status).toBe(200);
+        expect(picture.headers.get("content-type")).toBe("image/png");
+        expect(new Uint8Array(await picture.arrayBuffer())).toEqual(pictureBytes);
+
+        const unchanged = await proxy.fetch(
+          new Request(new URL(path, app), {
+            headers: {
+              cookie: session,
+              "if-none-match": z.string().parse(picture.headers.get("etag")),
+            },
+          }),
+        );
+
+        expect(unchanged.status).toBe(304);
+        // Only people signed in to the organization's apps see its pictures.
+        expect((await proxy.fetch(new Request(new URL(path, app)))).status).toBe(401);
+      } finally {
+        idp.settings.picture = false;
+        configuration = original;
+      }
+    },
+  );
 
   it("fetches Entra memberships directly on login and renewal", async () => {
     const originalFetch = globalThis.fetch;

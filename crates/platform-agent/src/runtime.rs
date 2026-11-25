@@ -75,7 +75,10 @@ pub fn configuration(
         "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
         "vars": { "WIDEFLEET_CONTROL_TOKEN": token, "WIDEFLEET_SECRETS_KEY": secrets_key, "WIDEFLEET_MANAGEMENT_HTTP": "true", "WIDEFLEET_CONFIGURATION": "{\"crons\":{},\"queues\":{}}" },
         "r2_buckets": [{ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-packages" }],
-        "kv_namespaces": [{ "binding": "AUTH_CONFIG", "id": "widefleet-auth" }],
+        "kv_namespaces": [
+            { "binding": "AUTH_CONFIG", "id": "widefleet-auth" },
+            { "binding": "USER_PICTURES", "id": "widefleet-user-pictures" }
+        ],
         "services": [],
         "durable_objects": { "bindings": [
         ] },
