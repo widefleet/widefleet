@@ -37,6 +37,7 @@ the [CLI or settings API](/reference/company-sign-in) through that process.
    for the next step; the secret's ID is not the value Widefleet needs.
 4. Under **API permissions**, ensure Microsoft Graph's delegated **User.Read**
    permission is present. Grant consent according to your tenant's policy.
+   Widefleet uses it for group membership and each person's photo.
 5. In Widefleet, choose **Microsoft Entra** under **App identity provider**.
    Fill in the following fields, then choose **Save**.
 

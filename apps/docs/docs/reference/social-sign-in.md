@@ -40,7 +40,8 @@ Create a Microsoft Entra app registration supporting **Accounts in any
 organizational directory and personal Microsoft accounts**. Add a **Web** redirect
 URI of `PLATFORM_URL/api/auth/callback/widefleet-microsoft`. Create a client secret
 and retain its **value**, rather than its identifier. Widefleet uses Microsoft's
-`common` endpoint and requests `openid`, `profile` and `email`. See
+`common` endpoint and requests `openid`, `profile`, `email` and Microsoft Graph's
+delegated `User.Read`, which shows each person's Microsoft photo. See
 [Microsoft provider configuration](https://better-auth.com/docs/authentication/microsoft).
 
 [MCP clients](/guides/mcp) use the same registrations for their Google and

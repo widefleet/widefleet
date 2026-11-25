@@ -13,6 +13,8 @@ Run `pnpm dev` for local development with a synthetic identity. Deployed request
 | SvelteKit      | `locals.user` in server loads, actions and handlers          |
 | TanStack Start | `context.user` in server functions and server route handlers |
 
+The identity includes `picture`, the person's profile picture from their sign-in provider as a path on the app's own address, or `null` when there is none. Use it directly as an image source, for example `<img src={user.picture} alt="">`. Everyone who can open the app sees the pictures of the organization's people.
+
 For example, a TanStack Start server function can return the current user:
 
 ```ts
