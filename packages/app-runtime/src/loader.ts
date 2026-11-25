@@ -33,6 +33,7 @@ import { organizationIdentifier, workflowRequest } from "@platform/contracts";
 import { appWorker, workerCode } from "./worker.ts";
 import { browserPolicy } from "./csp.ts";
 import { serveAsset } from "./assets.ts";
+import { linkManifest, manifestPath, webManifest } from "./web-app.ts";
 import { readApp } from "./catalog.ts";
 import { refreshServiceIndex } from "./service-index.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
@@ -228,11 +229,29 @@ const dispatchApp = async (
 
   if (app.metadata.web === false) return new Response(null, { status: 404 });
 
+  // Served before rewrite rules and the app, whose fallbacks would answer with a page.
+  // An app ships a manifest file of its own or links another one from its pages.
+  if (
+    app.displayName &&
+    url.pathname === manifestPath &&
+    request.method === "GET" &&
+    !app.manifest[manifestPath]
+  )
+    return browserPolicy(
+      await webManifest(environment, app, app.displayName),
+      app.network.policy.browser,
+      authenticated?.frameAncestors,
+    );
+
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 
     if (asset.status !== 404)
-      return browserPolicy(asset, app.network.policy.browser, authenticated?.frameAncestors);
+      return browserPolicy(
+        linkManifest(app, asset),
+        app.network.policy.browser,
+        authenticated?.frameAncestors,
+      );
   }
 
   const proof = authenticated
@@ -244,17 +263,19 @@ const dispatchApp = async (
       )
     : undefined;
 
+  // celld forwards incoming request cancellation only when the signal is
+  // explicitly supplied to the subrequest.
+  const response = await run(app, environment, context, (worker) =>
+    worker
+      .getEntrypoint(undefined, {
+        ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"),
+        props: { caller: authenticated?.caller ?? null, appCaller: proof },
+      })
+      .fetch(request, { signal: request.signal }),
+  );
+
   return browserPolicy(
-    // celld forwards incoming request cancellation only when the signal is
-    // explicitly supplied to the subrequest.
-    await run(app, environment, context, (worker) =>
-      worker
-        .getEntrypoint(undefined, {
-          ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"),
-          props: { caller: authenticated?.caller ?? null, appCaller: proof },
-        })
-        .fetch(request, { signal: request.signal }),
-    ),
+    linkManifest(app, response),
     app.network.policy.browser,
     authenticated?.frameAncestors,
   );

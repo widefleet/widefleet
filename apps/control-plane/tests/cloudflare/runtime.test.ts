@@ -33,6 +33,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
   const sourceHash = createHash("sha256").update(appSource).digest("hex");
   const asset = "fixture asset";
   const assetHash = hashAsset("/asset.txt", new TextEncoder().encode(asset));
+  const page = "<html><head><title>Page</title></head></html>";
+  const pageHash = hashAsset("/page.html", new TextEncoder().encode(page));
 
   const app = publishedApp.parse({
     id: crypto.randomUUID(),
@@ -40,6 +42,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     version: crypto.randomUUID(),
     deploymentId: crypto.randomUUID(),
     hostname,
+    displayName: "Fixture",
     metadata: {
       main_module: "app.js",
       compatibility_date: "2026-10-01",
@@ -63,7 +66,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     modules: [
       { name: "app.js", type: "esm", sha256: sourceHash, size: Buffer.byteLength(appSource) },
     ],
-    manifest: { "/asset.txt": { hash: assetHash, size: Buffer.byteLength(asset) } },
+    manifest: {
+      "/asset.txt": { hash: assetHash, size: Buffer.byteLength(asset) },
+      "/page.html": { hash: pageHash, size: Buffer.byteLength(page) },
+    },
     nativeBindings: { DB: "DB", KV: "KV", FILES: "FILES", JOBS: "JOBS" },
     capabilities: {
       SERVICE: {
@@ -126,7 +132,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       body: JSON.stringify({
         app: record,
         modules: [{ hash: record.modules[0]?.sha256, source }],
-        assets: [{ hash: assetHash, source: asset }],
+        assets: [
+          { hash: assetHash, source: asset },
+          { hash: pageHash, source: page },
+        ],
       }),
     });
 
@@ -480,6 +489,23 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect(await response.text()).toBe(asset);
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
     expect((await fetchApp("/env", undefined, "missing.example.test")).status).toBe(404);
+  });
+
+  it("links pages to the web app manifest named after the app", async () => {
+    expect(await (await fetchApp("/page")).text()).toBe(
+      '<html><head><title>Page</title><link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials"></head></html>',
+    );
+
+    const manifest = await fetchApp("/manifest.webmanifest");
+
+    expect(manifest.headers.get("content-type")).toBe("application/manifest+json");
+    expect(await manifest.json()).toEqual({
+      name: "Fixture",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+      icons: [],
+    });
   });
 
   const availability = async (value: string | null, organizationId = "widefleet") => {

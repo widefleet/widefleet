@@ -319,6 +319,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               modules: record.modules,
               hostname: app.hostname,
               origin: new URL(appUrl(app.hostname, configuration.APP_HTTPS_PORT)).origin,
+              displayName: app.displayName,
               deploymentId: command.kind === "deploy" ? command.id : serving?.deploymentId,
               network,
               capabilities: resolved,

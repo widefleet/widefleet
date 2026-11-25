@@ -250,6 +250,8 @@ pub struct Job {
     pub app_id: Option<Uuid>,
     pub hostname: Option<String>,
     pub origin: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
     pub deployment_id: Option<Uuid>,
     pub artifact_id: Option<Uuid>,
     pub attempt: u32,
@@ -314,6 +316,9 @@ pub struct CapabilitySnapshot {
 pub struct PublishedApp {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    // Installed apps show this name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(default)]
     pub secret_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
