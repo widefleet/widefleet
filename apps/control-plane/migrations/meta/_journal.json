@@ -309,6 +309,13 @@
       "when": 1795737600000,
       "tag": "0043_job_secret_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795824000000,
+      "tag": "0044_require_jwe_secrets",
+      "breakpoints": true
     }
   ]
 }

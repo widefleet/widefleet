@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { symmetricEncrypt } from "better-auth/crypto";
 import { eq } from "drizzle-orm";
 import { CompactEncrypt } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -37,24 +36,21 @@ const previous = keyVersion("previous");
 
 const current = keyVersion("current");
 
-// Temporary: the format of releases before the keyring.
-const legacy = (value: string) =>
-  symmetricEncrypt({ key: environment.environment.PLATFORM_ENCRYPTION_KEY, data: value });
+const oldest = keyVersion("oldest");
 
-const service = (keys: ReturnType<typeof keyVersion>[], legacyKey?: string) =>
-  createSecretEncryption({ keyring: parseKeyring(keySet(...keys), "test"), legacyKey });
+const service = (keys: ReturnType<typeof keyVersion>[]) =>
+  createSecretEncryption({ keyring: parseKeyring(keySet(...keys), "test") });
+
+/** Writes values under the oldest key version, with a context no reader checks. */
+const older = (value: string) =>
+  service([oldest]).encrypt({ kind: "directory-client-secret", organizationId: "fixture" }, value);
 
 /** The environment's key versions, which encrypted its fixture values. */
 const environmentKeys = () => keysOf(environment.environment.PLATFORM_ENCRYPTION_KEYS);
 
 /** The keyring after rotation: new active version, the environment's, then an older one. */
 const rotated = () =>
-  checkSecretContexts(
-    service(
-      [current, ...environmentKeys(), previous],
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
-    ),
-  );
+  checkSecretContexts(service([current, ...environmentKeys(), previous, oldest]));
 
 const directorySecret = async () =>
   (
@@ -83,13 +79,13 @@ describe("re-encryption", () => {
     const entry = await seedDeployment(database, { bindings: [] });
     const app = { organizationId: entry.organizationId, appId: entry.appId } as const;
     // Two names that hold the same ciphertext still get their own values.
-    const shared = await legacy("shared");
+    const shared = await older("shared");
 
     await database
       .update(apps)
       .set({
         secrets: {
-          TOKEN: await legacy("token"),
+          TOKEN: await older("token"),
           OTHER: await earlier.encrypt({ kind: "app-secret", ...app, name: "OTHER" }, "other"),
           FIRST: shared,
           SECOND: shared,
@@ -112,7 +108,7 @@ describe("re-encryption", () => {
           oidc,
           await environment.encryption.decrypt(oidc, provider?.oidcConfig ?? ""),
         ),
-        samlConfig: await legacy(JSON.stringify({ entryPoint: "https://saml.example.test" })),
+        samlConfig: await older(JSON.stringify({ entryPoint: "https://saml.example.test" })),
       })
       .where(eq(ssoProvider.organizationId, "widefleet"));
     await database
@@ -122,7 +118,7 @@ describe("re-encryption", () => {
           { kind: "directory-client-secret", organizationId: "widefleet" },
           "directory-secret",
         ),
-        appClientSecret: await legacy("app-login-secret"),
+        appClientSecret: await older("app-login-secret"),
       })
       .where(eq(organizationSettings.organizationId, "widefleet"));
 
@@ -140,7 +136,7 @@ describe("re-encryption", () => {
         identity: {
           management: {
             clientId: "legacy-client",
-            secret: { ciphertext: await legacy("legacy-secret") },
+            secret: { ciphertext: await older("legacy-secret") },
           },
         },
       },
@@ -149,17 +145,22 @@ describe("re-encryption", () => {
     const encryption = rotated();
     const before = await readSecretEncryption(database, encryption);
 
-    expect(before).toMatchObject({ activeKeyVersion: "current", legacy: 6, failed: 0 });
-    expect(before.keyVersions).toMatchObject({ current: 0, previous: 3 });
+    expect(before).toMatchObject({ activeKeyVersion: "current", failed: 0 });
+    expect(before.keyVersions).toMatchObject({ current: 0, previous: 3, oldest: 6 });
     expect(incomplete(before)).toBe(true);
 
     const result = await reencryptSecrets(database, encryption);
     const after = await readSecretEncryption(database, encryption);
 
     expect(result).toMatchObject({ changed: 0, failed: 0 });
-    expect(result.reencrypted).toBe(Object.values(before.keyVersions).reduce((a, b) => a + b, 6));
-    expect(after).toMatchObject({ legacy: 0, failed: 0 });
-    expect(after.keyVersions).toMatchObject({ current: result.reencrypted, previous: 0, test: 0 });
+    expect(result.reencrypted).toBe(Object.values(before.keyVersions).reduce((a, b) => a + b, 0));
+    expect(after).toMatchObject({ failed: 0 });
+    expect(after.keyVersions).toMatchObject({
+      current: result.reencrypted,
+      previous: 0,
+      oldest: 0,
+      test: 0,
+    });
     expect(incomplete(after)).toBe(false);
     expect((await reencryptSecrets(database, encryption)).reencrypted).toBe(0);
 
@@ -242,10 +243,10 @@ describe("re-encryption", () => {
     }
   });
 
-  it("counts key versions by ID, even IDs named legacy, constructor or __proto__", async () => {
+  it("counts key versions by ID, even IDs named constructor or __proto__", async () => {
     const database = environment.database.db;
-    const named = keyVersion("legacy");
-    const encryption = service([named, current, ...environmentKeys(), previous]);
+    const named = keyVersion("named");
+    const encryption = service([named, current, ...environmentKeys(), previous, oldest]);
     const entry = await seedDeployment(database, { bindings: [] });
 
     const context = {
@@ -278,9 +279,8 @@ describe("re-encryption", () => {
       const status = await readSecretEncryption(database, encryption);
       const counts = new Map(Object.entries(status.keyVersions));
 
-      expect(status.legacy).toBe(before.legacy);
       expect(status.failed).toBe(before.failed + 2);
-      expect([counts.get("legacy"), counts.get("constructor"), counts.get("__proto__")]).toEqual([
+      expect([counts.get("named"), counts.get("constructor"), counts.get("__proto__")]).toEqual([
         1, 1, 1,
       ]);
       expect(JSON.stringify(status.keyVersions)).toContain('"__proto__":1');
@@ -296,7 +296,7 @@ describe("re-encryption", () => {
     const database = environment.database.db;
     const encryption = rotated();
 
-    // A full first page of documents without a readable secret, then 40 legacy ones.
+    // A full first page of documents without a secret, then 40 under the oldest version.
     const ids = Array.from(
       { length: 150 },
       (_, index) => `paging-${String(index).padStart(3, "0")}`,
@@ -315,20 +315,20 @@ describe("re-encryption", () => {
               index < 110
                 ? null
                 : {
-                    management: { clientId: id, secret: { ciphertext: await legacy(id) } },
+                    management: { clientId: id, secret: { ciphertext: await older(id) } },
                   },
           },
         })),
       ),
     );
 
-    expect((await readSecretEncryption(database, encryption)).legacy).toBe(40);
+    expect((await readSecretEncryption(database, encryption)).keyVersions["oldest"]).toBe(40);
 
     expect(await reencryptSecrets(database, encryption)).toMatchObject({
       reencrypted: 40,
       failed: 0,
     });
-    expect((await readSecretEncryption(database, encryption)).legacy).toBe(0);
+    expect((await readSecretEncryption(database, encryption)).keyVersions["oldest"]).toBe(0);
   });
 });
 
@@ -367,7 +367,6 @@ describe("the re-encryption command", () => {
       const keys = {
         ...settings,
         PLATFORM_ENCRYPTION_KEYS: keySet(current, ...environmentKeys()),
-        PLATFORM_ENCRYPTION_KEY: environment.environment.PLATFORM_ENCRYPTION_KEY,
       };
 
       const reencrypted = await run("reencrypt", keys);
@@ -375,7 +374,7 @@ describe("the re-encryption command", () => {
       expect(reencrypted).toMatchObject({ code: 0 });
       expect(JSON.parse(reencrypted.stdout)).toMatchObject({
         failed: 0,
-        status: { activeKeyVersion: "current", legacy: 0, failed: 0 },
+        status: { activeKeyVersion: "current", failed: 0 },
       });
 
       // A value under a key version the keyring does not hold.

@@ -3,7 +3,6 @@ import { z } from "zod";
 import { storedAppSecrets } from "./app-secrets.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import type { Database } from "./database.ts";
-import { isLegacyCiphertext } from "./legacy-secret-migration.ts";
 import { apps, organizationSettings } from "./schema.ts";
 import {
   ciphertextKeyVersion,
@@ -267,19 +266,13 @@ const eachRow = async function* (database: Database) {
 };
 
 /**
- * Counts per JWE key version, plus legacy values and values that do not
- * decrypt. Key version IDs are operator-chosen, so they are kept in a `Map`:
- * no ID can collide with the legacy count or an inherited object property.
+ * Counts per key version, plus values that do not decrypt. Key version IDs are
+ * operator-chosen, so they are kept in a `Map`: no ID can collide with an
+ * inherited object property.
  */
-type Counts = { keyVersions: Map<string, number>; legacy: number; failed: number };
+type Counts = { keyVersions: Map<string, number>; failed: number };
 
 const tally = (counts: Counts, ciphertext: string) => {
-  if (isLegacyCiphertext(ciphertext)) {
-    counts.legacy += 1;
-
-    return;
-  }
-
   // A value without a readable `kid` cannot decrypt, so it counts only as failed.
   const version = ciphertextKeyVersion(ciphertext);
 
@@ -293,7 +286,6 @@ const tally = (counts: Counts, ciphertext: string) => {
 export const readSecretEncryption = async (database: Database, encryption: SecretEncryption) => {
   const counts: Counts = {
     keyVersions: new Map(encryption.keyVersions.map((id) => [id, 0])),
-    legacy: 0,
     failed: 0,
   };
 
@@ -312,7 +304,6 @@ export const readSecretEncryption = async (database: Database, encryption: Secre
     activeKeyVersion: encryption.activeKeyVersion,
     // Own properties, even for IDs such as `__proto__`, so they reach the JSON output.
     keyVersions: Object.fromEntries(counts.keyVersions),
-    legacy: counts.legacy,
     failed: counts.failed,
   };
 };
@@ -363,7 +354,6 @@ export const reencryptSecrets = async (
 /** Whether stored secrets still use anything but the active version, or fail to decrypt. */
 export const incomplete = (status: Awaited<ReturnType<typeof readSecretEncryption>>) =>
   status.failed > 0 ||
-  status.legacy > 0 ||
   Object.entries(status.keyVersions).some(
     ([id, values]) => id !== status.activeKeyVersion && values > 0,
   );

@@ -1,8 +1,6 @@
-import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { symmetricEncrypt } from "better-auth/crypto";
 import { decodeProtectedHeader } from "jose";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { configurationSchema } from "../src/lib/server/config.ts";
@@ -44,8 +42,6 @@ it("creates a private keyring on first start and keeps using it", async () => {
   expect((await stat(path)).mode & 0o777).toBe(0o600);
   expect(decodeProtectedHeader(ciphertext).kid).toBe(keysOf(await readFile(path, "utf8"))[0]?.kid);
   expect(console.info).toHaveBeenCalledWith(expect.stringContaining(path));
-  // Only installations from before the keyring have a legacy key.
-  await expect(stat(join(directory, "encryption.key"))).rejects.toThrow();
 
   const restarted = await installationKeys(configuration());
 
@@ -61,28 +57,6 @@ it("agrees on one keyring when processes start together", async () => {
   expect(
     await second.encryption.decrypt(context, await first.encryption.encrypt(context, "value")),
   ).toBe("value");
-});
-
-it("upgrades an installation with only a legacy key without configuration changes", async () => {
-  const legacyKey = randomBytes(32).toString("base64url");
-  await writeFile(join(directory, "encryption.key"), legacyKey);
-  const stored = await symmetricEncrypt({ key: legacyKey, data: "written by an earlier release" });
-
-  const { encryption } = await installationKeys(configuration());
-
-  expect(await encryption.decrypt(context, stored)).toBe("written by an earlier release");
-  expect(decodeProtectedHeader(await encryption.encrypt(context, "new value")).enc).toBe("A256GCM");
-});
-
-it("keeps an operator-managed legacy key for earlier ciphertexts", async () => {
-  const legacyKey = "synthetic-operator-managed-legacy-key";
-  const stored = await symmetricEncrypt({ key: legacyKey, data: "earlier" });
-
-  const { encryption } = await installationKeys(
-    configuration({ PLATFORM_ENCRYPTION_KEY: legacyKey }),
-  );
-
-  expect(await encryption.decrypt(context, stored)).toBe("earlier");
 });
 
 it("uses a configured keyring from the environment or a file", async () => {

@@ -39,7 +39,6 @@ describe("Hosted installation initialization", () => {
     PLATFORM_URL: "https://platform.example.test",
     APP_DOMAIN: "apps.example.test",
     BETTER_AUTH_SECRET: "local-test-only-authentication-secret",
-    PLATFORM_ENCRYPTION_KEY: "local-test-only-encryption-secret",
     // Synthetic key material: byte values 0 to 31.
     PLATFORM_ENCRYPTION_KEYS: keySet(
       keyVersion("test", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"),
@@ -105,14 +104,6 @@ describe("Hosted installation initialization", () => {
   });
 
   it("requires stable keys, migrates an empty database, and creates the owner only once", async () => {
-    // Only stored values from earlier releases need the legacy key.
-    expect(
-      cloudflareConfigurationSchema.safeParse({
-        ...environment,
-        PLATFORM_ENCRYPTION_KEY: undefined,
-      }).success,
-    ).toBe(true);
-
     for (const key of ["BETTER_AUTH_SECRET", "PLATFORM_ENCRYPTION_KEYS"]) {
       expect(
         cloudflareConfigurationSchema.safeParse({ ...environment, [key]: undefined }).success,
