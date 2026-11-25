@@ -3480,10 +3480,13 @@ test.describe(`app templates`, () => {
     );
     await expect(setup.getByLabel("Prompt for your agent")).toHaveValue(detail.prompt);
 
-    await expect(
-      page.getByRole("heading", { name: "Configure Google", exact: true }),
-    ).toBeVisible();
-    await expect(page.locator(".markdown")).toContainText("GOOGLE_CLIENT_ID");
+    const configure = page.getByRole("heading", { name: "Configure Google", exact: true });
+
+    await expect(configure).toBeVisible();
+    // Required secrets render their own help, so name the template's README by its content.
+    await expect(page.locator(".markdown").filter({ has: configure })).toContainText(
+      "GOOGLE_CLIENT_ID",
+    );
     const missing = await page.goto("/widefleet/catalog/templates/missing");
     expect(missing?.status()).toBe(404);
     const unavailable = await page.goto("/widefleet/catalog/templates/unavailable");
