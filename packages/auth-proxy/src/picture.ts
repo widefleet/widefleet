@@ -215,6 +215,8 @@ export interface PictureStorage {
   ): Promise<void>;
 }
 
+const refreshing = new Map<string, Promise<string | undefined>>();
+
 /** Copies of the pictures that people of one organization's sign-in report. */
 export const pictureStore = (storage: PictureStorage, organizationId: string, issuer: string) => {
   const key = async (subject: string) => {
@@ -257,36 +259,50 @@ export const pictureStore = (storage: PictureStorage, organizationId: string, is
      * answer, including no picture or a failure, waits a day before the provider is asked again.
      */
     refresh: async (subject: string, fetchPicture: () => Promise<PictureResult>) => {
-      const current = await entry(subject);
+      const id = await key(subject);
+      const running = refreshing.get(id);
 
-      if (current && Date.now() - current.checkedAt < pictureRecheck)
-        return current.version ?? undefined;
-      const picture = await fetchPicture();
+      if (running) return running;
 
-      if (picture === null) {
+      const refreshed = (async () => {
+        const current = await entry(subject);
+        const kept = current?.version ?? undefined;
+
+        if (current && Date.now() - current.checkedAt < pictureRecheck) return kept;
+        const picture = await fetchPicture();
+
         // A failed read keeps the current copy.
-        await write(
-          subject,
-          current?.version && current.contentType
-            ? { bytes: current.bytes, contentType: current.contentType }
-            : null,
-          current?.version ?? null,
-        );
+        const [bytes, version] =
+          picture === null
+            ? [
+                current?.version && current.contentType
+                  ? { bytes: current.bytes, contentType: current.contentType }
+                  : null,
+                current?.version ?? null,
+              ]
+            : picture === "none"
+              ? [null, null]
+              : [picture, await pictureVersion(picture)];
 
-        return current?.version ?? undefined;
+        try {
+          await write(subject, bytes, version);
+        } catch {
+          // Another isolate may write the same key at the same moment. The stored entry
+          // still answers until the next check.
+          return kept;
+        }
+
+        return version ?? undefined;
+      })();
+
+      // Parallel renewals of one session in this isolate share the provider request.
+      refreshing.set(id, refreshed);
+
+      try {
+        return await refreshed;
+      } finally {
+        refreshing.delete(id);
       }
-
-      if (picture === "none") {
-        await write(subject, null, null);
-
-        return undefined;
-      }
-
-      const version = await pictureVersion(picture);
-
-      await write(subject, picture, version);
-
-      return version;
     },
   };
 };

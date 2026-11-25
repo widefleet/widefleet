@@ -161,4 +161,49 @@ describe("profile pictures", () => {
       vi.useRealTimers();
     }
   });
+
+  it("shares a refresh between parallel renewals and keeps the copy when a write fails", async () => {
+    const entries = new Map<string, { value: ArrayBuffer; metadata: unknown }>();
+    let failWrites = false;
+
+    const storage: PictureStorage = {
+      getWithMetadata: async (key) => entries.get(key) ?? { value: null, metadata: null },
+      put: async (key, value, options) => {
+        if (failWrites) throw new Error("KV write limit");
+        entries.set(key, { value: value.slice().buffer, metadata: options.metadata });
+      },
+    };
+
+    const store = pictureStore(storage, "organization", "https://login.example.test");
+    let asked = 0;
+
+    const answer = (picture: PictureResult) => async () => {
+      asked += 1;
+
+      return picture;
+    };
+
+    const picture = { bytes: png(16), contentType: "image/png" };
+
+    const versions = await Promise.all([
+      store.refresh("person", answer(picture)),
+      store.refresh("person", answer(picture)),
+    ]);
+
+    expect(asked).toBe(1);
+    expect(versions[0]).toMatch(/^[0-9a-f]{16}$/);
+    expect(versions[1]).toBe(versions[0]);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    try {
+      vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000);
+      failWrites = true;
+      expect(
+        await store.refresh("person", answer({ bytes: png(24), contentType: "image/png" })),
+      ).toBe(versions[0]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
