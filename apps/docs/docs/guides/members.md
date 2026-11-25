@@ -1,13 +1,14 @@
 ---
 title: Members and app sign-in
 description: Join your organization, open shared apps, invite colleagues and remove access.
-lastModified: 2026-11-15
+lastModified: 2026-11-22
 ---
 
 Use your work account to join your organization and open apps shared with you.
 If your company has connected its sign-in provider, you can join on your first
-company sign-in when that provider allows access. Otherwise, ask an Owner or
-Admin for an invitation.
+company sign-in when that provider allows access. If your organization is open to
+your company email domain, you can [join it directly](#join-with-your-company-email).
+Otherwise, ask an Owner or Admin for an invitation.
 
 Administrators connecting a provider for the first time should follow
 [Set up company sign-in](/guides/company-sign-in).
@@ -30,6 +31,58 @@ Company SSO must return the invited email, and your account's email must be veri
 With one available organization, app commands work without an explicit selection.
 With several, use [organization selection](/reference/cli-configuration#select-an-organization).
 You can now [deploy an app](/guides/deployments) or open a shared app from the catalog.
+
+## Join with your company email
+
+Requires platform **0.7.21 or newer** on an installation where people create
+their own organizations.
+
+Sign in with your work email. Organizations open to your email domain appear
+under **Join your team**, or under **Open to example.com** when you already belong
+to an organization. Each shows a colleague from your domain and how many others
+belong to it. Choose **Join** to become a member and open the organization. A
+check mark beside the name shows that the organization verified the domain for
+company sign-in.
+
+The CLI lists and joins the same organizations:
+
+```sh
+widefleet organizations joinable
+widefleet organizations join ORGANIZATION_ID
+```
+
+## Let colleagues join by email domain
+
+Owners and Admins can let everyone with a verified address on the company email
+domain join as members, without invitations. Sign in with Google Workspace or a
+Microsoft work account on that domain; this sign-in confirms that the domain
+belongs to your company.
+
+- When you create an organization, keep **Enable access for example.com** turned on.
+- Later, open **Members** and choose **Let anyone with a @example.com address join**
+  under **Join by email domain**.
+
+Removing a domain closes it for new members. People who already joined stay
+members until you remove them.
+
+```sh
+widefleet organizations create --name "Example Team" --slug example-team --allow-domain-join
+widefleet settings domain-access
+widefleet settings add-join-domain example.com
+widefleet settings remove-join-domain example.com
+```
+
+### Reserve new organizations for your company
+
+After you [verify your company domain](/guides/company-sign-in), Owners and Admins
+can turn on **Reserve new organizations for administrators** under **Members**.
+Only your organization's Owners and Admins can then create organizations with
+addresses on your verified domains, and only your organization can open itself to
+those addresses. Existing organizations continue unchanged.
+
+```sh
+widefleet settings restrict-organization-creation true
+```
 
 ## Opening published apps
 

@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-16
+lastModified: 2026-11-22
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -130,8 +130,12 @@ self-service organization creation.
 `POST /api/v1/organizations` requires a verified personal account and accepts:
 
 ```json
-{ "name": "Example Team", "slug": "example-team" }
+{ "name": "Example Team", "slug": "example-team", "allowDomainJoin": true }
 ```
+
+`allowDomainJoin` is optional and requires platform **0.7.21 or newer**. It lets
+verified addresses on your email domain join the new organization; your account
+needs a linked Google Workspace or Microsoft work account on that domain.
 
 Tokens need `platform:write`; browser sessions require a same-origin request.
 Company-scoped credentials are limited to their organization. Names contain
@@ -143,6 +147,26 @@ Pass the returned ID in `X-Widefleet-Organization` for subsequent requests.
 
 A `409` response explains whether to retry incomplete setup or choose an available
 slug. A `403` response means creation is disabled or the account is ineligible.
+
+## Joining by email domain
+
+These endpoints require platform **0.7.21 or newer** on an installation that enables
+self-service organization creation. Reads require `platform:read`, writes require
+`platform:write`. See [Let colleagues join by email domain](/guides/members#let-colleagues-join-by-email-domain).
+
+| Endpoint                                          | Operation                                                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET /api/v1/organizations/joinable`              | List organizations open to your verified email domain, with `memberCount` and `colleagues`.    |
+| `POST /api/v1/organizations/{organizationId}/join` | Join as a member; returns `{ "organizationId": "..." }`.                                       |
+| `GET /api/v1/settings/domain-access`              | Read `joinDomains`, `provableDomains`, `verifiedDomains` and `restrictOrganizationCreation`.   |
+| `POST /api/v1/settings/join-domains`              | Open the selected organization to `{ "domain": "example.com" }`.                               |
+| `DELETE /api/v1/settings/join-domains/{domain}`   | Close the organization to new members from that domain.                                        |
+| `PUT /api/v1/settings/organization-creation`      | Set `{ "restricted": true }` to reserve new organizations on verified domains for administrators. |
+
+Joining and settings changes use the selected organization's administrator role and
+the member limit described in [member management](/guides/members). The domains in
+`provableDomains` are the ones your own Google Workspace or Microsoft work sign-in
+confirms. Reserving new organizations requires a domain verified for company sign-in.
 
 ## Members, invitations and company sign-in
 
