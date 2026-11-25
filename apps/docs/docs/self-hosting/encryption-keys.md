@@ -4,7 +4,7 @@ description: Configure, add, re-encrypt with and back up the keys that protect s
 lastModified: 2026-11-25
 ---
 
-Widefleet encrypts the secrets it stores in PostgreSQL: app secrets, company SSO and directory client secrets, and the client secret of app sign-in. Only the installation's encryption keys can read them. This page shows how to manage the keys, add a key version, move stored secrets to it, upgrade from the format of earlier releases and back up the keys.
+Widefleet encrypts the secrets it stores in PostgreSQL: app secrets, company SSO and directory client secrets, and the client secret of app sign-in. Only the installation's encryption keys can read them. This page shows how to manage the keys, add a key version, move stored secrets to it, upgrade from earlier releases and back up the keys.
 
 ## How the keyring works
 
@@ -101,7 +101,7 @@ To see the counts without changing anything, run `node tools/secret-encryption.t
 
 On Cloudflare, `PLATFORM_ENCRYPTION_KEYS` is a required secret of the hosted deployment, in the same JWK Set format. The deployment stops before it changes anything if the secret is missing or malformed, and the control plane does not start without it. Generate the first key with the command above and keep the keyring in your deployment pipeline's secret store. Add and remove key versions there, then deploy through your normal versioned deployment process.
 
-Run re-encryption from the deployment pipeline, in a checkout of the deployed release with its dependencies installed. Set the same `DATABASE_URL` and `PLATFORM_ENCRYPTION_KEYS` that the deployment uses. While values in the [format of earlier releases](#upgrade-from-earlier-releases) remain, also set `PLATFORM_ENCRYPTION_KEY`. Pass them as environment variables from the secret store, not as command arguments:
+Run re-encryption from the deployment pipeline, in a checkout of the deployed release with its dependencies installed. Set the same `DATABASE_URL` and `PLATFORM_ENCRYPTION_KEYS` that the deployment uses. Pass them as environment variables from the secret store, not as command arguments:
 
 ```sh
 cd apps/control-plane
@@ -120,15 +120,11 @@ Wait until the lists are empty, then remove the key version.
 
 ## Upgrade from earlier releases
 
-Releases before the encryption keyring stored secrets in an earlier format, under one installation key: `encryption.key` in `platform-state`, or the key set with `PLATFORM_ENCRYPTION_KEY` or `PLATFORM_ENCRYPTION_KEY_FILE`. Releases with the keyring still read that format but write only with the keyring. The release that removes the earlier format refuses to start while any stored secret still uses it.
+Releases up to 0.7.21 stored secrets in an earlier format, under one installation key: `encryption.key` in `platform-state`, or the key set with `PLATFORM_ENCRYPTION_KEY` or `PLATFORM_ENCRYPTION_KEY_FILE`. Later releases no longer read that format. While any stored secret still uses it, their database migration stops the upgrade with `Stored secrets still use the encryption format of earlier releases` and leaves the database unchanged.
 
-1. Upgrade to a release with the keyring and keep the earlier key in place. On Cloudflare, add `PLATFORM_ENCRYPTION_KEYS` to the deployment secrets and keep `PLATFORM_ENCRYPTION_KEY`.
-2. [Re-encrypt stored secrets](#re-encrypt-stored-secrets) until the command exits with status 0. Its output counts values in the earlier format as `legacy`; the count must be 0.
-3. Upgrade to the release that removes the earlier format.
+An installation without stored secrets upgrades normally. An installation with stored secrets from those releases cannot be upgraded in place: set it up again with an empty database and new volumes, then enter its provider secrets, company SSO settings and app secrets again.
 
-If a value in the earlier format remains, the database migration of that release stops the upgrade with `Stored secrets still use the encryption format of earlier releases` and leaves the database unchanged. Start the previous release again, re-encrypt, then upgrade.
-
-After the upgrade, the control plane no longer reads the earlier key. Remove `PLATFORM_ENCRYPTION_KEY` from the configuration, but keep a copy while you may restore a backup taken before re-encryption. To restore such a backup, restore it on a release with the keyring, re-encrypt, then upgrade again.
+The control plane no longer reads the earlier key. Remove `PLATFORM_ENCRYPTION_KEY` and `PLATFORM_ENCRYPTION_KEY_FILE` from the configuration.
 
 ## Back up the keys
 
@@ -145,6 +141,6 @@ Restoring a database requires every key version that encrypted values in it. Wit
 
 **"The configured encryption keyring must include every key version in …/encryption.keys".** Copy the entries from that file into your keyring, as in [Manage the keyring yourself](#manage-the-keyring-yourself).
 
-**"Stored credentials could not be decrypted. Restore the installation encryption key.", or `failed` is not 0.** A stored value uses a key version that the keyring does not have, for example after restoring a database without its keys. Add the missing version back to the keyring and recreate the control plane. For values in the [format of earlier releases](#upgrade-from-earlier-releases), restore `encryption.key` or `PLATFORM_ENCRYPTION_KEY`. Then run `node tools/secret-encryption.ts status` again.
+**"Stored credentials could not be decrypted. Restore the installation encryption key.", or `failed` is not 0.** A stored value uses a key version that the keyring does not have, for example after restoring a database without its keys. Add the missing version back to the keyring and recreate the control plane. Then run `node tools/secret-encryption.ts status` again.
 
 **"No encryption keyring found".** The command runs where neither `PLATFORM_ENCRYPTION_KEYS` nor `encryption.keys` is available. Run it inside the control-plane container, or set the deployment's keyring in its environment.
