@@ -302,6 +302,13 @@
       "when": 1795651200000,
       "tag": "0042_open_app_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795737600000,
+      "tag": "0043_job_secret_revisions",
+      "breakpoints": true
     }
   ]
 }
