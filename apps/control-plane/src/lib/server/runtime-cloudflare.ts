@@ -90,10 +90,7 @@ const createSharedRuntime = (
 
   const sendEmail = extension.sendEmail ?? createCloudflareEmail(bindings);
 
-  const encryption = configuredSecretEncryption(
-    configuration.PLATFORM_ENCRYPTION_KEY,
-    configuration.PLATFORM_ENCRYPTION_KEYS,
-  );
+  const encryption = configuredSecretEncryption(configuration);
 
   const settings = createSettingsService(
     configuration,

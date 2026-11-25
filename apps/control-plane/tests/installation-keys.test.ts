@@ -44,6 +44,8 @@ it("creates a private keyring on first start and keeps using it", async () => {
   expect((await stat(path)).mode & 0o777).toBe(0o600);
   expect(ciphertext).toMatch(new RegExp(`^v1:${(await readFile(path, "utf8")).split(":")[0]}:`));
   expect(console.info).toHaveBeenCalledWith(expect.stringContaining(path));
+  // Only installations from before the keyring have a legacy key.
+  await expect(stat(join(directory, "encryption.key"))).rejects.toThrow();
 
   const restarted = await installationKeys(configuration());
 

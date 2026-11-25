@@ -3,6 +3,7 @@ import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
+import { readLegacyKey } from "./legacy-secret-migration.ts";
 import {
   createSecretEncryption,
   generateKeyVersion,
@@ -98,27 +99,13 @@ const installationKeyring = async (configuration: Configuration) => {
   return parseKeyring(created.content, path);
 };
 
-export const installationKeys = async (configuration: Configuration) => {
-  if (configuration.PLATFORM_ENCRYPTION_KEY && configuration.PLATFORM_ENCRYPTION_KEY_FILE)
-    throw new Error("Set either PLATFORM_ENCRYPTION_KEY or PLATFORM_ENCRYPTION_KEY_FILE");
-
-  const legacyKey =
-    configuration.PLATFORM_ENCRYPTION_KEY ??
-    (configuration.PLATFORM_ENCRYPTION_KEY_FILE
-      ? z
-          .string()
-          .min(32)
-          .parse((await readFile(configuration.PLATFORM_ENCRYPTION_KEY_FILE, "utf8")).trim())
-      : await persistentKey(configuration.PLATFORM_STATE_DIRECTORY, "encryption.key"));
-
-  return {
-    encryption: createSecretEncryption({
-      legacyKey,
-      keyring: await installationKeyring(configuration),
-    }),
-    cookie: await persistentKey(configuration.PLATFORM_STATE_DIRECTORY, "app-cookie.key"),
-    authentication:
-      configuration.BETTER_AUTH_SECRET ??
-      (await persistentKey(configuration.PLATFORM_STATE_DIRECTORY, "authentication.key")),
-  };
-};
+export const installationKeys = async (configuration: Configuration) => ({
+  encryption: createSecretEncryption({
+    keyring: await installationKeyring(configuration),
+    legacyKey: await readLegacyKey(configuration, readOptionalFile),
+  }),
+  cookie: await persistentKey(configuration.PLATFORM_STATE_DIRECTORY, "app-cookie.key"),
+  authentication:
+    configuration.BETTER_AUTH_SECRET ??
+    (await persistentKey(configuration.PLATFORM_STATE_DIRECTORY, "authentication.key")),
+});

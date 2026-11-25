@@ -23,7 +23,7 @@ import {
 import { CloudflareBindingUpdatePending } from "../../src/lib/server/cloudflare-binding-updates.ts";
 import { deployHostedRuntime, waitForRuntimeVersion } from "../../tools/hosted-runtime.ts";
 import { hostedConfigurations, hostedInstallation } from "../../tools/hosted-configuration.ts";
-import { provisionHostedResources, requireHostedKeyring } from "../../tools/hosted-resources.ts";
+import { provisionHostedResources } from "../../tools/hosted-resources.ts";
 
 const installation = hostedInstallation.parse({
   name: "fixture",
@@ -202,34 +202,6 @@ describe("Hosted resource provisioning", () => {
     writes.length = 0;
     await provisionHostedResources(installation, cloudflare, wrangler);
     expect(writes).toEqual([settingsUpdate]);
-  });
-
-  it("requires the deployed encryption keyring before changing a hosted installation", async () => {
-    let deployed: string[] | null = null;
-
-    const cloudflare = createCloudflareProvisioner(configuration, async (input, init) => {
-      const request = new Request(input, init);
-      expect(new URL(request.url).pathname).toBe(
-        `/client/v4/accounts/${ids.account}/workers/scripts/fixture-control-plane/secrets`,
-      );
-
-      return deployed === null
-        ? new Response(null, { status: 404 })
-        : Response.json({
-            success: true,
-            result: deployed.map((name) => ({ name, type: "secret_text" })),
-          });
-    });
-
-    // A first deployment has no control plane yet.
-    await requireHostedKeyring(installation, cloudflare, undefined);
-    deployed = ["PLATFORM_ENCRYPTION_KEY"];
-    await requireHostedKeyring(installation, cloudflare, undefined);
-    deployed = ["PLATFORM_ENCRYPTION_KEY", "PLATFORM_ENCRYPTION_KEYS"];
-    await expect(requireHostedKeyring(installation, cloudflare, undefined)).rejects.toThrow(
-      "Supply the same keyring",
-    );
-    await requireHostedKeyring(installation, cloudflare, "current:synthetic");
   });
 
   it("does not interpret a provider failure as a missing resource", async () => {

@@ -13,7 +13,11 @@ import {
   ssoProvider,
 } from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
-import { createSecretEncryption } from "../src/lib/server/secret-encryption.ts";
+import {
+  createSecretEncryption,
+  generateKeyVersion,
+  parseKeyring,
+} from "../src/lib/server/secret-encryption.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { cliClientId } from "../src/lib/server/auth-options.ts";
 import { readAppLogin, appLoginClientId } from "../src/lib/server/app-login-client.ts";
@@ -400,7 +404,7 @@ describe("Organization login settings", () => {
     const wrongKey = createSettingsService(
       environment.configuration,
       environment.database.db,
-      createSecretEncryption({ legacyKey: "wrong-test-key" }),
+      createSecretEncryption({ keyring: parseKeyring(generateKeyVersion(), "test") }),
       () => null,
     );
 

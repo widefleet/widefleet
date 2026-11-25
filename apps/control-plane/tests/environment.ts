@@ -191,7 +191,7 @@ export const createTestEnvironment = async (
     email: "owner@example.test",
   });
 
-  await registerCli(database.db, configuration);
+  await registerCli(database.db, configuration, encryption);
 
   // The exported fixture factory accepts Better Auth's general plugin context.
   const fixtureAuth = betterAuth<BetterAuthOptions>(auth.options);

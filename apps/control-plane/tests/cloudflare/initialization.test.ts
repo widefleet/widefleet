@@ -18,7 +18,7 @@ import {
   user,
 } from "../../src/lib/server/auth-schema.ts";
 import { organizationSettings } from "../../src/lib/server/schema.ts";
-import { createSecretEncryption } from "../../src/lib/server/secret-encryption.ts";
+import { configuredSecretEncryption } from "../../src/lib/server/secret-encryption.ts";
 import { cliScopes } from "../../src/lib/server/auth-options.ts";
 import { cloudflareConfigurationSchema } from "../../src/lib/server/cloudflare-config.ts";
 import { createDatabase } from "../../src/lib/server/database.ts";
@@ -39,9 +39,11 @@ describe("Hosted installation initialization", () => {
     APP_DOMAIN: "apps.example.test",
     BETTER_AUTH_SECRET: "local-test-only-authentication-secret",
     PLATFORM_ENCRYPTION_KEY: "local-test-only-encryption-secret",
+    // Synthetic key material: byte values 0 to 31.
+    PLATFORM_ENCRYPTION_KEYS: "test:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
   };
 
-  const encryption = createSecretEncryption({ legacyKey: environment.PLATFORM_ENCRYPTION_KEY });
+  const encryption = configuredSecretEncryption(environment);
 
   let database: ReturnType<typeof createDatabase>;
   let directory: string;
@@ -100,7 +102,11 @@ describe("Hosted installation initialization", () => {
   });
 
   it("requires stable keys, migrates an empty database, and creates the owner only once", async () => {
-    for (const key of ["BETTER_AUTH_SECRET", "PLATFORM_ENCRYPTION_KEY"]) {
+    for (const key of [
+      "BETTER_AUTH_SECRET",
+      "PLATFORM_ENCRYPTION_KEY",
+      "PLATFORM_ENCRYPTION_KEYS",
+    ]) {
       expect(
         cloudflareConfigurationSchema.safeParse({ ...environment, [key]: undefined }).success,
       ).toBe(false);
@@ -108,6 +114,14 @@ describe("Hosted installation initialization", () => {
         false,
       );
     }
+
+    // A malformed keyring fails at startup, not when a secret is first written.
+    expect(
+      cloudflareConfigurationSchema.safeParse({
+        ...environment,
+        PLATFORM_ENCRYPTION_KEYS: "test:not-a-key",
+      }).success,
+    ).toBe(false);
 
     await expect(initialize()).rejects.toThrow(
       "PLATFORM_BOOTSTRAP_FILE must provide the first hosted administrator",

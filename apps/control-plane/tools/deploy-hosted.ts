@@ -19,7 +19,6 @@ import {
   validateCloudflareRuntime,
 } from "../src/lib/server/cloudflare-runtime-package.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
-import { parseKeyring } from "../src/lib/server/secret-encryption.ts";
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeInstallation, readInstallation } from "../src/lib/server/installation-store.ts";
 import { StorageUnavailable } from "../src/lib/server/errors.ts";
@@ -29,7 +28,7 @@ import {
   hostedResourceNames,
   readHostedInstallation,
 } from "./hosted-configuration.ts";
-import { provisionHostedResources, requireHostedKeyring } from "./hosted-resources.ts";
+import { provisionHostedResources } from "./hosted-resources.ts";
 import {
   initializeCloudflareInstallation,
   type InitializationPlatform,
@@ -80,12 +79,10 @@ const secrets = z
       .url()
       .refine((value) => ["postgres:", "postgresql:"].includes(new URL(value).protocol)),
     BETTER_AUTH_SECRET: z.string().min(32),
+    // The legacy key, needed only until stored values are re-encrypted.
     PLATFORM_ENCRYPTION_KEY: z.string().min(32),
-    // Optional until the control plane has one; omitting it keeps the deployed secret.
-    PLATFORM_ENCRYPTION_KEYS: z
-      .string()
-      .optional()
-      .transform((value) => value?.trim() || undefined),
+    // Validated with the rest of the configuration below, before any change.
+    PLATFORM_ENCRYPTION_KEYS: z.string().min(1),
     WIDEFLEET_CONTROL_TOKEN: z.string().min(32),
     WIDEFLEET_SECRETS_KEY: z.string().regex(/^[a-f0-9]{64}$/),
     APP_COOKIE_SECRET: z.string().min(32),
@@ -95,10 +92,6 @@ const secrets = z
       .transform((value) => value || undefined),
   })
   .parse(process.env);
-
-// Reject a malformed keyring before any resource changes.
-if (secrets.PLATFORM_ENCRYPTION_KEYS)
-  parseKeyring(secrets.PLATFORM_ENCRYPTION_KEYS, "PLATFORM_ENCRYPTION_KEYS");
 
 // A trusted installation may supply additional Wrangler configuration.
 const runtimeOverrides = z
@@ -240,7 +233,6 @@ let proxy: Awaited<ReturnType<typeof getPlatformProxy<InitializationPlatform>>> 
 
 try {
   console.info(`Preparing Hosted installation ${installation.name}`);
-  await requireHostedKeyring(installation, cloudflare, secrets.PLATFORM_ENCRYPTION_KEYS);
   await migrate(database.db, { migrationsFolder: resolve(controlDirectory, "migrations") });
   const initialized = await initializeCloudflareRuntime(database.db);
 
@@ -306,9 +298,7 @@ try {
       ...socialCredentials,
       BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET,
       PLATFORM_ENCRYPTION_KEY: secrets.PLATFORM_ENCRYPTION_KEY,
-      ...(secrets.PLATFORM_ENCRYPTION_KEYS && {
-        PLATFORM_ENCRYPTION_KEYS: secrets.PLATFORM_ENCRYPTION_KEYS,
-      }),
+      PLATFORM_ENCRYPTION_KEYS: secrets.PLATFORM_ENCRYPTION_KEYS,
       APP_COOKIE_SECRET: secrets.APP_COOKIE_SECRET,
       CLOUDFLARE_API_TOKEN: secrets.WIDEFLEET_PROVISIONING_TOKEN,
     }),

@@ -85,15 +85,8 @@ export const createAuthentication = (
     },
   });
 
-  const legacyKey = configuration.PLATFORM_ENCRYPTION_KEY ?? configuration.BETTER_AUTH_SECRET;
-
-  const encryption =
-    options.encryption ??
-    (legacyKey
-      ? configuredSecretEncryption(legacyKey, configuration.PLATFORM_ENCRYPTION_KEYS)
-      : undefined);
-
-  if (!encryption) throw new Error("An encryption key is required for authentication");
+  // Installations pass their service; the fallback reads only the configuration.
+  const encryption = options.encryption ?? configuredSecretEncryption(configuration);
 
   let readKeys: () => Promise<JSONWebKeySet> = async () => {
     throw new Error("Authentication is initializing");
@@ -314,11 +307,19 @@ export const createAuthentication = (
 
 export type Authentication = ReturnType<typeof createAuthentication>;
 
-export const registerCli = async (database: Database, configuration: Configuration) =>
+export const registerCli = async (
+  database: Database,
+  configuration: Configuration,
+  encryption: SecretEncryption,
+) =>
   database.transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(1740031201)`);
 
-    const auth = createAuthentication(configuration, transaction, { initializeResources: true });
+    const auth = createAuthentication(configuration, transaction, {
+      initializeResources: true,
+      encryption,
+    });
+
     await auth.$context;
 
     const policy = cliResourcePolicy(configuration);

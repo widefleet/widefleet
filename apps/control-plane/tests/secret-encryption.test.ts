@@ -1,7 +1,8 @@
 import { createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
-import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
+import { symmetricEncrypt } from "better-auth/crypto";
 import { describe, expect, it } from "vitest";
 import {
+  configuredSecretEncryption,
   createSecretEncryption,
   generateKeyVersion,
   parseKeyring,
@@ -21,40 +22,45 @@ const unreadable = {
   message: "Stored credentials could not be decrypted. Restore the installation encryption key.",
 };
 
+// Temporary: remove with legacy-secret-migration.ts.
 describe("legacy ciphertexts", () => {
   // Recorded from better-auth's symmetricEncrypt with the synthetic key above.
   const stored =
     "04170b74ec840be7258e5c66a39a6a3455ee568a0ea14a8df2866f47bf919593d5bf7849c95bf27ecb86c01f03052ca9329cab0882bbedc2";
 
-  it("decrypts ciphertexts that earlier releases stored, with or without a keyring", async () => {
-    const keyring = parseKeyring(keyVersion("current"), "test");
+  const keyring = () => parseKeyring(keyVersion("current"), "test");
 
-    expect(await createSecretEncryption({ legacyKey }).decrypt(context, stored)).toBe(
-      "synthetic secret",
-    );
-    expect(await createSecretEncryption({ legacyKey, keyring }).decrypt(context, stored)).toBe(
-      "synthetic secret",
-    );
+  it("decrypts ciphertexts that earlier releases stored, but writes only the active version", async () => {
+    const encryption = createSecretEncryption({ keyring: keyring(), legacyKey });
+
+    expect(await encryption.decrypt(context, stored)).toBe("synthetic secret");
+    expect(await encryption.encrypt(context, "new value")).toMatch(/^v1:current:/);
   });
 
-  it("keeps writing the legacy format without a keyring", async () => {
-    const encryption = createSecretEncryption({ legacyKey });
-    const ciphertext = await encryption.encrypt(context, "synthetic secret");
-
-    expect(ciphertext).toMatch(/^[a-f0-9]+$/);
-    expect(await symmetricDecrypt({ key: legacyKey, data: ciphertext })).toBe("synthetic secret");
-    expect(await encryption.decrypt(context, ciphertext)).toBe("synthetic secret");
-  });
-
-  it("asks for the installation key when the legacy key differs", async () => {
+  it("asks for the installation key when the legacy key differs or is missing", async () => {
     const ciphertext = await symmetricEncrypt({ key: legacyKey, data: "value" });
 
-    await expect(
-      createSecretEncryption({ legacyKey: "another-synthetic-installation-key" }).decrypt(
+    for (const other of ["another-synthetic-installation-key", undefined])
+      await expect(
+        createSecretEncryption({ keyring: keyring(), legacyKey: other }).decrypt(
+          context,
+          ciphertext,
+        ),
+      ).rejects.toMatchObject(unreadable);
+  });
+});
+
+describe("configured keyrings", () => {
+  it("requires PLATFORM_ENCRYPTION_KEYS without file access", async () => {
+    expect(() => configuredSecretEncryption({ PLATFORM_ENCRYPTION_KEY: legacyKey })).toThrow(
+      "Set PLATFORM_ENCRYPTION_KEYS",
+    );
+    expect(
+      await configuredSecretEncryption({ PLATFORM_ENCRYPTION_KEYS: keyVersion("current") }).encrypt(
         context,
-        ciphertext,
+        "value",
       ),
-    ).rejects.toMatchObject(unreadable);
+    ).toMatch(/^v1:current:/);
   });
 });
 

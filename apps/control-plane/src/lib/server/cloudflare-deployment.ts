@@ -56,10 +56,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
 
   if (!runtime) throw new Error("The app runtime service binding is missing");
 
-  const encryption = configuredSecretEncryption(
-    bindings.PLATFORM_ENCRYPTION_KEY,
-    bindings.PLATFORM_ENCRYPTION_KEYS,
-  );
+  const encryption = configuredSecretEncryption(bindings);
 
   const provisioner = createCloudflareProvisioner(
     {

@@ -55,13 +55,10 @@ export const initializeCloudflareInstallation = async ({
   await initializeOrganization(database);
   await initializeInstallation(database);
 
-  const encryption = configuredSecretEncryption(
-    configuration.PLATFORM_ENCRYPTION_KEY,
-    configuration.PLATFORM_ENCRYPTION_KEYS,
-  );
+  const encryption = configuredSecretEncryption(configuration);
 
   await migrateSsoSettings(database, encryption);
-  await registerCli(database, configuration);
+  await registerCli(database, configuration, encryption);
 
   const state = await readInstallation(database);
 

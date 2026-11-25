@@ -1,5 +1,9 @@
-import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
 import { InvalidOperation } from "./errors.ts";
+import {
+  configuredLegacyKey,
+  decryptLegacySecret,
+  isLegacyCiphertext,
+} from "./legacy-secret-migration.ts";
 
 /**
  * Names the stored value a ciphertext protects. Each kind carries exactly the
@@ -105,8 +109,7 @@ export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
     ),
   );
 
-// Versioned ciphertexts are `v1:<key ID>:<base64url of IV and sealed value>`.
-// Legacy ciphertexts are bare hexadecimal and never contain a colon.
+// Ciphertexts are `v1:<key ID>:<base64url of IV and sealed value>`.
 const format = "v1";
 
 const ivSize = 12;
@@ -125,16 +128,16 @@ const deriveSubkey = async (material: Uint8Array<ArrayBuffer>) =>
 
 /**
  * Encrypts the customer secrets that the control plane stores. Callers name
- * what they protect and never handle key material. New values use the active
- * key version of `keyring`; without a keyring they keep the legacy format.
- * Unprefixed legacy ciphertexts always decrypt with `legacyKey`.
+ * what they protect and never handle key material. New values always use the
+ * active key version of `keyring`. `legacyKey` only decrypts values that
+ * releases before the keyring wrote, until they are re-encrypted.
  */
 export const createSecretEncryption = ({
-  legacyKey,
   keyring,
+  legacyKey,
 }: {
-  legacyKey: string;
-  keyring?: Keyring | undefined;
+  keyring: Keyring;
+  legacyKey?: string | undefined;
 }) => {
   const subkeys = new Map<string, Promise<CryptoKey>>();
 
@@ -150,7 +153,7 @@ export const createSecretEncryption = ({
 
   const decryptVersioned = async (ciphertext: string) => {
     const [prefix, id, payload, ...rest] = ciphertext.split(":");
-    const version = keyring?.find((candidate) => candidate.id === id);
+    const version = keyring.find((candidate) => candidate.id === id);
 
     if (prefix !== format || !version || payload === undefined || rest.length > 0)
       throw new Error("Unsupported ciphertext");
@@ -169,9 +172,7 @@ export const createSecretEncryption = ({
     // The context is not yet bound to the ciphertext. Callers already pass it,
     // so binding it in a later format changes only this module.
     encrypt: async (_context: SecretContext, value: string) => {
-      const active = keyring?.[0];
-
-      if (!active) return symmetricEncrypt({ key: legacyKey, data: value });
+      const [active] = keyring;
       const iv = crypto.getRandomValues(new Uint8Array(ivSize));
 
       const sealed = await crypto.subtle.encrypt(
@@ -186,9 +187,9 @@ export const createSecretEncryption = ({
     },
     decrypt: async (_context: SecretContext, ciphertext: string) => {
       try {
-        return ciphertext.includes(":")
-          ? await decryptVersioned(ciphertext)
-          : await symmetricDecrypt({ key: legacyKey, data: ciphertext });
+        return isLegacyCiphertext(ciphertext)
+          ? await decryptLegacySecret(legacyKey, ciphertext)
+          : await decryptVersioned(ciphertext);
       } catch {
         throw new InvalidOperation({
           code: "BAD_REQUEST",
@@ -204,10 +205,19 @@ export type SecretEncryption = ReturnType<typeof createSecretEncryption>;
 
 /**
  * Creates the service from settings that need no file access, as on Cloudflare,
- * where the keyring is the `PLATFORM_ENCRYPTION_KEYS` secret.
+ * where the keyring is the required `PLATFORM_ENCRYPTION_KEYS` secret.
  */
-export const configuredSecretEncryption = (legacyKey: string, keys: string | undefined) =>
-  createSecretEncryption({
-    legacyKey,
-    keyring: keys?.trim() ? parseKeyring(keys, "PLATFORM_ENCRYPTION_KEYS") : undefined,
+export const configuredSecretEncryption = (configuration: {
+  PLATFORM_ENCRYPTION_KEYS?: string | undefined;
+  PLATFORM_ENCRYPTION_KEY?: string | undefined;
+  BETTER_AUTH_SECRET?: string | undefined;
+}) => {
+  const keys = configuration.PLATFORM_ENCRYPTION_KEYS?.trim();
+
+  if (!keys) throw new Error(`Set PLATFORM_ENCRYPTION_KEYS to ${keyEntry}`);
+
+  return createSecretEncryption({
+    keyring: parseKeyring(keys, "PLATFORM_ENCRYPTION_KEYS"),
+    legacyKey: configuredLegacyKey(configuration),
   });
+};

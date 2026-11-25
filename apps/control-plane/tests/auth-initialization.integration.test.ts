@@ -16,7 +16,8 @@ describe("Installation-owned CLI resource policy", () => {
     await environment.close();
   });
 
-  const initialize = () => registerCli(environment.database.db, environment.configuration);
+  const initialize = () =>
+    registerCli(environment.database.db, environment.configuration, environment.encryption);
 
   const resource = () =>
     environment.database.db
