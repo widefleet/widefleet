@@ -55,6 +55,9 @@ const requirePublicOrigin = async (origin: string) => {
 export const prepareCompanyOidc = async (
   issuer: string,
   configuration: z.infer<typeof oidcConfiguration>,
+  // A saved connection can lack a user info endpoint its provider advertises, for example
+  // one added after registration. Discovery fills it in; saved endpoints keep precedence.
+  options: { discoverMissingUserInfo?: boolean } = {},
 ) => {
   const issuerOrigin = new URL(identityUrl.parse(issuer)).origin;
 
@@ -65,7 +68,8 @@ export const prepareCompanyOidc = async (
   const discovered =
     !configuration.authorizationEndpoint ||
     !configuration.tokenEndpoint ||
-    !configuration.jwksEndpoint;
+    !configuration.jwksEndpoint ||
+    (options.discoverMissingUserInfo === true && !configuration.userInfoEndpoint);
 
   const accept = (value: string) => {
     const url = new URL(value);

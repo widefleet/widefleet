@@ -533,7 +533,8 @@ describe("Better Auth SSO provider integration", () => {
     expect((await environment.settings.read(principal)).ssoDomains).toEqual(before.ssoDomains);
   });
 
-  it.each(["registered", "migrated"])(
+  // A partial connection was registered while its provider advertised no user info endpoint.
+  it.each(["registered", "migrated", "partial"])(
     "completes %s-provider sign-in without changing stored configuration",
     async (kind) => {
       await environment.database.db.delete(ssoProvider);
@@ -545,6 +546,8 @@ describe("Better Auth SSO provider integration", () => {
       const oidcConfig = { kind: "sso-provider-config", field: "oidcConfig" } as const;
 
       let discoveryAvailable = true;
+
+      let advertiseUserInfo = kind !== "partial";
 
       const metadata = {
         issuer,
@@ -594,7 +597,9 @@ describe("Better Auth SSO provider integration", () => {
           case `${issuer}/.well-known/openid-configuration`:
             if (!discoveryAvailable) return new Response(null, { status: 503 });
 
-            return Response.json(metadata);
+            return Response.json(
+              advertiseUserInfo ? metadata : { ...metadata, userinfo_endpoint: undefined },
+            );
           case metadata.token_endpoint: {
             expect(outgoing.method).toBe("POST");
             const fields = new URLSearchParams(await outgoing.text());
@@ -661,7 +666,7 @@ describe("Better Auth SSO provider integration", () => {
         request.mockClear();
         const rotatedSecret = "concurrently-rotated-secret";
 
-        if (kind === "registered")
+        if (kind !== "migrated")
           ipv4.mockImplementationOnce(async () => {
             const [current] = await environment.database.db.select().from(ssoProvider);
 
@@ -728,7 +733,7 @@ describe("Better Auth SSO provider integration", () => {
         expect(saved?.oidcConfig).toBe(encrypted);
         expect(encrypted).not.toContain(input.oidcConfig.clientSecret);
         expect(JSON.parse(await encryption.decrypt(oidcConfig, encrypted))).toMatchObject({
-          clientSecret: kind === "registered" ? rotatedSecret : input.oidcConfig.clientSecret,
+          clientSecret: kind === "migrated" ? input.oidcConfig.clientSecret : rotatedSecret,
         });
         visited.clear();
 
@@ -762,7 +767,7 @@ describe("Better Auth SSO provider integration", () => {
           new Set([
             metadata.token_endpoint,
             metadata.jwks_uri,
-            metadata.userinfo_endpoint,
+            ...(kind === "partial" ? [] : [metadata.userinfo_endpoint]),
             picture,
             ...(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
           ]),
@@ -790,39 +795,62 @@ describe("Better Auth SSO provider integration", () => {
         expect(first.user.image).toMatch(copied);
         const firstImage = first.user.image;
 
-        // A returning sign-in replaces only the picture.
+        const returningSignIn = async () => {
+          const again = await environment.auth.handler(signIn.clone());
+          const againTarget = z.object({ url: z.url() }).parse(await again.json());
+          const againCallback = new URL(callback);
+          againCallback.searchParams.set(
+            "state",
+            z.string().min(1).parse(new URL(againTarget.url).searchParams.get("state")),
+          );
+          againCallback.searchParams.set("code", "synthetic-code");
+
+          const returned = await environment.auth.handler(
+            new Request(againCallback, { headers: { cookie: cookie(again) } }),
+          );
+
+          expect(returned.status).toBe(302);
+
+          return z
+            .object({
+              user: z.object({ email: z.string(), name: z.string(), image: z.string().nullable() }),
+            })
+            .parse(
+              await (
+                await environment.auth.handler(
+                  new Request(`${origin}/api/auth/get-session`, {
+                    headers: { cookie: cookie(returned) },
+                  }),
+                )
+              ).json(),
+            ).user;
+        };
+
+        // A returning sign-in replaces only the picture. A registered connection reads its saved
+        // user info endpoint without discovery; a partial connection's provider now advertises
+        // user info, which the picture lookup discovers.
         idToken = await signedIdToken({ name: "Renamed at provider" });
         userInfo = { ...profile, picture: `${picture}/new` };
-        const again = await environment.auth.handler(signIn.clone());
-        const againTarget = z.object({ url: z.url() }).parse(await again.json());
-        const againCallback = new URL(callback);
-        againCallback.searchParams.set(
-          "state",
-          z.string().min(1).parse(new URL(againTarget.url).searchParams.get("state")),
-        );
-        againCallback.searchParams.set("code", "synthetic-code");
-
-        const returned = await environment.auth.handler(
-          new Request(againCallback, { headers: { cookie: cookie(again) } }),
-        );
-
-        expect(returned.status).toBe(302);
-
-        const second = z
-          .object({ user: z.object({ email: z.string(), name: z.string(), image: z.string() }) })
-          .parse(
-            await (
-              await environment.auth.handler(
-                new Request(`${origin}/api/auth/get-session`, {
-                  headers: { cookie: cookie(returned) },
-                }),
-              )
-            ).json(),
-          ).user;
+        advertiseUserInfo = true;
+        discoveryAvailable = kind !== "registered";
+        const second = await returningSignIn();
 
         expect(second).toMatchObject({ email: profile.email, name: profile.name });
         expect(second.image).toMatch(copied);
         expect(second.image).not.toBe(firstImage);
+
+        if (kind === "partial") {
+          // A failed discovery keeps the copy.
+          discoveryAvailable = false;
+          expect((await returningSignIn()).image).toBe(second.image);
+          // A provider that advertises no user info, with an ID token that names no picture,
+          // has none.
+          discoveryAvailable = true;
+          advertiseUserInfo = false;
+          expect((await returningSignIn()).image).toBeNull();
+        }
+
+        discoveryAvailable = kind === "migrated";
 
         request.mockClear();
         visited.clear();

@@ -74,11 +74,15 @@ const readPicture = async (response: Response): Promise<Picture | null> => {
  */
 export type PictureResult = Picture | "none" | null;
 
+// Workers accept only "follow" and "manual" redirects. With "manual", a redirect is a non-2xx
+// response like any other, so its target is never asked.
+const noRedirect = "manual";
+
 export const pictureRequest = async (url: string, init: RequestInit): Promise<PictureResult> => {
   try {
     const response = await fetch(url, {
       ...init,
-      redirect: "error",
+      redirect: noRedirect,
       signal: AbortSignal.timeout(5_000),
     });
 
@@ -152,7 +156,7 @@ export const fetchUserInfoClaims = async (endpoint: string, accessToken: string)
   try {
     const response = await fetch(endpoint, {
       headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
-      redirect: "error",
+      redirect: noRedirect,
       signal: AbortSignal.timeout(5_000),
     });
 
@@ -315,7 +319,7 @@ const discoveredUserInfo = async (issuerUrl: string) => {
   try {
     const response = await fetch(`${issuerUrl}/.well-known/openid-configuration`, {
       headers: { accept: "application/json" },
-      redirect: "error",
+      redirect: noRedirect,
       signal: AbortSignal.timeout(5_000),
     });
 

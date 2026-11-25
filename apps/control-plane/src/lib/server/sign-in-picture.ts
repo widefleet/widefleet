@@ -29,8 +29,11 @@ const idTokenClaims = (idToken: string | null | undefined) => {
 // `null` when discovery fails, `undefined` when the provider has none.
 const companyUserInfo = async (issuer: string, configuration: string) => {
   try {
-    return (await prepareCompanyOidc(issuer, oidcConfiguration.parse(JSON.parse(configuration))))
-      .configuration.userInfoEndpoint;
+    return (
+      await prepareCompanyOidc(issuer, oidcConfiguration.parse(JSON.parse(configuration)), {
+        discoverMissingUserInfo: true,
+      })
+    ).configuration.userInfoEndpoint;
   } catch {
     return null;
   }
