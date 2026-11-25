@@ -87,11 +87,12 @@ own window under its Widefleet name and icon:
 - **iPhone and iPad:** in Safari, choose **Share → Add to Home Screen**.
 - **Android:** in Chrome, choose **Install app** from the menu.
 
-The icon comes from the app's static files. Ship `/favicon.svg` for computers and
-a square `/apple-touch-icon.png` of at least 512 × 512 pixels for phones. Renaming
-the app changes the installed name with the next deployment. To set the name,
-colors or start page yourself, ship your own `/manifest.webmanifest` static file
-or link a manifest from your pages; Widefleet then uses yours.
+The icon comes from the app's `/favicon.svg`. Widefleet renders the PNG icons
+phones need from it when you deploy. To use your own instead, ship
+`/apple-touch-icon.png`. Renaming the app changes the installed name with the
+next deployment. To set the name, colors or start page yourself, ship your own
+`/manifest.webmanifest` static file or link a manifest from your pages;
+Widefleet then uses yours.
 
 ## Verify access
 
