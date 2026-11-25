@@ -4,9 +4,11 @@
 import {
   buildFailure,
   bundleResult,
+  type configRequest,
   documentResult,
   type documentRequest,
 } from "@platform/contracts/builds";
+import { appDeclaration } from "@platform/contracts";
 import { Result } from "better-result";
 import type { z } from "zod";
 import type { Fetcher } from "@cloudflare/workers-types";
@@ -67,9 +69,11 @@ const call = <T>(endpoint: Endpoint, body: string, schema: z.ZodType<T>, timeout
   });
 
 export const createAppBuilder = (
-  endpoints: { bundle: Endpoint; document: Endpoint },
+  endpoints: { bundle: Endpoint; document: Endpoint; config: Endpoint },
   timeout = defaultTimeout,
 ) => ({
+  config: (input: z.input<typeof configRequest>) =>
+    call(endpoints.config, JSON.stringify(input), appDeclaration, timeout),
   bundle: (files: Record<string, string>) =>
     call(endpoints.bundle, JSON.stringify({ files }), bundleResult, timeout),
   document: (request: z.input<typeof documentRequest>) =>
@@ -85,12 +89,18 @@ export const httpAppBuilder = (origin: string) => {
   const endpoint = (path: string) => (body: string, signal: AbortSignal) =>
     fetch(new URL(path, origin), { method: "POST", headers, body, signal });
 
-  return createAppBuilder({ bundle: endpoint("/bundle"), document: endpoint("/document") });
+  return createAppBuilder({
+    config: endpoint("/config"),
+    bundle: endpoint("/bundle"),
+    document: endpoint("/document"),
+  });
 };
 
 /** Separate builder Workers per phase, so each phase runs in its own isolate. */
 export const bindingAppBuilder = (bundler: Fetcher, documenter: Fetcher) =>
   createAppBuilder({
+    config: (body) =>
+      bundler.fetch("https://builder.internal/config", { method: "POST", headers, body }),
     bundle: (body) =>
       bundler.fetch("https://builder.internal/bundle", { method: "POST", headers, body }),
     document: (body) =>

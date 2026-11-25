@@ -3,10 +3,16 @@
 // twice, so each phase runs in its own isolate; self-hosted installations run
 // one instance. Only the control plane reaches the builder: through service
 // bindings, or on a private network without other workloads.
-import { buildFailure, bundleRequest, documentRequest } from "@platform/contracts/builds";
+import {
+  buildFailure,
+  bundleRequest,
+  configRequest,
+  documentRequest,
+} from "@platform/contracts/builds";
 import { z } from "zod";
 import { bundle } from "./bundle.ts";
 import { BuildError } from "./configuration.ts";
+import { evaluateDeclaration, readDeclaration } from "./declaration.ts";
 import { document } from "./document.ts";
 
 interface Environment {
@@ -21,7 +27,10 @@ export default {
   async fetch(request, environment) {
     const { pathname } = new URL(request.url);
 
-    if (request.method !== "POST" || (pathname !== "/bundle" && pathname !== "/document"))
+    if (
+      request.method !== "POST" ||
+      (pathname !== "/bundle" && pathname !== "/document" && pathname !== "/config")
+    )
       return failure(404, "Not found");
 
     const registry = environment.NPM_REGISTRY ?? "https://registry.npmjs.org";
@@ -35,6 +44,16 @@ export default {
     }
 
     try {
+      if (pathname === "/config") {
+        const input = configRequest.parse(body);
+
+        return Response.json(
+          "program" in input
+            ? await evaluateDeclaration(input.program)
+            : await readDeclaration(input.files),
+        );
+      }
+
       if (pathname === "/bundle")
         return Response.json(await bundle(bundleRequest.parse(body).files, registry));
 

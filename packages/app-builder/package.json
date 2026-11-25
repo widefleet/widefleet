@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "@cloudflare/worker-bundler": "0.2.6",
+    "@opencode/codemode": "2.3.0",
     "@platform/contracts": "workspace:*",
     "@platform/service-docs": "workspace:*",
+    "effect": "4.1.0",
     "es-module-lexer": "2.3.2",
     "yaml": "2.9.1",
     "zod": "4.6.5"

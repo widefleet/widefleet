@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::json as value;
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::{Seek, Write},
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -363,6 +364,7 @@ async fn publish(
         local_command(project, &["run", "build"]).await?;
     }
     let temporary = tempfile::tempdir_in(project)?;
+    let declared = resolve_declaration(project, &bundler, api, credentials).await?;
     let entry = project.join(&configuration.worker.main).canonicalize()?;
     if !entry.starts_with(project) {
         return Err(Error::invalid(
@@ -545,7 +547,7 @@ async fn publish(
         web: Some(web),
         entrypoints,
         source: saved,
-        network: declaration(project)?.network,
+        network: declared.network,
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         required_secrets: configuration.secrets.required,
@@ -659,8 +661,64 @@ struct Declaration {
     network: Option<platform_core::model::NetworkDeclaration>,
 }
 
-// widefleet.jsonc beside wrangler.jsonc declares what the app needs from
-// Widefleet; Wrangler's configuration stays Cloudflare's format.
+async fn resolve_declaration(
+    project: &Path,
+    bundler: &Path,
+    api: &Api,
+    credentials: &auth::Credentials,
+) -> Result<Declaration> {
+    if !project.join("widefleet.config.ts").try_exists()? {
+        return declaration(project);
+    }
+    if project.join("widefleet.jsonc").try_exists()? {
+        return Err(Error::invalid(
+            "Use only one of widefleet.config.ts and widefleet.jsonc".into(),
+        ));
+    }
+    let mut entry = tempfile::tempfile()?;
+    entry.write_all(br#"import config from "./widefleet.config.ts"; widefleetConfig(config);"#)?;
+    entry.rewind()?;
+    let output = Command::new(bundler)
+        .current_dir(project)
+        .stdin(Stdio::from(entry))
+        .args([
+            "--bundle",
+            "--format=esm",
+            "--packages=external",
+            "--platform=browser",
+            "--target=es2022",
+            "--charset=utf8",
+            "--log-level=warning",
+        ])
+        .stderr(Stdio::inherit())
+        .output()
+        .await?;
+    if !output.status.success() {
+        return Err(Error::invalid(
+            "Could not bundle widefleet.config.ts; see esbuild diagnostics above".into(),
+        ));
+    }
+    if output.stdout.len() > 64 * 1024 {
+        return Err(Error::invalid(
+            "The bundled widefleet.config.ts exceeds 64 KiB".into(),
+        ));
+    }
+    let program = std::str::from_utf8(&output.stdout)
+        .map_err(|_| Error::invalid("The config bundler emitted invalid UTF-8".into()))?;
+    let token = auth::access_token(api, credentials).await?;
+    let response = api
+        .authenticated(Method::POST, "/build/config", &token)
+        .json(&value!({ "program": program }))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(Error::invalid(
+            "Update the Widefleet server and app builder to use widefleet.config.ts".into(),
+        ));
+    }
+    json(response).await
+}
+
 fn declaration(project: &Path) -> Result<Declaration> {
     let path = project.join("widefleet.jsonc");
     if !path.exists() {

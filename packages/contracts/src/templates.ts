@@ -25,7 +25,7 @@ export const appTemplate = appTemplateSummary.extend({
   prompt: z.string(),
   /** Whether this installation builds templates for one-click installs. */
   installable: z.boolean(),
-  /** Origins the template declares in widefleet.jsonc; installing from its page grants them. */
+  /** Origins the template declares in its project configuration; installing from its page grants them. */
   network: networkPolicy.optional(),
   /** Secrets its wrangler.jsonc requires; an install provides their values. */
   requiredSecrets: z.array(z.string()),

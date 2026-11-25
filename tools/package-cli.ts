@@ -194,6 +194,8 @@ await build({
   target: "node22.18",
 });
 
+await copyFile(join(root, "tools/widefleet-config.d.ts"), join(launcherPackage, "config.d.ts"));
+
 await chmod(join(launcherPackage, "bin/widefleet.mjs"), 0o755);
 
 await copyFile(join(root, "LICENSE"), join(launcherPackage, "LICENSE"));
@@ -214,7 +216,8 @@ await writeFile(
       engines: { node: ">=22.18.0" },
       os: ["linux", "darwin", "win32"],
       cpu: ["x64", "arm64"],
-      files: ["bin", "README.md", "LICENSE"],
+      files: ["bin", "config.d.ts", "README.md", "LICENSE"],
+      exports: { "./config": { types: "./config.d.ts" }, "./*": "./*" },
       optionalDependencies: Object.fromEntries(
         cliPlatforms.map((entry) => [`widefleet-${entry.name}`, version]),
       ),

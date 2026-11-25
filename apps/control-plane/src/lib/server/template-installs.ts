@@ -36,7 +36,6 @@ export const createTemplateInstalls = (
   secrets: Pick<ReturnType<typeof createAppSecrets>, "encrypt">,
   builder?: AppBuilder,
 ) => ({
-  available: Boolean(builder),
   /**
    * Installs a template. The template's page lists the declared origins next
    * to its install button, and that click grants exactly those

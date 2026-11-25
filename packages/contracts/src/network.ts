@@ -20,7 +20,7 @@ const origins = z
 export const networkPolicy = z.strictObject({ backend: origins, browser: origins });
 
 /**
- * The origins an app declares in widefleet.jsonc. A deployment requests them;
+ * The origins an app declares in its project configuration. A deployment requests them;
  * only the app's owner or an administrator grants them.
  */
 export const networkDeclaration = z.strictObject({
@@ -28,7 +28,7 @@ export const networkDeclaration = z.strictObject({
   browser: origins.default([]),
 });
 
-/** widefleet.jsonc: what an app needs from Widefleet beyond its Wrangler configuration. */
+/** The resolved Widefleet configuration of an app. */
 export const appDeclaration = z.strictObject({
   $schema: z.string().optional(),
   network: networkDeclaration.optional(),

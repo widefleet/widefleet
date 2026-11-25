@@ -4,6 +4,7 @@ import { OpenAPIGenerator } from "@orpc/openapi";
 import { ORPCError, ValidationError, onError, os } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import * as contract from "@platform/contracts";
+import { configProgram } from "@platform/contracts/builds";
 import type { Result } from "better-result";
 import { z } from "zod";
 import type { Runtime } from "./runtime.ts";
@@ -746,7 +747,7 @@ export const createApi = (runtime: Runtime) => {
             context.principal,
             runtime.configuration,
             input.templateId,
-            runtime.templates.available,
+            runtime.builder,
             unwrap(await runtime.apps.templateInstalls(context.principal)),
           ),
         ),
@@ -966,6 +967,18 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.agents.disable(context.principal, input.agentId)),
       ),
+    resolveAppConfig: write
+      .route({ method: "POST", path: "/build/config" })
+      .input(z.strictObject({ program: configProgram }))
+      .output(contract.appDeclaration)
+      .handler(async ({ input }) => {
+        if (!runtime.builder)
+          throw new ORPCError("BAD_REQUEST", {
+            message: "Configure the app builder to use widefleet.config.ts",
+          });
+
+        return unwrap(await runtime.builder.config(input));
+      }),
     startUpload: write
       .route({ method: "POST", path: "/apps/{appId}/assets-upload-session" })
       .input(contract.appPath.extend(contract.createUploadInput.shape))

@@ -194,13 +194,7 @@ export const getTemplate = query(
     const installed = queryValue(await runtime.apps.templateInstalls(principal));
 
     const template = queryValue(
-      await readTemplate(
-        principal,
-        runtime.configuration,
-        templateId,
-        runtime.templates.available,
-        installed,
-      ),
+      await readTemplate(principal, runtime.configuration, templateId, runtime.builder, installed),
     );
 
     return { ...template, html: new MarkdownIt({ html: false }).render(template.markdown) };

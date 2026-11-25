@@ -41,6 +41,18 @@ export const buildSources = z
 
 export const bundleRequest = z.strictObject({ files: buildSources });
 
+// A CLI build supplies the program; a hosted build starts with project sources.
+export const configProgram = z
+  .string()
+  .min(1)
+  .max(64 * 1024)
+  .refine(
+    (program) => new TextEncoder().encode(program).byteLength <= 64 * 1024,
+    "Config programs must fit in 64 KiB",
+  );
+
+export const configRequest = z.union([bundleRequest, z.strictObject({ program: configProgram })]);
+
 export const builtWorker = workerConfiguration.extend({
   web: z.boolean(),
   entrypoints: z.array(bindingName).max(32),

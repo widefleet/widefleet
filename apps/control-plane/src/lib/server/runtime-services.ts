@@ -207,6 +207,7 @@ export const createRuntime = ({
     appSecrets,
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads,
+    ...(builder && { builder }),
     templates: createTemplateInstalls(configuration, apps, uploads, network, appSecrets, builder),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };

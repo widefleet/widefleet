@@ -173,7 +173,7 @@ pub struct WorkerMetadata {
     pub entrypoints: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceRevision>,
-    /// Origins the app declares in widefleet.jsonc. Deploying requests them;
+    /// Origins the app declares in its project configuration. Deploying requests them;
     /// the app's owner or an administrator grants them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<NetworkDeclaration>,

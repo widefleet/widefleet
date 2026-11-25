@@ -86,6 +86,7 @@ let bundleResponse = () =>
 
 // A builder that records its requests and returns a fixed build.
 const builder = createAppBuilder({
+  config: async () => Response.json({}),
   bundle: async (body) => {
     builderRequests.push({ phase: "bundle", body });
 
@@ -160,6 +161,25 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 afterAll(async () => environment?.close());
+
+it("resolves a CLI config with the installation's builder before deployment", async () => {
+  const runtime = await runtimeWith(builder);
+  const program = "widefleetConfig({});";
+  const resolve = vi.spyOn(builder, "config");
+
+  const response = await createApi(runtime)(
+    new Request("http://localhost/api/v1/build/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ program }),
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({});
+  expect(runtime.identity.authenticate).toHaveBeenCalledWith(expect.any(Request), "platform:write");
+  expect(resolve).toHaveBeenCalledWith({ program });
+});
 
 it("builds a template's sources and deploys them as the CLI would", async () => {
   const runtime = await runtimeWith(builder);
@@ -545,6 +565,7 @@ it("does not install over an app deployed while the template builds", async () =
   let duringBuild = async () => {};
 
   const racing = createAppBuilder({
+    config: async () => Response.json({}),
     bundle: async () => {
       await duringBuild();
 
@@ -854,6 +875,7 @@ it("reports build errors and missing templates", async () => {
 it("ends a build that exceeds the deadline", async () => {
   const stalled = createAppBuilder(
     {
+      config: () => new Promise<Response>(() => {}),
       bundle: () => new Promise<Response>(() => {}),
       document: () => new Promise<Response>(() => {}),
     },

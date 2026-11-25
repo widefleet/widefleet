@@ -14,7 +14,8 @@ import type { Principal } from "./identity.ts";
 import type { Configuration } from "./config.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { iconPaths, maxIconBytes } from "./app-icons.ts";
-import { declaredAssets, declaredSecrets } from "./template-project.ts";
+import type { AppBuilder } from "./app-builder.ts";
+import { declaredAssets, declaredSecrets, templateProject } from "./template-project.ts";
 import { readBody } from "./upload-body.ts";
 
 const maxWranglerBytes = 1024 * 1024;
@@ -74,8 +75,28 @@ export const templateDescription = (files: Readonly<Record<string, Uint8Array>>)
     .slice(0, appDescriptionLength);
 };
 
-// The origins a template declares in widefleet.jsonc, which an install grants.
-const loadNetwork = async (id: string) => {
+// The origins a template declares in its project configuration, which an install grants.
+const loadNetwork = async (
+  id: string,
+  configuration: Pick<Configuration, "GITHUB_TOKEN">,
+  builder: AppBuilder | undefined,
+) => {
+  const typescript = await fetch(`${files}/${id}/widefleet.config.ts`, {
+    method: "HEAD",
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (typescript.ok) {
+    // Preview and installation evaluate the same project format, including local imports.
+    if (!builder) return undefined;
+    const snapshot = (await templateSources(configuration, id)).unwrap();
+    const project = templateProject(snapshot.files).unwrap();
+
+    return (await builder.config({ files: project.sources })).unwrap().network;
+  }
+
+  if (typescript.status !== 404) throw new Error(`GitHub returned HTTP ${typescript.status}`);
+
   const response = await fetch(`${files}/${id}/widefleet.jsonc`, {
     signal: AbortSignal.timeout(10_000),
   });
@@ -162,9 +183,9 @@ export const templateCatalog = (
 
 export const readTemplate = (
   principal: Principal,
-  configuration: Pick<Configuration, "PLATFORM_URL">,
+  configuration: Pick<Configuration, "PLATFORM_URL" | "GITHUB_TOKEN">,
   id: string,
-  installable: boolean,
+  builder: AppBuilder | undefined,
   installed: ReadonlyMap<string, string>,
 ) =>
   Result.gen(async function* () {
@@ -173,7 +194,7 @@ export const readTemplate = (
         try: async () => {
           const [template, network, requiredSecrets] = await Promise.all([
             loadTemplate(id),
-            loadNetwork(id),
+            loadNetwork(id, configuration, builder),
             loadRequiredSecrets(id),
           ]);
 
@@ -194,7 +215,7 @@ export const readTemplate = (
       appTemplate.parse({
         ...template,
         prompt: `Set up the ${template.name} app on Widefleet. Read https://widefleet.com/SKILL.md, then run ${cli(principal, configuration)} catalog templates show ${id} and follow its template instructions. Reuse a suitable existing app where possible. Help me finish setup and report its URL and any steps that still need my attention.`,
-        installable,
+        installable: Boolean(builder),
         installedAppId: installed.get(id) ?? null,
       }),
     );

@@ -165,8 +165,8 @@ it.each([undefined, "", "fixture-catalog-token"])(
       (request) => new URL(request.url).hostname === "raw.githubusercontent.com",
     );
 
-    // Each listed template, then the detail's template.md, widefleet.jsonc and wrangler.jsonc.
-    expect(documents).toHaveLength(ids.length + 3);
+    // Each listed template, then the detail's template.md, configuration files and Wrangler settings.
+    expect(documents).toHaveLength(ids.length + 4);
 
     for (const document of documents) expect(document.headers.has("authorization")).toBe(false);
   },
@@ -191,7 +191,8 @@ it("reads a new template from its directory and frontmatter without provider-spe
       return new Response(null, { status: 404 });
 
     // A template without widefleet.jsonc declares no network access.
-    if (url.pathname.endsWith("/widefleet.jsonc")) return new Response(null, { status: 404 });
+    if (url.pathname.endsWith("/widefleet.jsonc") || url.pathname.endsWith("/widefleet.config.ts"))
+      return new Response(null, { status: 404 });
 
     // Templates read wrangler.json when they have no wrangler.jsonc.
     if (url.pathname.endsWith("/wrangler.jsonc")) return new Response(null, { status: 404 });

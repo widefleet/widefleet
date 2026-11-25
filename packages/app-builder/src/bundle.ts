@@ -6,7 +6,8 @@ import { createWorker, InMemoryFileSystem, installDependencies } from "@cloudfla
 import { bundleResult } from "@platform/contracts/builds";
 import { parse } from "es-module-lexer/js";
 import { z } from "zod";
-import { BuildError, readConfiguration, readDeclaration, workerMetadata } from "./configuration.ts";
+import { BuildError, readConfiguration, workerMetadata } from "./configuration.ts";
+import { readDeclaration } from "./declaration.ts";
 import { dependencyPatches, projectPatches } from "./patches.ts";
 
 const builtins = [
@@ -112,7 +113,7 @@ const bundleProject = async (options: Parameters<typeof createWorker>[0]) => {
 
 export const bundle = async (files: Readonly<Record<string, string>>, registry: string) => {
   const configuration = readConfiguration(files);
-  const declaration = readDeclaration(files);
+  const declaration = await readDeclaration(files);
   const entry = configuration.main.replace(/^\.\//, "");
 
   if (files[entry] === undefined) throw new BuildError(`The Worker entry ${entry} is missing`);

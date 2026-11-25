@@ -354,7 +354,7 @@ export const workerMetadata = workerConfiguration
   .extend({
     source: sourceRevision.optional(),
     web: z.boolean().optional(),
-    // Origins the app declares in widefleet.jsonc; see networkDeclaration.
+    // Origins the app declares in its project configuration; see networkDeclaration.
     network: networkDeclaration.optional(),
     entrypoints: z
       .array(bindingName)

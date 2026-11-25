@@ -109,9 +109,8 @@ export const parseJson = (text: string, file: string) => {
   }
 };
 
-/** Worker metadata in the order `widefleet deploy` writes bindings. */
-/** widefleet.jsonc beside the Wrangler configuration, as `widefleet deploy` reads it. */
-export const readDeclaration = (files: Readonly<Record<string, string>>) => {
+/** Older projects can still declare their network in JSONC. */
+export const readLegacyDeclaration = (files: Readonly<Record<string, string>>) => {
   const source = files["widefleet.jsonc"];
 
   if (source === undefined) return {};
@@ -125,7 +124,7 @@ export const readDeclaration = (files: Readonly<Record<string, string>>) => {
 
 export const workerMetadata = (
   configuration: WranglerConfiguration,
-  declaration: ReturnType<typeof readDeclaration>,
+  declaration: z.output<typeof appDeclaration>,
   exports: readonly string[],
   debug: { build_id: string; source_maps: Record<string, string> },
 ) =>

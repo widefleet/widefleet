@@ -1,6 +1,6 @@
 import {
   buildFailure,
-  bundleRequest,
+  configRequest,
   bundleResult,
   documentRequest,
   documentResult,
@@ -251,7 +251,7 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
 
   const post = (
     path: string,
-    body: z.input<typeof bundleRequest> | z.input<typeof documentRequest>,
+    body: z.input<typeof configRequest> | z.input<typeof documentRequest>,
   ) =>
     builder.dispatchFetch(`https://builder.example.test${path}`, {
       method: "POST",
@@ -547,6 +547,48 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
 
     expect(unknown.status).toBe(422);
     expect(await failure(unknown)).toContain("network");
+  });
+
+  it("evaluates a typed default export and local imports for builds and config previews", async () => {
+    const files = {
+      ...project,
+      "origins.ts": 'export const hosts = ["api.example.test"];',
+      "widefleet.config.ts": `import type { WidefleetConfig } from "widefleet/config";
+import { hosts } from "./origins";
+export default { network: { backend: hosts.map(host => "https://" + host) } } satisfies WidefleetConfig;`,
+    };
+
+    const expected = { backend: ["https://api.example.test"], browser: [] };
+    const preview = await post("/config", { files });
+    expect(preview.status, await preview.clone().text()).toBe(200);
+    expect(await preview.json()).toEqual({ network: expected });
+    const built = await post("/bundle", { files });
+    expect(built.status, await built.clone().text()).toBe(200);
+    expect(bundleResult.parse(await built.json()).metadata.network).toEqual(expected);
+    const conflict = await post("/config", { files: { ...files, "widefleet.jsonc": "{}" } });
+    expect(conflict.status).toBe(422);
+    expect(await failure(conflict)).toContain("Use only one");
+  });
+
+  it("validates CLI config results and runs with no host APIs", async () => {
+    const valid = await post("/config", {
+      program: 'widefleetConfig({network: {backend: ["https://example.org"]}});',
+    });
+
+    expect(await valid.json()).toEqual({
+      network: { backend: ["https://example.org"], browser: [] },
+    });
+
+    for (const program of [
+      'widefleetConfig({network: {backend: ["no"]}});',
+      'widefleetConfig(await fetch("https://example.org"));',
+      "widefleetConfig(process.env);",
+      "while (true) {}",
+    ]) {
+      const invalid = await post("/config", { program });
+      expect(invalid.status).toBe(422);
+      expect(await failure(invalid)).toContain("widefleet.config.ts");
+    }
   });
 
   it("adds the network origins widefleet.jsonc declares, as widefleet deploy does", async () => {

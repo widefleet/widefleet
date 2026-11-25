@@ -368,12 +368,18 @@ importers:
       '@cloudflare/worker-bundler':
         specifier: 0.2.6
         version: 0.2.6(patch_hash=0eb0808184ef590337ab61d84c78de641ce65a713d7c6dc1ba070b0ac664cb99)(supports-color@10.2.2)
+      '@opencode/codemode':
+        specifier: 2.3.0
+        version: 2.3.0(patch_hash=74a3d62cb776da99648b8b8841dac898697a072918fc2c1b31477eb2273c744a)
       '@platform/contracts':
         specifier: workspace:*
         version: link:../contracts
       '@platform/service-docs':
         specifier: workspace:*
         version: link:../service-docs
+      effect:
+        specifier: 4.1.0
+        version: 4.1.0
       es-module-lexer:
         specifier: 2.3.2
         version: 2.3.2

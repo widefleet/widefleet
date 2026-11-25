@@ -72,6 +72,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       url: "https://review.server-app.apps.localhost:25453/",
     });
 
+    let configProgram: string | undefined;
+    let publishedMetadata: Promise<FormData> | undefined;
     const requests: string[] = [];
     const organizations: (string | string[] | undefined)[] = [];
     let requiredOrganization: string | undefined;
@@ -132,6 +134,21 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       }
 
       response.setHeader("content-type", "application/json");
+
+      if (request.method === "POST" && request.url === "/api/v1/build/config") {
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          configProgram = z.object({ program: z.string() }).parse(JSON.parse(body)).program;
+          response.end(
+            JSON.stringify({ network: { backend: ["https://fixture.example"], browser: [] } }),
+          );
+        });
+
+        return;
+      }
 
       if (request.method === "POST" && request.url === "/api/v1/apps/source-target") {
         let body = "";
@@ -564,6 +581,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         const session = { id: queued.artifactId, expiresAt: finishedAt, missing: [] };
         response.end(JSON.stringify(includeUrl ? { ...session, url: app.url } : session));
       } else if (request.url === `/api/v1/apps/${app.id}/worker`) {
+        if (configProgram !== undefined) {
+          const chunks: Buffer[] = [];
+          request.on("data", (chunk: Buffer) => chunks.push(chunk));
+          request.on("end", () => {
+            publishedMetadata = new Response(Buffer.concat(chunks), {
+              headers: { "content-type": request.headers["content-type"] ?? "" },
+            }).formData();
+            response.end(JSON.stringify(queued));
+          });
+
+          return;
+        }
+
         response.end(JSON.stringify(queued));
       } else if (request.url === `/api/v1/apps/${app.id}/deployments/${queued.id}/events`) {
         response.end(JSON.stringify([{ id: 1, message: "Synthetic deployment progress" }]));
@@ -1894,6 +1924,38 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       });
       expect(result.stderr).toContain("Synthetic build output");
       expect(result.stderr).toContain("Synthetic deployment progress");
+    });
+
+    it("bundles local imports and uploads the network declaration resolved by the builder", async () => {
+      const project = join(state, "project with spaces");
+      const config = join(project, "widefleet.config.ts");
+      const origins = join(project, "origins.ts");
+      await writeFile(origins, 'export const backend: string[] = ["https://fixture.example"];');
+      await writeFile(
+        config,
+        'import {backend} from "./origins"; import type {WidefleetConfig} from "widefleet/config"; export default {network:{backend}} satisfies WidefleetConfig;',
+      );
+
+      try {
+        const result = await cli(app.id, "--json", "--no-wait", "--skip-build");
+        expect(JSON.parse(result.stdout)).toMatchObject({ appId: app.id });
+        expect(configProgram).toContain("https://fixture.example");
+        expect(configProgram).not.toMatch(/import |satisfies /);
+        const metadata = (await publishedMetadata)?.get("metadata");
+        expect(
+          contract.workerMetadata.parse(JSON.parse(z.string().parse(metadata))).network,
+        ).toEqual({ backend: ["https://fixture.example"], browser: [] });
+        await writeFile(join(project, "widefleet.jsonc"), "{}");
+        const rejected = await failure(cli(app.id, "--no-wait", "--skip-build"));
+        expect(rejected.stderr).toContain("Use only one");
+      } finally {
+        configProgram = undefined;
+        await Promise.all(
+          [config, origins, join(project, "widefleet.jsonc")].map((path) =>
+            rm(path, { force: true }),
+          ),
+        );
+      }
     });
 
     it("deploys to an explicit app with a write-only token and returns its URL without waiting", async () => {

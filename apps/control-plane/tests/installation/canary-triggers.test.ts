@@ -106,6 +106,7 @@ it.each([
   "patches/dependency.patch",
   "tools/cargo.sh",
   "tools/package-cli.ts",
+  "tools/widefleet-config.d.ts",
   "tools/cli-launcher.ts",
   "tools/cli-platforms.ts",
   "tools/cli-tools.ts",
