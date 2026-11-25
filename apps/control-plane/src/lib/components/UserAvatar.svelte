@@ -13,7 +13,8 @@
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
-      .map((part) => part[0])
+      // A name part can start with a character outside the Basic Multilingual Plane.
+      .map((part) => Array.from(part)[0])
       .join("")
       .toUpperCase(),
   );
