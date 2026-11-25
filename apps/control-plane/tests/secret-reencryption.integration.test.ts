@@ -10,7 +10,7 @@ import { CompactEncrypt } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readAppLogin } from "../src/lib/server/app-login-client.ts";
 import { storedAppSecrets } from "../src/lib/server/app-secrets.ts";
-import { organization, ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { apps, organizationSettings } from "../src/lib/server/schema.ts";
 import {
   createSecretEncryption,
@@ -122,31 +122,11 @@ describe("re-encryption", () => {
       })
       .where(eq(organizationSettings.organizationId, "widefleet"));
 
-    const legacyOrganization = crypto.randomUUID();
-    await database.insert(organization).values({
-      id: legacyOrganization,
-      name: "Legacy settings",
-      slug: `legacy-${legacyOrganization}`,
-      createdAt: new Date(),
-    });
-    await database.insert(organizationSettings).values({
-      organizationId: legacyOrganization,
-      settings: {
-        externallyManaged: false,
-        identity: {
-          management: {
-            clientId: "legacy-client",
-            secret: { ciphertext: await older("legacy-secret") },
-          },
-        },
-      },
-    });
-
     const encryption = rotated();
     const before = await readSecretEncryption(database, encryption);
 
     expect(before).toMatchObject({ activeKeyVersion: "current", failed: 0 });
-    expect(before.keyVersions).toMatchObject({ current: 0, previous: 3, oldest: 6 });
+    expect(before.keyVersions).toMatchObject({ current: 0, previous: 3, oldest: 5 });
     expect(incomplete(before)).toBe(true);
 
     const result = await reencryptSecrets(database, encryption);
@@ -290,45 +270,6 @@ describe("re-encryption", () => {
         .set({ secrets: {}, secretRevision: 0 })
         .where(eq(apps.id, entry.appId));
     }
-  });
-
-  it("pages past rows without a secret", async () => {
-    const database = environment.database.db;
-    const encryption = rotated();
-
-    // A full first page of documents without a secret, then 40 under the oldest version.
-    const ids = Array.from(
-      { length: 150 },
-      (_, index) => `paging-${String(index).padStart(3, "0")}`,
-    );
-
-    await database
-      .insert(organization)
-      .values(ids.map((id) => ({ id, name: id, slug: id, createdAt: new Date() })));
-    await database.insert(organizationSettings).values(
-      await Promise.all(
-        ids.map(async (id, index) => ({
-          organizationId: id,
-          settings: {
-            externallyManaged: false,
-            identity:
-              index < 110
-                ? null
-                : {
-                    management: { clientId: id, secret: { ciphertext: await older(id) } },
-                  },
-          },
-        })),
-      ),
-    );
-
-    expect((await readSecretEncryption(database, encryption)).keyVersions["oldest"]).toBe(40);
-
-    expect(await reencryptSecrets(database, encryption)).toMatchObject({
-      reencrypted: 40,
-      failed: 0,
-    });
-    expect((await readSecretEncryption(database, encryption)).keyVersions["oldest"]).toBe(0);
   });
 });
 

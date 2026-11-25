@@ -3,7 +3,6 @@ import { unstable_readConfig } from "wrangler";
 import { z } from "zod";
 import { bootstrapConfiguration } from "@platform/contracts";
 import { initializeBootstrap } from "../src/lib/server/bootstrap.ts";
-import { migrateSsoSettings } from "../src/lib/server/sso-migration.ts";
 import { createAuthentication, registerCli } from "../src/lib/server/auth.ts";
 import type {
   CloudflareBindings,
@@ -57,7 +56,6 @@ export const initializeCloudflareInstallation = async ({
 
   const encryption = configuredSecretEncryption(configuration);
 
-  await migrateSsoSettings(database, encryption);
   await registerCli(database, configuration, encryption);
 
   const state = await readInstallation(database);
