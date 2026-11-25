@@ -189,7 +189,7 @@ export const installTemplate = form(
 // Keep entered credentials in the form while the installer opens provider settings.
 const fieldMarkdown = new MarkdownIt({ html: false }).disable("image");
 
-fieldMarkdown.renderer.rules.link_open = (tokens, index, options, _env, renderer) => {
+fieldMarkdown.renderer.rules["link_open"] = (tokens, index, options, _env, renderer) => {
   tokens[index]?.attrSet("target", "_blank");
   tokens[index]?.attrSet("rel", "noopener noreferrer");
 
