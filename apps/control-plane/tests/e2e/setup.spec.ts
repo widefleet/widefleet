@@ -11,7 +11,6 @@ import { account, ssoProvider } from "../../src/lib/server/auth-schema.ts";
 import { installation, organizationSettings } from "../../src/lib/server/schema.ts";
 import { installationId } from "../../src/lib/server/installation-store.ts";
 import { migrateSsoSettings } from "../../src/lib/server/sso-migration.ts";
-import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { createRecoveryLink } from "../../src/lib/server/recovery.ts";
 import { createTestEnvironment } from "../environment.ts";
 
@@ -230,8 +229,8 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     const preserved = installationSettings.parse(beforeUpgrade?.settings);
 
     const managementSecret = {
-      ciphertext: await encryptSecret(
-        environment.environment.PLATFORM_ENCRYPTION_KEY,
+      ciphertext: await environment.encryption.encrypt(
+        { kind: "legacy-sso-client-secret", organizationId: installationId },
         environment.environment.ENTRA_CLIENT_SECRET,
       ),
     };
@@ -255,10 +254,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
       })
       .where(eq(organizationSettings.organizationId, installationId));
     await environment.database.db.delete(ssoProvider);
-    await migrateSsoSettings(
-      environment.database.db,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
-    );
+    await migrateSsoSettings(environment.database.db, environment.encryption);
     await page.context().clearCookies();
     await page.goto("/sign-in");
     await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toHaveCount(0);

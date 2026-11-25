@@ -1,5 +1,4 @@
 import { createGunzip } from "node:zlib";
-import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { companyIdentity } from "../../src/lib/server/company-identity.ts";
 import { runtimeIdentity } from "../runtime-identity.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -2437,10 +2436,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const reader = (label: string) =>
         `export default { async fetch(request, env) { try { return new Response('${label}:' + await env.WIDEFLEET_SECRETS.get('TOKEN')); } catch { return new Response('${label}:none'); } } };`;
 
-      const secrets = {
-        TOKEN: await encryptSecret(environment.environment.PLATFORM_ENCRYPTION_KEY, "synthetic"),
-      };
-
       const install = async (appId?: string) => {
         const entry = await seedDeployment(environment.database.db, {
           ...(appId && { appId }),
@@ -2450,6 +2445,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         });
 
         await seed(entry);
+
+        const secrets = {
+          TOKEN: await environment.encryption.encrypt(
+            {
+              kind: "app-secret",
+              organizationId: entry.organizationId,
+              appId: entry.appId,
+              name: "TOKEN",
+            },
+            "synthetic",
+          ),
+        };
 
         return {
           ...entry,
@@ -2510,8 +2517,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .set({
           secretRevision: 1,
           secrets: {
-            TOKEN: await encryptSecret(
-              environment.environment.PLATFORM_ENCRYPTION_KEY,
+            TOKEN: await environment.encryption.encrypt(
+              {
+                kind: "app-secret",
+                organizationId: target.organizationId,
+                appId: target.appId,
+                name: "TOKEN",
+              },
               "synthetic-first",
             ),
           },
@@ -2556,8 +2568,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .set({
           secretRevision: 2,
           secrets: {
-            TOKEN: await encryptSecret(
-              environment.environment.PLATFORM_ENCRYPTION_KEY,
+            TOKEN: await environment.encryption.encrypt(
+              {
+                kind: "app-secret",
+                organizationId: target.organizationId,
+                appId: target.appId,
+                name: "TOKEN",
+              },
               "synthetic-second",
             ),
           },

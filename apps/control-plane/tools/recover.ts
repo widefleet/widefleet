@@ -16,7 +16,7 @@ const configuration = { ...input, BETTER_AUTH_SECRET: keys.authentication };
 const database = createDatabase(configuration);
 
 try {
-  const auth = createAuthentication(configuration, database.db);
+  const auth = createAuthentication(configuration, database.db, { encryption: keys.encryption });
   console.info(await createRecoveryLink(auth, database.db, configuration, email));
   console.info("This link can be used once. Administrator access expires in 10 minutes.");
 } finally {

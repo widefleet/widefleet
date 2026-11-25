@@ -4,7 +4,7 @@ import { companyProvider, installationSettings, parseCompanyDomains } from "@pla
 import { ssoProvider } from "./auth-schema.ts";
 import { organizationSettings } from "./schema.ts";
 import type { Database } from "./database.ts";
-import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import { companyAccountProvider, providerIssuer } from "./company-identity.ts";
 import { changeSsoDomains } from "./sso-domains.ts";
 
@@ -27,7 +27,7 @@ const legacySettings = z.object({
 
 // One-time conversion of the pre-plugin configuration. Subsequent reads and
 // writes use only the native provider; the old editable identity document is removed.
-export const migrateSsoSettings = async (database: Database, key: string) => {
+export const migrateSsoSettings = async (database: Database, encryption: SecretEncryption) => {
   await database.transaction(async (transaction) => {
     const rows = await transaction
       .select()
@@ -47,7 +47,11 @@ export const migrateSsoSettings = async (database: Database, key: string) => {
           .where(eq(ssoProvider.organizationId, row.organizationId));
 
         if (!existing) {
-          const clientSecret = await decryptSecret(key, identity.management.secret.ciphertext);
+          const clientSecret = await encryption.decrypt(
+            { kind: "legacy-sso-client-secret", organizationId: row.organizationId },
+            identity.management.secret.ciphertext,
+          );
+
           await transaction.insert(ssoProvider).values({
             id: crypto.randomUUID(),
             organizationId: row.organizationId,
@@ -57,8 +61,8 @@ export const migrateSsoSettings = async (database: Database, key: string) => {
             domain: identity.domain ?? "",
             // Earlier configurations did not establish ownership of an email domain.
             domainVerified: false,
-            oidcConfig: await encryptSecret(
-              key,
+            oidcConfig: await encryption.encrypt(
+              { kind: "sso-provider-config", field: "oidcConfig" },
               JSON.stringify({
                 issuer: providerIssuer(provider),
                 clientId: identity.management.clientId,

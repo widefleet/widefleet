@@ -18,7 +18,6 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import { organization, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { companySsoOrigins } from "../src/lib/server/company-sso.ts";
 import { verifySsoDomains } from "../src/lib/server/sso-domains.ts";
-import { decryptSecret, encryptSecret } from "../src/lib/server/secret-encryption.ts";
 
 describe("Better Auth SSO provider integration", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -507,8 +506,8 @@ describe("Better Auth SSO provider integration", () => {
 
     expect(
       JSON.parse(
-        await decryptSecret(
-          environment.environment.PLATFORM_ENCRYPTION_KEY,
+        await environment.encryption.decrypt(
+          { kind: "sso-provider-config", field: "oidcConfig" },
           stored?.oidcConfig ?? "",
         ),
       ),
@@ -542,9 +541,8 @@ describe("Better Auth SSO provider integration", () => {
       const issuer = "https://issuer.example.test";
       const providerId = `split-origin-${kind}`;
 
-      const encryptionKey =
-        environment.configuration.PLATFORM_ENCRYPTION_KEY ??
-        environment.configuration.BETTER_AUTH_SECRET;
+      const encryption = environment.encryption;
+      const oidcConfig = { kind: "sso-provider-config", field: "oidcConfig" } as const;
 
       let discoveryAvailable = true;
 
@@ -652,13 +650,13 @@ describe("Better Auth SSO provider integration", () => {
               .record(z.string(), z.unknown())
               .parse(
                 JSON.parse(
-                  await decryptSecret(encryptionKey, z.string().parse(current?.oidcConfig)),
+                  await encryption.decrypt(oidcConfig, z.string().parse(current?.oidcConfig)),
                 ),
               );
 
             await environment.database.db.update(ssoProvider).set({
-              oidcConfig: await encryptSecret(
-                encryptionKey,
+              oidcConfig: await encryption.encrypt(
+                oidcConfig,
                 JSON.stringify({
                   ...configuration,
                   clientSecret: rotatedSecret,
@@ -681,8 +679,8 @@ describe("Better Auth SSO provider integration", () => {
 
         if (kind === "migrated")
           await environment.database.db.update(ssoProvider).set({
-            oidcConfig: await encryptSecret(
-              encryptionKey,
+            oidcConfig: await encryption.encrypt(
+              oidcConfig,
               JSON.stringify({ ...input.oidcConfig, issuer }),
             ),
           });
@@ -710,7 +708,7 @@ describe("Better Auth SSO provider integration", () => {
         const [saved] = await environment.database.db.select().from(ssoProvider);
         expect(saved?.oidcConfig).toBe(encrypted);
         expect(encrypted).not.toContain(input.oidcConfig.clientSecret);
-        expect(JSON.parse(await decryptSecret(encryptionKey, encrypted))).toMatchObject({
+        expect(JSON.parse(await encryption.decrypt(oidcConfig, encrypted))).toMatchObject({
           clientSecret: kind === "registered" ? rotatedSecret : input.oidcConfig.clientSecret,
         });
         visited.clear();
@@ -773,14 +771,14 @@ describe("Better Auth SSO provider integration", () => {
 
         request.mockClear();
         ipv4.mockClear();
-        expect(await companySsoOrigins(environment.database.db, origin, encryptionKey)).toEqual([
+        expect(await companySsoOrigins(environment.database.db, origin, encryption)).toEqual([
           origin,
         ]);
         expect(
           await companySsoOrigins(
             environment.database.db,
             origin,
-            encryptionKey,
+            encryption,
             new Request(`${origin}/api/auth/sign-out`),
           ),
         ).toEqual([origin]);
@@ -788,7 +786,7 @@ describe("Better Auth SSO provider integration", () => {
           await companySsoOrigins(
             environment.database.db,
             origin,
-            encryptionKey,
+            encryption,
             new Request(callback, { headers: { origin: "https://tokens.example.test" } }),
           ),
         ).toEqual([origin]);
@@ -796,7 +794,7 @@ describe("Better Auth SSO provider integration", () => {
           await companySsoOrigins(
             environment.database.db,
             origin,
-            encryptionKey,
+            encryption,
             new Request(`${origin}/api/auth/sso/callback/missing`),
           ),
         ).toEqual([origin]);
@@ -805,7 +803,7 @@ describe("Better Auth SSO provider integration", () => {
           await companySsoOrigins(
             environment.database.db,
             origin,
-            encryptionKey,
+            encryption,
             new Request(callback),
           ),
         ).toEqual([origin]);

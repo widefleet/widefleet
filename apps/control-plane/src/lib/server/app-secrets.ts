@@ -7,7 +7,7 @@ import type { Database, DatabaseExecutor } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
 import { apps, artifacts, cloudflareOperations, deployments } from "./schema.ts";
-import { encryptSecret } from "./secret-encryption.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import { InvalidOperation } from "./errors.ts";
 import { requireAgentExecution } from "./organization-runtime.ts";
 import { readOnly, transact, type Transaction } from "./transactions.ts";
@@ -83,15 +83,25 @@ export const saveAppSecrets = async (
 
 export const createAppSecrets = (
   database: Database,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   execution?: HostedExecution,
 ) => ({
-  /** Encrypts validated values for saveAppSecrets. */
-  encrypt: async (values: Readonly<Record<string, string>>) =>
+  /** Encrypts an app's validated values for saveAppSecrets. */
+  encrypt: async (
+    app: Pick<typeof apps.$inferSelect, "id" | "organizationId">,
+    values: Readonly<Record<string, string>>,
+  ) =>
     Object.fromEntries(
       await Promise.all(
         Object.entries(values).map(
-          async ([name, value]) => [name, await encryptSecret(encryptionKey, value)] as const,
+          async ([name, value]) =>
+            [
+              name,
+              await encryption.encrypt(
+                { kind: "app-secret", organizationId: app.organizationId, appId: app.id, name },
+                value,
+              ),
+            ] as const,
         ),
       ),
     ),
@@ -137,7 +147,15 @@ export const createAppSecrets = (
       const updated = await saveAppSecrets(
         transaction,
         app,
-        { [name]: value === null ? null : await encryptSecret(encryptionKey, value) },
+        {
+          [name]:
+            value === null
+              ? null
+              : await encryption.encrypt(
+                  { kind: "app-secret", organizationId: app.organizationId, appId: app.id, name },
+                  value,
+                ),
+        },
         { hosted: Boolean(execution), variables },
       );
 

@@ -197,7 +197,7 @@ describe("App identity of management accounts", () => {
     await registerAppLogin(
       environment.database.db,
       environment.configuration,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       organizationId,
     );
 

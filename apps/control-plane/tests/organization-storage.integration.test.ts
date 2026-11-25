@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { organizationSettings } from "../src/lib/server/schema.ts";
-import { decryptSecret } from "../src/lib/server/secret-encryption.ts";
 import { settingsInput } from "@platform/contracts";
 import { organization, member, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { createTestEnvironment, organizationCredential } from "./environment.ts";
@@ -93,8 +92,8 @@ describe("Organization settings storage", () => {
 
     expect(saved?.directorySecret).not.toBe("rotated-second-secret");
     expect(
-      await decryptSecret(
-        environment.environment.PLATFORM_ENCRYPTION_KEY,
+      await environment.encryption.decrypt(
+        { kind: "directory-client-secret", organizationId: second.id },
         saved?.directorySecret ?? "",
       ),
     ).toBe("rotated-second-secret");

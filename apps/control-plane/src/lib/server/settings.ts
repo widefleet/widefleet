@@ -16,7 +16,7 @@ import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
-import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { readOrganizationSettings, createInstallationOwner } from "./installation-store.ts";
 import { account, oauthClient, organization } from "./auth-schema.ts";
@@ -58,7 +58,7 @@ const requireAdmin = (principal: Principal, organizationId: string) => {
 const createOrganizationSettingsService = (
   configuration: Configuration,
   database: Database,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   appSignIn: AppSignIn | null,
   organizationId: string,
   emailSignIn: boolean,
@@ -101,7 +101,7 @@ const createOrganizationSettingsService = (
     const state = { settings: installationSettings.parse(stored?.settings ?? {}) };
 
     const errors: string[] = [];
-    const sso = await readSsoConfiguration(transaction, encryptionKey, organizationId);
+    const sso = await readSsoConfiguration(transaction, encryption, organizationId);
     let identity: z.infer<typeof companyIdentity> | null = null;
 
     try {
@@ -114,7 +114,10 @@ const createOrganizationSettingsService = (
         if (state.settings.directory)
           identity.directory = {
             clientId: state.settings.directory.clientId,
-            clientSecret: await decryptSecret(encryptionKey, stored?.directorySecret ?? ""),
+            clientSecret: await encryption.decrypt(
+              { kind: "directory-client-secret", organizationId },
+              stored?.directorySecret ?? "",
+            ),
           };
       }
     } catch (cause) {
@@ -144,12 +147,12 @@ const createOrganizationSettingsService = (
 
         let fallback =
           !current.identity && emailSignIn
-            ? await readAppLogin(transaction, configuration, encryptionKey, organizationId)
+            ? await readAppLogin(transaction, configuration, encryption, organizationId)
             : null;
 
         if (publish && emailSignIn && !current.identity) {
-          await registerAppLogin(transaction, configuration, encryptionKey, organizationId);
-          fallback = await readAppLogin(transaction, configuration, encryptionKey, organizationId);
+          await registerAppLogin(transaction, configuration, encryption, organizationId);
+          fallback = await readAppLogin(transaction, configuration, encryption, organizationId);
         }
 
         if (publish && current.identity)
@@ -424,7 +427,10 @@ const createOrganizationSettingsService = (
       const directorySecret = !next.directory
         ? null
         : next.directory.clientSecret
-          ? await encryptSecret(encryptionKey, next.directory.clientSecret)
+          ? await encryption.encrypt(
+              { kind: "directory-client-secret", organizationId },
+              next.directory.clientSecret,
+            )
           : current?.directorySecret;
 
       if (next.directory && !directorySecret)
@@ -605,7 +611,7 @@ const createOrganizationSettingsService = (
       requireAdmin(principal, organizationId);
       await database.transaction(async (transaction) => {
         await lockSettings(transaction);
-        const provider = await readSsoConfiguration(transaction, encryptionKey, organizationId);
+        const provider = await readSsoConfiguration(transaction, encryption, organizationId);
 
         if (!provider || !companySsoAvailable(configuration, provider))
           throw new InvalidOperation({
@@ -661,7 +667,7 @@ const createOrganizationSettingsService = (
 export const createSettingsService = (
   configuration: Configuration,
   database: Database,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   appSignIn: (organizationId: string) => AppSignIn | null,
   emailSignIn = false,
   observation?: Observation,
@@ -672,7 +678,7 @@ export const createSettingsService = (
     createOrganizationSettingsService(
       configuration,
       database,
-      encryptionKey,
+      encryption,
       appSignIn(organizationId),
       organizationId,
       signInEnabled,

@@ -33,7 +33,7 @@ it.each([443, 25453])("includes the configured HTTPS port %s in native app jobs"
     const service = createJobService(
       environment.database.db,
       createArtifactStorage(memoryStorage()),
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       undefined,
       port,
     );

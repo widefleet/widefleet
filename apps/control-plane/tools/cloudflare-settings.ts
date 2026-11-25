@@ -7,6 +7,7 @@ import type { Database } from "../src/lib/server/database.ts";
 import { createCloudflareEmail } from "../src/lib/server/email-cloudflare.ts";
 import { createInvitationService } from "../src/lib/server/members.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
+import type { SecretEncryption } from "../src/lib/server/secret-encryption.ts";
 import type { RuntimeExtension } from "../src/lib/server/runtime-extension.ts";
 
 type SettingsPlatform = Pick<CloudflareBindings, "APP_RUNTIME" | "EMAIL" | "EMAIL_FROM">;
@@ -16,7 +17,7 @@ type SettingsPlatform = Pick<CloudflareBindings, "APP_RUNTIME" | "EMAIL" | "EMAI
 export const createCloudflareSettings = (
   configuration: Configuration,
   database: Database,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   cookieSecret: string,
   platform: SettingsPlatform,
   extension: RuntimeExtension,
@@ -28,7 +29,7 @@ export const createCloudflareSettings = (
     settings: createSettingsService(
       configuration,
       database,
-      encryptionKey,
+      encryption,
       (organizationId) =>
         createCloudflareAppSignIn(
           configuration,
@@ -52,7 +53,7 @@ export const createCloudflareSettings = (
 export const connectCloudflareSettings = async (
   configuration: Configuration,
   database: Database,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   cookieSecret: string,
   configPath: string,
   extension: RuntimeExtension,
@@ -65,7 +66,7 @@ export const connectCloudflareSettings = async (
       ...createCloudflareSettings(
         configuration,
         database,
-        encryptionKey,
+        encryption,
         cookieSecret,
         proxy.env,
         extension,

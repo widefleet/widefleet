@@ -15,7 +15,7 @@ import { runtimeConfigurationSchema } from "./config.ts";
 export type { Runtime } from "./runtime-services.ts";
 
 const startRuntime = async () => {
-  const { configuration, database, settings, encryptionKey, extension, observation } =
+  const { configuration, database, settings, encryption, extension, observation } =
     await initializeRuntime();
 
   const storage = createStorage(configuration);
@@ -46,7 +46,7 @@ const startRuntime = async () => {
     settings,
     storage,
     reporting,
-    encryptionKey,
+    encryption,
     userConnectionRequest: (input, signal) =>
       runtimeManagementRequest(
         configuration,

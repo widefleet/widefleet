@@ -13,7 +13,7 @@ import {
   ssoProvider,
 } from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
-import * as encryption from "../src/lib/server/secret-encryption.ts";
+import { createSecretEncryption } from "../src/lib/server/secret-encryption.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { cliClientId } from "../src/lib/server/auth-options.ts";
 import { readAppLogin, appLoginClientId } from "../src/lib/server/app-login-client.ts";
@@ -32,7 +32,7 @@ describe("Organization login settings", () => {
     settings = createSettingsService(
       environment.configuration,
       environment.database.db,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       () => null,
       true,
     );
@@ -233,7 +233,7 @@ describe("Organization login settings", () => {
       readAppLogin(
         environment.database.db,
         environment.configuration,
-        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        environment.encryption,
         target.organizationId,
       );
 
@@ -371,7 +371,7 @@ describe("Organization login settings", () => {
 
   it("reads the selected provider and observes rotation, deletion and wrong encryption keys", async () => {
     const first = await company("settings-rotation");
-    const key = environment.environment.PLATFORM_ENCRYPTION_KEY;
+    const context = { kind: "sso-provider-config", field: "oidcConfig" } as const;
 
     const [provider] = await environment.database.db
       .select()
@@ -382,13 +382,13 @@ describe("Organization login settings", () => {
 
     const config = z
       .record(z.string(), z.json())
-      .parse(JSON.parse(await encryption.decryptSecret(key, provider.oidcConfig)));
+      .parse(JSON.parse(await environment.encryption.decrypt(context, provider.oidcConfig)));
 
     await environment.database.db
       .update(ssoProvider)
       .set({
-        oidcConfig: await encryption.encryptSecret(
-          key,
+        oidcConfig: await environment.encryption.encrypt(
+          context,
           JSON.stringify({ ...config, clientSecret: "rotated-login-secret" }),
         ),
       })
@@ -400,7 +400,7 @@ describe("Organization login settings", () => {
     const wrongKey = createSettingsService(
       environment.configuration,
       environment.database.db,
-      "wrong-test-key",
+      createSecretEncryption({ legacyKey: "wrong-test-key" }),
       () => null,
     );
 
@@ -422,7 +422,7 @@ describe("Organization login settings", () => {
       readAppLogin(
         environment.database.db,
         environment.configuration,
-        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        environment.encryption,
         organizationId,
       );
 

@@ -13,7 +13,7 @@ import type { Configuration } from "./config.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
-import { decryptSecret } from "./secret-encryption.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 
 export const managedPluginPaths = [
   "/organization/invite-member",
@@ -32,7 +32,7 @@ export const managedPluginPaths = [
 export const pluginAuthentication = (
   database: DatabaseExecutor,
   configuration: Configuration,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   keys: () => Promise<JSONWebKeySet>,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
   allowUser?: (userId: string) => Promise<boolean>,
@@ -186,7 +186,12 @@ export const pluginAuthentication = (
       const saved =
         provider?.oidcConfig && issuer === provider.issuer
           ? oidcConfiguration.parse(
-              JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)),
+              JSON.parse(
+                await encryption.decrypt(
+                  { kind: "sso-provider-config", field: "oidcConfig" },
+                  provider.oidcConfig,
+                ),
+              ),
             )
           : {};
 

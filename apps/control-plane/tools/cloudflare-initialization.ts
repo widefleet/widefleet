@@ -19,6 +19,7 @@ import type { Observation } from "../src/lib/server/observation.ts";
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { configuredAppSignInOrganizations } from "../src/lib/server/settings.ts";
+import { createSecretEncryption } from "../src/lib/server/secret-encryption.ts";
 import { createCloudflareSettings } from "./cloudflare-settings.ts";
 import { loadRuntimeExtension } from "./runtime-extension.ts";
 
@@ -53,7 +54,10 @@ export const initializeCloudflareInstallation = async ({
   if (execution.isErr()) throw execution.error;
   await initializeOrganization(database);
   await initializeInstallation(database);
-  await migrateSsoSettings(database, configuration.PLATFORM_ENCRYPTION_KEY);
+
+  const encryption = createSecretEncryption({ legacyKey: configuration.PLATFORM_ENCRYPTION_KEY });
+
+  await migrateSsoSettings(database, encryption);
   await registerCli(database, configuration);
 
   const state = await readInstallation(database);
@@ -104,7 +108,7 @@ export const initializeCloudflareInstallation = async ({
     const services = createCloudflareSettings(
       configuration,
       database,
-      configuration.PLATFORM_ENCRYPTION_KEY,
+      encryption,
       secrets.APP_COOKIE_SECRET,
       await platform(),
       extension,
@@ -114,7 +118,7 @@ export const initializeCloudflareInstallation = async ({
     if (bootstrap)
       await initializeBootstrap(
         services.settings,
-        createAuthentication(configuration, database, { ...extension, observation }),
+        createAuthentication(configuration, database, { ...extension, observation, encryption }),
         database,
         bootstrap,
       );

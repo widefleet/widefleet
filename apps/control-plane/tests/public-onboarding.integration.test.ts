@@ -110,7 +110,7 @@ describe("Public account registration and organization onboarding", () => {
       settings: environment.settings,
       reporting: environment.reporting,
       storage: createStorage(environment.configuration),
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
     })();
 
     const { headers } = await register("self-hosted-account@mail.test");
@@ -203,7 +203,7 @@ describe("Public account registration and organization onboarding", () => {
       },
       reporting: environment.reporting,
       storage: createStorage(environment.configuration),
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
       sendEmail: async (message) => {
         messages.push(message);
       },

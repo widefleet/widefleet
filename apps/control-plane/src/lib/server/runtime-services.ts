@@ -5,6 +5,7 @@ import type { SourceBackend } from "./source-backend.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { createConnectionService } from "./connections.ts";
 import { createAppSecrets } from "./app-secrets.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { BetterAuthOptions } from "better-auth";
 import type { sveltekitCookies } from "better-auth/svelte-kit";
@@ -48,7 +49,7 @@ export const createRuntime = ({
   storage,
   reporting,
   observation,
-  encryptionKey,
+  encryption,
   execution,
   hostedLogs,
   userConnectionRequest,
@@ -71,7 +72,7 @@ export const createRuntime = ({
   storage: ArtifactStorage;
   reporting: ReturnType<typeof createReporting>;
   observation?: Observation;
-  encryptionKey: string;
+  encryption: SecretEncryption;
   execution?: HostedExecution;
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;
@@ -104,7 +105,7 @@ export const createRuntime = ({
       : undefined);
 
   const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = {
-    encryptionKey,
+    encryption,
     publicSignup,
     reportException,
     cliLoginSettings: settings,
@@ -139,7 +140,7 @@ export const createRuntime = ({
 
   const uploads = createUploadService(database.db, storage, configuration, execution, source);
 
-  const appSecrets = createAppSecrets(database.db, encryptionKey, execution);
+  const appSecrets = createAppSecrets(database.db, encryption, execution);
 
   const runtime = {
     auth,
@@ -193,7 +194,7 @@ export const createRuntime = ({
     jobs: createJobService(
       database.db,
       storage,
-      encryptionKey,
+      encryption,
       reporting.operation,
       configuration.APP_HTTPS_PORT,
       source,

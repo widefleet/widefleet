@@ -37,7 +37,7 @@ beforeAll(async () => {
     storage: createStorage(environment.configuration),
     reporting: environment.reporting,
     observation: { capture: () => {}, exception, close: async () => {} },
-    encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+    encryption: environment.encryption,
   })();
   const credential = await environment.users.login({ userId: environment.owner.id });
   const current = await runtime.auth.api.getSession({ headers: credential.headers });
@@ -289,7 +289,7 @@ it("routes handled authentication failures through installation reporting withou
     settings: environment.settings,
     storage: createStorage(environment.configuration),
     reporting: environment.reporting,
-    encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+    encryption: environment.encryption,
     authentication: {
       plugins: [
         {

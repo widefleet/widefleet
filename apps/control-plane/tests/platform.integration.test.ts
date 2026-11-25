@@ -111,19 +111,11 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
       connections: createConnectionService(environment.database.db, storage),
-      appSecrets: createAppSecrets(
-        environment.database.db,
-        environment.environment.PLATFORM_ENCRYPTION_KEY,
-      ),
+      appSecrets: createAppSecrets(environment.database.db, environment.encryption),
       agents: createAgentService(environment.database.db),
-      jobs: createJobService(
-        environment.database.db,
-        storage,
-        "local-integration-test-encryption-key-only",
-        (event) => {
-          reportedOperations.push(event);
-        },
-      ),
+      jobs: createJobService(environment.database.db, storage, environment.encryption, (event) => {
+        reportedOperations.push(event);
+      }),
       releases: createRuntimeReleaseService(environment.database.db, storage),
       uploads: createUploadService(environment.database.db, storage, configuration),
       templates: createTemplateInstalls(
@@ -131,7 +123,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         createAppService(environment.database.db, configuration),
         createUploadService(environment.database.db, storage, configuration),
         createNetworkService(environment.database.db),
-        createAppSecrets(environment.database.db, environment.environment.PLATFORM_ENCRYPTION_KEY),
+        createAppSecrets(environment.database.db, environment.encryption),
       ),
       telemetry: createTelemetry(environment.database.db, storage, configuration),
     });

@@ -5,7 +5,7 @@ import { organizationSettings } from "./schema.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import { companyIdentity } from "./company-identity.ts";
 import type { DatabaseExecutor } from "./database.ts";
-import { decryptSecret } from "./secret-encryption.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import type { OrganizationCredential } from "./organization-operations.ts";
 import { InvalidOperation } from "./errors.ts";
 import { changeSsoDomains } from "./sso-domains.ts";
@@ -37,7 +37,7 @@ export const readSsoProvider = async (database: DatabaseExecutor, organizationId
 // a second editable/persisted SSO connection.
 export const readSsoConfiguration = async (
   database: DatabaseExecutor,
-  key: string,
+  encryption: SecretEncryption,
   organizationId: string,
 ) => {
   const provider = await readSsoProvider(database, organizationId);
@@ -46,7 +46,14 @@ export const readSsoConfiguration = async (
 
   const oidcConfig = oidcProviderInput.shape.oidcConfig
     .strip()
-    .parse(JSON.parse(await decryptSecret(key, provider.oidcConfig)));
+    .parse(
+      JSON.parse(
+        await encryption.decrypt(
+          { kind: "sso-provider-config", field: "oidcConfig" },
+          provider.oidcConfig,
+        ),
+      ),
+    );
 
   return {
     ...provider,

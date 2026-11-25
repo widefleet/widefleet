@@ -26,7 +26,7 @@ import {
   runtimeReference,
   type BundledRuntime,
 } from "./runtime-releases.ts";
-import { decryptSecret } from "./secret-encryption.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import { readDocumentation } from "./artifact-documentation.ts";
 import type { ArtifactStorage } from "./storage.ts";
@@ -64,7 +64,7 @@ const leasedJob = async (
 export const createJobService = (
   database: Database,
   storage: ArtifactStorage,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   report: (event: z.infer<typeof contract.reportingOperation>) => void = () => {},
   appHttpsPort = 443,
   source?: SourceBackend,
@@ -338,7 +338,18 @@ export const createJobService = (
               await Promise.all(
                 Object.entries(secretSnapshot.values).map(
                   async ([name, ciphertext]) =>
-                    [name, await decryptSecret(encryptionKey, ciphertext)] as const,
+                    [
+                      name,
+                      await encryption.decrypt(
+                        {
+                          kind: "app-secret",
+                          organizationId: lease.value.organizationId,
+                          appId: secretSnapshot.appId,
+                          name,
+                        },
+                        ciphertext,
+                      ),
+                    ] as const,
                 ),
               ),
             ),

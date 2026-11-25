@@ -675,18 +675,13 @@ test("completes app OAuth through the built server after signing in", async ({ p
     .set({ emailVerified: true })
     .where(eq(user.id, environment.owner.id));
   await environment.database.db.transaction((transaction) =>
-    registerAppLogin(
-      transaction,
-      environment.configuration,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
-      "widefleet",
-    ),
+    registerAppLogin(transaction, environment.configuration, environment.encryption, "widefleet"),
   );
 
   const identity = await readAppLogin(
     environment.database.db,
     environment.configuration,
-    environment.environment.PLATFORM_ENCRYPTION_KEY,
+    environment.encryption,
     "widefleet",
   );
 
@@ -3517,7 +3512,7 @@ test(`personal connections account controls and workspace entry`, async ({ brows
   await registerAppLogin(
     environment.database.db,
     environment.configuration,
-    environment.environment.PLATFORM_ENCRYPTION_KEY,
+    environment.encryption,
     "widefleet",
   );
   const appIds: string[] = [];
