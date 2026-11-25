@@ -2,6 +2,7 @@ import { build } from "esbuild";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { googleGroupsScope, organizationHttpAvailabilityKey } from "@platform/contracts";
@@ -17,6 +18,16 @@ const token = "synthetic-management-token-at-least-32-characters";
 
 const headers = { "content-type": "application/json" };
 
+const appUserActivity = z.object({
+  event: z.literal("app_user_active"),
+  distinct_id: z.string(),
+  properties: z.object({
+    trigger: z.string(),
+    $groups: z.object({ organization: z.string() }),
+    $set: z.object({ email: z.string() }),
+  }),
+});
+
 describe("MCP OAuth in the data plane", () => {
   let runtime: Miniflare;
   let idp: Awaited<ReturnType<typeof createIdentityProvider>>;
@@ -25,6 +36,7 @@ describe("MCP OAuth in the data plane", () => {
   let directoryAvailable = true;
   let controlPlaneAvailable = true;
   const logs: string[] = [];
+  const activity: z.infer<typeof appUserActivity>[] = [];
   const cookies = new Map<string, string>();
 
   const send = async (
@@ -202,6 +214,7 @@ describe("MCP OAuth in the data plane", () => {
               WIDEFLEET_CONTROL_TOKEN: { type: "json", value: token },
               WIDEFLEET_MCP_ORIGIN: { type: "json", value: origin },
               WIDEFLEET_HTTP_AVAILABILITY: { type: "json", value: "kv" },
+              POSTHOG_PROJECT_TOKEN: { type: "json", value: "phc_synthetic" },
             },
           },
           dev: {
@@ -209,6 +222,29 @@ describe("MCP OAuth in the data plane", () => {
               type: "fetcher",
               handler: async (request) => {
                 const url = new URL(request.url);
+
+                if (url.origin === "https://eu.i.posthog.com") {
+                  const bytes = Buffer.from(await request.arrayBuffer());
+
+                  const body = z
+                    .object({ batch: z.array(z.json()) })
+                    .parse(
+                      JSON.parse(
+                        (request.headers.get("content-encoding") === "gzip"
+                          ? gunzipSync(bytes)
+                          : bytes
+                        ).toString(),
+                      ),
+                    );
+
+                  for (const event of body.batch) {
+                    const parsed = appUserActivity.safeParse(event);
+
+                    if (parsed.success) activity.push(parsed.data);
+                  }
+
+                  return WorkerResponse.json({});
+                }
 
                 if (url.origin === "https://cloudidentity.googleapis.com") {
                   directoryRequests.push(url.pathname);
@@ -510,6 +546,17 @@ describe("MCP OAuth in the data plane", () => {
 
       expect(refreshed.status, await refreshed.clone().text()).toBe(200);
       const renewed = z.object({ access_token: z.string() }).parse(await refreshed.json());
+
+      // Each issued token counts the person as an app user of the organization.
+      await expect
+        .poll(() => activity.map((event) => event.properties.trigger), { timeout: 8_000 })
+        .toEqual(["mcp_sign_in", "mcp_renewal"]);
+      expect(new Set(activity.map((event) => event.distinct_id)).size).toBe(1);
+      expect(activity[0]?.distinct_id).toMatch(/^app-user:[a-f0-9]{64}$/);
+      expect(activity[0]?.properties).toMatchObject({
+        $groups: { organization: "company" },
+        $set: { email: "user@example.test" },
+      });
 
       const metadata = z
         .object({ revocation_endpoint: z.string() })

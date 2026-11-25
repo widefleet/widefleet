@@ -13,9 +13,19 @@ import {
 import { issuer, proxyIdentity } from "./identity.ts";
 import { authorization, failureSummary } from "./renewal.ts";
 
+// A person proved their identity to the organization: at sign-in, when an expired
+// session is renewed and when a host token starts an embedded session.
+export interface AppUserActivity {
+  trigger: "sign_in" | "renewal" | "embedded_sign_in";
+  issuer: string;
+  identity: z.infer<typeof proxyIdentity>;
+  hostname?: string;
+}
+
 interface Apps {
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
   fetch: (request: Request, caller: z.infer<typeof appCaller>) => Promise<Response>;
+  observe?: (activity: AppUserActivity) => void;
 }
 
 const response = (status: number, message: string) =>
@@ -79,6 +89,14 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
   const embedded = embeddedPath(configuration.organizationId);
 
+  const observe = (activity: Omit<AppUserActivity, "issuer">) => {
+    try {
+      apps.observe?.({ ...activity, issuer: issuer(configuration.provider) });
+    } catch {
+      // Observation must not change sign-in or app responses.
+    }
+  };
+
   // Identity providers refuse to render their sign-in pages in frames, so a
   // framed app asks its embedding page for a host token instead.
   const embeddedLoginUrl = (url: URL) => {
@@ -122,8 +140,10 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
     try {
       const headers = new Headers({ "cache-control": "no-store" });
 
-      for (const cookie of await signInEmbedded(configuration, input.data.token, request.headers))
-        headers.append("set-cookie", cookie);
+      const session = await signInEmbedded(configuration, input.data.token, request.headers);
+
+      for (const cookie of session.cookies) headers.append("set-cookie", cookie);
+      observe({ trigger: "embedded_sign_in", identity: session.identity });
 
       return new Response(null, { status: 204, headers });
     } catch (cause) {
@@ -172,7 +192,12 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
     if (url.pathname === `${basePath}/callback` && request.method === "GET") {
       if (["state", "code", "error"].some((key) => url.searchParams.getAll(key).length > 1))
         return response(400, "Invalid sign-in callback.");
-      const auth = await createAuthentication(configuration, true);
+      let verified: z.infer<typeof authorization> | undefined;
+
+      const auth = await createAuthentication(configuration, true, (value) => {
+        verified = value;
+      });
+
       const internal = new URL(url);
 
       internal.pathname = `${basePath}/callback/company`;
@@ -180,6 +205,18 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       const headers = new Headers(result.headers);
 
       headers.set("cache-control", "no-store");
+      const identity = proxyIdentity.safeParse(verified?.identity);
+
+      // A verified identity alone does not complete sign-in; the session cookie does.
+      if (
+        identity.success &&
+        result.headers
+          .getSetCookie()
+          .some((cookie) =>
+            cookie.startsWith(`__Secure-${cookiePrefix(configuration)}.session_token=`),
+          )
+      )
+        observe({ trigger: "sign_in", identity: identity.data });
 
       return new Response(result.body, { status: result.status, headers });
     }
@@ -268,7 +305,12 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
             if (retryAfter) unavailable.headers.set("retry-after", retryAfter);
 
             return finish(unavailable);
-          } else user = proxyIdentity.safeParse(await renewed.json());
+          } else {
+            user = proxyIdentity.safeParse(await renewed.json());
+
+            if (user.success)
+              observe({ trigger: "renewal", identity: user.data, hostname: url.hostname });
+          }
         } catch (cause) {
           console.error("App session renewal failed", {
             stage: "proxy",

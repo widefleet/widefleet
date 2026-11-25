@@ -418,6 +418,26 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
           })
         ).status,
       ).toBe(200);
+
+      // Sign-in happens on the auth host, so it names the organization but no app.
+      const activity = z
+        .array(
+          z.object({
+            trigger: z.string(),
+            organizationId: z.string(),
+            appId: z.string().optional(),
+            issuer: z.string(),
+            identity: z.object({ email: z.string() }),
+          }),
+        )
+        .parse(await (await fetch(`${worker.origin}/_fixture/activity`)).json());
+
+      expect(activity).toContainEqual({
+        trigger: "sign_in",
+        organizationId: "widefleet",
+        issuer: idp.origin,
+        identity: { email: "user@example.test" },
+      });
     });
 
     it.each([

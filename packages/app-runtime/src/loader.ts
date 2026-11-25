@@ -13,6 +13,7 @@ export { WorkloadIdentity } from "./workload-identity.ts";
 export { AppOAuth } from "./app-oauth.ts";
 
 import { signAppCaller } from "./app-caller.ts";
+import { appUserAnalytics } from "./app-user-analytics.ts";
 import type { appCaller } from "@platform/contracts";
 
 export { AppKeys } from "./app-keys.ts";
@@ -408,6 +409,7 @@ export default {
           caller,
           frameAncestors,
         }),
+      appUserAnalytics(environment),
     ).fetch(request);
   },
   async scheduled(

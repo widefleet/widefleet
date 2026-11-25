@@ -3,6 +3,7 @@ import { publishedApp } from "@platform/contracts";
 import { workerDefinition, workerTails } from "../src/worker-definition.ts";
 import { readApp } from "../src/catalog.ts";
 import { readOrganizationAvailability } from "../src/availability.ts";
+import { appUserAnalytics } from "../src/app-user-analytics.ts";
 import { workerCode } from "../src/worker.ts";
 import { digest } from "./digest.ts";
 import type { ParentEnvironment } from "../src/types.ts";
@@ -44,6 +45,22 @@ export default {
     const scope = path.startsWith("/service") ? "service" : "app";
     const identity = scope === "app" ? app : service;
     const keyValue = path.endsWith("/kv");
+
+    if (path === "/app-user") {
+      env = { ...env };
+
+      if (new URL(request.url).searchParams.has("unconfigured")) delete env.POSTHOG_PROJECT_TOKEN;
+
+      appUserAnalytics(env)?.({
+        trigger: "renewal",
+        organizationId: "observer-fixture",
+        appId: app.appId,
+        issuer: "https://login.example.test",
+        identity: { id: "subject-1", name: "Example User", email: "user@example.test" },
+      });
+
+      return new Response(null, { status: 204 });
+    }
 
     if (path.startsWith("/platform-error/")) {
       env = { ...env };

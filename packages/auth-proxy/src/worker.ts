@@ -10,7 +10,7 @@ import {
   decodeConfiguration,
   encodeConfiguration,
 } from "./publication.ts";
-import { createAuthProxy } from "./proxy.ts";
+import { createAuthProxy, type AppUserActivity } from "./proxy.ts";
 import {
   encodeMcpLogin,
   decodeMcpLogin,
@@ -230,6 +230,9 @@ export const createAuthHandler = (
     caller: z.infer<typeof appCaller>,
     frameAncestors: string[],
   ) => Promise<Response>,
+  observe?: (
+    activity: Omit<AppUserActivity, "hostname"> & { organizationId: string; appId?: string },
+  ) => void,
 ) => ({
   async fetch(request: Request) {
     const url = new URL(request.url);
@@ -303,6 +306,16 @@ export const createAuthHandler = (
             caller,
             installed.configuration.embeddingOrigins ?? [],
           );
+        },
+        observe: ({ hostname, ...activity }) => {
+          const reported: Parameters<NonNullable<typeof observe>>[0] = {
+            ...activity,
+            organizationId,
+          };
+
+          // Renewal happens on a request to the app this route belongs to.
+          if (hostname === url.hostname && route) reported.appId = route.appId;
+          observe?.(reported);
         },
       });
 

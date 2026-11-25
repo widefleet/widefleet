@@ -13,6 +13,9 @@ const outgoing = globalThis.fetch;
 // The production proxy still validates the real Graph origin before fetching.
 let graphOrigin = "";
 
+// Activity the handler reported, kept for the test to read back from this isolate.
+const activity: unknown[] = [];
+
 globalThis.fetch = (input, init) => {
   const request = new Request(input, init);
   const url = new URL(request.url);
@@ -30,22 +33,27 @@ export default {
 
     graphOrigin = env.GRAPH_ORIGIN;
 
-    const worker = createAuthHandler(input, async (appRequest, appId) =>
-      Response.json(
-        {
-          appId,
-          url: appRequest.url,
-          method: appRequest.method,
-          headers: Object.fromEntries(appRequest.headers),
-          body: await appRequest.text(),
-        },
-        {
-          headers: {
-            "set-cookie":
-              "app_cookie=oauth; Domain=apps.example.test; Path=/; Secure; HttpOnly; SameSite=Lax",
+    if (new URL(request.url).pathname === "/_fixture/activity") return Response.json(activity);
+
+    const worker = createAuthHandler(
+      input,
+      async (appRequest, appId) =>
+        Response.json(
+          {
+            appId,
+            url: appRequest.url,
+            method: appRequest.method,
+            headers: Object.fromEntries(appRequest.headers),
+            body: await appRequest.text(),
           },
-        },
-      ),
+          {
+            headers: {
+              "set-cookie":
+                "app_cookie=oauth; Domain=apps.example.test; Path=/; Secure; HttpOnly; SameSite=Lax",
+            },
+          },
+        ),
+      (reported) => activity.push(reported),
     );
 
     if (new URL(request.url).pathname === "/_fixture/install") {

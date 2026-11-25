@@ -42,6 +42,19 @@ const exception = z.object({
   }),
 });
 
+const appUser = z.object({
+  event: z.literal("app_user_active"),
+  distinct_id: z.string(),
+  properties: z.object({
+    scope: z.string(),
+    service: z.literal("app-runtime"),
+    trigger: z.string(),
+    app_id: z.string().optional(),
+    $groups: z.object({ organization: z.string() }),
+    $set: z.object({ name: z.string(), email: z.string() }),
+  }),
+});
+
 const logBatch = z.object({
   resourceLogs: z.array(
     z.object({
@@ -63,6 +76,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
     const keyValues: z.infer<typeof keyValueObservation>[] = [];
     const pending: ServerResponse[] = [];
     const exceptions: z.infer<typeof exception>[] = [];
+    const appUsers: z.infer<typeof appUser>[] = [];
     let exceptionStatus = 503;
 
     const collector = createServer((request, response) => {
@@ -84,7 +98,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           );
 
         if (request.url === "/exception") {
-          exceptions.push(...z.object({ batch: z.array(exception) }).parse(body).batch);
+          for (const event of z
+            .object({ batch: z.array(z.union([exception, appUser])) })
+            .parse(body).batch)
+            if (event.event === "app_user_active") appUsers.push(event);
+            else exceptions.push(event);
           // Reporting failure must not change the platform failure or fallback response.
           response.writeHead(exceptionStatus).end("{}");
 
@@ -411,6 +429,20 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
       expect(
         exceptions.find(({ properties }) => properties.scope === "installation")?.distinct_id,
       ).toBe("installation:app-runtime");
+
+      expect((await worker.fetch("http://fixture/app-user?unconfigured")).status).toBe(204);
+      expect((await worker.fetch("http://fixture/app-user")).status).toBe(204);
+      await expect.poll(() => appUsers.length, { timeout: 8_000 }).toBe(1);
+      expect(appUsers[0]?.distinct_id).toMatch(/^app-user:[a-f0-9]{64}$/);
+      expect(appUsers[0]?.properties).toMatchObject({
+        scope: "fixture",
+        service: "app-runtime",
+        trigger: "renewal",
+        app_id: "a0000000-0000-4000-8000-000000000001",
+        $groups: { organization: "observer-fixture" },
+        $set: { name: "Example User", email: "user@example.test" },
+      });
+      expect(appUsers[0]?.distinct_id).not.toContain("subject-1");
       expect(errors).toEqual([]);
     } finally {
       for (const response of pending) response.writeHead(503).end();
