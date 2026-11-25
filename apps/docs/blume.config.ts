@@ -26,12 +26,17 @@ const config = defineConfig({
   },
   theme: {
     mode: "system",
-    accent: { light: "#22221f", dark: "#deded8" },
-    background: { light: "#fafaf7", dark: "#1d1d1b" },
-    radius: "sm",
+    accent: { light: "#12161b", dark: "#e2e6ea" },
+    background: { light: "#ffffff", dark: "#12161b" },
+    radius: "md",
+    // The website's typeface; code keeps Blume's monospace default.
+    fonts: {
+      display: { name: "Epilogue", provider: "fontsource", weights: ["100..900"] },
+      body: { name: "Epilogue", provider: "fontsource", weights: ["100..900"] },
+    },
   },
   navigation: {
-    cta: { label: "GitHub", href: repositoryUrl },
+    cta: { label: "Get started", href: "https://app.widefleet.com/sign-up" },
     repo: repositoryUrl,
     sidebar: { display: "group" },
   },
