@@ -1,6 +1,11 @@
 ---
 name: Qonto
 description: Read accounts and transactions and make transfers, cards and invoices in Qonto, with typed results and Qonto's own payment approval.
+secretHelp:
+  QONTO_CLIENT_ID: >-
+    Open your app in [Qonto Developer Portal](https://developers.qonto.com/) and copy its Production client ID.
+  QONTO_CLIENT_SECRET: >-
+    Use the Production client secret for the same application in [Qonto Developer Portal](https://developers.qonto.com/).
 ---
 
 Connect a Qonto organization and use Qonto's Business API as typed methods: business
