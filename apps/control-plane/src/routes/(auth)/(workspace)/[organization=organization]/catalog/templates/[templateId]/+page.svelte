@@ -107,17 +107,23 @@
           explain where to get them.
         </p>
       </div>
-      {#each template.requiredSecrets as secret (secret)}
+      {#each template.secretFields as { name: secret, helpHtml } (secret)}
         <div class="space-y-2">
           <Label for={`secret-${secret}`}><code>{secret}</code></Label>
           <Input
             {...installTemplate.fields._secrets[secret]?.as("password")}
             id={`secret-${secret}`}
+            aria-describedby={helpHtml ? `secret-help-${secret}` : undefined}
             autocomplete="new-password"
             spellcheck={false}
             required
             disabled={installTemplate.pending > 0}
           />
+          {#if helpHtml}
+            <div id={`secret-help-${secret}`} class="text-muted-foreground">
+              <Markdown html={helpHtml} />
+            </div>
+          {/if}
         </div>
       {/each}
       {#if naming}

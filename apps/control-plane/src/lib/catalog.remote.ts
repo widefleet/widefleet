@@ -186,6 +186,16 @@ export const installTemplate = form(
   },
 );
 
+// Keep entered credentials in the form while the installer opens provider settings.
+const fieldMarkdown = new MarkdownIt({ html: false }).disable("image");
+
+fieldMarkdown.renderer.rules.link_open = (tokens, index, options, _env, renderer) => {
+  tokens[index]?.attrSet("target", "_blank");
+  tokens[index]?.attrSet("rel", "noopener noreferrer");
+
+  return renderer.renderToken(tokens, index, options);
+};
+
 export const getTemplate = query(
   templatePath.extend(organizationSelection.shape),
   async ({ templateId, organizationId }) => {
@@ -203,6 +213,17 @@ export const getTemplate = query(
       ),
     );
 
-    return { ...template, html: new MarkdownIt({ html: false }).render(template.markdown) };
+    const descriptions = new Map(Object.entries(template.secretHelp ?? {}));
+
+    const secretFields = template.requiredSecrets.map((name) => ({
+      name,
+      helpHtml: fieldMarkdown.render(descriptions.get(name) ?? ""),
+    }));
+
+    return {
+      ...template,
+      secretFields,
+      html: new MarkdownIt({ html: false }).render(template.markdown),
+    };
   },
 );

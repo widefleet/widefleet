@@ -200,7 +200,7 @@ it("reads a new template from its directory and frontmatter without provider-spe
       return Response.json({ main: "src/app.ts", secrets: { required: ["BOARD_TOKEN"] } });
 
     return new Response(
-      `\uFEFF---\r\nname: Team board\r\ndescription: >-\r\n  Organize tasks\r\n  together.\r\n---\r\n${markdown}`,
+      `\uFEFF---\r\nname: Team board\r\ndescription: >-\r\n  Organize tasks\r\n  together.\r\nsecretHelp:\r\n  BOARD_TOKEN: "Open [API settings](https://example.test/settings)."\r\n---\r\n${markdown}`,
     );
   });
   const api = createApi(runtime);
@@ -220,6 +220,9 @@ it("reads a new template from its directory and frontmatter without provider-spe
   expect(template.markdown).toBe(markdown);
   expect(template.network).toBeUndefined();
   expect(template.requiredSecrets).toEqual(["BOARD_TOKEN"]);
+  expect(template.secretHelp).toEqual({
+    BOARD_TOKEN: "Open [API settings](https://example.test/settings).",
+  });
   expect(template.source).toBe("https://github.com/widefleet/widefleet/tree/main/templates/kanban");
   expect(template.prompt).toContain("catalog templates show kanban");
   expect(template.prompt).not.toMatch(/OAuth|personal account/i);
