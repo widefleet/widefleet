@@ -5,9 +5,10 @@ import { describe, expect, it } from "vitest";
 import {
   configuredSecretEncryption,
   createSecretEncryption,
-  generateKeyVersion,
+  generateKeyring,
   parseKeyring,
 } from "../src/lib/server/secret-encryption.ts";
+import { keySet, keyVersion } from "./keyring.fixture.ts";
 
 const legacyKey = "synthetic-legacy-installation-key-for-tests";
 
@@ -16,9 +17,9 @@ const context = { kind: "directory-client-secret", organizationId: "widefleet" }
 // Synthetic key material: byte values 255 down to 224.
 const fixtureKey = "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA";
 
-const fixture = () => parseKeyring(`fixture:${fixtureKey}`, "test");
+const fixture = () => parseKeyring(keySet(keyVersion("fixture", fixtureKey)), "test");
 
-const keyVersion = (id: string) => `${id}:${randomBytes(32).toString("base64")}`;
+const keyring = (...keys: ReturnType<typeof keyVersion>[]) => parseKeyring(keySet(...keys), "test");
 
 const unreadable = {
   code: "BAD_REQUEST",
@@ -100,11 +101,11 @@ describe("JWE ciphertexts", () => {
 
   it("encrypts with a new active version while earlier versions still decrypt", async () => {
     const previous = keyVersion("previous");
-    const before = createSecretEncryption({ keyring: parseKeyring(previous, "test") });
+    const before = createSecretEncryption({ keyring: keyring(previous) });
     const old = await before.encrypt(context, "written before rotation");
 
     const after = createSecretEncryption({
-      keyring: parseKeyring(`${keyVersion("current")}\n${previous}`, "test"),
+      keyring: keyring(keyVersion("current"), previous),
     });
 
     const current = await after.encrypt(context, "written after rotation");
@@ -153,7 +154,7 @@ describe("configured keyrings", () => {
     );
 
     const ciphertext = await configuredSecretEncryption({
-      PLATFORM_ENCRYPTION_KEYS: keyVersion("current"),
+      PLATFORM_ENCRYPTION_KEYS: keySet(keyVersion("current")),
     }).encrypt(context, "value");
 
     expect(decodeProtectedHeader(ciphertext).kid).toBe("current");
@@ -161,58 +162,80 @@ describe("configured keyrings", () => {
 });
 
 describe("keyrings", () => {
-  it("accepts canonical base64 and base64url keys separated by commas or line breaks", () => {
+  it("reads a private JWK Set, active key first, and ignores other JWK members", () => {
     const material = randomBytes(32);
 
-    const keyring = parseKeyring(
-      ` first:${material.toString("base64")},second:${randomBytes(32).toString("base64url")}\n`,
+    const versions = parseKeyring(
+      JSON.stringify({
+        keys: [
+          { ...keyVersion("first", material.toString("base64url")), alg: "dir", use: "enc" },
+          keyVersion("second"),
+        ],
+      }),
       "test",
     );
 
-    expect(keyring.map((version) => version.id)).toEqual(["first", "second"]);
-    expect(Buffer.from(keyring[0].material)).toEqual(material);
+    expect(versions.map((version) => version.id)).toEqual(["first", "second"]);
+    expect(Buffer.from(versions[0].jwk.k, "base64url")).toEqual(material);
   });
 
-  it("creates distinct random versions", () => {
-    const [first, second] = [generateKeyVersion(), generateKeyVersion()];
+  it("generates a JWK Set with one random key", () => {
+    const [first, second] = [
+      parseKeyring(generateKeyring(), "test"),
+      parseKeyring(generateKeyring(), "test"),
+    ];
 
-    expect(parseKeyring(`${first},${second}`, "test")).toHaveLength(2);
+    expect(first).toHaveLength(1);
+    expect(first[0].jwk.k).not.toBe(second[0].jwk.k);
   });
 
-  // Both alphabets appear in this key's base64 spelling.
-  const mixed = Buffer.alloc(32, 0xfb).toString("base64").replace("/", "_");
+  // Fixed spellings of 32 bytes, so each case fails for its stated reason.
+  const urlSafe = "-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_8";
+  const standard = Buffer.from(urlSafe, "base64url").toString("base64");
 
   it.each([
-    ["no entry", " \n", /must list at least one key version/],
-    ["a passphrase", `current:${"a-long-but-not-random-passphrase".repeat(2)}`, /entry 1 must be/],
-    ["a short key", `current:${randomBytes(16).toString("base64")}`, /entry 1 must be/],
-    ["a long key", `current:${randomBytes(33).toString("base64")}`, /entry 1 must be/],
-    ["mixed alphabets", `current:${mixed}`, /entry 1 must be/],
-    ["padded base64url", `current:${randomBytes(32).toString("base64url")}=`, /entry 1 must be/],
+    ["text that is not JSON", "current:key", /must be a JWK Set/],
+    ["a document without keys", JSON.stringify({ key: [] }), /must be a JWK Set/],
+    ["an empty key set", keySet(), /at least one key/],
+    [
+      "another key type",
+      JSON.stringify({ keys: [{ ...keyVersion("rsa"), kty: "RSA" }] }),
+      /key 1 must follow/,
+    ],
+    ["a kid with a colon", keySet(keyVersion("org:current")), /key 1 must follow/],
+    ["a kid longer than 32 characters", keySet(keyVersion("k".repeat(33))), /key 1 must follow/],
+    ["padded base64url", keySet(keyVersion("current", `${urlSafe}=`)), /key 1 must follow/],
+    ["standard base64", keySet(keyVersion("current", standard)), /key 1 must follow/],
+    [
+      "a short key",
+      keySet(keyVersion("current", randomBytes(16).toString("base64url"))),
+      /key 1 must follow/,
+    ],
+    [
+      "a long key",
+      keySet(keyVersion("current", randomBytes(33).toString("base64url"))),
+      /key 1 must follow/,
+    ],
     [
       "unused trailing bits",
-      `current:${randomBytes(32).toString("base64url").slice(0, -1)}B`,
-      /entry 1 must be/,
+      keySet(keyVersion("current", `${urlSafe.slice(0, -1)}9`)),
+      /key 1 must follow/,
     ],
-    ["a missing ID", `:${randomBytes(32).toString("base64")}`, /entry 1 must be/],
-    ["an invalid ID", `current key:${randomBytes(32).toString("base64")}`, /entry 1 must be/],
-    ["a repeated ID", `${keyVersion("current")},${keyVersion("current")}`, /more than once/],
+    ["a repeated kid", keySet(keyVersion("current"), keyVersion("current")), /more than once/],
   ])("rejects %s", (_name, text, message) => {
     expect(() => parseKeyring(text, "PLATFORM_ENCRYPTION_KEYS")).toThrow(message);
   });
 
-  it("rejects one key under two IDs without repeating key material", () => {
-    const material = randomBytes(32).toString("base64");
+  it("rejects one key under two kids without repeating key material", () => {
+    expect(() =>
+      parseKeyring(keySet(keyVersion("one", urlSafe), keyVersion("two", urlSafe)), "test"),
+    ).toThrow("test key version two repeats the key of another version");
 
-    expect(() => parseKeyring(`one:${material},two:${material}`, "test")).toThrow(
-      "test key version two repeats the key of another version",
-    );
-
-    const invalid = material.slice(1);
+    const invalid = urlSafe.slice(1);
 
     const rejection = (() => {
       try {
-        parseKeyring(`current:${invalid}`, "test");
+        parseKeyring(keySet(keyVersion("current", invalid)), "test");
       } catch (cause) {
         return cause instanceof Error ? cause.message : "";
       }
@@ -220,7 +243,7 @@ describe("keyrings", () => {
       return "";
     })();
 
-    expect(rejection).toMatch(/entry 1 must be/);
+    expect(rejection).toMatch(/key 1 must follow/);
     expect(rejection).not.toContain(invalid);
   });
 });

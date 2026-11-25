@@ -37,8 +37,8 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   APP_DOMAIN: string;
   BETTER_AUTH_SECRET: string;
   GITHUB_TOKEN?: string;
-  /** The legacy key, needed only until stored values are re-encrypted. */
-  PLATFORM_ENCRYPTION_KEY: string;
+  /** The legacy key, needed only while stored values from earlier releases remain. */
+  PLATFORM_ENCRYPTION_KEY?: string;
   /** The keyring, active version first. */
   PLATFORM_ENCRYPTION_KEYS: string;
   DEPLOYMENTS?: Workflow<z.infer<typeof deploymentWorkflowCommand>>;
@@ -59,7 +59,11 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
 export const cloudflareConfigurationSchema = runtimeConfigurationSchema.extend({
   ARTIFACT_STORAGE_PROVIDER: z.literal("r2").default("r2"),
   BETTER_AUTH_SECRET: z.string().min(32),
-  PLATFORM_ENCRYPTION_KEY: z.string().min(32),
+  // Read only by the temporary legacy reader; installations without legacy data omit it.
+  PLATFORM_ENCRYPTION_KEY: z
+    .union([z.string().min(32), z.literal("")])
+    .optional()
+    .transform((value) => value || undefined),
   // Workers keep no generated keyring, so a hosted installation must configure one.
   PLATFORM_ENCRYPTION_KEYS: z
     .string({ error: "Set PLATFORM_ENCRYPTION_KEYS, the encryption keyring" })

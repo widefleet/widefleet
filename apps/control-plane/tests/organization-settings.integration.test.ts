@@ -15,7 +15,7 @@ import {
 import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
 import {
   createSecretEncryption,
-  generateKeyVersion,
+  generateKeyring,
   parseKeyring,
 } from "../src/lib/server/secret-encryption.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
@@ -404,7 +404,7 @@ describe("Organization login settings", () => {
     const wrongKey = createSettingsService(
       environment.configuration,
       environment.database.db,
-      createSecretEncryption({ keyring: parseKeyring(generateKeyVersion(), "test") }),
+      createSecretEncryption({ keyring: parseKeyring(generateKeyring(), "test") }),
       () => null,
     );
 

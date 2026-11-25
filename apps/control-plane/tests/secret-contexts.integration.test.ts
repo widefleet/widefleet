@@ -9,7 +9,7 @@ import { savePackage } from "../src/lib/server/package-storage.ts";
 import { agents, apps, jobs, organizationRuntimes } from "../src/lib/server/schema.ts";
 import {
   createSecretEncryption,
-  generateKeyVersion,
+  generateKeyring,
   parseKeyring,
 } from "../src/lib/server/secret-encryption.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
@@ -27,7 +27,7 @@ afterAll(async () => environment?.close());
 
 it("rejects a read with a context other than the one the value was written with", async () => {
   const encryption = checkSecretContexts(
-    createSecretEncryption({ keyring: parseKeyring(generateKeyVersion(), "test") }),
+    createSecretEncryption({ keyring: parseKeyring(generateKeyring(), "test") }),
   );
 
   const written = { kind: "app-secret", organizationId: "one", appId: "app", name: "A" } as const;

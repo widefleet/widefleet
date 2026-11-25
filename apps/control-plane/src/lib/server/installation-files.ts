@@ -6,7 +6,7 @@ import type { Configuration } from "./config.ts";
 import { readLegacyKey } from "./legacy-secret-migration.ts";
 import {
   createSecretEncryption,
-  generateKeyVersion,
+  generateKeyring,
   includesKeyVersions,
   parseKeyring,
 } from "./secret-encryption.ts";
@@ -89,7 +89,7 @@ const installationKeyring = async (configuration: Configuration) => {
   }
 
   if (stored !== null) return parseKeyring(stored, path);
-  const created = await createPrivateFile(path, `${generateKeyVersion()}\n`);
+  const created = await createPrivateFile(path, generateKeyring());
 
   if (created.created)
     console.info(

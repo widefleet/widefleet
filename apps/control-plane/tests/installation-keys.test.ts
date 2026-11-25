@@ -7,6 +7,7 @@ import { decodeProtectedHeader } from "jose";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { configurationSchema } from "../src/lib/server/config.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
+import { keySet, keyVersion, keysOf } from "./keyring.fixture.ts";
 
 const context = { kind: "app-login-client-secret", organizationId: "widefleet" } as const;
 
@@ -25,8 +26,6 @@ const configuration = (settings: Record<string, string> = {}) =>
     ...settings,
   });
 
-const keyVersion = (id: string) => `${id}:${randomBytes(32).toString("base64")}`;
-
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "widefleet-keys-"));
   vi.spyOn(console, "info").mockImplementation(() => {});
@@ -43,7 +42,7 @@ it("creates a private keyring on first start and keeps using it", async () => {
   const ciphertext = await first.encryption.encrypt(context, "synthetic secret");
 
   expect((await stat(path)).mode & 0o777).toBe(0o600);
-  expect(decodeProtectedHeader(ciphertext).kid).toBe((await readFile(path, "utf8")).split(":")[0]);
+  expect(decodeProtectedHeader(ciphertext).kid).toBe(keysOf(await readFile(path, "utf8"))[0]?.kid);
   expect(console.info).toHaveBeenCalledWith(expect.stringContaining(path));
   // Only installations from before the keyring have a legacy key.
   await expect(stat(join(directory, "encryption.key"))).rejects.toThrow();
@@ -87,9 +86,9 @@ it("keeps an operator-managed legacy key for earlier ciphertexts", async () => {
 });
 
 it("uses a configured keyring from the environment or a file", async () => {
-  const keys = `${keyVersion("current")},${keyVersion("previous")}`;
+  const keys = keySet(keyVersion("current"), keyVersion("previous"));
   const path = join(directory, "operator.keys");
-  await writeFile(path, keys.replace(",", "\n"));
+  await writeFile(path, keys);
 
   const fromEnvironment = await installationKeys(configuration({ PLATFORM_ENCRYPTION_KEYS: keys }));
   const fromFile = await installationKeys(configuration({ PLATFORM_ENCRYPTION_KEYS_FILE: path }));
@@ -105,21 +104,24 @@ it("uses a configured keyring from the environment or a file", async () => {
     ),
   ).rejects.toThrow("Set either PLATFORM_ENCRYPTION_KEYS or PLATFORM_ENCRYPTION_KEYS_FILE");
   await expect(
-    installationKeys(configuration({ PLATFORM_ENCRYPTION_KEYS: "current:not-a-key" })),
-  ).rejects.toThrow("PLATFORM_ENCRYPTION_KEYS entry 1 must be");
+    installationKeys(
+      configuration({ PLATFORM_ENCRYPTION_KEYS: keySet(keyVersion("current", "not-a-key")) }),
+    ),
+  ).rejects.toThrow("PLATFORM_ENCRYPTION_KEYS key 1 must follow");
 });
 
 it("requires a configured keyring to keep the generated key versions", async () => {
   const generated = await installationKeys(configuration());
   const ciphertext = await generated.encryption.encrypt(context, "value");
-  const stored = (await readFile(join(directory, "encryption.keys"), "utf8")).trim();
+  const stored = keysOf(await readFile(join(directory, "encryption.keys"), "utf8"));
+  const operator = keyVersion("operator");
 
   await expect(
-    installationKeys(configuration({ PLATFORM_ENCRYPTION_KEYS: keyVersion("operator") })),
+    installationKeys(configuration({ PLATFORM_ENCRYPTION_KEYS: keySet(operator) })),
   ).rejects.toThrow("must include every key version");
 
   const configured = await installationKeys(
-    configuration({ PLATFORM_ENCRYPTION_KEYS: `${keyVersion("operator")},${stored}` }),
+    configuration({ PLATFORM_ENCRYPTION_KEYS: keySet(operator, ...stored) }),
   );
 
   expect(await configured.encryption.decrypt(context, ciphertext)).toBe("value");
