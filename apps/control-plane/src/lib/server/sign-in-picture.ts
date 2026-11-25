@@ -25,13 +25,14 @@ const idTokenClaims = (idToken: string | null | undefined) => {
   }
 };
 
-// A company connection's user info endpoint, discovered and checked as for sign-in itself.
+// A company connection's user info endpoint, discovered and checked as for sign-in itself;
+// `null` when discovery fails, `undefined` when the provider has none.
 const companyUserInfo = async (issuer: string, configuration: string) => {
   try {
     return (await prepareCompanyOidc(issuer, oidcConfiguration.parse(JSON.parse(configuration))))
       .configuration.userInfoEndpoint;
   } catch {
-    return undefined;
+    return null;
   }
 };
 
@@ -110,10 +111,14 @@ export const signInPicture = (save: SavePicture) =>
                     : undefined
                 : undefined;
 
+            // A failed lookup keeps the copy; only a provider without user info falls back to
+            // the ID token, which then names no picture.
             const claims =
-              userInfo && accessToken
-                ? await fetchUserInfoClaims(userInfo, accessToken)
-                : fromIdToken;
+              userInfo === null
+                ? null
+                : userInfo && accessToken
+                  ? await fetchUserInfoClaims(userInfo, accessToken)
+                  : fromIdToken;
 
             await save(
               signedIn.user.id,
