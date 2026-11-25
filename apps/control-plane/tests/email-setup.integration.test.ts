@@ -127,7 +127,7 @@ it.each(["runtime", "source command"])(
           await readAppLogin(
             runtime.database.db,
             runtime.configuration,
-            runtime.encryptionKey,
+            runtime.encryption,
             "widefleet",
           ),
         ).toMatchObject({ management: { clientId: appLoginClientId("widefleet") } });

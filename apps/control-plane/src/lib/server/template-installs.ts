@@ -240,7 +240,7 @@ export const createTemplateInstalls = (
         crypto.randomUUID(),
         {
           firstDeployment: true,
-          ...(required.length > 0 && { secrets: await secrets.encrypt(input.secrets) }),
+          ...(required.length > 0 && { secrets: await secrets.encrypt(installed, input.secrets) }),
         },
       );
 

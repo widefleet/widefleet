@@ -24,7 +24,7 @@ describe("Installation organization", () => {
         settings: environment.settings,
         reporting: environment.reporting,
         storage: createStorage(environment.configuration),
-        encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+        encryption: environment.encryption,
       })(),
     );
   });

@@ -7,13 +7,13 @@ import { installationOrganizationId } from "../organization.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { ssoProvider, user } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
-import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
 
 export const companySsoOrigins = async (
   database: DatabaseExecutor,
   platformUrl: string,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   request?: Request,
   policy?: Configuration,
 ) => {
@@ -53,7 +53,12 @@ export const companySsoOrigins = async (
   if (!companySsoAvailable(policy, provider) || !provider?.oidcConfig) return origins;
 
   const configuration = oidcConfiguration.parse(
-    JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)),
+    JSON.parse(
+      await encryption.decrypt(
+        { kind: "sso-provider-config", field: "oidcConfig" },
+        provider.oidcConfig,
+      ),
+    ),
   );
 
   const prepared = await prepareCompanyOidc(provider.issuer, configuration);
@@ -65,7 +70,7 @@ export const companySsoOrigins = async (
 
 export const companySsoPlugin = (
   database: DatabaseExecutor,
-  encryptionKey: string,
+  encryption: SecretEncryption,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
   policy?: Configuration,
 ) => {
@@ -161,7 +166,7 @@ export const companySsoPlugin = (
 
   // Better Auth's schema transforms cover every adapter read/write, including
   // the plugin's own transactions, without a second credential store.
-  for (const field of ["oidcConfig", "samlConfig"]) {
+  for (const field of ["oidcConfig", "samlConfig"] as const) {
     const definition = plugin.schema.ssoProvider.fields[field];
 
     if (!definition) throw new Error(`Missing SSO configuration field: ${field}`);
@@ -169,11 +174,11 @@ export const companySsoPlugin = (
       input: (value) =>
         value === null || value === undefined
           ? value
-          : encryptSecret(encryptionKey, z.string().parse(value)),
+          : encryption.encrypt({ kind: "sso-provider-config", field }, z.string().parse(value)),
       output: (value) =>
         value === null || value === undefined
           ? value
-          : decryptSecret(encryptionKey, z.string().parse(value)),
+          : encryption.decrypt({ kind: "sso-provider-config", field }, z.string().parse(value)),
     };
   }
 

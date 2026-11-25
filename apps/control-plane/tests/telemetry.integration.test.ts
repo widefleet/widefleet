@@ -207,17 +207,10 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         workflows: createWorkflowService(environment.database.db),
         migrations: createMigrationService(environment.database.db, storage),
         connections: createConnectionService(environment.database.db, storage),
-        appSecrets: createAppSecrets(
-          environment.database.db,
-          environment.environment.PLATFORM_ENCRYPTION_KEY,
-        ),
+        appSecrets: createAppSecrets(environment.database.db, environment.encryption),
         agents: createAgentService(environment.database.db),
         identity: createIdentityService(environment.auth, environment.database.db, configuration),
-        jobs: createJobService(
-          environment.database.db,
-          storage,
-          "local-integration-test-encryption-key-only",
-        ),
+        jobs: createJobService(environment.database.db, storage, environment.encryption),
         releases: createRuntimeReleaseService(environment.database.db, storage),
         uploads: createUploadService(environment.database.db, storage, configuration),
         templates: createTemplateInstalls(
@@ -225,10 +218,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
           createAppService(environment.database.db, configuration),
           createUploadService(environment.database.db, storage, configuration),
           createNetworkService(environment.database.db),
-          createAppSecrets(
-            environment.database.db,
-            environment.environment.PLATFORM_ENCRYPTION_KEY,
-          ),
+          createAppSecrets(environment.database.db, environment.encryption),
         ),
       });
       const admin = environment.users.createUser({ email: "telemetry-admin@example.test" });

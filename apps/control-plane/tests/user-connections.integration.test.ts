@@ -101,7 +101,7 @@ describe("Personal connector accounts", () => {
     await registerAppLogin(
       environment.database.db,
       environment.configuration,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       "widefleet",
     );
     // App sign-in through Widefleet admits members with a verified email.
@@ -257,7 +257,7 @@ describe("Personal connector accounts", () => {
       settings: environment.settings,
       reporting: environment.reporting,
       storage: createStorage(environment.configuration),
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
     })();
 
     const api = createApi({ ...runtime, userConnections: service() });

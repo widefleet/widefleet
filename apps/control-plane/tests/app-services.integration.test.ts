@@ -13,7 +13,6 @@ import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { apps, artifacts, deployments } from "../src/lib/server/schema.ts";
-import { decryptSecret } from "../src/lib/server/secret-encryption.ts";
 import type { Principal } from "../src/lib/server/identity.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
 
@@ -54,8 +53,7 @@ describe("App service connections", () => {
 
   const applications = () => createAppService(environment.database.db, environment.configuration);
 
-  const secrets = () =>
-    createAppSecrets(environment.database.db, environment.environment.PLATFORM_ENCRYPTION_KEY);
+  const secrets = () => createAppSecrets(environment.database.db, environment.encryption);
 
   const app = async (
     entrypoints: string[] = [],
@@ -711,7 +709,15 @@ describe("App service connections", () => {
     const values = contract.appSecretPreparation.shape.values.parse(record?.secrets);
     expect(values["TOKEN"]).not.toBe("synthetic-value");
     expect(
-      await decryptSecret(environment.environment.PLATFORM_ENCRYPTION_KEY, values["TOKEN"] ?? ""),
+      await environment.encryption.decrypt(
+        {
+          kind: "app-secret",
+          organizationId: target.organizationId,
+          appId: target.id,
+          name: "TOKEN",
+        },
+        values["TOKEN"] ?? "",
+      ),
     ).toBe("synthetic-value");
     expect((await secrets().read(principal, source.id)).unwrap().names).toEqual([]);
 

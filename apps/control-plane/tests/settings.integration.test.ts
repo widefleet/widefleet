@@ -307,7 +307,7 @@ describe("Platform setup and managed settings", () => {
       createSettingsService(
         environment.configuration,
         environment.database.db,
-        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        environment.encryption,
         () => signIn,
       );
 
@@ -420,7 +420,7 @@ describe("Platform setup and managed settings", () => {
     const service = createSettingsService(
       environment.configuration,
       environment.database.db,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       () => signIn,
     );
 

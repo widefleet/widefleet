@@ -18,7 +18,7 @@ import {
   user,
 } from "../../src/lib/server/auth-schema.ts";
 import { organizationSettings } from "../../src/lib/server/schema.ts";
-import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
+import { createSecretEncryption } from "../../src/lib/server/secret-encryption.ts";
 import { cliScopes } from "../../src/lib/server/auth-options.ts";
 import { cloudflareConfigurationSchema } from "../../src/lib/server/cloudflare-config.ts";
 import { createDatabase } from "../../src/lib/server/database.ts";
@@ -40,6 +40,8 @@ describe("Hosted installation initialization", () => {
     BETTER_AUTH_SECRET: "local-test-only-authentication-secret",
     PLATFORM_ENCRYPTION_KEY: "local-test-only-encryption-secret",
   };
+
+  const encryption = createSecretEncryption({ legacyKey: environment.PLATFORM_ENCRYPTION_KEY });
 
   let database: ReturnType<typeof createDatabase>;
   let directory: string;
@@ -292,7 +294,7 @@ describe("Hosted installation initialization", () => {
           await readAppLogin(
             database.db,
             cloudflareConfigurationSchema.parse(environment),
-            environment.PLATFORM_ENCRYPTION_KEY,
+            encryption,
             "widefleet",
           ),
         ).toMatchObject({ management: { clientId: appLoginClientId("widefleet") } });
@@ -316,8 +318,8 @@ describe("Hosted installation initialization", () => {
           domain: "company.example.test",
           domainVerified: true,
           appIdentityType: "google",
-          oidcConfig: await encryptSecret(
-            environment.PLATFORM_ENCRYPTION_KEY,
+          oidcConfig: await encryption.encrypt(
+            { kind: "sso-provider-config", field: "oidcConfig" },
             JSON.stringify({ clientId: "company-client", clientSecret: "company-secret" }),
           ),
         });

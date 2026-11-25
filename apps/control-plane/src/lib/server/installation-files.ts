@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
+import { createSecretEncryption } from "./secret-encryption.ts";
 
 export const readOptionalFile = async (path: string) => {
   try {
@@ -35,7 +36,7 @@ export const installationKeys = async (configuration: Configuration) => {
   if (configuration.PLATFORM_ENCRYPTION_KEY && configuration.PLATFORM_ENCRYPTION_KEY_FILE)
     throw new Error("Set either PLATFORM_ENCRYPTION_KEY or PLATFORM_ENCRYPTION_KEY_FILE");
 
-  const encryption =
+  const legacyKey =
     configuration.PLATFORM_ENCRYPTION_KEY ??
     (configuration.PLATFORM_ENCRYPTION_KEY_FILE
       ? z
@@ -45,7 +46,7 @@ export const installationKeys = async (configuration: Configuration) => {
       : await persistentKey(configuration.PLATFORM_STATE_DIRECTORY, "encryption.key"));
 
   return {
-    encryption,
+    encryption: createSecretEncryption({ legacyKey }),
     cookie: await persistentKey(configuration.PLATFORM_STATE_DIRECTORY, "app-cookie.key"),
     authentication:
       configuration.BETTER_AUTH_SECRET ??

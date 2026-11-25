@@ -162,16 +162,13 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         directory: createDirectory(async (id) => (await environment.settings.resolve(id)).identity),
         apps: createAppService(database, configuration),
         agents: createAgentService(database),
-        jobs: createJobService(database, storage, "local-integration-test-encryption-key-only"),
+        jobs: createJobService(database, storage, environment.encryption),
         network: createNetworkService(database),
         appAccess: createAppAccessService(database),
         workflows: createWorkflowService(database),
         migrations: createMigrationService(database, storage),
         connections: createConnectionService(environment.database.db, storage),
-        appSecrets: createAppSecrets(
-          environment.database.db,
-          environment.environment.PLATFORM_ENCRYPTION_KEY,
-        ),
+        appSecrets: createAppSecrets(environment.database.db, environment.encryption),
         releases: createRuntimeReleaseService(database, storage),
         uploads: createUploadService(database, storage, configuration),
         templates: createTemplateInstalls(
@@ -179,10 +176,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
           createAppService(database, configuration),
           createUploadService(database, storage, configuration),
           createNetworkService(database),
-          createAppSecrets(
-            environment.database.db,
-            environment.environment.PLATFORM_ENCRYPTION_KEY,
-          ),
+          createAppSecrets(environment.database.db, environment.encryption),
         ),
         telemetry: createTelemetry(database, storage, configuration),
       });

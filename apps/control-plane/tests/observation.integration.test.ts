@@ -40,7 +40,7 @@ describe("Installation observation", () => {
       storage: createStorage(environment.configuration),
       reporting: environment.reporting,
       observation: { capture: () => {}, exception, close: async () => {} },
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
     })();
 
     const error = new TypeError("Cannot read deployment status", {

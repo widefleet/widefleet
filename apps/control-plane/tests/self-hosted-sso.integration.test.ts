@@ -262,7 +262,7 @@ describe("Operator-trusted self-hosted SSO", () => {
     const settings = createSettingsService(
       configuration,
       environment.database.db,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       (organizationId) =>
         createAppSignIn(configuration, Buffer.alloc(32, 1).toString("base64url"), organizationId),
       options.emailSignIn,
@@ -303,7 +303,7 @@ describe("Operator-trusted self-hosted SSO", () => {
     const settings = createSettingsService(
       configuration,
       environment.database.db,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       (organizationId) =>
         createAppSignIn(configuration, Buffer.alloc(32, 1).toString("base64url"), organizationId),
     );
@@ -374,7 +374,7 @@ describe("Operator-trusted self-hosted SSO", () => {
     const settings = createSettingsService(
       configuration,
       environment.database.db,
-      configuration.PLATFORM_ENCRYPTION_KEY ?? configuration.BETTER_AUTH_SECRET,
+      environment.encryption,
       () => null,
     );
 

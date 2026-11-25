@@ -100,7 +100,7 @@ describe("Organization discovery and selection", () => {
       settings: environment.settings,
       reporting: environment.reporting,
       storage: createStorage(environment.configuration),
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
       // Returning an unrelated admitted ID must not turn it into a membership.
       organizationAccess: { filterOrganizations: async () => [...admitted] },
     })();

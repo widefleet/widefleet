@@ -904,18 +904,13 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
 
   it("does not expose Widefleet app sign-in when company SSO is active", async () => {
     await environment.database.db.transaction((transaction) =>
-      registerAppLogin(
-        transaction,
-        environment.configuration,
-        environment.environment.PLATFORM_ENCRYPTION_KEY,
-        secondOrg,
-      ),
+      registerAppLogin(transaction, environment.configuration, environment.encryption, secondOrg),
     );
 
     const client = await readAppLogin(
       environment.database.db,
       environment.configuration,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       secondOrg,
     );
 
@@ -981,7 +976,7 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
       registerAppLogin(
         transaction,
         environment.configuration,
-        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        environment.encryption,
         organizationId,
       ),
     );
@@ -989,7 +984,7 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     const client = await readAppLogin(
       environment.database.db,
       environment.configuration,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       organizationId,
     );
 
