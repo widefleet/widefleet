@@ -71,32 +71,6 @@ export const declaredSecrets = (wrangler: string | undefined) => {
   return secretsSettings.safeParse(configuration.data.secrets).data?.required ?? [];
 };
 
-/**
- * Adds optional generated assets, such as rendered app icons, unless they would
- * take the project over the platform's asset limits.
- */
-export const addGeneratedAssets = (
-  assets: { manifest: z.infer<typeof assetManifest>; bytes: Map<string, Uint8Array> },
-  files: { path: string; bytes: Uint8Array }[],
-) => {
-  const total = [...assets.bytes.values(), ...files.map(({ bytes }) => bytes)].reduce(
-    (sum, bytes) => sum + bytes.byteLength,
-    0,
-  );
-
-  if (Object.keys(assets.manifest).length + files.length > maxAssets || total > maxAssetTotal)
-    return false;
-
-  for (const { path, bytes } of files) {
-    const hash = hashAsset(path, bytes);
-
-    assets.bytes.set(hash, bytes);
-    assets.manifest[path] = { hash, size: bytes.byteLength };
-  }
-
-  return true;
-};
-
 export const templateProject = (files: Readonly<Record<string, Uint8Array>>) =>
   Result.gen(function* () {
     const wrangler = files["wrangler.jsonc"] ?? files["wrangler.json"];

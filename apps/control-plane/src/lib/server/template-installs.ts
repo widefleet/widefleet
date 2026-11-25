@@ -10,7 +10,8 @@ import { Result } from "better-result";
 import { z } from "zod";
 import type { AppBuilder } from "./app-builder.ts";
 import { templateDescription, templateSources } from "./app-templates.ts";
-import { addGeneratedAssets, declaredSecrets, templateProject } from "./template-project.ts";
+import { hashAsset } from "./asset-hash.ts";
+import { declaredSecrets, templateProject } from "./template-project.ts";
 import type { createAppSecrets } from "./app-secrets.ts";
 import type { createAppService } from "./apps.ts";
 import type { Configuration } from "./config.ts";
@@ -180,11 +181,13 @@ export const createTemplateInstalls = (
       ) {
         const rendered = await builder.icons(svg);
 
-        if (rendered.isOk())
-          addGeneratedAssets(
-            assets,
-            rendered.value.icons.map(({ path, png }) => ({ path, bytes: decodeBase64(png) })),
-          );
+        for (const { path, png } of rendered.isOk() ? rendered.value.icons : []) {
+          const bytes = decodeBase64(png);
+          const hash = hashAsset(path, bytes);
+
+          assets.bytes.set(hash, bytes);
+          assets.manifest[path] = { hash, size: bytes.byteLength };
+        }
       }
 
       // The app exists only once its build succeeded, so a failed build leaves

@@ -155,9 +155,6 @@ pub async fn run(
     Ok(())
 }
 
-const MAX_ASSETS: usize = 10_000;
-const MAX_ASSET_BYTES: usize = 250 * 1024 * 1024;
-
 fn collect_assets(root: &Path) -> Result<AssetFiles> {
     let mut pending = vec![root.to_owned()];
     let mut manifest = AssetManifest::new();
@@ -220,7 +217,7 @@ fn collect_assets(root: &Path) -> Result<AssetFiles> {
                     size: bytes.len() as u64,
                 },
             );
-            if manifest.len() > MAX_ASSETS || total > MAX_ASSET_BYTES {
+            if manifest.len() > 10_000 || total > 250 * 1024 * 1024 {
                 return Err(Error::invalid(
                     "Asset manifest exceeds the platform limit".into(),
                 ));
@@ -259,18 +256,6 @@ fn add_app_icons(assets: &mut AssetFiles) -> Result<()> {
                 return Ok(());
             }
         }
-    }
-    // The icons are optional and never push a deployment over the asset limits.
-    let unique: BTreeMap<_, _> = assets
-        .manifest
-        .values()
-        .map(|asset| (&asset.hash, asset.size))
-        .collect();
-    let total = unique.values().sum::<u64>() as usize
-        + rendered.iter().map(|(_, png)| png.len()).sum::<usize>();
-    if assets.manifest.len() + rendered.len() > MAX_ASSETS || total > MAX_ASSET_BYTES {
-        eprintln!("App icons were not generated: the assets are at the platform limit");
-        return Ok(());
     }
     for (name, png) in rendered {
         let hash = asset_hash(name, &png);
@@ -1162,23 +1147,6 @@ mod tests {
                 .ok_or_else(|| Error::invalid(format!("{name} is missing")))?;
             assert!(assets.generated.contains_key(&asset.hash));
         }
-
-        // Icons never take a deployment over the asset limit.
-        let mut full = collect_assets(directory.path())?;
-        full.generated.clear();
-        full.manifest.retain(|name, _| name == "/favicon.svg");
-        for index in 1..MAX_ASSETS {
-            full.manifest.insert(
-                format!("/file-{index}.txt"),
-                Asset {
-                    hash: format!("{index:032x}"),
-                    size: 1,
-                },
-            );
-        }
-        add_app_icons(&mut full)?;
-        assert!(full.generated.is_empty());
-        assert_eq!(full.manifest.len(), MAX_ASSETS);
 
         // An app with a PNG icon of its own keeps it.
         std::fs::write(directory.path().join("favicon.png"), b"png")?;
