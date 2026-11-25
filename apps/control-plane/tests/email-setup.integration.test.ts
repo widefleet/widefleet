@@ -28,6 +28,7 @@ it.each(["runtime", "source command"])(
         events.push(event);
       },
       exception: () => {},
+      alias: async () => {},
       close: async () => {},
     });
 

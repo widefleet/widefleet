@@ -1,5 +1,5 @@
 import { createUserConnections, type UserConnectionRequest } from "./user-connections.ts";
-import { createAppUserIdentity } from "./app-user-identity.ts";
+import { createAppIdentityLinks, createAppUserIdentity } from "./app-user-identity.ts";
 import { createAppSource } from "./app-source.ts";
 import type { SourceBackend } from "./source-backend.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
@@ -110,7 +110,10 @@ export const createRuntime = ({
     cliLoginSettings: settings,
   };
 
-  if (observation) authOptions.observation = observation;
+  if (observation) {
+    authOptions.observation = observation;
+    authOptions.appIdentityLinks = createAppIdentityLinks(database.db, configuration, settings);
+  }
 
   if (authentication) authOptions.authentication = authentication;
 

@@ -54,6 +54,8 @@ export const createAuthentication = (
     organizationAccess?: OrganizationAccess;
     authentication?: AuthenticationExtension;
     observation?: Observation;
+    // The analytics IDs of the person's app identities, linked to their account on sign-in.
+    appIdentityLinks?: (userId: string) => Promise<string[]>;
     reportException?: (error: Error) => void;
     encryptionKey?: string;
     cookies?: ReturnType<typeof sveltekitCookies>;
@@ -221,6 +223,19 @@ export const createAuthentication = (
               id: record.id,
               userId: record.userId,
             });
+
+            const { appIdentityLinks } = options;
+
+            if (!appIdentityLinks) return;
+
+            // Awaited so the links are captured before the request's analytics drain.
+            try {
+              await options.observation?.alias?.(record.userId, () =>
+                appIdentityLinks(record.userId),
+              );
+            } catch {
+              // Analytics must not fail sign-in.
+            }
           },
           before: async (record, context) => {
             if (

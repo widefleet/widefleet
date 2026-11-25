@@ -1,5 +1,6 @@
 import { waitUntil } from "cloudflare:workers";
 import { PostHog } from "posthog-node/edge";
+import { appUserDistinctId } from "@platform/contracts";
 import type { ParentEnvironment } from "./types.ts";
 
 export interface AppUserActivity {
@@ -9,17 +10,6 @@ export interface AppUserActivity {
   issuer: string;
   identity: { id: string; name: string; email: string };
 }
-
-const pseudonym = async (issuer: string, subject: string) =>
-  Array.from(
-    new Uint8Array(
-      await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(JSON.stringify([issuer, subject])),
-      ),
-    ),
-    (byte) => byte.toString(16).padStart(2, "0"),
-  ).join("");
 
 /**
  * Sends app sign-ins and session renewals to the installation's PostHog project, when one
@@ -47,7 +37,10 @@ export const appUserAnalytics = (environment: ParentEnvironment) => {
 
           client.capture({
             // The provider's subject is the stable account; email addresses can change.
-            distinctId: `app-user:${await pseudonym(activity.issuer, activity.identity.id)}`,
+            distinctId: await appUserDistinctId({
+              issuer: activity.issuer,
+              subject: activity.identity.id,
+            }),
             event: "app_user_active",
             groups: { organization: activity.organizationId },
             properties: {
