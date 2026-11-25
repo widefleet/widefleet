@@ -10,6 +10,7 @@ import { createDomainAccess } from "../src/lib/server/domain-access.ts";
 import { createInvitationService } from "../src/lib/server/members.ts";
 import { createAuthControl } from "./auth-control.ts";
 import { checkSecretContexts } from "./secret-contexts.fixture.ts";
+import { keySet, keyVersion } from "./keyring.fixture.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
 import { createReporting } from "../src/lib/server/reporting.ts";
@@ -122,6 +123,10 @@ export const createTestEnvironment = async (
     PLATFORM_RUNTIME_DIRECTORY: join(directory, "auth"),
     PLATFORM_APP_RUNTIME_URL: authControl.url,
     PLATFORM_ENCRYPTION_KEY: "local-integration-test-encryption-key-only",
+    // Synthetic key material, shared with Cloudflare bindings and the built server.
+    PLATFORM_ENCRYPTION_KEYS: keySet(
+      keyVersion("test", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"),
+    ),
     DATABASE_URL: `postgres://platform_test:local-test-only@127.0.0.1:25432/${name}`,
     PLATFORM_URL: platformUrl,
     APP_DOMAIN: "apps.localhost",
@@ -189,7 +194,7 @@ export const createTestEnvironment = async (
     email: "owner@example.test",
   });
 
-  await registerCli(database.db, configuration);
+  await registerCli(database.db, configuration, encryption);
 
   // The exported fixture factory accepts Better Auth's general plugin context.
   const fixtureAuth = betterAuth<BetterAuthOptions>(auth.options);

@@ -10,6 +10,7 @@ import type {
 } from "@cloudflare/workers-types";
 import { z } from "zod";
 import { runtimeConfigurationSchema } from "./config.ts";
+import { parseKeyring } from "./secret-encryption.ts";
 import type { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
 import type { deploymentWorkflowCommand } from "./deployment-workflow-command.ts";
 import type { CloudflareAuthRateLimitBindings } from "./auth-rate-limit-cloudflare.ts";
@@ -36,7 +37,10 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   APP_DOMAIN: string;
   BETTER_AUTH_SECRET: string;
   GITHUB_TOKEN?: string;
-  PLATFORM_ENCRYPTION_KEY: string;
+  /** The legacy key, needed only while stored values from earlier releases remain. */
+  PLATFORM_ENCRYPTION_KEY?: string;
+  /** The keyring, active version first. */
+  PLATFORM_ENCRYPTION_KEYS: string;
   DEPLOYMENTS?: Workflow<z.infer<typeof deploymentWorkflowCommand>>;
   APP_OPERATIONS?: Workflow<z.infer<typeof cloudflareAppOperation>>;
   APP_RUNTIME?: Fetcher;
@@ -55,7 +59,24 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
 export const cloudflareConfigurationSchema = runtimeConfigurationSchema.extend({
   ARTIFACT_STORAGE_PROVIDER: z.literal("r2").default("r2"),
   BETTER_AUTH_SECRET: z.string().min(32),
-  PLATFORM_ENCRYPTION_KEY: z.string().min(32),
+  // Read only by the temporary legacy reader; installations without legacy data omit it.
+  PLATFORM_ENCRYPTION_KEY: z
+    .union([z.string().min(32), z.literal("")])
+    .optional()
+    .transform((value) => value || undefined),
+  // Workers keep no generated keyring, so a hosted installation must configure one.
+  PLATFORM_ENCRYPTION_KEYS: z
+    .string({ error: "Set PLATFORM_ENCRYPTION_KEYS, the encryption keyring" })
+    .superRefine((value, context) => {
+      try {
+        parseKeyring(value, "PLATFORM_ENCRYPTION_KEYS");
+      } catch (cause) {
+        context.addIssue({
+          code: "custom",
+          message: cause instanceof Error ? cause.message : "PLATFORM_ENCRYPTION_KEYS is invalid",
+        });
+      }
+    }),
 });
 
 export const readCloudflareConfiguration = (bindings: CloudflareBindings) =>

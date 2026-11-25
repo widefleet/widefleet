@@ -107,7 +107,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
         `
         import {readFile,stat} from "node:fs/promises";
         import {createHash} from "node:crypto";
-        const key = "/var/lib/widefleet/encryption.key";
+        const key = "/var/lib/widefleet/encryption.keys";
         const owner = await stat(key);
         const setup = await fetch("http://127.0.0.1:3000/setup");
         const body = await setup.text();

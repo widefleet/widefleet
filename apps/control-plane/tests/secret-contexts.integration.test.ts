@@ -7,7 +7,11 @@ import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
 import { savePackage } from "../src/lib/server/package-storage.ts";
 import { agents, apps, jobs, organizationRuntimes } from "../src/lib/server/schema.ts";
-import { createSecretEncryption } from "../src/lib/server/secret-encryption.ts";
+import {
+  createSecretEncryption,
+  generateKeyring,
+  parseKeyring,
+} from "../src/lib/server/secret-encryption.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
@@ -23,7 +27,7 @@ afterAll(async () => environment?.close());
 
 it("rejects a read with a context other than the one the value was written with", async () => {
   const encryption = checkSecretContexts(
-    createSecretEncryption({ legacyKey: "synthetic-context-check-key" }),
+    createSecretEncryption({ keyring: parseKeyring(generateKeyring(), "test") }),
   );
 
   const written = { kind: "app-secret", organizationId: "one", appId: "app", name: "A" } as const;

@@ -79,7 +79,13 @@ const secrets = z
       .url()
       .refine((value) => ["postgres:", "postgresql:"].includes(new URL(value).protocol)),
     BETTER_AUTH_SECRET: z.string().min(32),
-    PLATFORM_ENCRYPTION_KEY: z.string().min(32),
+    // Only for stored values from earlier releases; installations without them omit it.
+    PLATFORM_ENCRYPTION_KEY: z
+      .union([z.string().min(32), z.literal("")])
+      .optional()
+      .transform((value) => value || undefined),
+    // Validated with the rest of the configuration below, before any change.
+    PLATFORM_ENCRYPTION_KEYS: z.string().min(1),
     WIDEFLEET_CONTROL_TOKEN: z.string().min(32),
     WIDEFLEET_SECRETS_KEY: z.string().regex(/^[a-f0-9]{64}$/),
     APP_COOKIE_SECRET: z.string().min(32),
@@ -294,7 +300,10 @@ try {
       ...controlSecretOverrides,
       ...socialCredentials,
       BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET,
-      PLATFORM_ENCRYPTION_KEY: secrets.PLATFORM_ENCRYPTION_KEY,
+      ...(secrets.PLATFORM_ENCRYPTION_KEY && {
+        PLATFORM_ENCRYPTION_KEY: secrets.PLATFORM_ENCRYPTION_KEY,
+      }),
+      PLATFORM_ENCRYPTION_KEYS: secrets.PLATFORM_ENCRYPTION_KEYS,
       APP_COOKIE_SECRET: secrets.APP_COOKIE_SECRET,
       CLOUDFLARE_API_TOKEN: secrets.WIDEFLEET_PROVISIONING_TOKEN,
     }),

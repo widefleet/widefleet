@@ -70,11 +70,18 @@ export const runtimeConfigurationSchema = z.object({
   ACME_EMAIL: z.email().optional(),
   ACME_ENVIRONMENT: z.enum(["production", "staging"]).default("production"),
   PLATFORM_BOOTSTRAP_FILE: z.string().min(1).optional(),
+  // Legacy key, read only by legacy-secret-migration.ts until stored values are re-encrypted.
   PLATFORM_ENCRYPTION_KEY: z
     .union([z.string().min(32), z.literal("")])
     .optional()
     .transform((value) => value || undefined),
   PLATFORM_ENCRYPTION_KEY_FILE: z.string().min(1).optional(),
+  // Parsed by the secret encryption service, so errors never repeat key material.
+  PLATFORM_ENCRYPTION_KEYS: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
+  PLATFORM_ENCRYPTION_KEYS_FILE: z.string().min(1).optional(),
   PLATFORM_SSO_TRUST_PROVIDER: z
     .enum(["true", "false", ""])
     .default("false")
