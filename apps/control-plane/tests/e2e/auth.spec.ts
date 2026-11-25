@@ -3442,15 +3442,14 @@ test.describe(`app templates`, () => {
     await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
     const response = await context.request.get("/api/v1/catalog/templates/gmail");
     const detail = z.object({ prompt: z.string() }).parse(await response.json());
-    await expect(
-      page.getByRole("region", { name: "Set up with your agent" }).locator("code"),
-    ).toHaveText(detail.prompt);
     expect(detail.prompt).toContain("--organization 'widefleet'");
     expect(detail.prompt).toContain(`--url '${environment.configuration.PLATFORM_URL}'`);
 
+    const setup = page.getByRole("region", { name: "Set up with your agent" });
+    await expect(setup.getByLabel("Prompt for your agent")).toHaveCount(0);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.getByRole("button", { name: "Copy setup prompt" }).click();
-    await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+    await setup.getByRole("button", { name: "Copy prompt" }).click();
+    await expect(setup.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(detail.prompt);
 
     for (const width of [1280, 390]) {
@@ -3475,10 +3474,11 @@ test.describe(`app templates`, () => {
         configurable: true,
       }),
     );
-    await page.getByRole("button", { name: /Copy setup prompt|Copied/ }).click();
-    await expect(page.getByRole("alert")).toHaveText(
-      "Copying is not available here. Select the text and copy it manually.",
+    await setup.getByRole("button", { name: /Copy prompt|Copied/ }).click();
+    await expect(setup.getByRole("alert")).toHaveText(
+      "Copying is not available here. Select the prompt and copy it manually.",
     );
+    await expect(setup.getByLabel("Prompt for your agent")).toHaveValue(detail.prompt);
 
     await expect(
       page.getByRole("heading", { name: "Configure Google", exact: true }),

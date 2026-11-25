@@ -7,7 +7,7 @@
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { page } from "$app/state";
   import Markdown from "#shadcn/components/Markdown.svelte";
-  import CopyValue from "#shadcn/components/CopyValue.svelte";
+  import AgentPromptCard from "#shadcn/components/AgentPromptCard.svelte";
   import TemplateIcon from "#shadcn/components/TemplateIcon.svelte";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
@@ -149,14 +149,13 @@
       {/each}.
     </p>
   {/if}
-  <section class="mt-8" aria-labelledby="setup-heading">
-    <h3 id="setup-heading" class="text-sm font-semibold">Set up with your agent</h3>
-    <p class="text-muted-foreground mt-2 mb-4 text-sm leading-6">
-      Copy this prompt into your agent. It will deploy the app to this organization and guide you
-      through configuration.
-    </p>
-    <CopyValue value={template.prompt} label="Copy setup prompt" />
-  </section>
+  <AgentPromptCard
+    id="setup"
+    title="Set up with your agent"
+    description="Copy the prompt into your agent. It deploys the app to this organization and guides you through configuration."
+    prompt={template.prompt}
+    class="mt-8"
+  />
   <a
     href={template.source}
     target="_blank"
