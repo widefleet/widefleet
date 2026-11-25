@@ -309,7 +309,8 @@ export const pictureStore = (storage: PictureStorage, organizationId: string, is
 
 export type PictureStore = ReturnType<typeof pictureStore>;
 
-// A generic OIDC provider's user info endpoint, from the discovery document sign-in uses.
+// A generic OIDC provider's user info endpoint, from the discovery document sign-in uses;
+// `null` when discovery fails, `undefined` when the provider has none.
 const discoveredUserInfo = async (issuerUrl: string) => {
   try {
     const response = await fetch(`${issuerUrl}/.well-known/openid-configuration`, {
@@ -321,16 +322,16 @@ const discoveredUserInfo = async (issuerUrl: string) => {
     if (!response.ok) {
       await response.body?.cancel();
 
-      return undefined;
+      return null;
     }
 
     const discovered = z
       .object({ userinfo_endpoint: z.url().optional() })
       .safeParse(await response.json());
 
-    return discovered.success ? discovered.data.userinfo_endpoint : undefined;
+    return discovered.success ? discovered.data.userinfo_endpoint : null;
   } catch {
-    return undefined;
+    return null;
   }
 };
 
@@ -355,12 +356,16 @@ export const providerPicture = async (
         : await discoveredUserInfo(issuer(provider))
       : undefined;
 
+  // A failed lookup keeps the copy; only a provider without user info falls back to the ID
+  // token, which then names no picture.
   return claimedPicture(
-    userInfo && accessToken
-      ? await fetchUserInfoClaims(userInfo, accessToken)
-      : fromIdToken.success
-        ? fromIdToken.data
-        : null,
+    userInfo === null
+      ? null
+      : userInfo && accessToken
+        ? await fetchUserInfoClaims(userInfo, accessToken)
+        : fromIdToken.success
+          ? fromIdToken.data
+          : null,
     new URL(issuer(provider)).origin,
     accessToken,
   );
