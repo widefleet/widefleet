@@ -106,7 +106,11 @@ const tracedClient = (span: DatabaseSpan) => {
   };
 };
 
-export const createDatabase = (configuration: Configuration, max = 10, span?: DatabaseSpan) => {
+export const createDatabase = (
+  configuration: Pick<Configuration, "DATABASE_URL">,
+  max = 10,
+  span?: DatabaseSpan,
+) => {
   const pool = new pg.Pool({
     ...(span && { Client: tracedClient(span) }),
     connectionString: configuration.DATABASE_URL,

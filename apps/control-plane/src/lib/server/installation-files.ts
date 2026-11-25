@@ -58,15 +58,23 @@ const createPrivateFile = async (path: string, content: string) => {
   }
 };
 
+const keyringFile = (configuration: Pick<Configuration, "PLATFORM_STATE_DIRECTORY">) =>
+  join(configuration.PLATFORM_STATE_DIRECTORY, "encryption.keys");
+
 /**
  * Reads the configured keyring or, without one, the keyring Widefleet keeps in
- * the state directory, created on first start.
+ * the state directory. Returns `null` without either and never creates one.
  */
-const installationKeyring = async (configuration: Configuration) => {
+export const readInstallationKeyring = async (
+  configuration: Pick<
+    Configuration,
+    "PLATFORM_ENCRYPTION_KEYS" | "PLATFORM_ENCRYPTION_KEYS_FILE" | "PLATFORM_STATE_DIRECTORY"
+  >,
+) => {
   if (configuration.PLATFORM_ENCRYPTION_KEYS && configuration.PLATFORM_ENCRYPTION_KEYS_FILE)
     throw new Error("Set either PLATFORM_ENCRYPTION_KEYS or PLATFORM_ENCRYPTION_KEYS_FILE");
 
-  const path = join(configuration.PLATFORM_STATE_DIRECTORY, "encryption.keys");
+  const path = keyringFile(configuration);
   const stored = await readOptionalFile(path);
 
   const configured = configuration.PLATFORM_ENCRYPTION_KEYS
@@ -88,7 +96,15 @@ const installationKeyring = async (configuration: Configuration) => {
     return configured;
   }
 
-  if (stored !== null) return parseKeyring(stored, path);
+  return stored === null ? null : parseKeyring(stored, path);
+};
+
+/** Reads the installation's keyring, creating one in the state directory on first start. */
+const installationKeyring = async (configuration: Configuration) => {
+  const existing = await readInstallationKeyring(configuration);
+
+  if (existing) return existing;
+  const path = keyringFile(configuration);
   const created = await createPrivateFile(path, generateKeyring());
 
   if (created.created)
