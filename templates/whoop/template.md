@@ -1,6 +1,11 @@
 ---
 name: WHOOP
 description: Read WHOOP cycles, recoveries, sleeps, workouts and body measurements, with typed results.
+secretHelp:
+  WHOOP_CLIENT_ID: >-
+    Open your app in [WHOOP Developer Dashboard](https://developer-dashboard.whoop.com/) and copy its client ID.
+  WHOOP_CLIENT_SECRET: >-
+    Use the client secret for the same application in [WHOOP Developer Dashboard](https://developer-dashboard.whoop.com/).
 ---
 
 Connect a WHOOP membership and use WHOOP's API as typed methods: the member's

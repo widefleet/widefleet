@@ -1,6 +1,11 @@
 ---
 name: Gmail
 description: Read, search, send and organize email through the complete Gmail API, with typed results.
+secretHelp:
+  GOOGLE_CLIENT_ID: >-
+    Open your web application in [Google Cloud OAuth clients](https://console.cloud.google.com/auth/clients) and copy its client ID.
+  GOOGLE_CLIENT_SECRET: >-
+    Use the client secret for the same application in [Google Cloud OAuth clients](https://console.cloud.google.com/auth/clients).
 ---
 
 Connect a personal Google account and use every method of the Gmail API as a typed

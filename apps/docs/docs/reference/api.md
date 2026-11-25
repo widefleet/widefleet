@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-16
+lastModified: 2026-11-25
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -96,6 +96,7 @@ use case.
 `GET /api/v1/catalog/templates/{templateId}` returns one template with:
 
 - `id`, `name`, `description` and a source URL in `source`.
+- `secretHelp`, when provided, maps secret names to Markdown descriptions shown under their inputs during installation.
 - `markdown`, the body of the template's `template.md` file.
 - `prompt`, a setup prompt containing the installation URL and selected organization.
 
@@ -104,6 +105,17 @@ Each directory with a `template.md` is a template; its YAML frontmatter supplies
 `name` and `description`, and its directory name supplies `id`. IDs contain
 1–64 characters, start with a lowercase ASCII letter, and use only lowercase
 ASCII letters, digits and hyphens. Directories with other names are skipped.
+
+To help someone find a required secret, add a description to the frontmatter of
+`template.md`. Use the same name as in the Wrangler configuration's
+`secrets.required` list. Fields without a description still appear in the form.
+
+```yaml
+secretHelp:
+  GOOGLE_CLIENT_SECRET: >-
+    Open your web application in [Google Cloud OAuth clients](https://console.cloud.google.com/auth/clients)
+    and use its client secret.
+```
 
 An unknown template ID returns `404`; an invalid ID returns `400`. A repository
 or template parsing failure returns `503`. These read operations leave app

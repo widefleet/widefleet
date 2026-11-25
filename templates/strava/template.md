@@ -1,6 +1,11 @@
 ---
 name: Strava
 description: Read activities, streams, routes and segments and create, upload and update activities in Strava, with typed results.
+secretHelp:
+  STRAVA_CLIENT_ID: >-
+    Open your application in [Strava API settings](https://www.strava.com/settings/api) and copy its Client ID.
+  STRAVA_CLIENT_SECRET: >-
+    Use the Client Secret for the same application in [Strava API settings](https://www.strava.com/settings/api).
 ---
 
 Connect a Strava account and use Strava's API as typed methods: the athlete's
