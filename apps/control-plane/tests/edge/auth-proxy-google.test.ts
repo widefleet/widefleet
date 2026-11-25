@@ -2,7 +2,7 @@ import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { googleGroupsScope } from "@platform/contracts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createIdentityProvider } from "./auth-proxy-idp.ts";
+import { createIdentityProvider, pictureBytes } from "./auth-proxy-idp.ts";
 import { memoryPictures } from "../memory-pictures.fixture.ts";
 
 const app = "https://ledger.apps.example.test/";
@@ -23,6 +23,8 @@ describe("Google Workspace app identity", () => {
   let allowedGroups = ["accounting@example.test"];
   let repeatPage = false;
   let invalidGroup = false;
+  // Google names Workspace pictures only in its user info, never in their ID tokens.
+  let userInfoPicture: string | undefined;
 
   const apps = {
     pictures: memoryPictures(),
@@ -58,6 +60,7 @@ describe("Google Workspace app identity", () => {
     allowedGroups = ["accounting@example.test"];
     repeatPage = false;
     invalidGroup = false;
+    userInfoPicture = undefined;
     calls.length = 0;
     memberships = ["accounting@example.test", "auditors@example.test"];
     directoryStatus = 200;
@@ -70,6 +73,15 @@ describe("Google Workspace app identity", () => {
 
       if (url.origin === "https://accounts.google.com")
         return originalFetch(new Request(new URL(url.pathname, idp.origin), request));
+
+      if (url.href === "https://openidconnect.googleapis.com/v1/userinfo") {
+        expect(request.headers.get("authorization")).toBe("Bearer fixture-access-token");
+
+        return Response.json({ sub: "pairwise-subject", picture: userInfoPicture });
+      }
+
+      if (url.href === "https://lh3.googleusercontent.com/a/workspace-photo")
+        return new Response(pictureBytes);
 
       if (url.origin === "https://cloudidentity.googleapis.com") {
         calls.push(url);
@@ -142,6 +154,26 @@ describe("Google Workspace app identity", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 61 * 60 * 1000);
   };
+
+  it("copies a Workspace picture from Google's user info and shows it on the app's origin", async () => {
+    userInfoPicture = "https://lh3.googleusercontent.com/a/workspace-photo";
+    const cookie = cookies(await login());
+
+    const forwarded = await visit(cookie);
+
+    const path = z
+      .object({
+        "x-auth-request-picture": z.string().regex(/^\/oauth2\/pictures\/[^/?]+\?v=[0-9a-f]{16}$/),
+      })
+      .parse(await forwarded.json())["x-auth-request-picture"];
+
+    const picture = await createAuthProxy(configuration, apps).fetch(
+      new Request(new URL(path, app), { headers: { cookie } }),
+    );
+
+    expect(picture.status).toBe(200);
+    expect(new Uint8Array(await picture.arrayBuffer())).toEqual(pictureBytes);
+  });
 
   it("loads all membership pages and rechecks groups when the provider token expires", async () => {
     const signedIn = await login();

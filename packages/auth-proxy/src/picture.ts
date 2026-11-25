@@ -309,23 +309,59 @@ export const pictureStore = (storage: PictureStorage, organizationId: string, is
 
 export type PictureStore = ReturnType<typeof pictureStore>;
 
+// A generic OIDC provider's user info endpoint, from the discovery document sign-in uses.
+const discoveredUserInfo = async (issuerUrl: string) => {
+  try {
+    const response = await fetch(`${issuerUrl}/.well-known/openid-configuration`, {
+      headers: { accept: "application/json" },
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (!response.ok) {
+      await response.body?.cancel();
+
+      return undefined;
+    }
+
+    const discovered = z
+      .object({ userinfo_endpoint: z.url().optional() })
+      .safeParse(await response.json());
+
+    return discovered.success ? discovered.data.userinfo_endpoint : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * The picture a company sign-in reports. Entra has no picture URL; Graph returns the photo.
- * Other providers name one in the ID token.
+ * Other providers name one in the ID token or, like Google for Workspace accounts, only in
+ * their user info.
  */
-export const providerPicture = (
+export const providerPicture = async (
   provider: z.infer<typeof companyProvider>,
   claims: JWTPayload,
   accessToken: string | undefined,
 ): Promise<PictureResult> => {
-  if (provider.type === "entra")
-    return accessToken ? fetchGraphPicture(accessToken) : Promise.resolve(null);
+  if (provider.type === "entra") return accessToken ? fetchGraphPicture(accessToken) : null;
 
-  // A provider that names no picture has none, for example after the person removed it.
-  if (claims["picture"] === undefined || claims["picture"] === null) return Promise.resolve("none");
-  const url = pictureUrl.safeParse(claims["picture"]);
+  const fromIdToken = pictureClaims.safeParse(claims);
 
-  return url.success
-    ? fetchPictureUrl(new URL(url.data), new URL(issuer(provider)).origin, accessToken)
-    : Promise.resolve(null);
+  const userInfo =
+    fromIdToken.success && fromIdToken.data.picture === undefined && accessToken
+      ? provider.type === "google"
+        ? googleUserInfo
+        : await discoveredUserInfo(issuer(provider))
+      : undefined;
+
+  return claimedPicture(
+    userInfo && accessToken
+      ? await fetchUserInfoClaims(userInfo, accessToken)
+      : fromIdToken.success
+        ? fromIdToken.data
+        : null,
+    new URL(issuer(provider)).origin,
+    accessToken,
+  );
 };
