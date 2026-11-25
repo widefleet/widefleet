@@ -353,6 +353,7 @@ export const reencryptSecrets = async (
   database: Database,
   encryption: SecretEncryption,
   cursor: string | null = null,
+  pendingSecrets?: PendingSecrets,
 ) => {
   let reencrypted = 0;
   let changed = 0;
@@ -395,10 +396,15 @@ export const reencryptSecrets = async (
     changed,
     failed,
     cursor: from ? encodeCursor(from) : null,
+    // The last batch reports the result, so callers need no separate read access.
+    status: from ? null : await readSecretEncryption(database, encryption, pendingSecrets),
   });
 };
 
-/** Runs every batch, reporting each one, for callers without request limits. */
+/**
+ * Runs every batch, reporting each one, for callers without request limits,
+ * and returns the totals with the final status.
+ */
 export const reencryptAllSecrets = async (
   database: Database,
   encryption: SecretEncryption,
@@ -413,7 +419,7 @@ export const reencryptAllSecrets = async (
     total.failed += batch.failed;
     progress(batch);
 
-    if (batch.cursor === null) return total;
+    if (batch.cursor === null) return { ...total, status: batch.status };
     cursor = batch.cursor;
   }
 };
@@ -440,7 +446,7 @@ export const createSecretMaintenance = (
     if (!principal.admin) return forbidden();
 
     try {
-      return Result.ok(await reencryptSecrets(database, encryption, cursor));
+      return Result.ok(await reencryptSecrets(database, encryption, cursor, pendingSecrets));
     } catch (cause) {
       if (cause instanceof InvalidOperation) return Result.err(cause);
       throw cause;

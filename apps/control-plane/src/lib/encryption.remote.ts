@@ -16,8 +16,8 @@ export const reencryptSecretBatch = command(
     const { runtime, principal } = await commandContext({ organizationId });
     const batch = queryValue(await runtime.secretEncryption.reencrypt(principal, cursor));
 
-    // The last batch returns the updated counts in the same response.
-    if (batch.cursor === null) await getSecretEncryption({ organizationId }).refresh();
+    // The last batch carries the updated counts, so the page needs no second read.
+    if (batch.status) getSecretEncryption({ organizationId }).set(batch.status);
 
     return batch;
   },

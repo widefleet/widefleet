@@ -163,8 +163,9 @@ describe("re-encryption", () => {
     const total = remaining(before);
     const result = await reencryptAllSecrets(database, encryption);
 
-    expect(result).toEqual({ reencrypted: total, changed: 0, failed: 0 });
-    expect((await readSecretEncryption(database, encryption)).keyVersions).toEqual([
+    expect(result).toMatchObject({ reencrypted: total, changed: 0, failed: 0 });
+    expect(result.status).toEqual(await readSecretEncryption(database, encryption));
+    expect(result.status?.keyVersions).toEqual([
       { id: "current", values: total, pending: 0, active: true, available: true },
       { id: "test", values: 0, pending: 0, active: false, available: true },
       { id: "previous", values: 0, pending: 0, active: false, available: true },

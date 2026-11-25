@@ -685,6 +685,8 @@ export const secretReencryption = z.strictObject({
   failed: z.number().int().nonnegative(),
   /** Pass this to continue with the next batch; `null` once every location is done. */
   cursor: z.string().nullable(),
+  /** The counts after the last batch; `null` while `cursor` continues. */
+  status: secretEncryptionStatus.nullable(),
 });
 
 export const secretReencryptionInput = z.strictObject({ cursor: z.string().min(1).optional() });

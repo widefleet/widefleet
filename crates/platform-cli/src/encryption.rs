@@ -42,12 +42,14 @@ struct Status {
 }
 
 /// One bounded batch; `cursor` continues with the next one until it is `null`.
+/// The last batch carries the final status, so a write-only token suffices.
 #[derive(Deserialize)]
 struct Batch {
     reencrypted: u64,
     changed: u64,
     failed: u64,
     cursor: Option<String>,
+    status: Option<Status>,
 }
 
 #[derive(Serialize)]
@@ -55,7 +57,7 @@ struct Reencryption {
     reencrypted: u64,
     changed: u64,
     failed: u64,
-    status: Status,
+    status: Option<Status>,
 }
 
 async fn status(api: &Api, token: &str) -> Result<Status> {
@@ -90,15 +92,16 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
                 eprintln!("Re-encrypted {reencrypted} secrets so far");
                 match batch.cursor {
                     Some(next) => cursor = Some(next),
-                    None => break,
+                    None => {
+                        return super::print_json(&Reencryption {
+                            reencrypted,
+                            changed,
+                            failed,
+                            status: batch.status,
+                        });
+                    }
                 }
             }
-            super::print_json(&Reencryption {
-                reencrypted,
-                changed,
-                failed,
-                status: status(api, token).await?,
-            })
         }
     }
 }

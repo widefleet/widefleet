@@ -450,23 +450,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      const encryptionStatus = (remaining: number) => ({
+        activeKeyVersion: "current",
+        pendingDeployments: 0,
+        keyVersions: [
+          { id: "current", values: 6 - remaining, pending: 0, active: true, available: true },
+          { id: null, values: remaining, pending: 0, active: false, available: true },
+        ],
+      });
+
       if (request.url === "/api/v1/encryption") {
-        response.end(
-          JSON.stringify({
-            activeKeyVersion: "current",
-            pendingDeployments: 0,
-            keyVersions: [
-              { id: "current", values: 3, pending: 0, active: true, available: true },
-              {
-                id: null,
-                values: reencryptBodies.length > 1 ? 0 : 3,
-                pending: 0,
-                active: false,
-                available: true,
-              },
-            ],
-          }),
-        );
+        response.end(JSON.stringify(encryptionStatus(3)));
 
         return;
       }
@@ -478,12 +472,27 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           body += chunk;
         });
         request.on("end", () => {
-          reencryptBodies.push(z.json().parse(JSON.parse(body)));
+          const raw = z.json().parse(JSON.parse(body));
+          reencryptBodies.push(raw);
+
+          const input = z.object({ cursor: z.string().optional() }).parse(raw);
           response.end(
             JSON.stringify(
-              reencryptBodies.length === 1
-                ? { reencrypted: 2, changed: 0, failed: 0, cursor: "synthetic-cursor" }
-                : { reencrypted: 1, changed: 0, failed: 0, cursor: null },
+              input.cursor === undefined
+                ? {
+                    reencrypted: 2,
+                    changed: 0,
+                    failed: 0,
+                    cursor: "synthetic-cursor",
+                    status: null,
+                  }
+                : {
+                    reencrypted: 1,
+                    changed: 0,
+                    failed: 0,
+                    cursor: null,
+                    status: encryptionStatus(0),
+                  },
             ),
           );
         });
@@ -1795,6 +1804,30 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         status: { keyVersions: [{ id: "current" }, { id: null, values: 0 }] },
       });
       expect(reencryptBodies).toEqual([{}, { cursor: "synthetic-cursor" }]);
+    });
+
+    it("reports a finished re-encryption to a token without read access", async () => {
+      // The last batch carries the final status, so no GET follows the writes.
+      accessToken = "synthetic-write-only-token";
+      requests.length = 0;
+
+      const reencrypted = await execute(
+        join(state, "installation", executableName),
+        ["encryption", "reencrypt"],
+        { env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken } },
+      );
+
+      expect(JSON.parse(reencrypted.stdout)).toMatchObject({
+        reencrypted: 3,
+        failed: 0,
+        status: {
+          keyVersions: [
+            { id: "current", values: 6 },
+            { id: null, values: 0 },
+          ],
+        },
+      });
+      expect(requests.filter((request) => request.startsWith("GET"))).toEqual([]);
     });
 
     it("reports runtime activation failure", async () => {

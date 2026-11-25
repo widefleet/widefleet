@@ -270,26 +270,27 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(status.activeKeyVersion).toBe("test");
 
     // Each call handles one bounded batch; the cursor continues until it is null.
-    let cursor: string | null = null;
-    let calls = 0;
+    let batch = contract.secretReencryption.parse(
+      await (await json("/encryption/reencrypt", "POST", {})).json(),
+    );
 
-    do {
-      const batch = contract.secretReencryption.parse(
-        await (await json("/encryption/reencrypt", "POST", cursor ? { cursor } : {})).json(),
+    for (let calls = 1; batch.cursor !== null && calls < 20; calls++) {
+      expect(batch.status).toBeNull();
+      batch = contract.secretReencryption.parse(
+        await (await json("/encryption/reencrypt", "POST", { cursor: batch.cursor })).json(),
       );
+    }
 
-      expect(batch.failed).toBe(0);
-      cursor = batch.cursor;
-      calls += 1;
-    } while (cursor !== null && calls < 20);
-
-    expect(cursor).toBeNull();
+    expect(batch.cursor).toBeNull();
+    expect(batch.failed).toBe(0);
     expect((await json("/encryption/reencrypt", "POST", { cursor: "not-a-cursor" })).status).toBe(
       400,
     );
-    expect(
+    // The last batch reports the same counts as a separate read.
+    expect(batch.status).toEqual(
       contract.secretEncryptionStatus.parse(await (await json("/encryption", "GET")).json()),
-    ).toEqual({
+    );
+    expect(batch.status).toEqual({
       activeKeyVersion: "test",
       pendingDeployments: 0,
       keyVersions: [

@@ -18,18 +18,18 @@ const { encryption } = await installationKeys(configuration);
 const database = createDatabase(configuration);
 
 try {
-  if (command === "reencrypt") {
+  if (command === "status")
+    console.info(JSON.stringify(await readSecretEncryption(database.db, encryption), null, 2));
+  else {
     let done = 0;
 
-    const total = await reencryptAllSecrets(database.db, encryption, (batch) => {
+    const result = await reencryptAllSecrets(database.db, encryption, (batch) => {
       done += batch.reencrypted;
       console.error(`Re-encrypted ${done} secrets so far`);
     });
 
-    console.info(JSON.stringify(total, null, 2));
+    console.info(JSON.stringify(result, null, 2));
   }
-
-  console.info(JSON.stringify(await readSecretEncryption(database.db, encryption), null, 2));
 } finally {
   await database.close();
 }
