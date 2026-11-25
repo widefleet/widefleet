@@ -1,7 +1,9 @@
 import { and, eq, inArray, notLike } from "drizzle-orm";
+import { z } from "zod";
 import { profileImagePath } from "@platform/contracts";
 import { organizationRole, organizationRoles } from "../organization.ts";
 import { member, user } from "./auth-schema.ts";
+import type { Authentication } from "./auth.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { pictureVersion, type PictureResult } from "@platform/auth-proxy/picture";
 import { userPictures } from "./schema.ts";
@@ -92,3 +94,13 @@ export const readUserPicture = async (
 
   return picture ?? null;
 };
+
+/**
+ * App sign-in through Widefleet names a person's picture URL as their `picture` claim. The app
+ * proxy fetches it with that sign-in's access token, which may read only its own subject.
+ */
+export const tokenViewer = (auth: Authentication, headers: Headers) =>
+  auth.api
+    .oauth2UserInfo({ headers })
+    .then((claims) => ({ id: z.string().parse(claims.sub), organizations: [] }))
+    .catch(() => null);

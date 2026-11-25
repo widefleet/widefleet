@@ -23,6 +23,7 @@ import { verifyMcpCliLogin } from "./mcp-cli-login.ts";
 
 export interface AuthEnvironment {
   AUTH_CONFIG: KVNamespace;
+  USER_PICTURES: KVNamespace;
   WIDEFLEET_CONTROL_TOKEN: string;
 }
 
@@ -287,6 +288,7 @@ export const createAuthHandler = (
           : reply(404, "Not found");
 
       const proxy = createAuthProxy(installed.configuration, {
+        pictures: environment.USER_PICTURES,
         resolve: async (hostname) => {
           const route = await resolve(hostname);
           phase = "authentication";

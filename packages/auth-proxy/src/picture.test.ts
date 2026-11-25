@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGraphPicture, fetchPictureUrl, maxPictureBytes, pictureFormat } from "./picture.ts";
+import {
+  fetchGraphPicture,
+  fetchPictureUrl,
+  maxPictureBytes,
+  pictureFormat,
+  pictureStore,
+  type PictureResult,
+  type PictureStorage,
+} from "./picture.ts";
 
 const png = (size: number) => {
   const bytes = new Uint8Array(size);
@@ -106,5 +114,96 @@ describe("profile pictures", () => {
       contentType: "image/png",
     });
     expect(authorization).toBe("Bearer synthetic-access-token");
+  });
+
+  it("asks the provider at most once a day, whatever it answers", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const entries = new Map<string, { value: ArrayBuffer; metadata: unknown }>();
+
+    const storage: PictureStorage = {
+      getWithMetadata: async (key) => entries.get(key) ?? { value: null, metadata: null },
+      put: async (key, value, options) => {
+        entries.set(key, { value: value.slice().buffer, metadata: options.metadata });
+      },
+    };
+
+    const store = pictureStore(storage, "organization", "https://login.example.test");
+    const asked: PictureResult[] = [];
+
+    const refresh = (answer: PictureResult) =>
+      store.refresh("person", async () => {
+        asked.push(answer);
+
+        return answer;
+      });
+
+    const day = 24 * 60 * 60 * 1000;
+    const picture = { bytes: png(16), contentType: "image/png" };
+
+    try {
+      const version = await refresh(picture);
+      expect(version).toMatch(/^[0-9a-f]{16}$/);
+      expect(await store.read("person")).toMatchObject({ version, contentType: "image/png" });
+
+      // Within a day the copy answers without asking.
+      expect(await refresh("none")).toBe(version);
+      // A failure keeps the copy and waits another day.
+      vi.setSystemTime(Date.now() + day);
+      expect(await refresh(null)).toBe(version);
+      expect(await refresh("none")).toBe(version);
+      // A provider that reports no picture removes it, and is not asked again that day.
+      vi.setSystemTime(Date.now() + day);
+      expect(await refresh("none")).toBeUndefined();
+      expect(await store.read("person")).toBeNull();
+      expect(await refresh(picture)).toBeUndefined();
+      expect(asked).toEqual([picture, null, "none"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares a refresh between parallel renewals and keeps the copy when a write fails", async () => {
+    const entries = new Map<string, { value: ArrayBuffer; metadata: unknown }>();
+    let failWrites = false;
+
+    const storage: PictureStorage = {
+      getWithMetadata: async (key) => entries.get(key) ?? { value: null, metadata: null },
+      put: async (key, value, options) => {
+        if (failWrites) throw new Error("KV write limit");
+        entries.set(key, { value: value.slice().buffer, metadata: options.metadata });
+      },
+    };
+
+    const store = pictureStore(storage, "organization", "https://login.example.test");
+    let asked = 0;
+
+    const answer = (picture: PictureResult) => async () => {
+      asked += 1;
+
+      return picture;
+    };
+
+    const picture = { bytes: png(16), contentType: "image/png" };
+
+    const versions = await Promise.all([
+      store.refresh("person", answer(picture)),
+      store.refresh("person", answer(picture)),
+    ]);
+
+    expect(asked).toBe(1);
+    expect(versions[0]).toMatch(/^[0-9a-f]{16}$/);
+    expect(versions[1]).toBe(versions[0]);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    try {
+      vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000);
+      failWrites = true;
+      expect(
+        await store.refresh("person", answer({ bytes: png(24), contentType: "image/png" })),
+      ).toBe(versions[0]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

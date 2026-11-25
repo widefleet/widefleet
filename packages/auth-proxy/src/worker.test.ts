@@ -57,6 +57,7 @@ const startAuthWorker = async () => {
           },
           env: {
             AUTH_CONFIG: { type: "kv", id: "auth" },
+            USER_PICTURES: { type: "kv", id: "pictures" },
             WIDEFLEET_CONTROL_TOKEN: { type: "json", value: controlKey },
           },
         },
@@ -316,6 +317,9 @@ describe("Auth proxy diagnostics", () => {
           get AUTH_CONFIG(): never {
             return storage();
           },
+          get USER_PICTURES(): never {
+            return storage();
+          },
         },
       );
 
@@ -335,6 +339,9 @@ describe("Auth proxy diagnostics", () => {
     const environment = {
       WIDEFLEET_CONTROL_TOKEN: key,
       get AUTH_CONFIG(): never {
+        throw new Error(privateValue);
+      },
+      get USER_PICTURES(): never {
         throw new Error(privateValue);
       },
     };

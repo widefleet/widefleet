@@ -4,6 +4,7 @@ import { betterAuth } from "better-auth/minimal";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { z } from "zod";
 import { sessionVersion, type AuthConfiguration } from "./configuration.ts";
+import { providerPicture, type PictureStore } from "./picture.ts";
 import { issuer, providerIdentity, proxyIdentity } from "./identity.ts";
 import { authorization, sessionRenewal } from "./renewal.ts";
 
@@ -78,6 +79,7 @@ export const createAuthentication = async (
   configuration: AuthConfiguration,
   login: boolean,
   onVerified?: (value: z.infer<typeof authorization>) => void,
+  pictures?: PictureStore,
 ) => {
   const options = await authenticationOptions(configuration);
   // Google's refresh-token requirements also apply to generic OIDC connections.
@@ -145,8 +147,15 @@ export const createAuthentication = async (
                       tokens.accessTokenExpiresAt?.getTime() ?? Infinity,
                     );
 
+                    // A missing picture never blocks sign-in or renewal.
+                    const picture = await pictures
+                      ?.refresh(result.identity.id, () =>
+                        providerPicture(configuration.provider, result.claims, tokens.accessToken),
+                      )
+                      .catch(() => undefined);
+
                     verified = authorization.parse({
-                      identity: result.identity,
+                      identity: picture ? { ...result.identity, picture } : result.identity,
                       subject: result.claims.sub,
                       nonce: result.claims["nonce"],
                       expiresAt,

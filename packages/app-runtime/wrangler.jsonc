@@ -9,7 +9,10 @@
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 1, "traces": { "enabled": true } },
   "routes": [{ "pattern": "*.apps.example.com/*", "zone_name": "example.com" }],
-  "kv_namespaces": [{ "binding": "AUTH_CONFIG", "id": "00000000000000000000000000000000" }],
+  "kv_namespaces": [
+    { "binding": "AUTH_CONFIG", "id": "00000000000000000000000000000000" },
+    { "binding": "USER_PICTURES", "id": "00000000000000000000000000000001" },
+  ],
   "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
   "r2_buckets": [{ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-artifacts" }],
   "vars": {

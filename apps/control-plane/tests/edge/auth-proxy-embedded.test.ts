@@ -8,6 +8,7 @@ import { SignJWT, exportJWK, generateKeyPair, type CryptoKey, type JWK } from "j
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createBrowserServer } from "./auth-proxy-https.ts";
+import { memoryPictures } from "../memory-pictures.fixture.ts";
 
 const tenantId = "00000000-0000-4000-8000-000000000001";
 
@@ -59,6 +60,7 @@ describe("embedded app sign-in", () => {
   const exchanges: URLSearchParams[] = [];
 
   const apps = {
+    pictures: memoryPictures(),
     resolve: (hostname: string) =>
       Promise.resolve(
         hostname === new URL(app).hostname ? { revision: 0, groups: allowedGroups } : null,
@@ -145,6 +147,9 @@ describe("embedded app sign-in", () => {
 
       if (url.pathname === "/v1.0/me/transitiveMemberOf")
         return Response.json({ value: memberships.map((id) => ({ id })) });
+
+      if (url.pathname === "/v1.0/me/photos/120x120/$value")
+        return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 3]));
 
       return new Response(null, { status: 404 });
     });
@@ -233,6 +238,10 @@ describe("embedded app sign-in", () => {
     expect(forwarded["x-auth-request-user"]).toBe(userId);
     expect(forwarded["x-auth-request-email"]).toBe("user@example.test");
     expect(forwarded["x-auth-request-groups"]).toBe("00000000-0000-4000-8000-0000000000aa");
+    // The host token's Graph access also copies the person's photo.
+    expect(forwarded["x-auth-request-picture"]).toMatch(
+      new RegExp(`^/oauth2/pictures/${userId}\\?v=[0-9a-f]{16}$`),
+    );
     expect(forwarded["cookie"]).toBeUndefined();
   });
 

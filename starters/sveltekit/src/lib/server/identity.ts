@@ -6,6 +6,8 @@ const accessContext = z.strictObject({
   name: z.string(),
   email: z.string().nullable(),
   groups: z.array(z.string()),
+  // The path of the person's picture on this app's address, when their sign-in has one.
+  picture: z.string().startsWith("/oauth2/pictures/").nullable(),
 });
 
 export type AppUser = z.infer<typeof accessContext>;
@@ -19,6 +21,7 @@ export const userFromHeaders = (headers: Headers) => {
     id: headers.get("x-auth-request-user"),
     name: headers.get("x-auth-request-preferred-username") ?? "",
     email: headers.get("x-auth-request-email"),
+    picture: headers.get("x-auth-request-picture"),
     groups: (headers.get("x-auth-request-groups") ?? "")
       .split(",")
       .flatMap((group) => (group.trim() ? [group.trim()] : [])),

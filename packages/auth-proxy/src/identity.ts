@@ -28,6 +28,11 @@ export const proxyIdentity = accessContext.extend({
   id: claim.min(1).refine((value) => value === value.trim()),
   name: claim,
   email: z.email(),
+  // The version of the person's picture copy, when their sign-in reported one.
+  picture: z
+    .string()
+    .regex(/^[0-9a-f]{16}$/)
+    .optional(),
   groups,
 });
 

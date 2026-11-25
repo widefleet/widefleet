@@ -1,4 +1,7 @@
+import type { companyProvider } from "@platform/contracts";
+import type { JWTPayload } from "jose";
 import { z } from "zod";
+import { issuer } from "./identity.ts";
 
 // Provider pictures are small thumbnails. A larger response is not a profile picture.
 export const maxPictureBytes = 100 * 1024;
@@ -184,4 +187,186 @@ export const claimedPicture = (
   return url.success
     ? fetchPictureUrl(new URL(url.data), providerOrigin, accessToken)
     : Promise.resolve(null);
+};
+
+// A copy lives as long as its owner keeps signing in to the organization's apps.
+const pictureLifetime = 30 * 24 * 60 * 60;
+
+// Sign-in and session renewal ask the provider again at most once a day.
+const pictureRecheck = 24 * 60 * 60 * 1000;
+
+// An entry without a picture records only when the provider was last asked.
+const pictureMetadata = z.object({
+  contentType: z.string().nullable(),
+  version: z.string().nullable(),
+  checkedAt: z.number(),
+});
+
+// The parts of a KV namespace the store uses.
+export interface PictureStorage {
+  getWithMetadata(
+    key: string,
+    type: "arrayBuffer",
+  ): Promise<{ value: ArrayBuffer | null; metadata: unknown }>;
+  put(
+    key: string,
+    value: Uint8Array<ArrayBuffer>,
+    options: { expirationTtl: number; metadata: z.infer<typeof pictureMetadata> },
+  ): Promise<void>;
+}
+
+const refreshing = new Map<string, Promise<string | undefined>>();
+
+/** Copies of the pictures that people of one organization's sign-in report. */
+export const pictureStore = (storage: PictureStorage, organizationId: string, issuer: string) => {
+  const key = async (subject: string) => {
+    const digest = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(issuer)),
+    );
+
+    const issuerId = Array.from(digest.slice(0, 8), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+
+    return `${organizationId}/${issuerId}/${subject}`;
+  };
+
+  const entry = async (subject: string) => {
+    const stored = await storage.getWithMetadata(await key(subject), "arrayBuffer");
+    const metadata = pictureMetadata.safeParse(stored.metadata);
+
+    return stored.value && metadata.success
+      ? { bytes: new Uint8Array(stored.value), ...metadata.data }
+      : null;
+  };
+
+  const write = async (subject: string, picture: Picture | null, version: string | null) =>
+    storage.put(await key(subject), picture?.bytes ?? new Uint8Array(), {
+      expirationTtl: pictureLifetime,
+      metadata: { contentType: picture?.contentType ?? null, version, checkedAt: Date.now() },
+    });
+
+  return {
+    read: async (subject: string) => {
+      const stored = await entry(subject);
+
+      return stored?.version && stored.contentType
+        ? { bytes: stored.bytes, contentType: stored.contentType, version: stored.version }
+        : null;
+    },
+    /**
+     * The version of the subject's copy, after asking the provider when it is due. Every
+     * answer, including no picture or a failure, waits a day before the provider is asked again.
+     */
+    refresh: async (subject: string, fetchPicture: () => Promise<PictureResult>) => {
+      const id = await key(subject);
+      const running = refreshing.get(id);
+
+      if (running) return running;
+
+      const refreshed = (async () => {
+        const current = await entry(subject);
+        const kept = current?.version ?? undefined;
+
+        if (current && Date.now() - current.checkedAt < pictureRecheck) return kept;
+        const picture = await fetchPicture();
+
+        // A failed read keeps the current copy.
+        const [bytes, version] =
+          picture === null
+            ? [
+                current?.version && current.contentType
+                  ? { bytes: current.bytes, contentType: current.contentType }
+                  : null,
+                current?.version ?? null,
+              ]
+            : picture === "none"
+              ? [null, null]
+              : [picture, await pictureVersion(picture)];
+
+        try {
+          await write(subject, bytes, version);
+        } catch {
+          // Another isolate may write the same key at the same moment. The stored entry
+          // still answers until the next check.
+          return kept;
+        }
+
+        return version ?? undefined;
+      })();
+
+      // Parallel renewals of one session in this isolate share the provider request.
+      refreshing.set(id, refreshed);
+
+      try {
+        return await refreshed;
+      } finally {
+        refreshing.delete(id);
+      }
+    },
+  };
+};
+
+export type PictureStore = ReturnType<typeof pictureStore>;
+
+// A generic OIDC provider's user info endpoint, from the discovery document sign-in uses;
+// `null` when discovery fails, `undefined` when the provider has none.
+const discoveredUserInfo = async (issuerUrl: string) => {
+  try {
+    const response = await fetch(`${issuerUrl}/.well-known/openid-configuration`, {
+      headers: { accept: "application/json" },
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (!response.ok) {
+      await response.body?.cancel();
+
+      return null;
+    }
+
+    const discovered = z
+      .object({ userinfo_endpoint: z.url().optional() })
+      .safeParse(await response.json());
+
+    return discovered.success ? discovered.data.userinfo_endpoint : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The picture a company sign-in reports. Entra has no picture URL; Graph returns the photo.
+ * Other providers name one in the ID token or, like Google for Workspace accounts, only in
+ * their user info.
+ */
+export const providerPicture = async (
+  provider: z.infer<typeof companyProvider>,
+  claims: JWTPayload,
+  accessToken: string | undefined,
+): Promise<PictureResult> => {
+  if (provider.type === "entra") return accessToken ? fetchGraphPicture(accessToken) : null;
+
+  const fromIdToken = pictureClaims.safeParse(claims);
+
+  const userInfo =
+    fromIdToken.success && fromIdToken.data.picture === undefined && accessToken
+      ? provider.type === "google"
+        ? googleUserInfo
+        : await discoveredUserInfo(issuer(provider))
+      : undefined;
+
+  // A failed lookup keeps the copy; only a provider without user info falls back to the ID
+  // token, which then names no picture.
+  return claimedPicture(
+    userInfo === null
+      ? null
+      : userInfo && accessToken
+        ? await fetchUserInfoClaims(userInfo, accessToken)
+        : fromIdToken.success
+          ? fromIdToken.data
+          : null,
+    new URL(issuer(provider)).origin,
+    accessToken,
+  );
 };

@@ -12,6 +12,7 @@ import {
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { editableSettings } from "./settings-input.ts";
 import { EventEmitter, once } from "node:events";
+import { memoryPictures } from "./memory-pictures.fixture.ts";
 
 const cookies = (response: Response) =>
   response.headers
@@ -111,6 +112,7 @@ it.each([false, true])(
       const appUrl = "https://ledger.apps.localhost/";
 
       const proxy = createAuthProxy(configuration, {
+        pictures: memoryPictures(),
         resolve: async (hostname) =>
           hostname === "ledger.apps.localhost" ? { revision: 1, groups: ["accounting"] } : null,
         fetch: async () => new Response("Company app"),

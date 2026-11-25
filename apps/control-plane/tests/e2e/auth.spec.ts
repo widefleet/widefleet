@@ -51,6 +51,7 @@ import { installationOrganizationId } from "../../src/lib/organization.ts";
 import { storedAppSecrets } from "../../src/lib/server/app-secrets.ts";
 import { parseJsonc } from "@platform/contracts/jsonc";
 import { bundleResult } from "@platform/contracts/builds";
+import { memoryPictures } from "../memory-pictures.fixture.ts";
 
 // A remote function's redirect arrives as a result whose serialized data names the location.
 // A query names its page's organization. SvelteKit sends a query argument as URL-safe Base64 of
@@ -706,6 +707,7 @@ test("completes app OAuth through the built server after signing in", async ({ p
   const appUrl = "https://notes.apps.localhost/";
 
   const proxy = createAuthProxy(configuration, {
+    pictures: memoryPictures(),
     resolve: async (hostname) =>
       hostname === "notes.apps.localhost" ? { revision: 0, groups: [] } : null,
     fetch: async () => new Response("Signed in to the app"),

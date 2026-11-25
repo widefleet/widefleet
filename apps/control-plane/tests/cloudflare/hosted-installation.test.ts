@@ -34,7 +34,7 @@ const installation = hostedInstallation.parse({
   storageLocation: "weur",
 });
 
-const ids = { account: "0".repeat(32), auth: "1".repeat(32) };
+const ids = { account: "0".repeat(32), auth: "1".repeat(32), pictures: "2".repeat(32) };
 
 const configuration = {
   accountId: ids.account,
@@ -114,10 +114,13 @@ describe("Hosted resource provisioning", () => {
     }
   });
 
-  it("shares the existing configuration namespace between runtime and control plane", async () => {
+  it("shares the configuration namespace and gives app sign-in its picture namespace", async () => {
     const configs = await hostedConfigurations(installation, ids);
-    expect(configs.controlPlane.kv_namespaces).toEqual(configs.runtime.kv_namespaces);
     expect(configs.controlPlane.kv_namespaces).toEqual([{ binding: "AUTH_CONFIG", id: ids.auth }]);
+    expect(configs.runtime.kv_namespaces).toEqual([
+      { binding: "AUTH_CONFIG", id: ids.auth },
+      { binding: "USER_PICTURES", id: ids.pictures },
+    ]);
   });
   it("defaults to email and preserves explicit sign-in delivery in the deployed Worker", async () => {
     expect(
@@ -162,10 +165,17 @@ describe("Hosted resource provisioning", () => {
           ? Response.json({ success: true, result: { name: "fixture-artifacts-weur" } })
           : new Response(null, { status: 404 });
 
+      // Later pages are empty, which ends the SDK's pagination.
       if (path.endsWith("/storage/kv/namespaces"))
         return Response.json({
           success: true,
-          result: created.has("kv") ? [{ id: ids.auth, title: "fixture-auth" }] : [],
+          result:
+            new URL(request.url).searchParams.get("page") === "1"
+              ? [
+                  { id: ids.auth, title: "fixture-auth" },
+                  { id: ids.pictures, title: "fixture-user-pictures" },
+                ].filter((namespace) => created.has(namespace.title))
+              : [],
         });
 
       throw new Error(`Unexpected request: ${path}`);
@@ -173,16 +183,18 @@ describe("Hosted resource provisioning", () => {
 
     const wrangler = async (args: string[]) => {
       writes.push(args);
-      created.add(args[0] ?? "");
+      created.add(args[0] === "kv" ? (args[3] ?? "") : (args[0] ?? ""));
     };
 
     expect(await provisionHostedResources(installation, cloudflare, wrangler)).toEqual({
       auth: ids.auth,
+      pictures: ids.pictures,
     });
-    expect(writes.map((args) => args.slice(0, 3))).toEqual([
-      ["r2", "bucket", "create"],
-      ["kv", "namespace", "create"],
-      ["hyperdrive", "update", installation.hyperdriveId],
+    expect(writes.map((args) => args.slice(0, 4))).toEqual([
+      ["r2", "bucket", "create", "fixture-artifacts-weur"],
+      ["kv", "namespace", "create", "fixture-auth"],
+      ["kv", "namespace", "create", "fixture-user-pictures"],
+      ["hyperdrive", "update", installation.hyperdriveId, "--caching-disabled"],
     ]);
     expect(writes[0]).toEqual([
       "r2",
@@ -192,13 +204,13 @@ describe("Hosted resource provisioning", () => {
       "--location",
       "weur",
     ]);
-    expect(writes[2]).toEqual([
+    expect(writes[3]).toEqual([
       "hyperdrive",
       "update",
       installation.hyperdriveId,
       "--caching-disabled",
     ]);
-    const settingsUpdate = writes[2];
+    const settingsUpdate = writes[3];
     writes.length = 0;
     await provisionHostedResources(installation, cloudflare, wrangler);
     expect(writes).toEqual([settingsUpdate]);
@@ -273,7 +285,10 @@ describe("Hosted resource provisioning", () => {
         if (pathname.endsWith("/storage/kv/namespaces"))
           return Response.json({
             success: true,
-            result: [{ id: ids.auth, title: "fixture-auth" }],
+            result: [
+              { id: ids.auth, title: "fixture-auth" },
+              { id: ids.pictures, title: "fixture-user-pictures" },
+            ],
           });
 
         throw new Error(`Unexpected request: ${pathname}`);
