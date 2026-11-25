@@ -137,7 +137,17 @@ export const createReporting = (
         if (!current.effective[category] || current.revision !== revision)
           return new Response("{}", { status: 200 });
 
-        return transport(url, { ...options, redirect: "error" });
+        // Workers accept only "follow" and "manual" redirects. A redirect is never followed;
+        // the SDK handles the error like any failed delivery.
+        const response = await transport(url, { ...options, redirect: "manual" });
+
+        if (response.status >= 300 && response.status < 400) {
+          // Cleanup never delays or replaces the failed delivery.
+          void response.body?.cancel().catch(() => undefined);
+          throw new Error("Installation reporting was redirected");
+        }
+
+        return response;
       },
     });
 

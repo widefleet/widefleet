@@ -241,6 +241,52 @@ describe("company directory", () => {
     if (failure.isErr()) expect(failure.error.message).not.toContain("sensitive upstream");
   });
 
+  it("reports a failed request and drops a rejected token however its body cleanup ends", async () => {
+    // A body whose cancellation rejects, or never settles.
+    const body = (cancel: () => Promise<void>) => new ReadableStream({ cancel });
+    let tokenCleanup: () => Promise<void> = () => Promise.reject(new Error("cancel failed"));
+    let tokens = 0;
+    let searches = 0;
+
+    const directory = createDirectory(
+      async () => configuration.IDENTITY,
+      async (input, init) => {
+        const request = new Request(input, init);
+
+        if (request.url.endsWith("/token")) {
+          tokens++;
+
+          return tokens === 1
+            ? new Response(body(tokenCleanup), { status: 400 })
+            : Response.json({ access_token: `token-${tokens}`, expires_in: 3600 });
+        }
+
+        searches++;
+
+        return searches === 1
+          ? new Response(
+              body(() => new Promise(() => {})),
+              { status: 401 },
+            )
+          : Response.json({ value: [] });
+      },
+    );
+
+    const search = () => directory.search(creator, { query: "Einkauf", limit: 10 });
+
+    // The authentication error stays, even when cleanup fails.
+    const unauthenticated = await search();
+    expect(unauthenticated.isErr() && unauthenticated.error.message).toContain(
+      "could not authenticate",
+    );
+
+    // Graph rejects the token; cleanup never ends, and the next search gets a new token.
+    tokenCleanup = () => Promise.resolve();
+    expect((await search()).isErr()).toBe(true);
+    expect((await search()).isOk()).toBe(true);
+    expect(tokens).toBe(3);
+  });
+
   it("preserves existing Entra account keys while isolating generic OIDC issuers", () => {
     expect(companyAccountProvider(configuration.IDENTITY)).toBe("microsoft");
 

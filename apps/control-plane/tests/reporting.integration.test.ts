@@ -38,6 +38,8 @@ describe("Installation reporting with synthetic PostHog transport", () => {
     const request = new Request(input, init);
 
     expect(request.url).toBe("https://eu.i.posthog.com/batch/");
+    // Workers accept only "follow" and "manual"; reporting never follows a redirect.
+    expect(request.redirect).toBe("manual");
     requests.push(batch.parse(await request.json()));
 
     return Response.json({ status: 1 });
@@ -232,5 +234,38 @@ describe("Installation reporting with synthetic PostHog transport", () => {
     });
     await expect(failing.flush()).resolves.toBeUndefined();
     await failing.close();
+  });
+
+  it("treats a redirect as a failed delivery without following it", async () => {
+    const requested: string[] = [];
+    let cancelled = 0;
+
+    const redirected = createReporting(
+      { ...environment.configuration, PLATFORM_USAGE_REPORTING: true },
+      environment.database.db,
+      async (input, init) => {
+        requested.push(new Request(input, init).url);
+
+        return new Response(new ReadableStream({ cancel: () => void cancelled++ }), {
+          status: 302,
+          headers: { location: "https://target.example.test/batch/" },
+        });
+      },
+    );
+
+    redirected.operation({
+      operation: "runtime_update",
+      outcome: "succeeded",
+      elapsed_ms: 55,
+      attempt: 1,
+    });
+    await expect(redirected.flush()).resolves.toBeUndefined();
+    await redirected.close();
+    // Closing sends the undelivered batch again, still never to the redirect's target.
+    expect(requested).toEqual([
+      "https://eu.i.posthog.com/batch/",
+      "https://eu.i.posthog.com/batch/",
+    ]);
+    expect(cancelled).toBe(2);
   });
 });
