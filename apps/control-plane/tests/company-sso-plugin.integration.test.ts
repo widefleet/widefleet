@@ -576,14 +576,18 @@ describe("Better Auth SSO provider integration", () => {
       delete next.sso.oidcConfig.clientSecret;
 
       // Saving other changes without the secret keeps working.
-      next.sso.oidcConfig.mapping.name = "name";
+      expect(before.oidcConfig).not.toMatchObject({ mapping: { name: "given_name" } });
+      next.sso.oidcConfig.mapping.name = "given_name";
       await environment.settings.update(
         principal,
         { ...next, acknowledgeRestart: false },
         false,
         credential,
       );
-      expect((await stored()).oidcConfig.clientSecret).toBe(before.oidcConfig.clientSecret);
+      expect((await stored()).oidcConfig).toMatchObject({
+        clientSecret: before.oidcConfig.clientSecret,
+        mapping: { name: "given_name" },
+      });
 
       // Better Auth refuses issuer changes once accounts are linked. Before that, for
       // example while a connection is being set up, the saved secret must not follow.
