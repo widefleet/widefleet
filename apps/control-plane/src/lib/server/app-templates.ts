@@ -3,7 +3,6 @@ import {
   appDescriptionLength,
   appTemplate,
   appTemplateCatalog,
-  appTemplateSummary,
   templateId,
 } from "@platform/contracts";
 import { Result } from "better-result";
@@ -43,8 +42,10 @@ const templateDocument = (text: string, id: string) => {
   if (!parts) throw new Error(`Missing frontmatter in ${id}/template.md`);
 
   return {
-    metadata: appTemplateSummary
-      .omit({ id: true, installedAppId: true })
+    metadata: appTemplate
+      .pick({ name: true, description: true, secretHelp: true })
+      // Templates on main can gain fields before an installation upgrades.
+      .strip()
       .parse(parse(parts[1] ?? "")),
     markdown: parts[2] ?? "",
   };

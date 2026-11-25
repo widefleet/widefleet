@@ -3244,6 +3244,25 @@ test.describe(`app templates`, () => {
       await page.emulateMedia({ colorScheme: "light" });
     };
 
+    await page.goto("/widefleet/catalog/templates/secret-help");
+    const described = page.getByLabel("CLIENT_ID", { exact: true });
+    await expect(described).toHaveAccessibleDescription("Copy the ID from OAuth clients.");
+    await expect(page.getByLabel("CLIENT_SECRET", { exact: true })).toHaveAccessibleDescription("");
+    const helpLink = page.getByRole("link", { name: "OAuth clients" });
+    await described.focus();
+    await page.keyboard.press("Tab");
+    await expect(helpLink).toBeFocused();
+    await expect(helpLink).toHaveAttribute("href", "https://example.test/clients");
+    await shoot("template-secret-help");
+    await described.fill("fixture-id");
+    await context.route("https://example.test/clients", (route) =>
+      route.fulfill({ body: "OAuth clients" }),
+    );
+    const [provider] = await Promise.all([page.waitForEvent("popup"), helpLink.click()]);
+    await expect(provider).toHaveURL("https://example.test/clients");
+    await provider.close();
+    await expect(described).toHaveValue("fixture-id");
+
     await page.goto("/widefleet/catalog/templates/gmail");
     await expect(
       page.getByRole("heading", { name: "Required secrets", exact: true }),

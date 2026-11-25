@@ -29,6 +29,8 @@ export const appTemplate = appTemplateSummary.extend({
   network: networkPolicy.optional(),
   /** Secrets its wrangler.jsonc requires; an install provides their values. */
   requiredSecrets: z.array(z.string()),
+  /** Markdown help keyed by the secret name in Wrangler. */
+  secretHelp: z.record(z.string(), z.string()).optional(),
 });
 
 export const appTemplateCatalog = z.strictObject({
