@@ -1,5 +1,4 @@
 import { and, asc, eq, gt, isNotNull, sql, type AnyColumn } from "drizzle-orm";
-import { z } from "zod";
 import { storedAppSecrets } from "./app-secrets.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import type { Database } from "./database.ts";
@@ -167,83 +166,6 @@ const ssoConfiguration =
     );
   };
 
-const legacyIdentity = z.looseObject({
-  identity: z.looseObject({
-    management: z.looseObject({ secret: z.looseObject({ ciphertext: z.string() }) }),
-  }),
-});
-
-// Startup converts these pre-plugin documents to SSO providers; one can remain
-// in a database that no release has started on since.
-const legacyIdentitySecrets: Location = async (database, key) => {
-  const rows = await database
-    .select({
-      organizationId: organizationSettings.organizationId,
-      settings: organizationSettings.settings,
-    })
-    .from(organizationSettings)
-    .where(
-      and(
-        sql`${organizationSettings.settings} ? 'identity'`,
-        after(organizationSettings.organizationId, key),
-      ),
-    )
-    .orderBy(asc(organizationSettings.organizationId))
-    .limit(pageSize);
-
-  return page(
-    rows,
-    (row) => row.organizationId,
-    rows.flatMap((row) => {
-      const parsed = legacyIdentity.safeParse(row.settings);
-
-      if (!parsed.success) return [];
-      const settings = parsed.data;
-      const ciphertext = settings.identity.management.secret.ciphertext;
-
-      return [
-        {
-          key: row.organizationId,
-          slots: [
-            {
-              slot: "identity",
-              context: { kind: "legacy-sso-client-secret", organizationId: row.organizationId },
-              ciphertext,
-            },
-          ],
-          replace: async (next) =>
-            replaced(
-              await database
-                .update(organizationSettings)
-                .set({
-                  settings: {
-                    ...settings,
-                    identity: {
-                      ...settings.identity,
-                      management: {
-                        ...settings.identity.management,
-                        secret: {
-                          ...settings.identity.management.secret,
-                          ciphertext: next.get("identity") ?? ciphertext,
-                        },
-                      },
-                    },
-                  },
-                })
-                .where(
-                  and(
-                    eq(organizationSettings.organizationId, row.organizationId),
-                    unchanged(organizationSettings.settings, JSON.stringify(row.settings)),
-                  ),
-                )
-                .returning({ organizationId: organizationSettings.organizationId }),
-            ),
-        },
-      ];
-    }),
-  );
-};
-
 /** Every place that stores ciphertexts of the secret encryption service. */
 const locations: Location[] = [
   appSecretValues,
@@ -251,7 +173,6 @@ const locations: Location[] = [
   organizationSecret("appClientSecret", "app-login-client-secret"),
   ssoConfiguration("oidcConfig"),
   ssoConfiguration("samlConfig"),
-  legacyIdentitySecrets,
 ];
 
 const eachRow = async function* (database: Database) {

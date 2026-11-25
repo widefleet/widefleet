@@ -7,17 +7,12 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { installationSettings, settingsView, domainVerification } from "@platform/contracts";
-import { account, ssoProvider } from "../../src/lib/server/auth-schema.ts";
+import { ssoProvider } from "../../src/lib/server/auth-schema.ts";
 import { installation, organizationSettings } from "../../src/lib/server/schema.ts";
 import { installationId } from "../../src/lib/server/installation-store.ts";
-import { migrateSsoSettings } from "../../src/lib/server/sso-migration.ts";
-import { createRecoveryLink } from "../../src/lib/server/recovery.ts";
 import { createTestEnvironment } from "../environment.ts";
 
-test("verifies company DNS, preserves matching accounts and enforces company SSO", async ({
-  page,
-  request,
-}) => {
+test("verifies company DNS and enforces company SSO", async ({ page, request }) => {
   const environment = await createTestEnvironment();
   await environment.database.db
     .update(installation)
@@ -218,147 +213,6 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     expect(settingsView.parse(await settingsResponse.json()).activation.state).toBe("failed");
     await expect(page.getByRole("heading", { name: "Connection" })).toBeVisible();
     environment.authControl.available(true);
-
-    // Model the state preserved by migration 0023: saved encrypted credentials,
-    // an existing owner, no company-domain proof and no native SSO provider yet.
-    const [beforeUpgrade] = await environment.database.db
-      .select()
-      .from(organizationSettings)
-      .where(eq(organizationSettings.organizationId, installationId));
-
-    const preserved = installationSettings.parse(beforeUpgrade?.settings);
-
-    const managementSecret = {
-      ciphertext: await environment.encryption.encrypt(
-        { kind: "legacy-sso-client-secret", organizationId: installationId },
-        environment.environment.ENTRA_CLIENT_SECRET,
-      ),
-    };
-
-    await environment.database.db
-      .update(organizationSettings)
-      .set({
-        ssoRequired: false,
-        settings: {
-          externallyManaged: preserved.externallyManaged,
-          identity: {
-            provider: environment.configuration.IDENTITY.provider,
-            domain: null,
-            management: {
-              clientId: environment.environment.ENTRA_CLIENT_ID,
-              secret: managementSecret,
-            },
-            directory: null,
-          },
-        },
-      })
-      .where(eq(organizationSettings.organizationId, installationId));
-    await environment.database.db.delete(ssoProvider);
-    await migrateSsoSettings(environment.database.db, environment.encryption);
-    await page.context().clearCookies();
-    await page.goto("/sign-in");
-    await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toHaveCount(0);
-    await expect(page.getByLabel("Password", { exact: true })).toHaveCount(0);
-
-    const link = await createRecoveryLink(
-      environment.auth,
-      environment.database.db,
-      environment.configuration,
-      "sso@example.test",
-    );
-
-    await expect(page.getByLabel("Organization slug")).toHaveCount(0);
-    await page.goto(link);
-    await expect(page).toHaveURL(/\/settings\/company-sign-in$/);
-    await expect(page.getByRole("heading", { name: "Company sign-in", exact: true })).toBeVisible();
-    // The migrated connection has no email domain yet; add it to the domain list.
-    await expect(page.getByLabel("Company email domain")).toHaveCount(0);
-    await page.goto("/widefleet/settings/company-sign-in");
-    await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: "Add domain", exact: true }).click();
-    const addition = page.getByRole("dialog");
-    await addition.getByLabel("Domain", { exact: true }).fill("example.test");
-    await addition.getByRole("button", { name: "Add domain", exact: true }).click();
-    await expect(addition.getByRole("heading", { name: "Verify example.test" })).toBeVisible();
-
-    const upgradeRecordResponse = await page.request.post("/api/v1/settings/domain-verification", {
-      headers: { origin: environment.configuration.PLATFORM_URL },
-    });
-
-    expect(upgradeRecordResponse.ok()).toBe(true);
-    const upgradeRecord = domainVerification.parse(await upgradeRecordResponse.json());
-    await writeFile(dnsFile, JSON.stringify({ [upgradeRecord.name]: upgradeRecord.value }));
-
-    // Released CLIs verify every pending domain with a request without a body.
-    const verified = await page.request.post("/api/v1/settings/verify-domain", {
-      headers: { origin: environment.configuration.PLATFORM_URL },
-    });
-
-    expect(await verified.json()).toEqual({ success: true });
-    await page.reload();
-    await expect(
-      page.getByRole("list", { name: "Email domains" }).getByText("Verified", { exact: true }),
-    ).toBeVisible();
-    await page.goto("/widefleet/settings/company-sign-in");
-    await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: "Test company sign-in" }).click();
-    await page.getByRole("button", { name: /sso@example.test/ }).click();
-    await expect(
-      page.getByText("Company sign-in and administrator access verified successfully."),
-    ).toBeVisible();
-    expect((await page.request.get("/api/v1/settings")).status()).toBe(200);
-
-    const [afterUpgrade] = await environment.database.db
-      .select()
-      .from(installation)
-      .where(eq(installation.id, installationId));
-
-    expect(
-      settingsView.parse(await (await page.request.get("/api/v1/settings")).json()).ssoRequired,
-    ).toBe(false);
-
-    const restored = await environment.auth.api.getSession({
-      headers: new Headers({
-        cookie: (await page.context().cookies())
-          .map(({ name, value }) => `${name}=${value}`)
-          .join("; "),
-      }),
-    });
-
-    expect(restored?.user.id).toBe(afterUpgrade?.ownerId);
-
-    const replacementLink = await createRecoveryLink(
-      environment.auth,
-      environment.database.db,
-      environment.configuration,
-      "sso@example.test",
-    );
-
-    await page.goto(replacementLink);
-    await expect(page).toHaveURL(/\/settings\/company-sign-in$/);
-    await page.goto("/widefleet/settings/company-sign-in");
-    await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: "Edit configuration" }).click();
-    await page
-      .getByLabel("Issuer URL")
-      .fill(
-        `${environment.environment.ENTRA_AUTHORITY}/${environment.replacementClient.tenantId}/v2.0`,
-      );
-    await page
-      .getByLabel("Client ID", { exact: true })
-      .fill(environment.replacementClient.clientId);
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
-    const [provider] = await environment.database.db.select().from(ssoProvider);
-    expect(provider?.issuer).toContain(environment.environment.ENTRA_TENANT_ID);
-
-    const linkedAccounts = await environment.database.db
-      .select()
-      .from(account)
-      .where(eq(account.providerId, "microsoft"));
-
-    expect(linkedAccounts).toHaveLength(1);
-    expect(linkedAccounts[0]?.userId).toBe(afterUpgrade?.ownerId);
   } catch (cause) {
     await test.info().attach("setup-server-log", { body: logs, contentType: "text/plain" });
     throw cause;

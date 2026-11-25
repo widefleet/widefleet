@@ -323,6 +323,13 @@
       "when": 1795910400000,
       "tag": "0045_user_picture",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795996800000,
+      "tag": "0046_require_converted_sso",
+      "breakpoints": true
     }
   ]
 }

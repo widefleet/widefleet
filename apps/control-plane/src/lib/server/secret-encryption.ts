@@ -14,8 +14,6 @@ export type SecretContext =
   | { kind: "directory-client-secret"; organizationId: string }
   /** `organization_settings.app_client_secret`. */
   | { kind: "app-login-client-secret"; organizationId: string }
-  /** The client secret of a pre-plugin `organization_settings.settings.identity`. */
-  | { kind: "legacy-sso-client-secret"; organizationId: string }
   /**
    * `sso_provider.oidc_config` or `sso_provider.saml_config`. Better Auth's
    * field transforms receive only the value, so this context cannot name the

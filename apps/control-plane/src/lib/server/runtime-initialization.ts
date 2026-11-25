@@ -7,7 +7,6 @@ import { bootstrapConfiguration } from "@platform/contracts";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { join, resolve } from "node:path";
 import { initializeBootstrap } from "./bootstrap.ts";
-import { migrateSsoSettings } from "./sso-migration.ts";
 import { createAuthentication, registerCli } from "./auth.ts";
 import { readConfiguration, type Configuration } from "./config.ts";
 import { createDatabase } from "./database.ts";
@@ -46,7 +45,6 @@ export const prepareInstallation = async (
     await migrate(database.db, { migrationsFolder });
     await initializeOrganization(database.db);
     await initializeInstallation(database.db);
-    await migrateSsoSettings(database.db, keys.encryption);
 
     const execution = await database.db.transaction(installationRuntime);
     const path = join(configuration.PLATFORM_RUNTIME_DIRECTORY, "installation.json");
