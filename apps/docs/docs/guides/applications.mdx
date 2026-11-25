@@ -1,7 +1,7 @@
 ---
 title: Applications
 description: Give colleagues access to a deployed app and publish it in the app catalog.
-lastModified: 2026-11-15
+lastModified: 2026-11-25
 ---
 
 Use this guide to share a deployed app with your team. You need app-owner or
@@ -76,6 +76,22 @@ Original apps with an active deployment can be listed. Colleagues can
 find them in **App catalog** and follow their launch URLs, subject to the app's
 SSO and group rules. Management permissions remain separate. Use
 `widefleet catalog unpublish APP_UUID` to withdraw the listing without deleting the app.
+
+## Install it as an app
+
+Colleagues can install the app on their computer or phone. It then opens in its
+own window under its Widefleet name and icon:
+
+- **Chrome and Edge:** choose **Install** in the address bar.
+- **Safari on Mac:** choose **File → Add to Dock**.
+- **iPhone and iPad:** in Safari, choose **Share → Add to Home Screen**.
+- **Android:** in Chrome, choose **Install app** from the menu.
+
+The icon comes from the app's static files. Ship `/favicon.svg` for computers and
+a square `/apple-touch-icon.png` of at least 512 × 512 pixels for phones. Renaming
+the app changes the installed name with the next deployment. To set the name,
+colors or start page yourself, ship your own `/manifest.webmanifest` static file
+or link a manifest from your pages; Widefleet then uses yours.
 
 ## Verify access
 
