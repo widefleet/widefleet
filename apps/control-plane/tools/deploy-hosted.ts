@@ -145,10 +145,10 @@ validateCloudflareRuntime(release);
 
 const builderBuild = new URL("../../../packages/app-builder/dist/", import.meta.url);
 
-for (const file of ["builder.js", "esbuild.wasm", "service-docs.wasm"])
+for (const file of ["builder.js", "esbuild.wasm", "service-docs.wasm", "app-icons.wasm"])
   if (!existsSync(new URL(file, builderBuild)))
     throw new Error(
-      "Build the app builder first: cargo build --profile wasm -p platform-service-docs-wasm --target wasm32-wasip1, then pnpm --filter @platform/app-builder build",
+      "Build the app builder first: cargo build --profile wasm -p platform-service-docs-wasm -p platform-app-icons-wasm --target wasm32-wasip1, then pnpm --filter @platform/app-builder build",
     );
 
 const controlDirectory = fileURLToPath(new URL("../", import.meta.url));

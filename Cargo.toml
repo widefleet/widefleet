@@ -5,6 +5,8 @@ members = [
   "crates/platform-agent",
   "crates/platform-service-docs",
   "crates/platform-service-docs-wasm",
+  "crates/platform-app-icons",
+  "crates/platform-app-icons-wasm",
 ]
 resolver = "3"
 
@@ -17,6 +19,10 @@ rust-version = "1.99"
 [workspace.dependencies]
 platform-core = { path = "crates/platform-core" }
 platform-service-docs = { path = "crates/platform-service-docs" }
+platform-app-icons = { path = "crates/platform-app-icons" }
+# Rasterizes app icons. Without text, fonts or embedded raster images, nothing
+# outside the SVG document is read.
+resvg = { version = "=0.50.0", default-features = false }
 tokio = { version = "=1.53.2", features = [
   "macros",
   "rt-multi-thread",
@@ -68,7 +74,7 @@ expect_used = "deny"
 [profile.release]
 debug = "line-tables-only"
 
-# The service documentation WebAssembly module, sized as tsrs ships its own.
+# The WebAssembly modules, sized as tsrs ships its own.
 [profile.wasm]
 inherits = "release"
 opt-level = "s"

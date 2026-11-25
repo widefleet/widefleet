@@ -3,7 +3,9 @@
 // `widefleet deploy` would upload them.
 import { z } from "zod";
 import {
+  appIconSource,
   bindingName,
+  generatedAppIcons,
   queueConsumer,
   requiredSecrets,
   serviceDocumentation,
@@ -74,5 +76,25 @@ export const documentResult = z.strictObject({
   /** Declarations that could not be installed, which leaves their types unknown. */
   warnings: z.array(z.string()),
 });
+
+/** `/favicon.svg`, base64-encoded, to render as PNG app icons. */
+export const iconsRequest = z.strictObject({
+  svg: z.base64().max(Math.ceil(appIconSource.maxBytes / 3) * 4),
+});
+
+export const iconsResult = z.strictObject({
+  icons: z.array(
+    z.strictObject({
+      path: z.literal(generatedAppIcons.map((icon) => icon.path)),
+      png: z.base64(),
+    }),
+  ),
+});
+
+export const encodeBase64 = (bytes: Uint8Array) =>
+  btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
+
+export const decodeBase64 = (text: string) =>
+  Uint8Array.from(atob(text), (character) => character.charCodeAt(0));
 
 export const buildFailure = z.strictObject({ message: z.string() });

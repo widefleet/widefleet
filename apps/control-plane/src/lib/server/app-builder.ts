@@ -5,6 +5,8 @@ import {
   buildFailure,
   bundleResult,
   documentResult,
+  encodeBase64,
+  iconsResult,
   type documentRequest,
 } from "@platform/contracts/builds";
 import { Result } from "better-result";
@@ -67,13 +69,15 @@ const call = <T>(endpoint: Endpoint, body: string, schema: z.ZodType<T>, timeout
   });
 
 export const createAppBuilder = (
-  endpoints: { bundle: Endpoint; document: Endpoint },
+  endpoints: { bundle: Endpoint; document: Endpoint; icons: Endpoint },
   timeout = defaultTimeout,
 ) => ({
   bundle: (files: Record<string, string>) =>
     call(endpoints.bundle, JSON.stringify({ files }), bundleResult, timeout),
   document: (request: z.input<typeof documentRequest>) =>
     call(endpoints.document, JSON.stringify(request), documentResult, timeout),
+  icons: (svg: Uint8Array) =>
+    call(endpoints.icons, JSON.stringify({ svg: encodeBase64(svg) }), iconsResult, timeout),
 });
 
 export type AppBuilder = ReturnType<typeof createAppBuilder>;
@@ -85,7 +89,11 @@ export const httpAppBuilder = (origin: string) => {
   const endpoint = (path: string) => (body: string, signal: AbortSignal) =>
     fetch(new URL(path, origin), { method: "POST", headers, body, signal });
 
-  return createAppBuilder({ bundle: endpoint("/bundle"), document: endpoint("/document") });
+  return createAppBuilder({
+    bundle: endpoint("/bundle"),
+    document: endpoint("/document"),
+    icons: endpoint("/icons"),
+  });
 };
 
 /** Separate builder Workers per phase, so each phase runs in its own isolate. */
@@ -95,4 +103,6 @@ export const bindingAppBuilder = (bundler: Fetcher, documenter: Fetcher) =>
       bundler.fetch("https://builder.internal/bundle", { method: "POST", headers, body }),
     document: (body) =>
       documenter.fetch("https://builder.internal/document", { method: "POST", headers, body }),
+    icons: (body) =>
+      documenter.fetch("https://builder.internal/icons", { method: "POST", headers, body }),
   });

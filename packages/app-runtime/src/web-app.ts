@@ -1,3 +1,4 @@
+import { appIconSource, appPngIcons } from "@platform/contracts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
 export const manifestPath = "/manifest.webmanifest";
@@ -6,9 +7,8 @@ export const manifestPath = "/manifest.webmanifest";
 const manifestLink = `<link rel="manifest" href="${manifestPath}" crossorigin="use-credentials">`;
 
 const icons = [
-  ["/favicon.svg", "image/svg+xml"],
-  ["/apple-touch-icon.png", "image/png"],
-  ["/favicon.png", "image/png"],
+  [appIconSource.path, "image/svg+xml"],
+  ...appPngIcons.map((path) => [path, "image/png"] as const),
 ] as const;
 
 export const linksManifest = (app: PublishedApp, contentType: string | null) =>

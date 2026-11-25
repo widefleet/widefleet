@@ -3,9 +3,9 @@ WORKDIR /source
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 RUN cargo build --locked --release --package platform-agent --bin platform-runtime
-# The app builder's service documentation module.
+# The app builder's service documentation and app icon modules.
 RUN rustup target add wasm32-wasip1 \
-    && cargo build --locked --profile wasm --package platform-service-docs-wasm --target wasm32-wasip1
+    && cargo build --locked --profile wasm --package platform-service-docs-wasm --package platform-app-icons-wasm --target wasm32-wasip1
 
 FROM node:26.8.2-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae AS build
 WORKDIR /source
@@ -14,7 +14,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
 RUN pnpm fetch
 COPY . .
-COPY --from=native /source/target/wasm32-wasip1/wasm/platform_service_docs_wasm.wasm target/wasm32-wasip1/wasm/
+COPY --from=native /source/target/wasm32-wasip1/wasm/platform_service_docs_wasm.wasm /source/target/wasm32-wasip1/wasm/platform_app_icons_wasm.wasm target/wasm32-wasip1/wasm/
 RUN pnpm install --offline --frozen-lockfile \
     && pnpm --filter @platform/app-runtime build \
     && pnpm --filter @platform/app-builder build

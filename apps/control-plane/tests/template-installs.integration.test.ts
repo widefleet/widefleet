@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import * as contract from "@platform/contracts";
-import { bundleResult, documentRequest } from "@platform/contracts/builds";
+import { generatedAppIcons } from "@platform/contracts";
+import {
+  bundleResult,
+  decodeBase64,
+  documentRequest,
+  encodeBase64,
+  iconsRequest,
+} from "@platform/contracts/builds";
 import { Result } from "better-result";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -61,7 +68,21 @@ const googleClient = {
   GOOGLE_CLIENT_SECRET: "synthetic-client-secret",
 };
 
-const builderRequests: { phase: "bundle" | "document"; body: string }[] = [];
+const builderRequests: { phase: "bundle" | "document" | "icons"; body: string }[] = [];
+
+// A PNG whose IHDR names its size, as the builder renders app icons.
+const png = (size: number) => {
+  const bytes = new Uint8Array(24);
+  new DataView(bytes.buffer).setUint32(16, size);
+  new DataView(bytes.buffer).setUint32(20, size);
+
+  return encodeBase64(bytes);
+};
+
+const iconsResponse = () =>
+  Response.json({
+    icons: generatedAppIcons.map(({ path, size }) => ({ path, png: png(size) })),
+  });
 
 let bundleResponse = () =>
   Response.json(
@@ -84,6 +105,9 @@ let bundleResponse = () =>
     }),
   );
 
+// Tests that replace the build leave this one for builders of their own.
+const successfulBundle = bundleResponse;
+
 // A builder that records its requests and returns a fixed build.
 const builder = createAppBuilder({
   bundle: async (body) => {
@@ -95,6 +119,11 @@ const builder = createAppBuilder({
     builderRequests.push({ phase: "document", body });
 
     return Response.json({ documentation, warnings: [] });
+  },
+  icons: async (body) => {
+    builderRequests.push({ phase: "icons", body });
+
+    return iconsResponse();
   },
 });
 
@@ -253,6 +282,11 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
     entrypoints: ["default"],
   });
 
+  // A template that ships only favicon.svg gets PNG icons for home screens.
+  const icons = builderRequests.find(({ phase }) => phase === "icons");
+
+  expect(iconsRequest.parse(JSON.parse(icons?.body ?? "{}")).svg).not.toBe("");
+
   // The published artifact carries the build's modules and documentation.
   const artifact = await environment.database.db.query.artifacts.findFirst({
     where: (artifacts, { eq }) => eq(artifacts.id, result.deployment.artifactId),
@@ -280,7 +314,18 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   const icon = { hash: hashAsset("/favicon.svg", favicon), size: favicon.byteLength };
 
-  expect(contract.assetManifest.parse(artifact?.manifest)).toEqual({ "/favicon.svg": icon });
+  const rendered = Object.fromEntries(
+    generatedAppIcons.map(({ path, size }) => {
+      const bytes = decodeBase64(png(size));
+
+      return [path, { hash: hashAsset(path, bytes), size: bytes.byteLength }];
+    }),
+  );
+
+  expect(contract.assetManifest.parse(artifact?.manifest)).toEqual({
+    "/favicon.svg": icon,
+    ...rendered,
+  });
   const stored = await runtime.storage.get(`apps/${result.app.id}/assets/${icon.hash}`);
   expect(stored.isOk() && new Uint8Array(stored.value)).toEqual(favicon);
   expect(metadata.bindings).toEqual([{ type: "d1", name: "DB", database_name: "accounts" }]);
@@ -551,6 +596,7 @@ it("does not install over an app deployed while the template builds", async () =
       return bundleResponse();
     },
     document: async () => Response.json({ documentation, warnings: [] }),
+    icons: async () => iconsResponse(),
   });
 
   const runtime = await runtimeWith(racing);
@@ -856,6 +902,7 @@ it("ends a build that exceeds the deadline", async () => {
     {
       bundle: () => new Promise<Response>(() => {}),
       document: () => new Promise<Response>(() => {}),
+      icons: () => new Promise<Response>(() => {}),
     },
     50,
   );
@@ -864,6 +911,27 @@ it("ends a build that exceeds the deadline", async () => {
   const response = await install(runtime, "onedrive", { name: "file-reader" });
 
   expect(response.status).toBe(503);
+});
+
+it("installs a template without generated icons when its SVG cannot be rendered", async () => {
+  const unrenderable = createAppBuilder({
+    bundle: async () => successfulBundle(),
+    document: async () => Response.json({ documentation, warnings: [] }),
+    icons: async () =>
+      Response.json({ message: "/favicon.svg is not a valid SVG" }, { status: 422 }),
+  });
+
+  const runtime = await runtimeWith(unrenderable);
+  const response = await install(runtime, "onedrive", { name: "plain-icons" });
+
+  expect(response.status).toBe(200);
+  const result = contract.templateInstall.parse(await response.json());
+
+  const artifact = await environment.database.db.query.artifacts.findFirst({
+    where: (artifacts, { eq }) => eq(artifacts.id, result.deployment.artifactId),
+  });
+
+  expect(Object.keys(contract.assetManifest.parse(artifact?.manifest))).toEqual(["/favicon.svg"]);
 });
 
 it("keeps templates on agent setup when no builder is configured", async () => {

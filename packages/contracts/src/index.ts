@@ -67,6 +67,30 @@ export const appNameLength = 120;
 /** The name people see. An app's slug and address do not follow it. */
 export const appDisplayName = z.string().trim().min(1).max(appNameLength);
 
+/** PNG icons an app can ship; installed apps and home screens use them. */
+export const appPngIcons = [
+  "/apple-touch-icon.png",
+  "/favicon.png",
+  "/icon-192.png",
+  "/icon-512.png",
+] as const;
+
+/**
+ * Icons rendered from `/favicon.svg` (at most 256 KiB) for an app that ships no PNG
+ * icon, as crates/platform-app-icons renders them. iOS requests the first at the
+ * root and shows transparency as black, so it is opaque.
+ */
+export const generatedAppIcons = [
+  { path: "/apple-touch-icon.png", size: 180, opaque: true },
+  { path: "/icon-192.png", size: 192, opaque: false },
+  { path: "/icon-512.png", size: 512, opaque: false },
+] as const;
+
+export const appIconSource = { path: "/favicon.svg", maxBytes: 256 * 1024 } as const;
+
+export const wantsGeneratedIcons = (has: (path: string) => boolean) =>
+  has(appIconSource.path) && !appPngIcons.some(has);
+
 /** One sentence that tells people what an app is for. An empty text removes it. */
 export const appDescriptionLength = 200;
 

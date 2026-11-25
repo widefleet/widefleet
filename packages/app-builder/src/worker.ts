@@ -1,13 +1,19 @@
 // The app builder Worker. POST /bundle builds an app project; POST /document
-// documents the bundle's service entrypoints. Hosted installations deploy it
+// documents the bundle's service entrypoints; POST /icons renders PNG app icons. Hosted installations deploy it
 // twice, so each phase runs in its own isolate; self-hosted installations run
 // one instance. Only the control plane reaches the builder: through service
 // bindings, or on a private network without other workloads.
-import { buildFailure, bundleRequest, documentRequest } from "@platform/contracts/builds";
+import {
+  buildFailure,
+  bundleRequest,
+  documentRequest,
+  iconsRequest,
+} from "@platform/contracts/builds";
 import { z } from "zod";
 import { bundle } from "./bundle.ts";
 import { BuildError } from "./configuration.ts";
 import { document } from "./document.ts";
+import { renderIcons } from "./icons.ts";
 
 interface Environment {
   /** npm registry for dependencies, such as a company mirror. */
@@ -21,7 +27,7 @@ export default {
   async fetch(request, environment) {
     const { pathname } = new URL(request.url);
 
-    if (request.method !== "POST" || (pathname !== "/bundle" && pathname !== "/document"))
+    if (request.method !== "POST" || !["/bundle", "/document", "/icons"].includes(pathname))
       return failure(404, "Not found");
 
     const registry = environment.NPM_REGISTRY ?? "https://registry.npmjs.org";
@@ -37,6 +43,8 @@ export default {
     try {
       if (pathname === "/bundle")
         return Response.json(await bundle(bundleRequest.parse(body).files, registry));
+
+      if (pathname === "/icons") return Response.json(renderIcons(iconsRequest.parse(body).svg));
 
       return Response.json(await document(documentRequest.parse(body), registry));
     } catch (error) {

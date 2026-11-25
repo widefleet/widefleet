@@ -24,6 +24,7 @@ tempfile.workspace = true
 system-resolver.workspace = true
 
 platform-service-docs.workspace = true
+platform-app-icons.workspace = true
 tsrs_vfs.workspace = true
 
 [target.'cfg(unix)'.dependencies]

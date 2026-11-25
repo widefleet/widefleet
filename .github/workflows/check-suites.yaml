@@ -177,8 +177,8 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
           cargo build --workspace
-          cargo clippy -p platform-service-docs-wasm --target wasm32-wasip1 -- -D warnings
-          cargo build --profile wasm -p platform-service-docs-wasm --target wasm32-wasip1
+          cargo clippy -p platform-service-docs-wasm -p platform-app-icons-wasm --target wasm32-wasip1 -- -D warnings
+          cargo build --profile wasm -p platform-service-docs-wasm -p platform-app-icons-wasm --target wasm32-wasip1
           RUN_WASM_TESTS=1 pnpm exec vitest run packages/service-docs
           pnpm --filter @platform/app-builder build
           pnpm --filter @platform/app-builder exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/app-builder"

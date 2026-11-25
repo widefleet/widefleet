@@ -5,10 +5,12 @@
 // whose app never received a deployment. The values of the secrets the
 // template requires are saved with that first deployment.
 import * as contract from "@platform/contracts";
+import { decodeBase64 } from "@platform/contracts/builds";
 import { Result } from "better-result";
 import { z } from "zod";
 import type { AppBuilder } from "./app-builder.ts";
 import { templateDescription, templateSources } from "./app-templates.ts";
+import { hashAsset } from "./asset-hash.ts";
 import { declaredSecrets, templateProject } from "./template-project.ts";
 import type { createAppSecrets } from "./app-secrets.ts";
 import type { createAppService } from "./apps.ts";
@@ -165,6 +167,28 @@ export const createTemplateInstalls = (
           entrypoints: built.metadata.entrypoints,
         }),
       );
+
+      // Home screens need PNG icons; a template that ships only its SVG icon gets
+      // them rendered, as the CLI does for its deployments. They are optional:
+      // an SVG the builder cannot render leaves the template's assets as they are.
+      const icon = assets.manifest[contract.appIconSource.path];
+      const svg = icon && assets.bytes.get(icon.hash);
+
+      if (
+        svg &&
+        svg.byteLength <= contract.appIconSource.maxBytes &&
+        contract.wantsGeneratedIcons((path) => Object.hasOwn(assets.manifest, path))
+      ) {
+        const rendered = await builder.icons(svg);
+
+        for (const { path, png } of rendered.isOk() ? rendered.value.icons : []) {
+          const bytes = decodeBase64(png);
+          const hash = hashAsset(path, bytes);
+
+          assets.bytes.set(hash, bytes);
+          assets.manifest[path] = { hash, size: bytes.byteLength };
+        }
+      }
 
       // The app exists only once its build succeeded, so a failed build leaves
       // the name free. An app without deployments is an earlier install that
