@@ -75,11 +75,14 @@ const createCompanyDirectory = (
         },
       );
 
-      if (!response.ok)
+      if (!response.ok) {
+        await response.body?.cancel();
         throw new DirectoryUnavailable({
           message:
             "The directory connection could not authenticate. Ask an administrator to check its credentials and consent.",
         });
+      }
+
       const result = tokenResponse.parse(await response.json());
       token = { value: result.access_token, expiresAt: Date.now() + result.expires_in * 1000 };
 
@@ -116,6 +119,8 @@ const createCompanyDirectory = (
         });
 
         if (!response.ok) {
+          await response.body?.cancel();
+
           if (response.status === 401) token = undefined;
           throw new DirectoryUnavailable({
             message:
