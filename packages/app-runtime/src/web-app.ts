@@ -11,13 +11,15 @@ const icons = [
   ["/favicon.png", "image/png"],
 ] as const;
 
+export const linksManifest = (app: PublishedApp, contentType: string | null) =>
+  Boolean(app.displayName) && contentType?.startsWith("text/html") === true;
+
 // Browsers offer to install a page that links a manifest. A link of the app's own takes precedence.
 export const linkManifest = (app: PublishedApp, response: Response) => {
   if (
-    !app.displayName ||
     response.status !== 200 ||
     !response.body ||
-    !response.headers.get("content-type")?.startsWith("text/html")
+    !linksManifest(app, response.headers.get("content-type"))
   )
     return response;
   let linked = false;

@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { readApp } from "./catalog.ts";
+import { linksManifest } from "./web-app.ts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
 const contentTypes = new Map([
@@ -202,12 +203,16 @@ export const serveAsset = async (
 
   if (!entry) return new Response(null, { status: 404 });
 
+  const contentType =
+    contentTypes.get(path.split(".").at(-1)?.toLowerCase() ?? "") ?? "application/octet-stream";
+
   const headers = new Headers({
-    "content-type":
-      contentTypes.get(path.split(".").at(-1)?.toLowerCase() ?? "") ?? "application/octet-stream",
+    "content-type": contentType,
     "content-length": String(entry.size),
     "accept-ranges": "bytes",
-    etag: `"${entry.hash}"`,
+    // Pages served with a manifest link differ from the uploaded file, so browsers
+    // must not reuse a copy cached without it.
+    etag: linksManifest(app, contentType) ? `"${entry.hash}-manifest"` : `"${entry.hash}"`,
     "cache-control": "public, max-age=0, must-revalidate",
     "x-content-type-options": "nosniff",
   });

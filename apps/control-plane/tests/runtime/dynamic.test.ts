@@ -859,9 +859,25 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       const page = await fetch(`${origin}/page`);
 
       expect(page.headers.has("content-length")).toBe(false);
+      expect(page.headers.get("etag")).toBe(`"${"7".repeat(32)}-manifest"`);
       expect(await page.text()).toBe(
         '<!doctype html><html><head><title>Page</title><link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials"></head><body></body></html>',
       );
+
+      // A copy cached before pages linked the manifest is replaced, not revalidated.
+      const cached = await fetch(`${origin}/page`, {
+        headers: { "if-none-match": `"${"7".repeat(32)}"` },
+      });
+
+      expect(cached.status).toBe(200);
+      expect(await cached.text()).toContain('rel="manifest"');
+      expect(
+        (
+          await fetch(`${origin}/page`, {
+            headers: { "if-none-match": `"${"7".repeat(32)}-manifest"` },
+          })
+        ).status,
+      ).toBe(304);
       expect(await (await fetch(`${origin}/own`)).text()).toBe(
         '<html><head><link rel="manifest" href="/own.webmanifest"></head></html>',
       );
