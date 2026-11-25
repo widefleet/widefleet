@@ -82,7 +82,8 @@ SSO and group rules. Management permissions remain separate. Use
 Colleagues can install the app on their computer or phone. It then opens in its
 own window under its Widefleet name and icon:
 
-- **Chrome and Edge:** choose **Install** in the address bar.
+- **Chrome and Edge:** choose **Open app** on Home and then **Install**, or
+  **Install** in the app's address bar. Installed apps show **Launch** on Home.
 - **Safari on Mac:** choose **File → Add to Dock**.
 - **iPhone and iPad:** in Safari, choose **Share → Add to Home Screen**.
 - **Android:** in Chrome, choose **Install app** from the menu.
@@ -93,6 +94,9 @@ phones need from it when you deploy. To use your own instead, ship
 next deployment. To set the name, colors or start page yourself, ship your own
 `/manifest.webmanifest` static file or link a manifest from your pages;
 Widefleet then uses yours.
+
+Browsers read an app's name and icon without signing in, so anyone who knows
+the app's address can see them. Everything else stays behind sign-in.
 
 ## Verify access
 
