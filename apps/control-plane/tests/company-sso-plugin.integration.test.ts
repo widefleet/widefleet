@@ -579,6 +579,9 @@ describe("Better Auth SSO provider integration", () => {
 
       let idToken = await signedIdToken({ picture });
 
+      // Sign-in copies the picture; the user row names the copy, never the provider URL.
+      const copied = /^\/users\/[^/]+\/picture\?v=[0-9a-f]{16}$/;
+
       const visited = new Set<string>();
 
       const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -606,6 +609,11 @@ describe("Better Auth SSO provider integration", () => {
             });
           }
 
+          case picture:
+          case `${picture}/new`:
+            return new Response(
+              new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, outgoing.url.length]),
+            );
           case metadata.jwks_uri:
             return Response.json({ keys: [publicKey] });
 
@@ -751,6 +759,7 @@ describe("Better Auth SSO provider integration", () => {
             metadata.token_endpoint,
             metadata.jwks_uri,
             metadata.userinfo_endpoint,
+            picture,
             ...(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
           ]),
         );
@@ -762,10 +771,20 @@ describe("Better Auth SSO provider integration", () => {
         );
 
         expect(authenticated.status).toBe(200);
-        expect(await authenticated.json()).toMatchObject({
-          user: { email: profile.email, name: profile.name, image: picture },
+
+        const first = z
+          .object({
+            user: z.object({ email: z.string(), name: z.string(), image: z.string() }),
+            session: z.object({ identityOrganizationId: z.string() }),
+          })
+          .parse(await authenticated.json());
+
+        expect(first).toMatchObject({
+          user: { email: profile.email, name: profile.name },
           session: { identityOrganizationId: "widefleet" },
         });
+        expect(first.user.image).toMatch(copied);
+        const firstImage = first.user.image;
 
         // A returning sign-in replaces only the picture.
         idToken = await signedIdToken({ picture: `${picture}/new`, name: "Renamed at provider" });
@@ -783,17 +802,22 @@ describe("Better Auth SSO provider integration", () => {
         );
 
         expect(returned.status).toBe(302);
-        expect(
-          await (
-            await environment.auth.handler(
-              new Request(`${origin}/api/auth/get-session`, {
-                headers: { cookie: cookie(returned) },
-              }),
-            )
-          ).json(),
-        ).toMatchObject({
-          user: { email: profile.email, name: profile.name, image: `${picture}/new` },
-        });
+
+        const second = z
+          .object({ user: z.object({ email: z.string(), name: z.string(), image: z.string() }) })
+          .parse(
+            await (
+              await environment.auth.handler(
+                new Request(`${origin}/api/auth/get-session`, {
+                  headers: { cookie: cookie(returned) },
+                }),
+              )
+            ).json(),
+          ).user;
+
+        expect(second).toMatchObject({ email: profile.email, name: profile.name });
+        expect(second.image).toMatch(copied);
+        expect(second.image).not.toBe(firstImage);
 
         request.mockClear();
         visited.clear();

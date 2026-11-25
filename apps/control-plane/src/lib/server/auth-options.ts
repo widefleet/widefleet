@@ -16,7 +16,7 @@ import type { SignIn } from "./sso-policy.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
 import { organizationMemberLimit } from "./organization.ts";
 import { personalSocialAccounts, socialProviders, validateSocialUser } from "./social-sign-in.ts";
-import { signInPicture } from "./sign-in-picture.ts";
+import { signInPicture, type SavePicture } from "./sign-in-picture.ts";
 
 export const cliClientId = "platform-cli";
 
@@ -59,6 +59,7 @@ export const authenticationOptions = (
     ipAddressHeaders,
     publicSignup = false,
     validateSchema,
+    savePicture,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
@@ -74,6 +75,8 @@ export const authenticationOptions = (
     publicSignup?: boolean;
     /** Better Auth checks the schema the first time each instance is used. */
     validateSchema?: boolean;
+    /** Keeps the picture each provider sign-in reports. */
+    savePicture?: SavePicture;
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
@@ -301,7 +304,7 @@ export const authenticationOptions = (
     rateLimit: rateLimit ?? { storage: "memory" },
     plugins: [
       personalSocialAccounts,
-      signInPicture,
+      ...(savePicture ? [signInPicture(savePicture)] : []),
       lastLoginMethod({
         cookieName: "platform.last_used_login_method",
         beforeStoreCookie: (context) => Boolean(context.context.newSession),

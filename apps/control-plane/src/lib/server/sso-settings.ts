@@ -131,7 +131,20 @@ export const saveSsoProvider = async (
 
   // Widefleet verifies each domain itself, so Better Auth's provider domain is
   // changed only through the domain list.
-  const { domain, ...connection } = input;
+  const { domain, ...requested } = input;
+
+  // Microsoft has no picture URL. Sign-in copies the photo from Graph with `User.Read`,
+  // which the company sign-in registration already grants for app membership checks.
+  const connection =
+    requested.appIdentityType === "entra"
+      ? {
+          ...requested,
+          oidcConfig: {
+            ...requested.oidcConfig,
+            scopes: [...new Set([...requested.oidcConfig.scopes, "User.Read"])],
+          },
+        }
+      : requested;
 
   if (existing)
     await credential.auth.api.updateSSOProvider({

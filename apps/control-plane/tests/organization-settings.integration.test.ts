@@ -122,6 +122,13 @@ describe("Organization login settings", () => {
     expect((await settings.resolve(second.organizationId)).identity?.management.clientSecret).toBe(
       "settings-second-management-secret",
     );
+    // Entra sign-in copies each person's photo from Microsoft Graph.
+    expect((await settings.resolve(second.organizationId)).identity?.scopes).toEqual([
+      "openid",
+      "profile",
+      "email",
+      "User.Read",
+    ]);
     await settings.update(
       second.principal,
       { ...settingsInput.parse({ sso: null }), acknowledgeRestart: false },

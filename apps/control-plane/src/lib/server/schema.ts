@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -121,6 +122,24 @@ export const apps = pgTable(
       .where(sql`${table.removedAt} IS NULL`),
   ],
 );
+
+const bytes = customType<{ data: Uint8Array<ArrayBuffer>; driverData: Uint8Array }>({
+  dataType: () => "bytea",
+  fromDriver: (value) => new Uint8Array(value),
+  toDriver: (value) => Buffer.from(value),
+});
+
+// Each user's copy of their sign-in provider's picture. It stays out of the `user` row,
+// which Better Auth reads on every session lookup.
+export const userPictures = pgTable("user_picture", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  contentType: text("content_type").notNull(),
+  bytes: bytes("bytes").notNull(),
+  version: text("version").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
 
 export const appGrants = pgTable(
   "app_grant",

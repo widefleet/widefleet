@@ -316,6 +316,13 @@
       "when": 1795824000000,
       "tag": "0044_require_jwe_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1795910400000,
+      "tag": "0045_user_picture",
+      "breakpoints": true
     }
   ]
 }
