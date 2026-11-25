@@ -98,6 +98,13 @@ const builder = createServer((request, response) => {
       return;
     }
 
+    // Rendered app icons are optional; this builder renders none.
+    if (request.url === "/icons") {
+      response.end(JSON.stringify({ icons: [] }));
+
+      return;
+    }
+
     const { files } = z.object({ files: z.record(z.string(), z.string()) }).parse(JSON.parse(body));
 
     const wrangler = z
