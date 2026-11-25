@@ -7,8 +7,8 @@
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import AppIcon from "#shadcn/components/AppIcon.svelte";
+  import OpenApp from "#shadcn/components/OpenApp.svelte";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
-  import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import Search from "@lucide/svelte/icons/search";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
@@ -132,17 +132,7 @@
                     >{/if}
                 </span>
               {/if}
-              <Button
-                href={app.url}
-                target="_blank"
-                rel="noreferrer"
-                variant="ghost"
-                size="sm"
-                class="relative z-10 ml-auto"
-                >Open app<ArrowUpRight /><span class="sr-only">
-                  {app.displayName} in a new tab</span
-                ></Button
-              >
+              <div class="relative z-10 ml-auto"><OpenApp {app} /></div>
             </div>
           </div>
         </li>

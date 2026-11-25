@@ -862,7 +862,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       expect(page.headers.has("content-length")).toBe(false);
       expect(page.headers.get("etag")).toBe(`"${"7".repeat(32)}-manifest"`);
       expect(await page.text()).toBe(
-        '<!doctype html><html><head><title>Page</title><link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials"></head><body></body></html>',
+        '<!doctype html><html><head><title>Page</title><link rel="manifest" href="/manifest.webmanifest"></head><body></body></html>',
       );
 
       // A copy cached before pages linked the manifest is replaced, not revalidated.
@@ -894,6 +894,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       expect(manifest.headers.has("content-security-policy")).toBe(true);
       expect(await manifest.json()).toEqual({
         name: "Fixture",
+        id: "/",
         start_url: "/",
         scope: "/",
         display: "standalone",
@@ -925,6 +926,8 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       // Rewrite rules that send every path to a page leave the platform manifest reachable.
       const manifest = await fetch(`${origin}/fixture/spa/manifest.webmanifest`);
       expect(manifest.headers.get("content-type")).toBe("application/manifest+json");
+      // Icons are the uploaded files, never a rewritten page.
+      expect(await (await fetch(`${origin}/fixture/spa/favicon.svg`)).text()).toContain("<svg");
 
       const direct = await fetch(`${origin}/static/index.html`, { redirect: "manual" });
       expect(direct.status).toBe(307);

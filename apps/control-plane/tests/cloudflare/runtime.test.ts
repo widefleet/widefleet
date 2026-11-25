@@ -493,14 +493,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
 
   it("links pages to the web app manifest named after the app", async () => {
     expect(await (await fetchApp("/page")).text()).toBe(
-      '<html><head><title>Page</title><link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials"></head></html>',
+      '<html><head><title>Page</title><link rel="manifest" href="/manifest.webmanifest"></head></html>',
     );
 
-    const manifest = await fetchApp("/manifest.webmanifest");
+    // Install prompts on other sites fetch the manifest without cookies.
+    const manifest = await worker.fetch(`https://${hostname}/manifest.webmanifest`);
+
+    expect((await worker.fetch(`https://${hostname}/page`)).status).toBe(401);
 
     expect(manifest.headers.get("content-type")).toBe("application/manifest+json");
     expect(await manifest.json()).toEqual({
       name: "Fixture",
+      id: "/",
       start_url: "/",
       scope: "/",
       display: "standalone",
