@@ -1,5 +1,6 @@
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
+import { createSecretMaintenance } from "../src/lib/server/secret-reencryption.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { execFile } from "node:child_process";
@@ -168,6 +169,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         workflows: createWorkflowService(database),
         migrations: createMigrationService(database, storage),
         connections: createConnectionService(environment.database.db, storage),
+        secretEncryption: createSecretMaintenance(environment.database.db, environment.encryption),
         appSecrets: createAppSecrets(environment.database.db, environment.encryption),
         releases: createRuntimeReleaseService(database, storage),
         uploads: createUploadService(database, storage, configuration),

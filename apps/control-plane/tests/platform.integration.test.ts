@@ -1,5 +1,6 @@
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
+import { createSecretMaintenance } from "../src/lib/server/secret-reencryption.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { createHash } from "node:crypto";
@@ -111,6 +112,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
       connections: createConnectionService(environment.database.db, storage),
+      secretEncryption: createSecretMaintenance(environment.database.db, environment.encryption),
       appSecrets: createAppSecrets(environment.database.db, environment.encryption),
       agents: createAgentService(environment.database.db),
       jobs: createJobService(environment.database.db, storage, environment.encryption, (event) => {
@@ -253,6 +255,29 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         )
       ).status,
     ).toBe(400);
+  });
+
+  it("lets installation administrators read and run re-encryption of stored secrets", async () => {
+    expect((await json("/encryption", "GET", undefined, outsiderHeaders)).status).toBe(403);
+    expect((await json("/encryption/reencrypt", "POST", undefined, outsiderHeaders)).status).toBe(
+      403,
+    );
+
+    const status = contract.secretEncryptionStatus.parse(
+      await (await json("/encryption", "GET")).json(),
+    );
+
+    expect(status.activeKeyVersion).toBe("test");
+
+    const result = contract.secretReencryption.parse(
+      await (await json("/encryption/reencrypt", "POST")).json(),
+    );
+
+    expect(result.failed).toBe(0);
+    expect(result.status.keyVersions).toEqual([
+      expect.objectContaining({ id: "test", active: true, available: true }),
+      { id: null, values: 0, active: false, available: true },
+    ]);
   });
 
   it("installs and rolls back runtime releases on an empty execution through replaceable executors", async () => {

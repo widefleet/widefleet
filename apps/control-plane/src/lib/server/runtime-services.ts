@@ -5,6 +5,7 @@ import type { SourceBackend } from "./source-backend.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { createConnectionService } from "./connections.ts";
 import { createAppSecrets } from "./app-secrets.ts";
+import { createSecretMaintenance } from "./secret-reencryption.ts";
 import type { SecretEncryption } from "./secret-encryption.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { BetterAuthOptions } from "better-auth";
@@ -206,6 +207,7 @@ export const createRuntime = ({
     migrations: createMigrationService(database.db, storage, execution),
     connections: createConnectionService(database.db, storage, execution),
     appSecrets,
+    secretEncryption: createSecretMaintenance(database.db, encryption),
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads,
     templates: createTemplateInstalls(configuration, apps, uploads, network, appSecrets, builder),

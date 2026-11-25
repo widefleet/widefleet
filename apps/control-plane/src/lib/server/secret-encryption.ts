@@ -109,6 +109,10 @@ export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
 // Legacy ciphertexts are bare hexadecimal and never contain a colon.
 const format = "v1";
 
+/** Returns the ID of the key version that wrote `ciphertext`, or `null` for the legacy key. */
+export const ciphertextKeyVersion = (ciphertext: string) =>
+  ciphertext.includes(":") ? (ciphertext.split(":")[1] ?? "") : null;
+
 const ivSize = 12;
 
 // Ties the derived AES key to this use of the key version.
@@ -166,6 +170,10 @@ export const createSecretEncryption = ({
   };
 
   return {
+    /** The version that encrypts new values, or `null` while they use the legacy key. */
+    activeKeyVersion: keyring?.[0].id ?? null,
+    /** The versions this installation can decrypt, besides the legacy key. */
+    keyVersions: keyring?.map((version) => version.id) ?? [],
     // The context is not yet bound to the ciphertext. Callers already pass it,
     // so binding it in a later format changes only this module.
     encrypt: async (_context: SecretContext, value: string) => {

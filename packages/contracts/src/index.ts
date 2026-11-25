@@ -655,6 +655,32 @@ export const agent = z.strictObject({
 
 export const createAgentInput = z.strictObject({ name: z.string().trim().min(1).max(120) });
 
+/** How many stored secrets one key version encrypted. */
+export const secretKeyVersion = z.strictObject({
+  /** The key version's ID, or `null` for the key that earlier releases used. */
+  id: z.string().nullable(),
+  values: z.number().int().nonnegative(),
+  /** Whether new secrets use this version. */
+  active: z.boolean(),
+  /** Whether the installation holds this key and can decrypt its values. */
+  available: z.boolean(),
+});
+
+export const secretEncryptionStatus = z.strictObject({
+  activeKeyVersion: z.string().nullable(),
+  keyVersions: z.array(secretKeyVersion),
+});
+
+export const secretReencryption = z.strictObject({
+  /** Secrets now encrypted with the active key version. */
+  reencrypted: z.number().int().nonnegative(),
+  /** Secrets left as they were because they changed while being re-encrypted. */
+  changed: z.number().int().nonnegative(),
+  /** Secrets that could not be decrypted, such as values of a missing key version. */
+  failed: z.number().int().nonnegative(),
+  status: secretEncryptionStatus,
+});
+
 export const migrationArtifact = z.strictObject({
   sha256: checksum,
   // JSON escaping can expand SQL to six bytes per source byte.

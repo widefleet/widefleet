@@ -1,5 +1,6 @@
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
+import { createSecretMaintenance } from "../src/lib/server/secret-reencryption.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { createRuntimeReleaseService } from "../src/lib/server/runtime-releases.ts";
@@ -207,6 +208,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         workflows: createWorkflowService(environment.database.db),
         migrations: createMigrationService(environment.database.db, storage),
         connections: createConnectionService(environment.database.db, storage),
+        secretEncryption: createSecretMaintenance(environment.database.db, environment.encryption),
         appSecrets: createAppSecrets(environment.database.db, environment.encryption),
         agents: createAgentService(environment.database.db),
         identity: createIdentityService(environment.auth, environment.database.db, configuration),

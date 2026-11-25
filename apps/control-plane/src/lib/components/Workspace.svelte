@@ -111,13 +111,19 @@
                 label: "Members",
                 current: (current: string) => current.startsWith("/settings/members"),
               },
-              // Deployment agents belong to the installation, so only its administrators see them.
+              // Deployment agents and stored secrets belong to the installation, so only its
+              // administrators see them.
               ...(principal.admin
                 ? [
                     {
                       href: "/settings/agents",
                       label: "Deployment agents",
                       current: (current: string) => current.startsWith("/settings/agents"),
+                    },
+                    {
+                      href: "/settings/encryption",
+                      label: "Encryption keys",
+                      current: (current: string) => current.startsWith("/settings/encryption"),
                     },
                   ]
                 : []),

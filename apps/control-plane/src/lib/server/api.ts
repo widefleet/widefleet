@@ -948,6 +948,18 @@ export const createApi = (runtime: Runtime) => {
           ),
         ),
       ),
+    secretEncryption: read
+      .route({ method: "GET", path: "/encryption" })
+      .output(contract.secretEncryptionStatus)
+      .handler(async ({ context }) =>
+        unwrap(await runtime.secretEncryption.status(context.principal)),
+      ),
+    reencryptSecrets: write
+      .route({ method: "POST", path: "/encryption/reencrypt" })
+      .output(contract.secretReencryption)
+      .handler(async ({ context }) =>
+        unwrap(await runtime.secretEncryption.reencrypt(context.principal)),
+      ),
     listAgents: read
       .route({ method: "GET", path: "/agents" })
       .output(z.array(contract.agent))

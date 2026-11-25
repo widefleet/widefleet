@@ -7,6 +7,7 @@ mod configuration;
 mod connections;
 mod deploy;
 mod discovery;
+mod encryption;
 mod groups;
 mod installation;
 mod logs;
@@ -94,6 +95,8 @@ enum Command {
     Settings(settings::Options),
     /// Update the application runtime independently of the deployment agent.
     Runtime(runtime::Options),
+    /// Show and re-encrypt the installation's stored secrets (installation administrators).
+    Encryption(encryption::Options),
     /// Query browser/server runtime logs, with source maps and optional follow.
     Logs(logs::Options),
     /// Inspect and explicitly apply app D1 database migrations.
@@ -276,6 +279,7 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Secret(options) => services::secrets(&api, &credentials, options).await,
         Command::Connections(options) => connections::run(&api, &credentials, options).await,
         Command::Runtime(options) => runtime::run(&api, &credentials, &token, options).await,
+        Command::Encryption(options) => encryption::run(&api, &token, options).await,
         Command::Settings(options) => settings::run(&api, &token, options).await,
         Command::Groups(options) => groups::run(&api, &token, options).await,
         Command::Members(options) => members::run(&api, &token, options).await,
@@ -457,6 +461,7 @@ async fn main() {
         Command::Groups(_) => "groups",
         Command::Settings(_) => "settings",
         Command::Runtime(_) => "runtime",
+        Command::Encryption(_) => "encryption",
         Command::Logs(_) => "logs",
         Command::Migrations(_) => "migrations",
         Command::Workflows(_) => "workflows",

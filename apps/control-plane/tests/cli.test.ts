@@ -449,6 +449,24 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      if (request.url === "/api/v1/encryption" || request.url === "/api/v1/encryption/reencrypt") {
+        const status = {
+          activeKeyVersion: "current",
+          keyVersions: [
+            { id: "current", values: 3, active: true, available: true },
+            { id: null, values: request.method === "POST" ? 0 : 3, active: false, available: true },
+          ],
+        };
+
+        response.end(
+          JSON.stringify(
+            request.method === "POST" ? { reencrypted: 3, changed: 0, failed: 0, status } : status,
+          ),
+        );
+
+        return;
+      }
+
       if (request.url === "/api/v1/settings/plan") {
         response.end(
           JSON.stringify({ restartRequired: true, message: "App sign-in will restart." }),
@@ -1731,6 +1749,23 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         state: "succeeded",
       });
       expect(requests).toContain("POST /api/v1/runtime/rollback");
+    });
+
+    it("shows key version counts and re-encrypts stored secrets", async () => {
+      const encryptionCli = (...args: string[]) =>
+        execute(join(state, "installation", executableName), ["encryption", ...args], {
+          env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+        });
+
+      expect(JSON.parse((await encryptionCli("status")).stdout)).toMatchObject({
+        activeKeyVersion: "current",
+        keyVersions: [{ id: "current" }, { id: null, values: 3 }],
+      });
+      expect(JSON.parse((await encryptionCli("reencrypt")).stdout)).toMatchObject({
+        reencrypted: 3,
+        status: { keyVersions: [{ id: "current" }, { id: null, values: 0 }] },
+      });
+      expect(requests).toContain("POST /api/v1/encryption/reencrypt");
     });
 
     it("reports runtime activation failure", async () => {

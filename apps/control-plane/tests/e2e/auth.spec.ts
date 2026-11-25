@@ -49,6 +49,8 @@ import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-c
 import { prepareOrganizationInvitation } from "../../src/lib/server/members.ts";
 import { installationOrganizationId } from "../../src/lib/organization.ts";
 import { storedAppSecrets } from "../../src/lib/server/app-secrets.ts";
+import { createSecretEncryption } from "../../src/lib/server/secret-encryption.ts";
+import { seedDeployment } from "../cloudflare-deployment.fixture.ts";
 import { parseJsonc } from "@platform/contracts/jsonc";
 import { bundleResult } from "@platform/contracts/builds";
 
@@ -1087,6 +1089,76 @@ test("shows deployment agents only to administrators", async ({ browser }) => {
     await expect(page).toHaveURL(/\/widefleet\/settings\/agents$/);
     await expect(denied).toBeVisible();
     await expect(page.getByRole("heading", { name: "Deployment agents" })).toHaveCount(0);
+    expect((await page.goto("/widefleet/settings/encryption"))?.status()).toBe(403);
+    await expect(denied).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test("lets installation administrators re-encrypt stored secrets", async ({ browser }) => {
+  // A value that an earlier release stored with the legacy key.
+  const entry = await seedDeployment(environment.database.db, { bindings: [] });
+
+  const legacy = createSecretEncryption({
+    legacyKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+  });
+
+  await environment.database.db
+    .update(apps)
+    .set({
+      secrets: {
+        TOKEN: await legacy.encrypt(
+          {
+            kind: "app-secret",
+            organizationId: entry.organizationId,
+            appId: entry.appId,
+            name: "TOKEN",
+          },
+          "synthetic-token",
+        ),
+      },
+    })
+    .where(eq(apps.id, entry.appId));
+
+  const context = await browser.newContext({
+    baseURL: environment.configuration.PLATFORM_URL,
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  const login = await environment.users.login({ userId: environment.owner.id });
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax" as const,
+      secure: false,
+    })),
+  );
+
+  try {
+    const page = await context.newPage();
+    await page.goto("/widefleet/settings/company-sign-in");
+    await page.getByRole("link", { name: "Encryption keys" }).click();
+    await expect(page.getByRole("heading", { name: "Encryption keys" })).toBeVisible();
+
+    const versions = page.getByRole("list", { name: "Key versions" });
+    await expect(versions.getByRole("listitem").first()).toContainText("Encrypts new secrets");
+    await expect(
+      versions.getByRole("listitem").filter({ hasText: "Key of earlier releases" }),
+    ).toContainText("1 secret");
+    await page.getByRole("button", { name: "Re-encrypt secrets" }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "Re-encrypted 1 secret with the active key version.",
+    );
+    await expect(page.getByText("All stored secrets use the active key version.")).toBeVisible();
+
+    const [saved] = await environment.database.db
+      .select()
+      .from(apps)
+      .where(eq(apps.id, entry.appId));
+
+    expect(storedAppSecrets.parse(saved?.secrets)["TOKEN"]).toMatch(/^v1:test:/);
   } finally {
     await context.close();
   }
