@@ -74,6 +74,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     const requests: string[] = [];
     const reencryptBodies: z.infer<ReturnType<typeof z.json>>[] = [];
+    const reencryptTokens: (string | undefined)[] = [];
+    let refreshedTokens = 0;
     const organizations: (string | string[] | undefined)[] = [];
     let requiredOrganization: string | undefined;
     const catalogUpdates: z.infer<typeof contract.catalogListing>[] = [];
@@ -465,7 +467,24 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      // Each refresh issues a token that is already close to expiry, so the next
+      // request has to refresh again.
+      if (request.method === "POST" && request.url === "/api/auth/oauth2/token") {
+        refreshedTokens += 1;
+        response.end(
+          JSON.stringify({
+            access_token: `synthetic-refreshed-token-${refreshedTokens}`,
+            refresh_token: "synthetic-refresh-token",
+            expires_in: 30,
+            token_type: "Bearer",
+          }),
+        );
+
+        return;
+      }
+
       if (request.url === "/api/v1/encryption/reencrypt") {
+        reencryptTokens.push(request.headers.authorization);
         // Two bounded batches: the first returns a cursor, the second finishes.
         let body = "";
         request.setEncoding("utf8").on("data", (chunk: string) => {
@@ -1805,6 +1824,49 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       });
       expect(reencryptBodies).toEqual([{}, { cursor: "synthetic-cursor" }]);
     });
+
+    it.skipIf(process.platform === "win32")(
+      "refreshes a saved login before each re-encryption batch",
+      async () => {
+        const sessionFile = join(state, "encryption-session.json");
+        await writeFile(
+          sessionFile,
+          JSON.stringify({
+            origin,
+            expires_at: Math.floor(Date.now() / 1000) + 30,
+            tokens: {
+              access_token: "synthetic-expiring-token",
+              refresh_token: "synthetic-refresh-token",
+              expires_in: 30,
+              token_type: "Bearer",
+            },
+          }),
+          { mode: 0o600 },
+        );
+        reencryptTokens.length = 0;
+
+        const result = await executeCli(
+          join(state, "installation", executableName),
+          ["encryption", "reencrypt", "--session-file", sessionFile],
+          {
+            timeout: 15_000,
+            env: {
+              ...process.env,
+              PLATFORM_URL: origin,
+              PLATFORM_ACCESS_TOKEN: undefined,
+              DBUS_SESSION_BUS_ADDRESS: `unix:path=${join(state, "missing-bus")}`,
+            },
+          },
+        );
+
+        expect(JSON.parse(result.stdout)).toMatchObject({ reencrypted: 3 });
+        expect(reencryptTokens).toHaveLength(2);
+        expect(new Set(reencryptTokens).size).toBe(2);
+
+        for (const token of reencryptTokens)
+          expect(token).toMatch(/^Bearer synthetic-refreshed-token-\d+$/);
+      },
+    );
 
     it("reports a finished re-encryption to a token without read access", async () => {
       // The last batch carries the final status, so no GET follows the writes.

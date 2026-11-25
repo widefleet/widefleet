@@ -279,7 +279,7 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Secret(options) => services::secrets(&api, &credentials, options).await,
         Command::Connections(options) => connections::run(&api, &credentials, options).await,
         Command::Runtime(options) => runtime::run(&api, &credentials, &token, options).await,
-        Command::Encryption(options) => encryption::run(&api, &token, options).await,
+        Command::Encryption(options) => encryption::run(&api, &credentials, options).await,
         Command::Settings(options) => settings::run(&api, &token, options).await,
         Command::Groups(options) => groups::run(&api, &token, options).await,
         Command::Members(options) => members::run(&api, &token, options).await,

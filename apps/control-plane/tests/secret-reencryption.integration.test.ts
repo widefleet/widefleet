@@ -394,6 +394,7 @@ describe("re-encryption", () => {
       registered: crypto.randomUUID(),
       finished: crypto.randomUUID(),
       unknown: crypto.randomUUID(),
+      unreachable: crypto.randomUUID(),
       network: crypto.randomUUID(),
       deployed: crypto.randomUUID(),
     };
@@ -406,6 +407,7 @@ describe("re-encryption", () => {
       [command(pendingApp.appId, ids.registered), JSON.stringify(await secrets(pendingApp.appId))],
       [command(pendingApp.appId, ids.finished), JSON.stringify(await secrets(pendingApp.appId))],
       [command(pendingApp.appId, ids.unknown), JSON.stringify(await secrets(pendingApp.appId))],
+      [command(pendingApp.appId, ids.unreachable), JSON.stringify(await secrets(pendingApp.appId))],
       [command(pendingApp.appId, ids.network), JSON.stringify({ kind: "network" })],
       [command(deployedApp.appId, ids.deployed), JSON.stringify(await secrets(deployedApp.appId))],
     ]);
@@ -446,11 +448,13 @@ describe("re-encryption", () => {
       [ids.deployed, "running"],
     ]);
 
+    // A missing instance is definitive; a failed lookup is not and keeps the command.
     const workflows: DeploymentWorkflows = {
       get: async (id) => {
+        if (id === ids.unreachable) throw new Error("Network connection lost");
         const status = statuses.get(id);
 
-        if (status === undefined) throw new Error("Workflow instance not found");
+        if (status === undefined) throw new Error("instance.not_found");
 
         return { status: async () => ({ status }) };
       },
@@ -470,11 +474,12 @@ describe("re-encryption", () => {
       })
     ).unwrap();
 
-    expect(status.pendingDeployments).toBe(2);
+    // Waiting, unreadable and unreachable count; registered, finished and missing do not.
+    expect(status.pendingDeployments).toBe(3);
     expect(status.keyVersions).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "previous", pending: 1 }),
-        expect.objectContaining({ id: null, pending: 1 }),
+        expect.objectContaining({ id: "previous", pending: 2 }),
+        expect.objectContaining({ id: null, pending: 2 }),
       ]),
     );
     expect(await readPendingDeploymentSecrets(database, store, undefined)).toEqual({

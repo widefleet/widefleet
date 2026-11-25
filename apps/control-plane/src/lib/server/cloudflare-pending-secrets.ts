@@ -17,8 +17,8 @@ export type DeploymentWorkflows = {
   get: (id: string) => Promise<{ status: () => Promise<{ status: string }> }>;
 };
 
-// Statuses of an instance that can still run its registration step.
-const active = new Set(["queued", "running", "paused", "waiting", "waitingForPause"]);
+// Statuses after which an instance never runs its registration step again.
+const finished = new Set(["complete", "errored", "terminated"]);
 
 const command = z.looseObject({
   kind: z.literal("deploy"),
@@ -27,12 +27,17 @@ const command = z.looseObject({
 
 const commandFile = /^([0-9a-f-]{36})\.json$/;
 
-const isActive = async (workflows: DeploymentWorkflows, id: string) => {
+/**
+ * Whether the command's Workflow may still register it. Only a definitive
+ * answer, a missing or finished instance, drops a command; any other failure
+ * keeps it pending, so the status never under-reports a key still in use.
+ */
+const mayRegister = async (workflows: DeploymentWorkflows, id: string) => {
   try {
-    return active.has((await (await workflows.get(id)).status()).status);
-  } catch {
-    // An unknown instance never registers its command.
-    return false;
+    return !finished.has((await (await workflows.get(id)).status()).status);
+  } catch (error) {
+    // The Workflow binding reports a missing instance with this error code.
+    return !(error instanceof Error && error.message.includes("instance.not_found"));
   }
 };
 
@@ -95,7 +100,7 @@ export const readPendingDeploymentSecrets = async (
       );
 
       for (const file of files) {
-        if (registered.has(file.id) || !(await isActive(workflows, file.id))) continue;
+        if (registered.has(file.id) || !(await mayRegister(workflows, file.id))) continue;
         const object = await commands.get(file.key);
 
         if (!object) continue;

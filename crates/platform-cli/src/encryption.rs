@@ -1,3 +1,4 @@
+use crate::auth::{self, Credentials};
 use clap::{Args, Subcommand};
 use platform_core::{
     Result,
@@ -60,18 +61,19 @@ struct Reencryption {
     status: Option<Status>,
 }
 
-async fn status(api: &Api, token: &str) -> Result<Status> {
+async fn status(api: &Api, credentials: &Credentials) -> Result<Status> {
+    let token = auth::access_token(api, credentials).await?;
     json(
-        api.authenticated(Method::GET, "/encryption", token)
+        api.authenticated(Method::GET, "/encryption", &token)
             .send()
             .await?,
     )
     .await
 }
 
-pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
+pub async fn run(api: &Api, credentials: &Credentials, options: Options) -> Result<()> {
     match options.command {
-        Command::Status => super::print_json(&status(api, token).await?),
+        Command::Status => super::print_json(&status(api, credentials).await?),
         Command::Reencrypt => {
             let (mut reencrypted, mut changed, mut failed) = (0, 0, 0);
             let mut cursor: Option<String> = None;
@@ -79,8 +81,10 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
                 let body = cursor
                     .as_ref()
                     .map_or_else(|| value!({}), |cursor| value!({ "cursor": cursor }));
+                // A long run can outlast one access token; refresh it before each batch.
+                let token = auth::access_token(api, credentials).await?;
                 let batch: Batch = json(
-                    api.authenticated(Method::POST, "/encryption/reencrypt", token)
+                    api.authenticated(Method::POST, "/encryption/reencrypt", &token)
                         .json(&body)
                         .send()
                         .await?,
