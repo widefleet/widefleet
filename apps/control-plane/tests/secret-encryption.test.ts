@@ -1,5 +1,4 @@
 import { createDecipheriv, randomBytes } from "node:crypto";
-import { symmetricEncrypt } from "better-auth/crypto";
 import { CompactEncrypt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
 import {
@@ -9,8 +8,6 @@ import {
   parseKeyring,
 } from "../src/lib/server/secret-encryption.ts";
 import { keySet, keyVersion } from "./keyring.fixture.ts";
-
-const legacyKey = "synthetic-legacy-installation-key-for-tests";
 
 const context = { kind: "directory-client-secret", organizationId: "widefleet" } as const;
 
@@ -41,34 +38,6 @@ const decryptIndependently = (jwe: string, key: Buffer) => {
     decipher.final(),
   ]).toString("utf8");
 };
-
-// Temporary: remove with legacy-secret-migration.ts.
-describe("legacy ciphertexts", () => {
-  // Recorded from better-auth's symmetricEncrypt with the synthetic key above.
-  const stored =
-    "04170b74ec840be7258e5c66a39a6a3455ee568a0ea14a8df2866f47bf919593d5bf7849c95bf27ecb86c01f03052ca9329cab0882bbedc2";
-
-  it("decrypts ciphertexts that earlier releases stored, but writes only JWE", async () => {
-    const encryption = createSecretEncryption({ keyring: fixture(), legacyKey });
-
-    expect(await encryption.decrypt(context, stored)).toBe("synthetic secret");
-    expect(decodeProtectedHeader(await encryption.encrypt(context, "new"))).toMatchObject({
-      kid: "fixture",
-    });
-  });
-
-  it("asks for the installation key when the legacy key differs or is missing", async () => {
-    const ciphertext = await symmetricEncrypt({ key: legacyKey, data: "value" });
-
-    for (const other of ["another-synthetic-installation-key", undefined])
-      await expect(
-        createSecretEncryption({ keyring: fixture(), legacyKey: other }).decrypt(
-          context,
-          ciphertext,
-        ),
-      ).rejects.toMatchObject(unreadable);
-  });
-});
 
 describe("JWE ciphertexts", () => {
   it("writes compact JWE with dir, A256GCM and the active version as kid", async () => {
@@ -149,9 +118,7 @@ describe("JWE ciphertexts", () => {
 
 describe("configured keyrings", () => {
   it("requires PLATFORM_ENCRYPTION_KEYS without file access", async () => {
-    expect(() => configuredSecretEncryption({ PLATFORM_ENCRYPTION_KEY: legacyKey })).toThrow(
-      "Set PLATFORM_ENCRYPTION_KEYS",
-    );
+    expect(() => configuredSecretEncryption({})).toThrow("Set PLATFORM_ENCRYPTION_KEYS");
 
     const ciphertext = await configuredSecretEncryption({
       PLATFORM_ENCRYPTION_KEYS: keySet(keyVersion("current")),

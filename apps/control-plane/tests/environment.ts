@@ -122,7 +122,6 @@ export const createTestEnvironment = async (
     PLATFORM_STATE_DIRECTORY: directory,
     PLATFORM_RUNTIME_DIRECTORY: join(directory, "auth"),
     PLATFORM_APP_RUNTIME_URL: authControl.url,
-    PLATFORM_ENCRYPTION_KEY: "local-integration-test-encryption-key-only",
     // Synthetic key material, shared with Cloudflare bindings and the built server.
     PLATFORM_ENCRYPTION_KEYS: keySet(
       keyVersion("test", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"),

@@ -3,7 +3,6 @@ import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
-import { readLegacyKey } from "./legacy-secret-migration.ts";
 import {
   createSecretEncryption,
   generateKeyring,
@@ -116,10 +115,7 @@ const installationKeyring = async (configuration: Configuration) => {
 };
 
 export const installationKeys = async (configuration: Configuration) => ({
-  encryption: createSecretEncryption({
-    keyring: await installationKeyring(configuration),
-    legacyKey: await readLegacyKey(configuration, readOptionalFile),
-  }),
+  encryption: createSecretEncryption({ keyring: await installationKeyring(configuration) }),
   cookie: await persistentKey(configuration.PLATFORM_STATE_DIRECTORY, "app-cookie.key"),
   authentication:
     configuration.BETTER_AUTH_SECRET ??

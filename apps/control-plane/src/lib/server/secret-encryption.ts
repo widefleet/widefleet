@@ -1,11 +1,6 @@
 import { CompactEncrypt, compactDecrypt, decodeProtectedHeader, importJWK } from "jose";
 import { z } from "zod";
 import { InvalidOperation } from "./errors.ts";
-import {
-  configuredLegacyKey,
-  decryptLegacySecret,
-  isLegacyCiphertext,
-} from "./legacy-secret-migration.ts";
 
 /**
  * Names the stored value a ciphertext protects. Each kind carries exactly the
@@ -133,16 +128,9 @@ export const ciphertextKeyVersion = (ciphertext: string) => {
 /**
  * Encrypts the customer secrets that the control plane stores. Callers name
  * what they protect and never handle key material. New values always use the
- * active key version of `keyring`. `legacyKey` only decrypts values that
- * releases before the keyring wrote, until they are re-encrypted.
+ * active key version of `keyring`.
  */
-export const createSecretEncryption = ({
-  keyring,
-  legacyKey,
-}: {
-  keyring: Keyring;
-  legacyKey?: string | undefined;
-}) => {
+export const createSecretEncryption = ({ keyring }: { keyring: Keyring }) => {
   const keys = new Map<string, ReturnType<typeof importJWK>>();
 
   const key = (version: KeyVersion) => {
@@ -190,9 +178,7 @@ export const createSecretEncryption = ({
     },
     decrypt: async (_context: SecretContext, ciphertext: string) => {
       try {
-        return isLegacyCiphertext(ciphertext)
-          ? await decryptLegacySecret(legacyKey, ciphertext)
-          : await decryptJwe(ciphertext);
+        return await decryptJwe(ciphertext);
       } catch {
         throw new InvalidOperation({
           code: "BAD_REQUEST",
@@ -212,15 +198,10 @@ export type SecretEncryption = ReturnType<typeof createSecretEncryption>;
  */
 export const configuredSecretEncryption = (configuration: {
   PLATFORM_ENCRYPTION_KEYS?: string | undefined;
-  PLATFORM_ENCRYPTION_KEY?: string | undefined;
-  BETTER_AUTH_SECRET?: string | undefined;
 }) => {
   const keys = configuration.PLATFORM_ENCRYPTION_KEYS?.trim();
 
   if (!keys) throw new Error(`Set PLATFORM_ENCRYPTION_KEYS to ${keySetFormat}`);
 
-  return createSecretEncryption({
-    keyring: parseKeyring(keys, "PLATFORM_ENCRYPTION_KEYS"),
-    legacyKey: configuredLegacyKey(configuration),
-  });
+  return createSecretEncryption({ keyring: parseKeyring(keys, "PLATFORM_ENCRYPTION_KEYS") });
 };

@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { runtimeConfigurationSchema } from "../src/lib/server/config.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
-import { readInstallationKeyring, readOptionalFile } from "../src/lib/server/installation-files.ts";
-import { readLegacyKey } from "../src/lib/server/legacy-secret-migration.ts";
+import { readInstallationKeyring } from "../src/lib/server/installation-files.ts";
 import { createSecretEncryption } from "../src/lib/server/secret-encryption.ts";
 import {
   incomplete,
@@ -25,8 +24,6 @@ const configuration = runtimeConfigurationSchema
     PLATFORM_STATE_DIRECTORY: true,
     PLATFORM_ENCRYPTION_KEYS: true,
     PLATFORM_ENCRYPTION_KEYS_FILE: true,
-    PLATFORM_ENCRYPTION_KEY: true,
-    PLATFORM_ENCRYPTION_KEY_FILE: true,
   })
   .parse(process.env);
 
@@ -38,10 +35,7 @@ if (!keyring)
     "No encryption keyring found. Set PLATFORM_ENCRYPTION_KEYS or PLATFORM_ENCRYPTION_KEYS_FILE, or run this where the control plane keeps encryption.keys in PLATFORM_STATE_DIRECTORY.",
   );
 
-const encryption = createSecretEncryption({
-  keyring,
-  legacyKey: await readLegacyKey(configuration, readOptionalFile),
-});
+const encryption = createSecretEncryption({ keyring });
 
 const database = createDatabase(configuration, 2);
 
@@ -60,7 +54,7 @@ try {
   if (status.failed > 0 || (result && (result.failed > 0 || incomplete(status)))) {
     console.error(
       status.failed > 0 || (result?.failed ?? 0) > 0
-        ? "Some stored secrets could not be decrypted. Restore their key versions or the legacy key, then run this again."
+        ? "Some stored secrets could not be decrypted. Restore their key versions, then run this again."
         : "Some stored secrets still use another key version, for example because they changed during the run. Run this again.",
     );
     process.exitCode = 1;

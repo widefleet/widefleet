@@ -15,7 +15,6 @@ x-control-plane: &control-plane
     APP_HTTPS_PORT: ${APP_HTTPS_PORT:-443}
     PLATFORM_CONFIG_DIRECTORY: /var/lib/widefleet/edge
     PLATFORM_RUNTIME_DIRECTORY: /var/lib/widefleet/runtime
-    PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:-}
     PLATFORM_ENCRYPTION_KEYS: ${PLATFORM_ENCRYPTION_KEYS:-}
     PLATFORM_APP_BUILDER_URL: http://builder:8080
   volumes:
