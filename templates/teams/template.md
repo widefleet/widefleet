@@ -33,7 +33,7 @@ Installations with managed OAuth for Microsoft need no registration: users conne
 their accounts directly. Otherwise, an administrator needs to:
 
 1. Register a Microsoft Entra application. Choose **Accounts in any organizational
-   directory** or **Accounts in this organizational directory only**.
+   directory**; the connection signs in through Microsoft's multi-tenant endpoint.
 2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI and
    add the delegated Microsoft Graph permissions `Chat.ReadWrite`, `ChatMessage.Send`,
    `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Read.All` and
