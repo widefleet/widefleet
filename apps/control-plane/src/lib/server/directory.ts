@@ -25,6 +25,10 @@ const graphGroups = z.object({
   "@odata.nextLink": z.string().optional(),
 });
 
+// Workers accept only "follow" and "manual" redirects. With "manual", a redirect fails the
+// status checks below, so credentials never leave the directory's own endpoints.
+const noRedirect = "manual";
+
 const createCompanyDirectory = (
   identity: z.infer<typeof companyIdentity> | null,
   request: typeof fetch,
@@ -60,7 +64,7 @@ const createCompanyDirectory = (
         `${new URL(provider.authority).origin}/${provider.tenantId}/oauth2/v2.0/token`,
         {
           method: "POST",
-          redirect: "error",
+          redirect: noRedirect,
           signal: AbortSignal.timeout(10_000),
           body: new URLSearchParams({
             grant_type: "client_credentials",
@@ -107,7 +111,7 @@ const createCompanyDirectory = (
 
         const response = await request(url, {
           headers: { authorization: `Bearer ${await accessToken()}`, ConsistencyLevel: "eventual" },
-          redirect: "error",
+          redirect: noRedirect,
           signal: AbortSignal.timeout(10_000),
         });
 
