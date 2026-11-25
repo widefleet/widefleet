@@ -80,6 +80,10 @@ export const authenticationOptions = (
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
+
+  const picture = (image: string | null | undefined) =>
+    image ? new URL(image, configuration.PLATFORM_URL).href : undefined;
+
   const providers = socialProviders(configuration);
 
   if (publicSignup && (!sendEmail || configuration.LOGIN_CODE_DELIVERY !== "email"))
@@ -391,6 +395,11 @@ export const authenticationOptions = (
           email: scopes.includes("email") ? user.email : undefined,
           email_verified: scopes.includes("email") ? user.emailVerified : undefined,
           name: scopes.includes("profile") ? user.name : undefined,
+          picture: scopes.includes("profile") ? picture(user.image) : undefined,
+        }),
+        // `user.image` names the picture on this installation. OIDC clients need its URL.
+        customUserInfoClaims: ({ user, scopes }) => ({
+          picture: scopes.includes("profile") ? picture(user.image) : undefined,
         }),
         // Request-scoped instances read the policies persisted by installation setup.
         resources: initializeResources ? [cliResourcePolicy(configuration)] : [],
