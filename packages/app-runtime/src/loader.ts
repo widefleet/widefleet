@@ -34,7 +34,7 @@ import { organizationIdentifier, workflowRequest } from "@platform/contracts";
 import { appWorker, workerCode } from "./worker.ts";
 import { browserPolicy } from "./csp.ts";
 import { serveAsset } from "./assets.ts";
-import { linkManifest, manifestPath, webManifest } from "./web-app.ts";
+import { linkManifest, publicPaths, servePublic } from "./web-app.ts";
 import { readApp } from "./catalog.ts";
 import { refreshServiceIndex } from "./service-index.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
@@ -106,20 +106,20 @@ const managementRequest = (request: Request, environment: ParentEnvironment) => 
   return token.success && request.headers.get("authorization") === `Bearer ${token.data}`;
 };
 
-const cronBlocked = async (environment: ParentEnvironment, app: PublishedApp) => {
+const organizationBlocked = async (environment: ParentEnvironment, app: PublishedApp) => {
   if (environment["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv") return false;
 
   const value = await environment.AUTH_CONFIG.get(authRouteKey(app.hostname));
 
-  if (value === null) throw new Error("Cron app organization is not published");
+  if (value === null) throw new Error("The app's organization is not published");
   const route = authRoute.parse(JSON.parse(value));
 
-  if (route.appId !== app.appId) throw new Error("Cron app authorization is being updated");
+  if (route.appId !== app.appId) throw new Error("App authorization is being updated");
 
-  // Cron admission uses the same organization suspension as HTTP admission.
+  // Cron and public admission use the same organization suspension as HTTP admission.
   const availability = await readOrganizationAvailability(environment, route.organizationId);
 
-  if (availability === null) throw new Error("Cron app availability could not be read");
+  if (availability === null) throw new Error("App availability could not be read");
 
   return availability.blocked;
 };
@@ -230,20 +230,6 @@ const dispatchApp = async (
 
   if (app.metadata.web === false) return new Response(null, { status: 404 });
 
-  // Served before rewrite rules and the app, whose fallbacks would answer with a page.
-  // An app ships a manifest file of its own or links another one from its pages.
-  if (
-    app.displayName &&
-    url.pathname === manifestPath &&
-    request.method === "GET" &&
-    !app.manifest[manifestPath]
-  )
-    return browserPolicy(
-      await webManifest(environment, app, app.displayName),
-      app.network.policy.browser,
-      authenticated?.frameAncestors,
-    );
-
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 
@@ -279,6 +265,27 @@ const dispatchApp = async (
     linkManifest(app, response),
     app.network.policy.browser,
     authenticated?.frameAncestors,
+  );
+};
+
+// An app's manifest and icons, without signing in.
+const publicRequest = async (request: Request, environment: ParentEnvironment) => {
+  const url = new URL(request.url);
+
+  if (!/^[a-z0-9.-]+$/.test(url.hostname)) return new Response(null, { status: 400 });
+  const app = await readApp(environment, `hosts/${url.hostname}.json`);
+
+  if (!app || app.metadata.web === false) return new Response(null, { status: 404 });
+
+  if (await organizationBlocked(environment, app))
+    return new Response("Application HTTP access is suspended", {
+      status: 429,
+      headers: { "cache-control": "no-store" },
+    });
+
+  return browserPolicy(
+    await servePublic(request, environment, app, url.pathname),
+    app.network.policy.browser,
   );
 };
 
@@ -400,6 +407,9 @@ export default {
       return manageRuntime(request, environment, context);
     }
 
+    if (request.method === "GET" && publicPaths.has(new URL(request.url).pathname))
+      return publicRequest(request, environment);
+
     return createAuthHandler(
       environment,
       (authenticated, appId, organizationId, caller, frameAncestors) =>
@@ -431,7 +441,7 @@ export default {
 
           if (!app || !app.metadata.crons.includes(controller.cron)) return;
 
-          if (await cronBlocked(environment, app)) return;
+          if (await organizationBlocked(environment, app)) return;
 
           const result = await run(app, environment, context, (worker) =>
             worker

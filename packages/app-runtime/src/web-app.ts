@@ -3,13 +3,43 @@ import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
 export const manifestPath = "/manifest.webmanifest";
 
-// Manifests are fetched without cookies unless the link asks for them; app pages require sign-in.
-const manifestLink = `<link rel="manifest" href="${manifestPath}" crossorigin="use-credentials">`;
+const manifestLink = `<link rel="manifest" href="${manifestPath}">`;
 
 const icons = [
   [appIconSource.path, "image/svg+xml"],
   ...appPngIcons.map((path) => [path, "image/png"] as const),
 ] as const;
+
+// Install prompts on other sites, such as the Widefleet home, fetch an app's manifest
+// and icons without cookies, so its name and icon are readable without signing in.
+export const publicPaths = new Set<string>([manifestPath, ...icons.map(([path]) => path)]);
+
+// The uploaded file itself: rewrite rules could otherwise answer with an app page.
+const publicAsset = async (
+  request: Request,
+  environment: ParentEnvironment,
+  app: PublishedApp,
+  path: string,
+) => {
+  const entry = app.manifest[path];
+
+  if (!entry) return new Response(null, { status: 404 });
+
+  if (request.headers.get("if-none-match") === `"${entry.hash}"`)
+    return new Response(null, { status: 304, headers: { etag: `"${entry.hash}"` } });
+  const object = await environment.WIDEFLEET_PACKAGES.get(`apps/${app.appId}/assets/${entry.hash}`);
+
+  if (!object) return new Response("Published asset is missing", { status: 502 });
+
+  return new Response(object.body, {
+    headers: {
+      "content-type": icons.find(([icon]) => icon === path)?.[1] ?? "application/manifest+json",
+      "cache-control": "no-cache",
+      etag: `"${entry.hash}"`,
+      "x-content-type-options": "nosniff",
+    },
+  });
+};
 
 export const linksManifest = (app: PublishedApp, contentType: string | null) =>
   Boolean(app.displayName) && contentType?.startsWith("text/html") === true;
@@ -75,6 +105,7 @@ export const webManifest = async (
 
   return Response.json(
     {
+      id: "/",
       name,
       start_url: "/",
       scope: "/",
@@ -83,4 +114,18 @@ export const webManifest = async (
     },
     { headers: { "content-type": "application/manifest+json", "cache-control": "no-cache" } },
   );
+};
+
+export const servePublic = async (
+  request: Request,
+  environment: ParentEnvironment,
+  app: PublishedApp,
+  path: string,
+) => {
+  if (path !== manifestPath || app.manifest[manifestPath])
+    return publicAsset(request, environment, app, path);
+
+  return app.displayName
+    ? webManifest(environment, app, app.displayName)
+    : new Response(null, { status: 404 });
 };
