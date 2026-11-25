@@ -2,53 +2,36 @@ import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { decryptOAuthToken } from "better-auth/oauth2";
 import {
+  claimedPicture,
   fetchGraphPicture,
-  fetchPictureUrl,
-  pictureUrl,
+  fetchUserInfoClaims,
+  googleUserInfo,
+  pictureClaims,
   type PictureResult,
 } from "@platform/auth-proxy/picture";
 import { decodeJwt } from "jose";
 import { z } from "zod";
 import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
 
-// The claims that name a picture; `null` when they cannot be read.
-const pictureClaims = z.looseObject({ picture: z.unknown().optional() });
-
 const idTokenClaims = (idToken: string | null | undefined) => {
   if (!idToken) return null;
 
   try {
-    return pictureClaims.parse(decodeJwt(idToken));
+    const claims = pictureClaims.safeParse(decodeJwt(idToken));
+
+    return claims.success ? claims.data : null;
   } catch {
     return null;
   }
 };
 
-// Some company providers name the picture only in their user info. Its endpoint comes from
-// the connection, discovered and checked as for sign-in itself.
-const userInfoPicture = async (issuer: string, configuration: string, accessToken: string) => {
+// A company connection's user info endpoint, discovered and checked as for sign-in itself.
+const companyUserInfo = async (issuer: string, configuration: string) => {
   try {
-    const endpoint = (
-      await prepareCompanyOidc(issuer, oidcConfiguration.parse(JSON.parse(configuration)))
-    ).configuration.userInfoEndpoint;
-
-    if (!endpoint) return null;
-
-    const response = await fetch(endpoint, {
-      headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
-      redirect: "error",
-      signal: AbortSignal.timeout(5_000),
-    });
-
-    if (!response.ok) {
-      await response.body?.cancel();
-
-      return null;
-    }
-
-    return pictureClaims.parse(await response.json());
+    return (await prepareCompanyOidc(issuer, oidcConfiguration.parse(JSON.parse(configuration))))
+      .configuration.userInfoEndpoint;
   } catch {
-    return null;
+    return undefined;
   }
 };
 
@@ -114,31 +97,31 @@ export const signInPicture = (save: SavePicture) =>
               return;
             }
 
+            // Providers that leave the picture out of the ID token name it in their user info:
+            // Google for Workspace accounts, and some company providers.
             const fromIdToken = idTokenClaims(account.idToken);
 
+            const userInfo =
+              fromIdToken?.picture === undefined && accessToken
+                ? providerId === "widefleet-google"
+                  ? googleUserInfo
+                  : company?.oidcConfig
+                    ? await companyUserInfo(company.issuer, company.oidcConfig)
+                    : undefined
+                : undefined;
+
             const claims =
-              fromIdToken?.picture === undefined && company?.oidcConfig && accessToken
-                ? await userInfoPicture(company.issuer, company.oidcConfig, accessToken)
+              userInfo && accessToken
+                ? await fetchUserInfoClaims(userInfo, accessToken)
                 : fromIdToken;
-
-            // A provider that names no picture has none, for example after the person removed it.
-            if (claims && (claims.picture === undefined || claims.picture === null)) {
-              await save(signedIn.user.id, "none");
-
-              return;
-            }
-
-            const url = pictureUrl.safeParse(claims?.picture);
 
             await save(
               signedIn.user.id,
-              url.success
-                ? await fetchPictureUrl(
-                    new URL(url.data),
-                    new URL(company?.issuer ?? "https://accounts.google.com").origin,
-                    accessToken,
-                  )
-                : null,
+              await claimedPicture(
+                claims,
+                new URL(company?.issuer ?? "https://accounts.google.com").origin,
+                accessToken,
+              ),
             );
           }),
         },

@@ -135,3 +135,53 @@ export const fetchPictureUrl = (
 
   return Promise.resolve(null);
 };
+
+// Sign-in claims that may name a picture.
+export const pictureClaims = z.looseObject({ picture: z.unknown().optional() });
+
+export type PictureClaims = z.infer<typeof pictureClaims>;
+
+// Google names Workspace accounts' pictures only in its user info, never in their ID tokens.
+export const googleUserInfo = "https://openidconnect.googleapis.com/v1/userinfo";
+
+/** The provider's user info with the sign-in's access token; `null` when it cannot be read. */
+export const fetchUserInfoClaims = async (endpoint: string, accessToken: string) => {
+  try {
+    const response = await fetch(endpoint, {
+      headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (!response.ok) {
+      await response.body?.cancel();
+
+      return null;
+    }
+
+    const claims = pictureClaims.safeParse(await response.json());
+
+    return claims.success ? claims.data : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The picture the sign-in's claims name. Claims that name none mean the person has none, for
+ * example after they removed it; unreadable claims keep the current copy.
+ */
+export const claimedPicture = (
+  claims: PictureClaims | null,
+  providerOrigin: string,
+  accessToken: string | undefined,
+): Promise<PictureResult> => {
+  if (!claims) return Promise.resolve(null);
+
+  if (claims.picture === undefined || claims.picture === null) return Promise.resolve("none");
+  const url = pictureUrl.safeParse(claims.picture);
+
+  return url.success
+    ? fetchPictureUrl(new URL(url.data), providerOrigin, accessToken)
+    : Promise.resolve(null);
+};

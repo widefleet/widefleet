@@ -323,7 +323,24 @@ describe("personal social sign-in", () => {
       picture: "https://lh3.googleusercontent.com/a/drawing",
     });
     await signInWith("google", { ...google, picture: "http://lh3.googleusercontent.com/a/photo" });
-    // A sign-in that names no picture reports that there is none.
+
+    // Google leaves Workspace pictures out of the ID token; its user info names them.
+    let userInfo: () => Response = () =>
+      Response.json({ picture: "https://lh3.googleusercontent.com/a/photo" });
+
+    let userInfoAuthorization: string | null = null;
+
+    f.pictures.set("https://openidconnect.googleapis.com/v1/userinfo", (request) => {
+      userInfoAuthorization = request.headers.get("authorization");
+
+      return userInfo();
+    });
+    await signInWith("google", google);
+    expect(userInfoAuthorization).toBe("Bearer synthetic-access-token");
+    // Unreadable user info keeps the copy; user info without a picture means there is none.
+    userInfo = () => new Response(null, { status: 503 });
+    await signInWith("google", google);
+    userInfo = () => Response.json({ sub: "synthetic-provider-subject" });
     await signInWith("google", google);
     // Microsoft reports the photo through Graph, here that the user has none.
     await signInWith("microsoft", { xms_edov: true });
@@ -331,6 +348,8 @@ describe("personal social sign-in", () => {
     expect(f.saved).toEqual([
       { userId, picture: { bytes: png, contentType: "image/png" } },
       { userId, picture: null },
+      { userId, picture: null },
+      { userId, picture: { bytes: png, contentType: "image/png" } },
       { userId, picture: null },
       { userId, picture: "none" },
       { userId, picture: "none" },
