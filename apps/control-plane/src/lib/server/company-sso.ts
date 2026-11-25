@@ -8,6 +8,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import { ssoProvider, user } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import type { SecretEncryption } from "./secret-encryption.ts";
+import { pictureClaim, usablePicture } from "./sign-in-picture.ts";
 import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
 
 export const companySsoOrigins = async (
@@ -145,7 +146,14 @@ export const companySsoPlugin = (
       return identity.success && identity.data.tid === tenant ? identity.data.oid : "";
     },
     provisionUserOnEveryLogin: true,
-    provisionUser: async ({ user: subject, userInfo, provider }) => {
+    provisionUser: async ({ user: subject, userInfo, token, provider }) => {
+      // Better Auth takes the profile from the user-info endpoint when the provider
+      // has one; Google returns Workspace pictures only there.
+      const picture = usablePicture.parse(userInfo["image"]) ?? pictureClaim(token?.idToken);
+
+      if (picture && picture !== subject.image)
+        await database.update(user).set({ image: picture }).where(eq(user.id, subject.id));
+
       if (
         !provider.organizationId ||
         !operatorTrustedSso(policy, provider.organizationId) ||

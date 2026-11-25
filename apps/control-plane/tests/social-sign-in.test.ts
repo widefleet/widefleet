@@ -149,6 +149,7 @@ describe("personal social sign-in", () => {
       authorization: URL,
       claims: ConstructorParameters<typeof SignJWT>[0],
       state = authorization.searchParams.get("state"),
+      userInfo?: { picture: string },
     ) => {
       const idToken = await new SignJWT({
         name: "Synthetic provider user",
@@ -171,8 +172,16 @@ describe("personal social sign-in", () => {
 
       vi.stubGlobal(
         "fetch",
-        vi.fn(async (input: Parameters<typeof fetch>[0]) => {
-          const url = new Request(input).url;
+        vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          const outgoing = new Request(input, init);
+          const url = outgoing.url;
+
+          if (provider === "google" && url === "https://openidconnect.googleapis.com/v1/userinfo") {
+            expect(outgoing.headers.get("authorization")).toBe("Bearer synthetic-access-token");
+
+            return userInfo ? Response.json(userInfo) : new Response(null, { status: 503 });
+          }
+
           expect(url).toBe(
             provider === "google"
               ? "https://oauth2.googleapis.com/token"
@@ -196,7 +205,12 @@ describe("personal social sign-in", () => {
     const signIn = async (
       provider: "google" | "microsoft",
       claims: ConstructorParameters<typeof SignJWT>[0],
-    ) => complete(provider, await start(provider), claims);
+      userInfo?: { picture: string },
+    ) => {
+      const authorization = await start(provider);
+
+      return complete(provider, authorization, claims, undefined, userInfo);
+    };
 
     return {
       auth,
@@ -277,9 +291,12 @@ describe("personal social sign-in", () => {
     const signInWith = async (
       provider: "google" | "microsoft",
       claims: ConstructorParameters<typeof SignJWT>[0],
+      userInfo?: { picture: string },
     ) => {
       f.cookies.clear();
-      expect((await f.signIn(provider, claims)).headers.get("location")).toContain("/device?");
+      expect((await f.signIn(provider, claims, userInfo)).headers.get("location")).toContain(
+        "/device?",
+      );
 
       return f.internalAdapter.findUserById(userId);
     };
@@ -304,6 +321,14 @@ describe("personal social sign-in", () => {
     ).toMatchObject({ image: "https://pictures.example.test/second" });
     expect(await signInWith("microsoft", { xms_edov: true })).toMatchObject({
       image: "https://pictures.example.test/second",
+    });
+    // Google sends Workspace pictures only from its user-info endpoint.
+    expect(
+      await signInWith("google", google, { picture: "https://pictures.example.test/user-info" }),
+    ).toMatchObject({ image: "https://pictures.example.test/user-info" });
+    // An unavailable user-info endpoint keeps the current picture and the sign-in.
+    expect(await signInWith("google", google)).toMatchObject({
+      image: "https://pictures.example.test/user-info",
     });
   });
 

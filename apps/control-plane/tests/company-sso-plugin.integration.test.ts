@@ -566,7 +566,7 @@ describe("Better Auth SSO provider integration", () => {
 
       const picture = `https://pictures.example.test/${kind}`;
 
-      // The picture is only in the ID token, which the sign-in hook reads after Better Auth
+      // The picture is first only in the ID token, which provisioning reads after Better Auth
       // has created the user from the user-info response.
       const signedIdToken = (claims: Record<string, string>) =>
         new SignJWT({ ...profile, ...claims })
@@ -578,6 +578,8 @@ describe("Better Auth SSO provider integration", () => {
           .sign(keys.privateKey);
 
       let idToken = await signedIdToken({ picture });
+
+      let userInfoPicture = "";
 
       const visited = new Set<string>();
 
@@ -612,7 +614,9 @@ describe("Better Auth SSO provider integration", () => {
           case metadata.userinfo_endpoint:
             expect(outgoing.headers.get("authorization")).toBe("Bearer synthetic-access-token");
 
-            return Response.json(profile);
+            return Response.json(
+              userInfoPicture ? { ...profile, picture: userInfoPicture } : profile,
+            );
           default:
             throw new Error(`Unexpected identity-provider request: ${outgoing.url}`);
         }
@@ -794,6 +798,39 @@ describe("Better Auth SSO provider integration", () => {
         ).toMatchObject({
           user: { email: profile.email, name: profile.name, image: `${picture}/new` },
         });
+
+        // Google sends Workspace pictures only from the user-info endpoint.
+        idToken = await signedIdToken({});
+        userInfoPicture = `${picture}/user-info`;
+        const fromUserInfo = await environment.auth.handler(signIn.clone());
+        const fromUserInfoCallback = new URL(callback);
+        fromUserInfoCallback.searchParams.set(
+          "state",
+          z
+            .string()
+            .min(1)
+            .parse(
+              new URL(
+                z.object({ url: z.url() }).parse(await fromUserInfo.json()).url,
+              ).searchParams.get("state"),
+            ),
+        );
+        fromUserInfoCallback.searchParams.set("code", "synthetic-code");
+
+        const refreshed = await environment.auth.handler(
+          new Request(fromUserInfoCallback, { headers: { cookie: cookie(fromUserInfo) } }),
+        );
+
+        expect(refreshed.status).toBe(302);
+        expect(
+          await (
+            await environment.auth.handler(
+              new Request(`${origin}/api/auth/get-session`, {
+                headers: { cookie: cookie(refreshed) },
+              }),
+            )
+          ).json(),
+        ).toMatchObject({ user: { image: `${picture}/user-info` } });
 
         request.mockClear();
         visited.clear();
