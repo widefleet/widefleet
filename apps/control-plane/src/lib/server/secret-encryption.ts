@@ -7,7 +7,7 @@ import { InvalidOperation } from "./errors.ts";
  * decryption always receive the same context.
  */
 export type SecretContext =
-  /** A value in `apps.secrets`, including copies in deployment job snapshots. */
+  /** A value in `apps.secrets`. */
   | { kind: "app-secret"; organizationId: string; appId: string; name: string }
   /** `organization_settings.directory_secret`. */
   | { kind: "directory-client-secret"; organizationId: string }
