@@ -200,7 +200,7 @@ it("reads a new template from its directory and frontmatter without provider-spe
       return Response.json({ main: "src/app.ts", secrets: { required: ["BOARD_TOKEN"] } });
 
     return new Response(
-      `\uFEFF---\r\nname: Team board\r\ndescription: >-\r\n  Organize tasks\r\n  together.\r\nsecretHelp:\r\n  BOARD_TOKEN: "Open [API settings](https://example.test/settings)."\r\n---\r\n${markdown}`,
+      `\uFEFF---\r\nname: Team board\r\ndescription: >-\r\n  Organize tasks\r\n  together.\r\nfutureField: [one, two]\r\nid: spoofed\r\ninstalledAppId: ${crypto.randomUUID()}\r\nsecretHelp:\r\n  BOARD_TOKEN: "Open [API settings](https://example.test/settings)."\r\n---\r\n${markdown}`,
     );
   });
   const api = createApi(runtime);
@@ -217,6 +217,9 @@ it("reads a new template from its directory and frontmatter without provider-spe
   const response = await api(new Request("http://localhost/api/v1/catalog/templates/kanban"));
   expect(response.status).toBe(200);
   const template = contract.appTemplate.parse(await response.json());
+  expect(template.id).toBe("kanban");
+  expect(template.installedAppId).toBeNull();
+  expect(template).not.toHaveProperty("futureField");
   expect(template.markdown).toBe(markdown);
   expect(template.network).toBeUndefined();
   expect(template.requiredSecrets).toEqual(["BOARD_TOKEN"]);
@@ -234,11 +237,7 @@ it.each([
   { status: 200, content: "No frontmatter" },
   { status: 200, content: "---\nname: [broken\n---\nInstructions" },
   { status: 200, content: "---\nname: Gmail\n---\nInstructions" },
-  // Frontmatter cannot claim an installed app.
-  {
-    status: 200,
-    content: `---\nname: Gmail\ndescription: Mail\ninstalledAppId: ${crypto.randomUUID()}\n---\n`,
-  },
+  { status: 200, content: "---\nname: Gmail\ndescription: Mail\nsecretHelp: []\n---\n" },
 ])("reports unavailable template content ($status, $content)", async ({ status, content }) => {
   vi.mocked(globalThis.fetch).mockResolvedValue(new Response(content, { status }));
 

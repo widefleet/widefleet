@@ -44,6 +44,8 @@ const templateDocument = (text: string, id: string) => {
   return {
     metadata: appTemplate
       .pick({ name: true, description: true, secretHelp: true })
+      // Templates on main can gain fields before an installation upgrades.
+      .strip()
       .parse(parse(parts[1] ?? "")),
     markdown: parts[2] ?? "",
   };
