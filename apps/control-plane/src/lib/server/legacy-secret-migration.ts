@@ -11,8 +11,8 @@ import { join } from "node:path";
 import { symmetricDecrypt } from "better-auth/crypto";
 import { z } from "zod";
 
-/** Legacy ciphertexts are bare hexadecimal; versioned ones contain colons. */
-export const isLegacyCiphertext = (ciphertext: string) => !ciphertext.includes(":");
+/** Legacy ciphertexts are bare hexadecimal; JWE compact values never are. */
+export const isLegacyCiphertext = (ciphertext: string) => /^[0-9a-f]+$/i.test(ciphertext);
 
 export const decryptLegacySecret = async (key: string | undefined, ciphertext: string) => {
   if (key === undefined) throw new Error("No legacy encryption key is configured");

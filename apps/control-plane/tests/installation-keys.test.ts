@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { symmetricEncrypt } from "better-auth/crypto";
+import { decodeProtectedHeader } from "jose";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { configurationSchema } from "../src/lib/server/config.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
@@ -42,7 +43,7 @@ it("creates a private keyring on first start and keeps using it", async () => {
   const ciphertext = await first.encryption.encrypt(context, "synthetic secret");
 
   expect((await stat(path)).mode & 0o777).toBe(0o600);
-  expect(ciphertext).toMatch(new RegExp(`^v1:${(await readFile(path, "utf8")).split(":")[0]}:`));
+  expect(decodeProtectedHeader(ciphertext).kid).toBe((await readFile(path, "utf8")).split(":")[0]);
   expect(console.info).toHaveBeenCalledWith(expect.stringContaining(path));
   // Only installations from before the keyring have a legacy key.
   await expect(stat(join(directory, "encryption.key"))).rejects.toThrow();
@@ -71,7 +72,7 @@ it("upgrades an installation with only a legacy key without configuration change
   const { encryption } = await installationKeys(configuration());
 
   expect(await encryption.decrypt(context, stored)).toBe("written by an earlier release");
-  expect(await encryption.encrypt(context, "new value")).toMatch(/^v1:/);
+  expect(decodeProtectedHeader(await encryption.encrypt(context, "new value")).enc).toBe("A256GCM");
 });
 
 it("keeps an operator-managed legacy key for earlier ciphertexts", async () => {
@@ -94,7 +95,7 @@ it("uses a configured keyring from the environment or a file", async () => {
   const fromFile = await installationKeys(configuration({ PLATFORM_ENCRYPTION_KEYS_FILE: path }));
   const ciphertext = await fromEnvironment.encryption.encrypt(context, "value");
 
-  expect(ciphertext).toMatch(/^v1:current:/);
+  expect(decodeProtectedHeader(ciphertext).kid).toBe("current");
   expect(await fromFile.encryption.decrypt(context, ciphertext)).toBe("value");
   await expect(readFile(join(directory, "encryption.keys"))).rejects.toThrow();
 
@@ -122,5 +123,7 @@ it("requires a configured keyring to keep the generated key versions", async () 
   );
 
   expect(await configured.encryption.decrypt(context, ciphertext)).toBe("value");
-  expect(await configured.encryption.encrypt(context, "value")).toMatch(/^v1:operator:/);
+  expect(decodeProtectedHeader(await configured.encryption.encrypt(context, "value")).kid).toBe(
+    "operator",
+  );
 });

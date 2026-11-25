@@ -1,3 +1,4 @@
+import { CompactEncrypt, compactDecrypt } from "jose";
 import { InvalidOperation } from "./errors.ts";
 import {
   configuredLegacyKey,
@@ -38,15 +39,22 @@ const keySize = 32;
 
 const keyEntry = `ID:KEY, where KEY is ${keySize} random bytes in base64, for example from \`openssl rand -base64 ${keySize}\``;
 
-/** Decodes canonical base64 or base64url of exactly 32 bytes, padded or not. */
+/**
+ * Decodes exactly 32 bytes from canonical base64 (padded) or canonical
+ * base64url (unpadded). Each alphabet is checked on its own, so mixed spellings
+ * are rejected, and re-encoding rejects unused trailing bits.
+ */
 const decodeKeyMaterial = (encoded: string) => {
-  const normalized = encoded.replaceAll("-", "+").replaceAll("_", "/").replace(/=$/, "");
+  const encoding = /^[A-Za-z0-9+/]{43}=$/.test(encoded)
+    ? "base64"
+    : /^[A-Za-z0-9_-]{43}$/.test(encoded)
+      ? "base64url"
+      : null;
 
-  if (!/^[A-Za-z0-9+/]{43}$/.test(normalized)) return null;
-  const material = new Uint8Array(Buffer.from(normalized, "base64"));
+  if (!encoding) return null;
+  const material = new Uint8Array(Buffer.from(encoded, encoding));
 
-  // Re-encoding rejects unused trailing bits, so each key has one spelling.
-  return Buffer.from(material).toString("base64").replace(/=$/, "") === normalized
+  return material.length === keySize && Buffer.from(material).toString(encoding) === encoded
     ? material
     : null;
 };
@@ -73,10 +81,6 @@ export const parseKeyring = (text: string, source: string): Keyring => {
       throw new Error(
         `${source} entry ${index + 1} must be ${keyEntry}. IDs use 1 to 32 letters, digits, - or _.`,
       );
-
-    // Random bytes repeat few values; a placeholder or typed pattern repeats many.
-    if (new Set(material).size < 16)
-      throw new Error(`${source} key version ${id} is not random. Generate it as ${keyEntry}.`);
 
     if (versions.some((version) => version.id === id))
       throw new Error(`${source} lists key version ${id} more than once`);
@@ -109,22 +113,9 @@ export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
     ),
   );
 
-// Ciphertexts are `v1:<key ID>:<base64url of IV and sealed value>`.
-const format = "v1";
-
-const ivSize = 12;
-
-// Ties the derived AES key to this use of the key version.
-const subkeyInfo = new TextEncoder().encode("widefleet control plane stored secrets");
-
-const deriveSubkey = async (material: Uint8Array<ArrayBuffer>) =>
-  crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: subkeyInfo },
-    await crypto.subtle.importKey("raw", material, "HKDF", false, ["deriveKey"]),
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
-  );
+// Ciphertexts are JWE compact serializations (RFC 7516): direct encryption
+// with the key version's 32 bytes, A256GCM, and the version's ID as `kid`.
+const header = { alg: "dir", enc: "A256GCM" } as const;
 
 /**
  * Encrypts the customer secrets that the control plane stores. Callers name
@@ -139,33 +130,23 @@ export const createSecretEncryption = ({
   keyring: Keyring;
   legacyKey?: string | undefined;
 }) => {
-  const subkeys = new Map<string, Promise<CryptoKey>>();
+  const decryptJwe = async (ciphertext: string) => {
+    const { plaintext } = await compactDecrypt(
+      ciphertext,
+      (protectedHeader) => {
+        const version = keyring.find((candidate) => candidate.id === protectedHeader.kid);
 
-  const subkey = (version: KeyVersion) => {
-    const existing = subkeys.get(version.id);
+        if (!version) throw new Error("The ciphertext names an unknown key version");
 
-    if (existing) return existing;
-    const derived = deriveSubkey(version.material);
-    subkeys.set(version.id, derived);
-
-    return derived;
-  };
-
-  const decryptVersioned = async (ciphertext: string) => {
-    const [prefix, id, payload, ...rest] = ciphertext.split(":");
-    const version = keyring.find((candidate) => candidate.id === id);
-
-    if (prefix !== format || !version || payload === undefined || rest.length > 0)
-      throw new Error("Unsupported ciphertext");
-    const bytes = new Uint8Array(Buffer.from(payload, "base64url"));
-
-    return new TextDecoder().decode(
-      await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: bytes.slice(0, ivSize) },
-        await subkey(version),
-        bytes.slice(ivSize),
-      ),
+        return version.material;
+      },
+      {
+        keyManagementAlgorithms: [header.alg],
+        contentEncryptionAlgorithms: [header.enc],
+      },
     );
+
+    return new TextDecoder().decode(plaintext);
   };
 
   return {
@@ -173,23 +154,16 @@ export const createSecretEncryption = ({
     // so binding it in a later format changes only this module.
     encrypt: async (_context: SecretContext, value: string) => {
       const [active] = keyring;
-      const iv = crypto.getRandomValues(new Uint8Array(ivSize));
 
-      const sealed = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        await subkey(active),
-        new TextEncoder().encode(value),
-      );
-
-      const payload = Buffer.concat([iv, new Uint8Array(sealed)]).toString("base64url");
-
-      return `${format}:${active.id}:${payload}`;
+      return new CompactEncrypt(new TextEncoder().encode(value))
+        .setProtectedHeader({ ...header, kid: active.id })
+        .encrypt(active.material);
     },
     decrypt: async (_context: SecretContext, ciphertext: string) => {
       try {
         return isLegacyCiphertext(ciphertext)
           ? await decryptLegacySecret(legacyKey, ciphertext)
-          : await decryptVersioned(ciphertext);
+          : await decryptJwe(ciphertext);
       } catch {
         throw new InvalidOperation({
           code: "BAD_REQUEST",
