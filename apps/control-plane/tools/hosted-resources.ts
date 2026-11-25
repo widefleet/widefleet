@@ -43,3 +43,36 @@ export const provisionHostedResources = async (
 
   return { auth };
 };
+
+/**
+ * A deployment that omits PLATFORM_ENCRYPTION_KEYS leaves the deployed secret in
+ * place, but initialization reads stored secrets here and needs the same keys.
+ * Stops before any change instead of failing during initialization.
+ */
+export const requireHostedKeyring = async (
+  installation: z.infer<typeof hostedInstallation>,
+  cloudflare: ReturnType<typeof createCloudflareProvisioner>,
+  keys: string | undefined,
+) => {
+  if (keys) return;
+
+  try {
+    const deployed = await cloudflare.call("list control plane secrets", async () => {
+      for await (const secret of cloudflare.client.workers.scripts.secrets.list(
+        hostedResourceNames(installation).controlPlane,
+        cloudflare.account,
+      ))
+        if (secret.name === "PLATFORM_ENCRYPTION_KEYS") return true;
+
+      return false;
+    });
+
+    if (deployed)
+      throw new Error(
+        "The deployed control plane uses PLATFORM_ENCRYPTION_KEYS. Supply the same keyring to deploy it.",
+      );
+  } catch (error) {
+    // A first deployment has no control plane Worker yet.
+    if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
+  }
+};
