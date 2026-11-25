@@ -9,7 +9,6 @@ import { apps, artifacts, deployments, organizationRuntimes } from "../../src/li
 import { hashAsset } from "../../src/lib/server/asset-hash.ts";
 import { workerMetadata } from "@platform/contracts";
 import { seedDeployment } from "../cloudflare-deployment.fixture.ts";
-import { decryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { storedAppSecrets } from "../../src/lib/server/app-secrets.ts";
 import {
   S3Client,
@@ -281,9 +280,12 @@ test(`preserves multiline secrets and offers failed disconnection retries`, asyn
     const encrypted = storedAppSecrets.parse(saved?.secrets)["TOKEN"];
 
     if (!encrypted) throw new Error("Missing saved secret");
-    expect(await decryptSecret(environment.environment.PLATFORM_ENCRYPTION_KEY, encrypted)).toBe(
-      value.replaceAll("\n", "\r\n"),
-    );
+    expect(
+      await environment.encryption.decrypt(
+        { kind: "app-secret", organizationId: alpha, appId: id, name: "TOKEN" },
+        encrypted,
+      ),
+    ).toBe(value.replaceAll("\n", "\r\n"));
     const entry = await seedDeployment(environment.database.db, { appId: id, bindings: [] });
     await environment.database.db.insert(deployments).values({
       id: entry.command.id,

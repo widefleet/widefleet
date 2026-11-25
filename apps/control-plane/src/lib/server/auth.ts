@@ -30,6 +30,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
 import { pluginAuthentication, managedPluginPaths } from "./plugin-authentication.ts";
 import { cliLoginPlugin, createCliLogin } from "./cli-login.ts";
+import { createSecretEncryption, type SecretEncryption } from "./secret-encryption.ts";
 import { createMcpCliLogin, mcpCliLoginPlugin, type CliLoginSettings } from "./mcp-cli-login.ts";
 
 export const companyLoginRevision = (
@@ -57,7 +58,7 @@ export const createAuthentication = (
     // The analytics IDs of the person's app identities, linked to their account on sign-in.
     appIdentityLinks?: (userId: string) => Promise<string[]>;
     reportException?: (error: Error) => void;
-    encryptionKey?: string;
+    encryption?: SecretEncryption;
     cookies?: ReturnType<typeof sveltekitCookies>;
     cliLoginSettings?: CliLoginSettings;
   } = {},
@@ -84,12 +85,12 @@ export const createAuthentication = (
     },
   });
 
-  const encryptionKey =
-    options.encryptionKey ??
-    configuration.PLATFORM_ENCRYPTION_KEY ??
-    configuration.BETTER_AUTH_SECRET;
+  const legacyKey = configuration.PLATFORM_ENCRYPTION_KEY ?? configuration.BETTER_AUTH_SECRET;
 
-  if (!encryptionKey) throw new Error("An encryption key is required for authentication");
+  const encryption =
+    options.encryption ?? (legacyKey ? createSecretEncryption({ legacyKey }) : undefined);
+
+  if (!encryption) throw new Error("An encryption key is required for authentication");
 
   let readKeys: () => Promise<JSONWebKeySet> = async () => {
     throw new Error("Authentication is initializing");
@@ -98,7 +99,7 @@ export const createAuthentication = (
   const authorizePlugin = pluginAuthentication(
     database,
     configuration,
-    encryptionKey,
+    encryption,
     () => readKeys(),
     options.organizationAccess,
     options.authentication?.allowUser,
@@ -134,13 +135,7 @@ export const createAuthentication = (
     },
     disabledPaths: [...settings.disabledPaths, ...managedPluginPaths],
     trustedOrigins: (request) =>
-      companySsoOrigins(
-        database,
-        configuration.PLATFORM_URL,
-        encryptionKey,
-        request,
-        configuration,
-      ),
+      companySsoOrigins(database, configuration.PLATFORM_URL, encryption, request, configuration),
     plugins: [
       ...(options.authentication?.plugins ?? []),
       ...settings.plugins,
@@ -157,7 +152,7 @@ export const createAuthentication = (
             ),
           ]
         : []),
-      companySsoPlugin(database, encryptionKey, options.organizationAccess, configuration),
+      companySsoPlugin(database, encryption, options.organizationAccess, configuration),
       {
         id: "management-credentials",
         // These library endpoints are invoked by the shared services. Exposing
@@ -277,7 +272,7 @@ export const createAuthentication = (
                 });
 
               revision = companyLoginRevision(
-                await readSsoConfiguration(database, encryptionKey, provider.organizationId),
+                await readSsoConfiguration(database, encryption, provider.organizationId),
               );
             }
 

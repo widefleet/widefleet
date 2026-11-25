@@ -411,7 +411,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     await registerAppLogin(
       environment.database.db,
       environment.configuration,
-      z.string().parse(environment.configuration.PLATFORM_ENCRYPTION_KEY),
+      environment.encryption,
       installationOrganizationId,
     );
 

@@ -120,9 +120,7 @@ export const initializeRuntime = async (
       if (bootstrap) {
         await initializeBootstrap(
           settings,
-          createAuthentication(configuration, database.db, {
-            encryptionKey: keys.encryption,
-          }),
+          createAuthentication(configuration, database.db, { encryption: keys.encryption }),
           database.db,
           bootstrap,
         );
@@ -141,7 +139,7 @@ export const initializeRuntime = async (
       configuration,
       database,
       settings,
-      encryptionKey: keys.encryption,
+      encryption: keys.encryption,
       extension,
       observation,
     };

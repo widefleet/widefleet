@@ -18,7 +18,7 @@ describe("Operator configuration and organization settings", () => {
       settings: environment.settings,
       storage: createStorage(environment.configuration),
       reporting: environment.reporting,
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
     });
 
   beforeEach(async () => {

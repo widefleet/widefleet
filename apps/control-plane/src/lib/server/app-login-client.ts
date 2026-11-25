@@ -7,7 +7,7 @@ import { companyIdentity } from "./company-identity.ts";
 import { oauthClient } from "./auth-schema.ts";
 import { organizationSettings } from "./schema.ts";
 import { appCallbackUrl } from "./app-sign-in.ts";
-import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 
 export const hashAppClientSecret = async (value: string) =>
   createHash("sha256").update(value).digest("base64url");
@@ -18,7 +18,7 @@ export const appLoginClientId = (organizationId: string) =>
 export const registerAppLogin = async (
   database: DatabaseExecutor,
   configuration: Configuration,
-  key: string,
+  encryption: SecretEncryption,
   organizationId: string,
 ) => {
   const [settings] = await database
@@ -30,13 +30,21 @@ export const registerAppLogin = async (
   if (!settings) throw new Error("Initialize organization settings before app sign-in");
 
   const secret = settings.appClientSecret
-    ? await decryptSecret(key, settings.appClientSecret)
+    ? await encryption.decrypt(
+        { kind: "app-login-client-secret", organizationId },
+        settings.appClientSecret,
+      )
     : randomBytes(32).toString("base64url");
 
   if (!settings.appClientSecret)
     await database
       .update(organizationSettings)
-      .set({ appClientSecret: await encryptSecret(key, secret) })
+      .set({
+        appClientSecret: await encryption.encrypt(
+          { kind: "app-login-client-secret", organizationId },
+          secret,
+        ),
+      })
       .where(eq(organizationSettings.organizationId, organizationId));
   const clientId = appLoginClientId(organizationId);
 
@@ -66,7 +74,7 @@ export const registerAppLogin = async (
 export const readAppLogin = async (
   database: DatabaseExecutor,
   configuration: Configuration,
-  key: string,
+  encryption: SecretEncryption,
   organizationId: string,
 ) => {
   const [settings] = await database
@@ -76,7 +84,11 @@ export const readAppLogin = async (
 
   if (!settings?.appClientSecret) return null;
   const clientId = appLoginClientId(organizationId);
-  const clientSecret = await decryptSecret(key, settings.appClientSecret);
+
+  const clientSecret = await encryption.decrypt(
+    { kind: "app-login-client-secret", organizationId },
+    settings.appClientSecret,
+  );
 
   return companyIdentity.parse({
     provider: {

@@ -171,16 +171,19 @@ export const createTestEnvironment = async (
   await initializeOrganization(database.db);
   await initializeInstallation(database.db);
 
-  const cookieKey = (await installationKeys(configuration)).cookie;
+  const keys = await installationKeys(configuration);
 
   const settings = createSettingsService(
     configuration,
     database.db,
-    environment.PLATFORM_ENCRYPTION_KEY,
-    (organizationId) => createAppSignIn(configuration, cookieKey, organizationId),
+    keys.encryption,
+    (organizationId) => createAppSignIn(configuration, keys.cookie, organizationId),
   );
 
-  const auth = createAuthentication(configuration, database.db, { cliLoginSettings: settings });
+  const auth = createAuthentication(configuration, database.db, {
+    cliLoginSettings: settings,
+    encryption: keys.encryption,
+  });
 
   const owner = await createInstallationOwner(database.db, {
     name: "Setup Owner",
@@ -248,6 +251,7 @@ export const createTestEnvironment = async (
     reporting: createReporting(configuration, database.db),
     replacementClient,
     settings,
+    encryption: keys.encryption,
     owner,
     ownerId: owner.id,
     ownerSubject,

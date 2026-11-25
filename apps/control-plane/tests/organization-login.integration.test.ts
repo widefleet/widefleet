@@ -129,7 +129,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
     const settings = createSettingsService(
       environment.configuration,
       environment.database.db,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.encryption,
       (organizationId) =>
         createInstalledAppSignIn(
           environment.configuration,
@@ -160,7 +160,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
       settings,
       storage: createStorage(environment.configuration),
       reporting: environment.reporting,
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
       sendEmail: async (message) => {
         if (failedRecipients.has(message.to)) throw new Error("Synthetic delivery failure");
         delivered.push(message);

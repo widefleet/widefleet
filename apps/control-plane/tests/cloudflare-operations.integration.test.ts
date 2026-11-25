@@ -288,7 +288,7 @@ describe("Cloudflare operation history", () => {
     (await registerCloudflareOperation(environment.database.db, newer.command)).unwrap();
     (await registerCloudflareOperation(environment.database.db, older.command)).unwrap();
 
-    const status = await createAppSecrets(environment.database.db, "unused-key").read(
+    const status = await createAppSecrets(environment.database.db, environment.encryption).read(
       {
         ...environment.owner,
         role: "owner",
@@ -375,7 +375,7 @@ describe("Cloudflare operation history", () => {
       tokenHash: crypto.randomUUID(),
     });
     expect(
-      await createJobService(environment.database.db, storage, "unused-test-key").claim(
+      await createJobService(environment.database.db, storage, environment.encryption).claim(
         agentId,
         true,
       ),

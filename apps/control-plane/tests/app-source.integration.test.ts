@@ -409,7 +409,7 @@ describe("App source repositories", () => {
       settings: environment.settings,
       storage: createStorage(environment.configuration, memoryStorage()),
       reporting: environment.reporting,
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
       source: backend,
     })();
 
@@ -533,7 +533,7 @@ describe("App source repositories", () => {
       settings: environment.settings,
       storage: createStorage(environment.configuration, memoryStorage()),
       reporting: environment.reporting,
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
       source: slowBackend,
     })();
 
@@ -581,7 +581,7 @@ describe("App source repositories", () => {
       settings: environment.settings,
       storage: createStorage(environment.configuration, memoryStorage()),
       reporting: environment.reporting,
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
       source: backend,
       bundledRuntime: loadBundledRuntime,
     })();

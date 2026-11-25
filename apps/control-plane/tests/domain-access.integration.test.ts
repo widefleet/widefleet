@@ -37,7 +37,7 @@ describe("Joining organizations by company email domain", () => {
       },
       reporting: environment.reporting,
       storage: createStorage(environment.configuration),
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
       sendEmail: async () => {},
       organizationAccess: {
         filterOrganizations: async (candidates) =>

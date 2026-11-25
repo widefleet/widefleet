@@ -97,7 +97,7 @@ describe("Mandatory application context", () => {
       settings: environment.settings,
       reporting: environment.reporting,
       storage: createStorage(environment.configuration, memoryStorage()),
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      encryption: environment.encryption,
       organizationAccess: {
         filterOrganizations: async (candidates) => candidates.map((candidate) => candidate.id),
       },
