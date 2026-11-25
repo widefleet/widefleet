@@ -65,6 +65,15 @@ it("sends immediately with the browser user ID and organization group", async ()
   await observer.close();
 });
 
+it("links another distinct ID to the user's person", async () => {
+  const { events, observer } = fixture();
+  observer.alias("a", "app-user:hash");
+  await observer.close();
+  expect(events).toMatchObject([
+    { event: "$create_alias", distinct_id: "user:a", properties: { alias: "app-user:hash" } },
+  ]);
+});
+
 it("stays inactive without configuration or on a different origin", async () => {
   const transport = vi.fn<typeof fetch>();
 

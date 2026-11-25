@@ -23,6 +23,7 @@ it("reports idle database connection errors through the runtime observer", async
   const observer = vi.spyOn(analytics, "createProductAnalytics").mockReturnValue({
     capture: () => {},
     exception,
+    alias: () => {},
     close: async () => {},
   });
 

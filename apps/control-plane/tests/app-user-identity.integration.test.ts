@@ -4,7 +4,11 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { issuer } from "@platform/auth-proxy/identity";
 import { createAuthentication } from "../src/lib/server/auth.ts";
-import { createAppUserIdentity } from "../src/lib/server/app-user-identity.ts";
+import { appUserDistinctId } from "@platform/contracts";
+import {
+  createAppIdentityLinks,
+  createAppUserIdentity,
+} from "../src/lib/server/app-user-identity.ts";
 import { registerAppLogin } from "../src/lib/server/app-login-client.ts";
 import { account, organization, ssoProvider, user } from "../src/lib/server/auth-schema.ts";
 import type { Principal } from "../src/lib/server/identity.ts";
@@ -157,6 +161,48 @@ describe("App identity of management accounts", () => {
 
     // A repeated sign-in finds the same account.
     expect((await login()).userId).toBe(id);
+  });
+
+  it("links the app identity that app sign-in issues to the account on sign-in", async () => {
+    const aliases: [string, string][] = [];
+
+    auth = createAuthentication(environment.configuration, environment.database.db, {
+      organizationAccess: {
+        filterOrganizations: async (candidates) =>
+          candidates.filter(({ id }) => id === organizationId).map(({ id }) => id),
+      },
+      observation: {
+        capture: () => {},
+        alias: (userId, alias) => {
+          aliases.push([userId, alias]);
+        },
+        close: async () => {},
+      },
+      appIdentityLinks: createAppIdentityLinks(
+        environment.database.db,
+        environment.configuration,
+        environment.settings,
+      ),
+    });
+
+    // The first company sign-in links its identity before the membership exists.
+    const id = z.string().parse((await login()).userId);
+    const identity = await identify(principal(id));
+
+    // The runtime derives the same ID from the caller app sign-in forwards.
+    expect(aliases).toEqual([
+      [
+        id,
+        await appUserDistinctId({
+          issuer: `${environment.configuration.PLATFORM_URL}/api/auth`,
+          subject: id,
+        }),
+      ],
+      [id, await appUserDistinctId(identity)],
+    ]);
+    expect(await appUserDistinctId(identity)).toBe(
+      await appUserDistinctId({ issuer: `${provider.origin}/${tenantId}/v2.0`, subject: objectId }),
+    );
   });
 
   it("rejects Entra sign-in for another tenant without creating an account", async () => {

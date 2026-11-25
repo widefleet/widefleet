@@ -1,12 +1,18 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { APIError } from "better-auth/api";
-import { appCaller } from "@platform/contracts";
+import { appCaller, appUserDistinctId } from "@platform/contracts";
 import { issuer } from "@platform/auth-proxy/identity";
-import { member, user, account } from "./auth-schema.ts";
+import { member, user, account, ssoProvider } from "./auth-schema.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import type { createSettingsService } from "./settings.ts";
+
+// Apps of organizations without company sign-in sign people in through Widefleet itself.
+const widefleetAppIdentity = (configuration: Configuration, userId: string) => ({
+  issuer: `${configuration.PLATFORM_URL}/api/auth`,
+  subject: userId,
+});
 
 /**
  * The member's app identity, as app sign-in issues it. Without required company
@@ -19,7 +25,11 @@ export const createAppUserIdentity =
     configuration: Configuration,
     settings: ReturnType<typeof createSettingsService>,
   ) =>
-  async (principal: Principal) => {
+  async (
+    principal: Pick<Principal, "id" | "name"> & {
+      application: Pick<Principal["application"], "organizationId">;
+    },
+  ) => {
     const organizationId = principal.application.organizationId;
     const current = await settings.resolve(organizationId);
 
@@ -42,8 +52,7 @@ export const createAppUserIdentity =
         });
 
       return appCaller.parse({
-        issuer: `${configuration.PLATFORM_URL}/api/auth`,
-        subject: principal.id,
+        ...widefleetAppIdentity(configuration, principal.id),
         name: principal.name,
       });
     }
@@ -70,3 +79,38 @@ export const createAppUserIdentity =
       name: principal.name,
     });
   };
+
+/**
+ * The product analytics IDs of a person's app identities, so their app use counts toward
+ * their account instead of a second person. Company identities come from the person's
+ * company accounts, which exist at sign-in even before company sign-in adds the membership.
+ */
+export const createAppIdentityLinks = (
+  database: Database,
+  configuration: Configuration,
+  settings: ReturnType<typeof createSettingsService>,
+) => {
+  const identify = createAppUserIdentity(database, configuration, settings);
+
+  return async (userId: string) => {
+    const companies = await database
+      .selectDistinct({ organizationId: ssoProvider.organizationId, name: user.name })
+      .from(account)
+      .innerJoin(ssoProvider, eq(ssoProvider.providerId, account.providerId))
+      .innerJoin(user, eq(user.id, account.userId))
+      .where(and(eq(account.userId, userId), isNotNull(ssoProvider.organizationId)));
+
+    const identities = await Promise.allSettled(
+      companies.flatMap(({ organizationId, name }) =>
+        organizationId ? [identify({ id: userId, name, application: { organizationId } })] : [],
+      ),
+    );
+
+    const callers = [
+      widefleetAppIdentity(configuration, userId),
+      ...identities.flatMap((result) => (result.status === "fulfilled" ? [result.value] : [])),
+    ];
+
+    return [...new Set(await Promise.all(callers.map((caller) => appUserDistinctId(caller))))];
+  };
+};

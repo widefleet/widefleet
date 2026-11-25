@@ -24,6 +24,8 @@ export interface Observation {
     distinctId?: string,
     properties?: Parameters<PostHog["captureException"]>[2],
   ) => void | Promise<void>;
+  // Links another distinct ID, such as an app identity, to the user's person.
+  alias?: (userId: string, alias: string) => void | Promise<void>;
   close: () => Promise<void>;
 }
 
