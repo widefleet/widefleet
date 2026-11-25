@@ -9,6 +9,7 @@ export default defineMeta({
     "company-setup",
     "external-services",
     "storage",
+    "encryption-keys",
     "runtime-logs",
     "installation-reporting",
   ],
