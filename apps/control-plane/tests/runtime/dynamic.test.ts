@@ -286,6 +286,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           text: '<html><head><link rel="manifest" href="/own.webmanifest"></head></html>',
           hash: "8".repeat(32),
         },
+        { path: "/plain-page", text: "<html><head></head></html>", hash: "b".repeat(32) },
         {
           path: "/favicon.svg",
           text: "<svg xmlns='http://www.w3.org/2000/svg'/>",
@@ -299,7 +300,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         },
         {
           path: "/_headers",
-          text: '/asset.txt\n  Cache-Control: public, max-age=3600\n  X-Fixture: preserved\n  Content-Length: 999\n  ETag: "release-1"\n/no-tag.txt\n  ! ETag\n/weak-tag.txt\n  ETag: W/"release-weak"\n',
+          text: '/asset.txt\n  Cache-Control: public, max-age=3600\n  X-Fixture: preserved\n  Content-Length: 999\n  ETag: "release-1"\n/no-tag.txt\n  ! ETag\n/weak-tag.txt\n  ETag: W/"release-weak"\n/plain-page\n  Content-Type: text/html\n',
           hash: "2".repeat(32),
         },
         {
@@ -878,6 +879,10 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           })
         ).status,
       ).toBe(304);
+      // Header rules can make an extensionless file a page.
+      expect((await fetch(`${origin}/plain-page`)).headers.get("etag")).toBe(
+        `"${"b".repeat(32)}-manifest"`,
+      );
       expect(await (await fetch(`${origin}/own`)).text()).toBe(
         '<html><head><link rel="manifest" href="/own.webmanifest"></head></html>',
       );

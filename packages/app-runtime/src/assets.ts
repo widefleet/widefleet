@@ -203,21 +203,22 @@ export const serveAsset = async (
 
   if (!entry) return new Response(null, { status: 404 });
 
-  const contentType =
-    contentTypes.get(path.split(".").at(-1)?.toLowerCase() ?? "") ?? "application/octet-stream";
-
   const headers = new Headers({
-    "content-type": contentType,
+    "content-type":
+      contentTypes.get(path.split(".").at(-1)?.toLowerCase() ?? "") ?? "application/octet-stream",
     "content-length": String(entry.size),
     "accept-ranges": "bytes",
-    // Pages served with a manifest link differ from the uploaded file, so browsers
-    // must not reuse a copy cached without it.
-    etag: linksManifest(app, contentType) ? `"${entry.hash}-manifest"` : `"${entry.hash}"`,
+    etag: `"${entry.hash}"`,
     "cache-control": "public, max-age=0, must-revalidate",
     "x-content-type-options": "nosniff",
   });
 
   applyHeaders(headerRules, new URL(request.url), headers);
+
+  // Pages served with a manifest link differ from the uploaded file, so browsers
+  // must not reuse a copy cached without it.
+  if (headers.get("etag") === `"${entry.hash}"` && linksManifest(app, headers.get("content-type")))
+    headers.set("etag", `"${entry.hash}-manifest"`);
   const etag = headers.get("etag");
 
   if (
