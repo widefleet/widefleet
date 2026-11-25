@@ -25,6 +25,7 @@ import * as authSchema from "./auth-schema.ts";
 import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { readSsoConfiguration } from "./sso-settings.ts";
+import { saveUserPicture } from "./user-pictures.ts";
 import { createAuthenticationAdmission } from "./auth-admission.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
@@ -72,6 +73,7 @@ export const createAuthentication = (
 
   const settings = authenticationOptions(configuration, {
     ...admission,
+    savePicture: (userId, picture) => saveUserPicture(database, userId, picture),
     ...options,
     allowUser: options.authentication?.allowUser,
     tokenClaims: async (input) => {

@@ -66,9 +66,12 @@ export const socialProviders = (configuration: Configuration) => {
       clientSecret: configuration.MICROSOFT_CLIENT_SECRET,
       tenantId: "common",
       disableIdTokenSignIn: true,
+      // Better Auth would store the photo as a data URL in the user row. The sign-in
+      // copies it to Widefleet's picture store instead.
       disableProfilePhoto: true,
       disableDefaultScope: true,
-      scope: ["openid", "profile", "email"],
+      // `User.Read` lets the sign-in copy the user's photo from Microsoft Graph.
+      scope: ["openid", "profile", "email", "User.Read"],
       prompt: "select_account",
       mapProfileToUser: (profile) => {
         if (z.email().safeParse(profile.email).success) {

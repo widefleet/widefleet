@@ -1,0 +1,110 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchGraphPicture, fetchPictureUrl, maxPictureBytes, pictureFormat } from "./picture.ts";
+
+const png = (size: number) => {
+  const bytes = new Uint8Array(size);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  return bytes;
+};
+
+const provider = "https://login.example.test";
+
+describe("profile pictures", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("recognizes raster pictures by their bytes only", () => {
+    const text = (value: string) => new TextEncoder().encode(value);
+    expect(pictureFormat(png(16))).toBe("image/png");
+    expect(pictureFormat(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg");
+    expect(pictureFormat(text("GIF89a..."))).toBe("image/gif");
+    expect(pictureFormat(text("RIFF....WEBPVP8 "))).toBe("image/webp");
+    expect(pictureFormat(text('<svg xmlns="http://www.w3.org/2000/svg"/>'))).toBeNull();
+    expect(pictureFormat(text("<html>"))).toBeNull();
+  });
+
+  it("asks only the provider and Google's picture host, within the size limit", async () => {
+    const responses = new Map([
+      [`${provider}/small`, () => new Response(png(maxPictureBytes))],
+      [`${provider}/large`, () => new Response(png(maxPictureBytes + 1))],
+      [`${provider}/gone`, () => new Response(null, { status: 404 })],
+      [`${provider}/failing`, () => new Response(null, { status: 503 })],
+      ["https://lh3.googleusercontent.com/a/photo", () => new Response(png(32))],
+    ]);
+
+    const requests: { url: string; redirect: RequestRedirect; authorization: string | null }[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const request = new Request(input, init);
+
+        requests.push({
+          url: request.url,
+          redirect: request.redirect,
+          authorization: request.headers.get("authorization"),
+        });
+
+        return (responses.get(request.url) ?? (() => Response.error()))();
+      }),
+    );
+
+    const read = (url: string) => fetchPictureUrl(new URL(url), provider, "provider-token");
+
+    expect(await read(`${provider}/small`)).toEqual({
+      bytes: png(maxPictureBytes),
+      contentType: "image/png",
+    });
+    expect(await read(`${provider}/large`)).toBeNull();
+    expect(await read(`${provider}/gone`)).toBe("none");
+    expect(await read(`${provider}/failing`)).toBeNull();
+    // Without the sign-in's token the provider is not asked.
+    expect(await fetchPictureUrl(new URL(`${provider}/small`), provider, undefined)).toBeNull();
+    expect(await read("https://lh3.googleusercontent.com/a/photo")).toEqual({
+      bytes: png(32),
+      contentType: "image/png",
+    });
+    // Other hosts, including private ones, are never asked.
+    expect(await read("https://pictures.example.test/photo")).toBeNull();
+    expect(await read("http://lh3.googleusercontent.com/a/photo")).toBeNull();
+    expect(await read("https://10.0.0.7/photo")).toBeNull();
+    expect(await read("https://user:secret@login.example.test/small")).toBeNull();
+
+    expect(requests.map(({ url }) => url)).toEqual([
+      `${provider}/small`,
+      `${provider}/large`,
+      `${provider}/gone`,
+      `${provider}/failing`,
+      "https://lh3.googleusercontent.com/a/photo",
+    ]);
+    // The provider's token goes only to the provider, and no redirect is followed.
+    expect(requests.at(-1)?.authorization).toBeNull();
+    expect(
+      requests.slice(0, 4).every((request) => request.authorization === "Bearer provider-token"),
+    ).toBe(true);
+    expect(requests.every((request) => request.redirect === "error")).toBe(true);
+  });
+
+  it("asks Graph for the signed-in user's photo", async () => {
+    let authorization: string | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const request = new Request(input, init);
+        expect(request.url).toBe("https://graph.microsoft.com/v1.0/me/photos/120x120/$value");
+        authorization = request.headers.get("authorization");
+
+        return new Response(png(32));
+      }),
+    );
+
+    expect(await fetchGraphPicture("synthetic-access-token")).toEqual({
+      bytes: png(32),
+      contentType: "image/png",
+    });
+    expect(authorization).toBe("Bearer synthetic-access-token");
+  });
+});

@@ -5,6 +5,7 @@ import { generateKeyPair, SignJWT } from "jose";
 import { z } from "zod";
 import { authenticationOptions } from "../src/lib/server/auth-options.ts";
 import { runtimeConfigurationSchema } from "../src/lib/server/config.ts";
+import type { PictureResult } from "@platform/auth-proxy/picture";
 import {
   availableSocialProviders,
   readCompanySsoHint,
@@ -40,6 +41,7 @@ describe("personal social sign-in", () => {
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   const fixture = async ({
@@ -51,6 +53,9 @@ describe("personal social sign-in", () => {
   } = {}) => {
     let otp = "";
     let active = true;
+    const saved: { userId: string; picture: PictureResult }[] = [];
+    // Picture responses by URL; any other request must be the provider's token exchange.
+    const pictures = new Map<string, (request: Request) => Response>();
     const logs: { level: string; message: string; args: unknown[] }[] = [];
 
     const options = authenticationOptions(configuration, {
@@ -65,6 +70,9 @@ describe("personal social sign-in", () => {
           .parse(message.text.match(/code is (\d{6})/)?.[1]);
       },
       rateLimit: { enabled: false },
+      savePicture: async (userId, picture) => {
+        saved.push({ userId, picture });
+      },
     });
 
     const user = existing
@@ -171,8 +179,12 @@ describe("personal social sign-in", () => {
 
       vi.stubGlobal(
         "fetch",
-        vi.fn(async (input: Parameters<typeof fetch>[0]) => {
-          const url = new Request(input).url;
+        vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          const outgoing = new Request(input, init);
+          const url = outgoing.url;
+          const picture = pictures.get(url);
+
+          if (picture) return picture(outgoing);
           expect(url).toBe(
             provider === "google"
               ? "https://oauth2.googleapis.com/token"
@@ -209,6 +221,8 @@ describe("personal social sign-in", () => {
       signIn,
       cookies,
       logs,
+      saved,
+      pictures,
       block: () => {
         active = false;
       },
@@ -269,10 +283,26 @@ describe("personal social sign-in", () => {
     }
   });
 
-  it("refreshes only the profile picture from each sign-in", async () => {
+  it("copies the picture each sign-in reports and nothing else from the profile", async () => {
     const f = await fixture();
     const userId = z.string().parse(f.user?.id);
     const google = { email_verified: true, hd: "example.test" };
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    let graphAuthorization: string | null = null;
+
+    f.pictures.set("https://lh3.googleusercontent.com/a/photo", () => new Response(png));
+    f.pictures.set(
+      "https://lh3.googleusercontent.com/a/drawing",
+      () =>
+        new Response('<svg xmlns="http://www.w3.org/2000/svg"/>', {
+          headers: { "content-type": "image/svg+xml" },
+        }),
+    );
+    f.pictures.set("https://graph.microsoft.com/v1.0/me/photos/120x120/$value", (request) => {
+      graphAuthorization = request.headers.get("authorization");
+
+      return new Response(null, { status: 404 });
+    });
 
     const signInWith = async (
       provider: "google" | "microsoft",
@@ -280,30 +310,54 @@ describe("personal social sign-in", () => {
     ) => {
       f.cookies.clear();
       expect((await f.signIn(provider, claims)).headers.get("location")).toContain("/device?");
-
-      return f.internalAdapter.findUserById(userId);
     };
 
-    expect(
-      await signInWith("google", { ...google, picture: "https://pictures.example.test/first" }),
-    ).toMatchObject({ image: "https://pictures.example.test/first" });
-    expect(
-      await signInWith("google", {
-        ...google,
-        name: "Renamed at provider",
-        picture: "https://pictures.example.test/second",
-      }),
-    ).toMatchObject({
+    await signInWith("google", {
+      ...google,
+      name: "Renamed at provider",
+      picture: "https://lh3.googleusercontent.com/a/photo",
+    });
+    // Only raster pictures over HTTPS from Google's picture host are copied.
+    await signInWith("google", {
+      ...google,
+      picture: "https://lh3.googleusercontent.com/a/drawing",
+    });
+    await signInWith("google", { ...google, picture: "http://lh3.googleusercontent.com/a/photo" });
+
+    // Google leaves Workspace pictures out of the ID token; its user info names them.
+    let userInfo: () => Response = () =>
+      Response.json({ picture: "https://lh3.googleusercontent.com/a/photo" });
+
+    let userInfoAuthorization: string | null = null;
+
+    f.pictures.set("https://openidconnect.googleapis.com/v1/userinfo", (request) => {
+      userInfoAuthorization = request.headers.get("authorization");
+
+      return userInfo();
+    });
+    await signInWith("google", google);
+    expect(userInfoAuthorization).toBe("Bearer synthetic-access-token");
+    // Unreadable user info keeps the copy; user info without a picture means there is none.
+    userInfo = () => new Response(null, { status: 503 });
+    await signInWith("google", google);
+    userInfo = () => Response.json({ sub: "synthetic-provider-subject" });
+    await signInWith("google", google);
+    // Microsoft reports the photo through Graph, here that the user has none.
+    await signInWith("microsoft", { xms_edov: true });
+
+    expect(f.saved).toEqual([
+      { userId, picture: { bytes: png, contentType: "image/png" } },
+      { userId, picture: null },
+      { userId, picture: null },
+      { userId, picture: { bytes: png, contentType: "image/png" } },
+      { userId, picture: null },
+      { userId, picture: "none" },
+      { userId, picture: "none" },
+    ]);
+    expect(graphAuthorization).toBe("Bearer synthetic-access-token");
+    expect(await f.internalAdapter.findUserById(userId)).toMatchObject({
       name: "Synthetic member",
       email,
-      image: "https://pictures.example.test/second",
-    });
-    // A provider without a usable picture leaves the current one in place.
-    expect(
-      await signInWith("google", { ...google, picture: "http://pictures.example.test/plain" }),
-    ).toMatchObject({ image: "https://pictures.example.test/second" });
-    expect(await signInWith("microsoft", { xms_edov: true })).toMatchObject({
-      image: "https://pictures.example.test/second",
     });
   });
 

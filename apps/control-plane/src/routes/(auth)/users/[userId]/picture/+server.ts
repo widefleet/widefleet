@@ -1,0 +1,45 @@
+import { error } from "@sveltejs/kit";
+import { sessionSignIn } from "#server/identity";
+import { queryValue } from "#server/remote-support";
+import { getRuntime } from "#server/runtime";
+import { readUserPicture } from "#server/user-pictures";
+import type { RequestHandler } from "./$types";
+
+// Pictures are copies of what sign-in providers report. The bytes were checked to be PNG,
+// JPEG, GIF or WebP; they are never sniffed, scripted or embedded on another site.
+export const GET: RequestHandler = async ({ params, locals, request }) => {
+  const { user, session } = locals;
+
+  if (!user || !session) error(401, "Sign in to see this picture.");
+  const runtime = await getRuntime();
+
+  const organizations = queryValue(
+    await runtime.identity.listOrganizations(sessionSignIn(user, session)),
+  );
+
+  const picture = await readUserPicture(
+    runtime.database.db,
+    { id: user.id, organizations },
+    params.userId,
+  );
+
+  if (!picture) error(404, "Picture not found");
+  const etag = `"${picture.version}"`;
+
+  // Each check repeats the authorization above, so a person removed from an organization
+  // stops seeing its members' pictures when their browser next asks.
+  const headers = {
+    etag,
+    "cache-control": "private, no-cache",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox",
+    "cross-origin-resource-policy": "same-origin",
+  };
+
+  if (request.headers.get("if-none-match") === etag)
+    return new Response(null, { status: 304, headers });
+
+  return new Response(Buffer.from(picture.bytes), {
+    headers: { ...headers, "content-type": picture.contentType },
+  });
+};

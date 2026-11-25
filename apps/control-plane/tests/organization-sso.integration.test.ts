@@ -15,9 +15,11 @@ import {
   organization,
   session,
   ssoProvider,
+  user,
 } from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
 import { registerAppLogin, readAppLogin } from "../src/lib/server/app-login-client.ts";
+import { saveUserPicture } from "../src/lib/server/user-pictures.ts";
 import {
   createInvitationService,
   prepareOrganizationInvitation,
@@ -989,6 +991,10 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     );
 
     if (!client) throw new Error("Expected an app client");
+    await saveUserPicture(environment.database.db, userId, {
+      bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      contentType: "image/png",
+    });
     const global = await environment.users.login({ userId });
     const cookie = new Headers(global.headers).get("cookie") ?? "";
     const verifier = randomBytes(32).toString("base64url");
@@ -1022,7 +1028,26 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     );
 
     expect(issued.status, await issued.clone().text()).toBe(200);
-    const grant = tokenResponse.parse(await issued.json());
+    const grant = tokenResponse.extend({ id_token: z.string() }).parse(await issued.json());
+
+    // Apps receive the copied picture as a URL on this installation.
+    const [stored] = await environment.database.db
+      .select({ image: user.image })
+      .from(user)
+      .where(eq(user.id, userId));
+
+    const picture = new URL(z.string().parse(stored?.image), origin).href;
+
+    expect(decodeJwt(grant.id_token)["picture"]).toBe(picture);
+
+    const userInfo = await auth.handler(
+      new Request(`${authUrl}/oauth2/userinfo`, {
+        headers: { authorization: `Bearer ${grant.access_token}` },
+      }),
+    );
+
+    expect(userInfo.status, await userInfo.clone().text()).toBe(200);
+    expect(await userInfo.json()).toMatchObject({ picture });
 
     const renew = (refreshToken: string) =>
       request(

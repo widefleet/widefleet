@@ -16,7 +16,7 @@ import type { SignIn } from "./sso-policy.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
 import { organizationMemberLimit } from "./organization.ts";
 import { personalSocialAccounts, socialProviders, validateSocialUser } from "./social-sign-in.ts";
-import { signInPicture } from "./sign-in-picture.ts";
+import { signInPicture, type SavePicture } from "./sign-in-picture.ts";
 
 export const cliClientId = "platform-cli";
 
@@ -59,6 +59,7 @@ export const authenticationOptions = (
     ipAddressHeaders,
     publicSignup = false,
     validateSchema,
+    savePicture,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
@@ -74,9 +75,15 @@ export const authenticationOptions = (
     publicSignup?: boolean;
     /** Better Auth checks the schema the first time each instance is used. */
     validateSchema?: boolean;
+    /** Keeps the picture each provider sign-in reports. */
+    savePicture?: SavePicture;
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
+
+  const picture = (image: string | null | undefined) =>
+    image ? new URL(image, configuration.PLATFORM_URL).href : undefined;
+
   const providers = socialProviders(configuration);
 
   if (publicSignup && (!sendEmail || configuration.LOGIN_CODE_DELIVERY !== "email"))
@@ -301,7 +308,7 @@ export const authenticationOptions = (
     rateLimit: rateLimit ?? { storage: "memory" },
     plugins: [
       personalSocialAccounts,
-      signInPicture,
+      ...(savePicture ? [signInPicture(savePicture)] : []),
       lastLoginMethod({
         cookieName: "platform.last_used_login_method",
         beforeStoreCookie: (context) => Boolean(context.context.newSession),
@@ -388,6 +395,11 @@ export const authenticationOptions = (
           email: scopes.includes("email") ? user.email : undefined,
           email_verified: scopes.includes("email") ? user.emailVerified : undefined,
           name: scopes.includes("profile") ? user.name : undefined,
+          picture: scopes.includes("profile") ? picture(user.image) : undefined,
+        }),
+        // `user.image` names the picture on this installation. OIDC clients need its URL.
+        customUserInfoClaims: ({ user, scopes }) => ({
+          picture: scopes.includes("profile") ? picture(user.image) : undefined,
         }),
         // Request-scoped instances read the policies persisted by installation setup.
         resources: initializeResources ? [cliResourcePolicy(configuration)] : [],
