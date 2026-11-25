@@ -323,6 +323,8 @@ describe("personal social sign-in", () => {
       picture: "https://lh3.googleusercontent.com/a/drawing",
     });
     await signInWith("google", { ...google, picture: "http://lh3.googleusercontent.com/a/photo" });
+    // A sign-in that names no picture reports that there is none.
+    await signInWith("google", google);
     // Microsoft reports the photo through Graph, here that the user has none.
     await signInWith("microsoft", { xms_edov: true });
 
@@ -330,6 +332,7 @@ describe("personal social sign-in", () => {
       { userId, picture: { bytes: png, contentType: "image/png" } },
       { userId, picture: null },
       { userId, picture: null },
+      { userId, picture: "none" },
       { userId, picture: "none" },
     ]);
     expect(graphAuthorization).toBe("Bearer synthetic-access-token");

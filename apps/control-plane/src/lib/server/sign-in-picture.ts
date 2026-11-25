@@ -11,11 +11,14 @@ import { decodeJwt } from "jose";
 import { z } from "zod";
 import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
 
-const pictureClaim = (idToken: string | null | undefined) => {
+// The claims that name a picture; `null` when they cannot be read.
+const pictureClaims = z.looseObject({ picture: z.unknown().optional() });
+
+const idTokenClaims = (idToken: string | null | undefined) => {
   if (!idToken) return null;
 
   try {
-    return decodeJwt(idToken)["picture"] ?? null;
+    return pictureClaims.parse(decodeJwt(idToken));
   } catch {
     return null;
   }
@@ -43,7 +46,7 @@ const userInfoPicture = async (issuer: string, configuration: string, accessToke
       return null;
     }
 
-    return z.looseObject({ picture: z.unknown() }).parse(await response.json()).picture ?? null;
+    return pictureClaims.parse(await response.json());
   } catch {
     return null;
   }
@@ -111,13 +114,21 @@ export const signInPicture = (save: SavePicture) =>
               return;
             }
 
-            const claim =
-              pictureClaim(account.idToken) ??
-              (company?.oidcConfig && accessToken
-                ? await userInfoPicture(company.issuer, company.oidcConfig, accessToken)
-                : null);
+            const fromIdToken = idTokenClaims(account.idToken);
 
-            const url = pictureUrl.safeParse(claim);
+            const claims =
+              fromIdToken?.picture === undefined && company?.oidcConfig && accessToken
+                ? await userInfoPicture(company.issuer, company.oidcConfig, accessToken)
+                : fromIdToken;
+
+            // A provider that names no picture has none, for example after the person removed it.
+            if (claims && (claims.picture === undefined || claims.picture === null)) {
+              await save(signedIn.user.id, "none");
+
+              return;
+            }
+
+            const url = pictureUrl.safeParse(claims?.picture);
 
             await save(
               signedIn.user.id,
