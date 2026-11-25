@@ -229,6 +229,20 @@ const dispatchApp = async (
 
   if (app.metadata.web === false) return new Response(null, { status: 404 });
 
+  // Served before rewrite rules and the app, whose fallbacks would answer with a page.
+  // An app ships a manifest file of its own or links another one from its pages.
+  if (
+    app.displayName &&
+    url.pathname === manifestPath &&
+    request.method === "GET" &&
+    !app.manifest[manifestPath]
+  )
+    return browserPolicy(
+      await webManifest(environment, app, app.displayName),
+      app.network.policy.browser,
+      authenticated?.frameAncestors,
+    );
+
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 
@@ -259,22 +273,6 @@ const dispatchApp = async (
       })
       .fetch(request, { signal: request.signal }),
   );
-
-  // An app that serves no manifest of its own gets one with its Widefleet name.
-  if (
-    app.displayName &&
-    url.pathname === manifestPath &&
-    request.method === "GET" &&
-    response.status === 404
-  ) {
-    await response.body?.cancel();
-
-    return browserPolicy(
-      await webManifest(environment, app, app.displayName),
-      app.network.policy.browser,
-      authenticated?.frameAncestors,
-    );
-  }
 
   return browserPolicy(
     linkManifest(app, response),

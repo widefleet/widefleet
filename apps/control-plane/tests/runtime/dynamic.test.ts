@@ -901,6 +901,10 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         expect(await response.text()).toBe("<p>home</p>");
       }
 
+      // Rewrite rules that send every path to a page leave the platform manifest reachable.
+      const manifest = await fetch(`${origin}/fixture/spa/manifest.webmanifest`);
+      expect(manifest.headers.get("content-type")).toBe("application/manifest+json");
+
       const direct = await fetch(`${origin}/static/index.html`, { redirect: "manual" });
       expect(direct.status).toBe(307);
       expect(direct.headers.get("location")).toBe("https://fixture.apps.example.test/static/");
