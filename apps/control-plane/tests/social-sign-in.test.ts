@@ -1,12 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import dns from "node:dns/promises";
 import { generateKeyPair, SignJWT } from "jose";
 import { z } from "zod";
 import { authenticationOptions } from "../src/lib/server/auth-options.ts";
 import { runtimeConfigurationSchema } from "../src/lib/server/config.ts";
-import type { PictureResult } from "../src/lib/server/profile-picture.ts";
+import type { PictureResult } from "@platform/auth-proxy/picture";
 import {
   availableSocialProviders,
   readCompanySsoHint,
@@ -285,17 +284,15 @@ describe("personal social sign-in", () => {
   });
 
   it("copies the picture each sign-in reports and nothing else from the profile", async () => {
-    vi.spyOn(dns, "resolve4").mockResolvedValue(["93.184.216.34"]);
-    vi.spyOn(dns, "resolve6").mockResolvedValue([]);
     const f = await fixture();
     const userId = z.string().parse(f.user?.id);
     const google = { email_verified: true, hd: "example.test" };
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
     let graphAuthorization: string | null = null;
 
-    f.pictures.set("https://pictures.example.test/photo", () => new Response(png));
+    f.pictures.set("https://lh3.googleusercontent.com/a/photo", () => new Response(png));
     f.pictures.set(
-      "https://pictures.example.test/drawing",
+      "https://lh3.googleusercontent.com/a/drawing",
       () =>
         new Response('<svg xmlns="http://www.w3.org/2000/svg"/>', {
           headers: { "content-type": "image/svg+xml" },
@@ -318,11 +315,14 @@ describe("personal social sign-in", () => {
     await signInWith("google", {
       ...google,
       name: "Renamed at provider",
-      picture: "https://pictures.example.test/photo",
+      picture: "https://lh3.googleusercontent.com/a/photo",
     });
-    // Only raster pictures over HTTPS are copied.
-    await signInWith("google", { ...google, picture: "https://pictures.example.test/drawing" });
-    await signInWith("google", { ...google, picture: "http://pictures.example.test/photo" });
+    // Only raster pictures over HTTPS from Google's picture host are copied.
+    await signInWith("google", {
+      ...google,
+      picture: "https://lh3.googleusercontent.com/a/drawing",
+    });
+    await signInWith("google", { ...google, picture: "http://lh3.googleusercontent.com/a/photo" });
     // Microsoft reports the photo through Graph, here that the user has none.
     await signInWith("microsoft", { xms_edov: true });
 

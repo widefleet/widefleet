@@ -26,26 +26,21 @@ const absentRecord = (cause: unknown) => {
   return [];
 };
 
-// A public host name must resolve only to public addresses.
-export const isPublicOrigin = async (origin: string) => {
+const requirePublicOrigin = async (origin: string) => {
   const hostname = new URL(origin).hostname;
 
-  if (!isPublicRoutableHost(hostname)) return false;
+  if (isPublicRoutableHost(hostname)) {
+    if (classifyHost(hostname).literal !== "fqdn") return;
 
-  if (classifyHost(hostname).literal !== "fqdn") return true;
+    const records = await Promise.all([
+      dns.resolve4(hostname).catch(absentRecord),
+      dns.resolve6(hostname).catch(absentRecord),
+    ]);
 
-  const records = await Promise.all([
-    dns.resolve4(hostname).catch(absentRecord),
-    dns.resolve6(hostname).catch(absentRecord),
-  ]);
+    const addresses = records.flat();
 
-  const addresses = records.flat();
-
-  return addresses.length > 0 && addresses.every(isPublicRoutableHost);
-};
-
-const requirePublicOrigin = async (origin: string) => {
-  if (await isPublicOrigin(origin)) return;
+    if (addresses.length > 0 && addresses.every(isPublicRoutableHost)) return;
+  }
 
   throw new DiscoveryError(
     "discovery_private_host",

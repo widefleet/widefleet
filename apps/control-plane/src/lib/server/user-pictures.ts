@@ -3,7 +3,7 @@ import { profileImagePath } from "@platform/contracts";
 import { organizationRole, organizationRoles } from "../organization.ts";
 import { member, user } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
-import { pictureVersion, type PictureResult } from "./profile-picture.ts";
+import { pictureVersion, type PictureResult } from "@platform/auth-proxy/picture";
 import { userPictures } from "./schema.ts";
 
 // `user.image` names Widefleet's copy, never a provider URL. Without a readable picture,
@@ -13,28 +13,29 @@ export const saveUserPicture = async (
   userId: string,
   picture: PictureResult,
 ) => {
-  if (picture === null) {
-    // Better Auth stores the provider URL at sign-up. Pages never load it.
-    await database
-      .update(user)
-      .set({ image: null })
-      .where(and(eq(user.id, userId), notLike(user.image, "/users/%")));
+  const version = picture && picture !== "none" ? await pictureVersion(picture) : null;
 
-    return;
-  }
+  // Concurrent sign-ins of one person take turns, so the row and `user.image` agree.
+  await database.transaction(async (transaction) => {
+    await transaction.select({ id: user.id }).from(user).where(eq(user.id, userId)).for("update");
 
-  if (picture === "none") {
-    await database.transaction(async (transaction) => {
+    if (picture === null) {
+      // Better Auth stores the provider URL at sign-up. Pages never load it.
+      await transaction
+        .update(user)
+        .set({ image: null })
+        .where(and(eq(user.id, userId), notLike(user.image, "/users/%")));
+
+      return;
+    }
+
+    if (picture === "none" || version === null) {
       await transaction.delete(userPictures).where(eq(userPictures.userId, userId));
       await transaction.update(user).set({ image: null }).where(eq(user.id, userId));
-    });
 
-    return;
-  }
+      return;
+    }
 
-  const version = await pictureVersion(picture);
-
-  await database.transaction(async (transaction) => {
     await transaction
       .insert(userPictures)
       .values({ userId, ...picture, version, updatedAt: new Date() })

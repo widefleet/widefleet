@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { isPublicOrigin } from "./sso-origins.ts";
 
 // Provider pictures are small thumbnails. A larger response is not a profile picture.
 export const maxPictureBytes = 100 * 1024;
@@ -72,7 +71,7 @@ const readPicture = async (response: Response): Promise<Picture | null> => {
  */
 export type PictureResult = Picture | "none" | null;
 
-const pictureRequest = async (url: string, init: RequestInit): Promise<PictureResult> => {
+export const pictureRequest = async (url: string, init: RequestInit): Promise<PictureResult> => {
   try {
     const response = await fetch(url, {
       ...init,
@@ -98,23 +97,6 @@ const pictureRequest = async (url: string, init: RequestInit): Promise<PictureRe
   }
 };
 
-// Google and company OIDC providers name a picture URL. It must be HTTPS on a public host.
-export const pictureUrl = z.url({ protocol: /^https$/ }).max(2048);
-
-export const fetchPictureUrl = async (url: z.infer<typeof pictureUrl>): Promise<PictureResult> => {
-  const parsed = new URL(url);
-
-  if (parsed.username || parsed.password) return null;
-
-  try {
-    if (!(await isPublicOrigin(parsed.origin))) return null;
-  } catch {
-    return null;
-  }
-
-  return pictureRequest(parsed.href, { headers: { accept: "image/*" } });
-};
-
 // Microsoft has no picture URL. Graph returns the signed-in user's photo with `User.Read`.
 export const fetchGraphPicture = (accessToken: string) =>
   pictureRequest("https://graph.microsoft.com/v1.0/me/photos/120x120/$value", {
@@ -126,3 +108,30 @@ export const pictureVersion = async (picture: Picture) =>
     new Uint8Array(await crypto.subtle.digest("SHA-256", picture.bytes)).slice(0, 8),
     (byte) => byte.toString(16).padStart(2, "0"),
   ).join("");
+
+// A picture URL as a provider reports it in a claim.
+export const pictureUrl = z.url().max(2048);
+
+/**
+ * Only the provider's own origin, which receives its access token like its other endpoints,
+ * and Google's account picture host are asked for a picture. Other hosts are not contacted.
+ */
+export const fetchPictureUrl = (
+  url: URL,
+  providerOrigin: string,
+  accessToken: string | undefined,
+): Promise<PictureResult> => {
+  if (url.username || url.password) return Promise.resolve(null);
+
+  if (url.origin === providerOrigin)
+    return accessToken
+      ? pictureRequest(url.href, {
+          headers: { accept: "image/*", authorization: `Bearer ${accessToken}` },
+        })
+      : Promise.resolve(null);
+
+  if (url.protocol === "https:" && url.hostname.endsWith(".googleusercontent.com"))
+    return pictureRequest(url.href, { headers: { accept: "image/*" } });
+
+  return Promise.resolve(null);
+};

@@ -11,6 +11,7 @@
     "./company-oauth": "./src/company-oauth.ts",
     "./mcp-login": "./src/mcp-login.ts",
     "./mcp-cli-login": "./src/mcp-cli-login.ts",
+    "./picture": "./src/picture.ts",
     "./configuration": "./src/configuration.ts",
     "./worker": "./src/worker.ts"
   },

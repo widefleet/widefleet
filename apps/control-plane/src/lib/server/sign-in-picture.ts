@@ -1,14 +1,15 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { decryptOAuthToken } from "better-auth/oauth2";
-import { decodeJwt } from "jose";
-import { z } from "zod";
 import {
   fetchGraphPicture,
   fetchPictureUrl,
   pictureUrl,
   type PictureResult,
-} from "./profile-picture.ts";
+} from "@platform/auth-proxy/picture";
+import { decodeJwt } from "jose";
+import { z } from "zod";
+import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
 
 const pictureClaim = (idToken: string | null | undefined) => {
   if (!idToken) return null;
@@ -19,6 +20,40 @@ const pictureClaim = (idToken: string | null | undefined) => {
     return null;
   }
 };
+
+// Some company providers name the picture only in their user info. Its endpoint comes from
+// the connection, discovered and checked as for sign-in itself.
+const userInfoPicture = async (issuer: string, configuration: string, accessToken: string) => {
+  try {
+    const endpoint = (
+      await prepareCompanyOidc(issuer, oidcConfiguration.parse(JSON.parse(configuration)))
+    ).configuration.userInfoEndpoint;
+
+    if (!endpoint) return null;
+
+    const response = await fetch(endpoint, {
+      headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (!response.ok) {
+      await response.body?.cancel();
+
+      return null;
+    }
+
+    return z.looseObject({ picture: z.unknown() }).parse(await response.json()).picture ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const companyProvider = z.object({
+  issuer: z.string(),
+  appIdentityType: z.string(),
+  oidcConfig: z.string().nullish(),
+});
 
 export type SavePicture = (userId: string, picture: PictureResult) => Promise<void>;
 
@@ -56,33 +91,44 @@ export const signInPicture = (save: SavePicture) =>
             const company =
               providerId === "widefleet-google" || providerId === "widefleet-microsoft"
                 ? null
-                : await context.context.adapter.findOne<{ appIdentityType: string }>({
-                    model: "ssoProvider",
-                    where: [{ field: "providerId", value: providerId }],
-                  });
-
-            const microsoft =
-              providerId === "widefleet-microsoft" || company?.appIdentityType === "entra";
+                : companyProvider.parse(
+                    await context.context.adapter.findOne({
+                      model: "ssoProvider",
+                      where: [{ field: "providerId", value: providerId }],
+                    }),
+                  );
 
             const accessToken = account.accessToken
               ? await decryptOAuthToken(account.accessToken, context.context)
-              : null;
+              : undefined;
 
-            // Better Auth's sign-up copy is the fallback for providers that name the
-            // picture only in their user info.
-            const pictureSource = pictureUrl.safeParse(
-              pictureClaim(account.idToken) ?? signedIn.user.image,
+            if (providerId === "widefleet-microsoft" || company?.appIdentityType === "entra") {
+              await save(
+                signedIn.user.id,
+                accessToken ? await fetchGraphPicture(accessToken) : null,
+              );
+
+              return;
+            }
+
+            const claim =
+              pictureClaim(account.idToken) ??
+              (company?.oidcConfig && accessToken
+                ? await userInfoPicture(company.issuer, company.oidcConfig, accessToken)
+                : null);
+
+            const url = pictureUrl.safeParse(claim);
+
+            await save(
+              signedIn.user.id,
+              url.success
+                ? await fetchPictureUrl(
+                    new URL(url.data),
+                    new URL(company?.issuer ?? "https://accounts.google.com").origin,
+                    accessToken,
+                  )
+                : null,
             );
-
-            const picture = microsoft
-              ? accessToken
-                ? await fetchGraphPicture(accessToken)
-                : null
-              : pictureSource.success
-                ? await fetchPictureUrl(pictureSource.data)
-                : null;
-
-            await save(signedIn.user.id, picture);
           }),
         },
       ],

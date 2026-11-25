@@ -564,10 +564,12 @@ describe("Better Auth SSO provider integration", () => {
         email_verified: true,
       };
 
-      const picture = `https://pictures.example.test/${kind}`;
+      const picture = `${issuer}/pictures/${kind}`;
 
-      // The picture is only in the ID token, which the sign-in hook reads after Better Auth
-      // has created the user from the user-info response.
+      // The first sign-in names the picture only in its ID token, the second only in its user
+      // info. Better Auth itself creates the user from the user info.
+      let userInfo: typeof profile & { picture?: string } = profile;
+
       const signedIdToken = (claims: Record<string, string>) =>
         new SignJWT({ ...profile, ...claims })
           .setProtectedHeader({ alg: "RS256", kid: publicKey.kid })
@@ -611,6 +613,8 @@ describe("Better Auth SSO provider integration", () => {
 
           case picture:
           case `${picture}/new`:
+            expect(outgoing.headers.get("authorization")).toBe("Bearer synthetic-access-token");
+
             return new Response(
               new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, outgoing.url.length]),
             );
@@ -620,7 +624,7 @@ describe("Better Auth SSO provider integration", () => {
           case metadata.userinfo_endpoint:
             expect(outgoing.headers.get("authorization")).toBe("Bearer synthetic-access-token");
 
-            return Response.json(profile);
+            return Response.json(userInfo);
           default:
             throw new Error(`Unexpected identity-provider request: ${outgoing.url}`);
         }
@@ -787,7 +791,8 @@ describe("Better Auth SSO provider integration", () => {
         const firstImage = first.user.image;
 
         // A returning sign-in replaces only the picture.
-        idToken = await signedIdToken({ picture: `${picture}/new`, name: "Renamed at provider" });
+        idToken = await signedIdToken({ name: "Renamed at provider" });
+        userInfo = { ...profile, picture: `${picture}/new` };
         const again = await environment.auth.handler(signIn.clone());
         const againTarget = z.object({ url: z.url() }).parse(await again.json());
         const againCallback = new URL(callback);
