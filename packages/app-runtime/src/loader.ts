@@ -284,7 +284,7 @@ const publicRequest = async (request: Request, environment: ParentEnvironment) =
     });
 
   return browserPolicy(
-    await servePublic(environment, app, url.pathname),
+    await servePublic(request, environment, app, url.pathname),
     app.network.policy.browser,
   );
 };

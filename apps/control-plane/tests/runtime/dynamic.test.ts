@@ -927,7 +927,16 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       const manifest = await fetch(`${origin}/fixture/spa/manifest.webmanifest`);
       expect(manifest.headers.get("content-type")).toBe("application/manifest+json");
       // Icons are the uploaded files, never a rewritten page.
-      expect(await (await fetch(`${origin}/fixture/spa/favicon.svg`)).text()).toContain("<svg");
+      const icon = await fetch(`${origin}/fixture/spa/favicon.svg`);
+
+      expect(await icon.text()).toContain("<svg");
+      expect(
+        (
+          await fetch(`${origin}/fixture/spa/favicon.svg`, {
+            headers: { "if-none-match": icon.headers.get("etag") ?? "" },
+          })
+        ).status,
+      ).toBe(304);
 
       const direct = await fetch(`${origin}/static/index.html`, { redirect: "manual" });
       expect(direct.status).toBe(307);

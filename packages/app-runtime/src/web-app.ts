@@ -15,10 +15,18 @@ const icons = [
 export const publicPaths = new Set<string>([manifestPath, ...icons.map(([path]) => path)]);
 
 // The uploaded file itself: rewrite rules could otherwise answer with an app page.
-const publicAsset = async (environment: ParentEnvironment, app: PublishedApp, path: string) => {
+const publicAsset = async (
+  request: Request,
+  environment: ParentEnvironment,
+  app: PublishedApp,
+  path: string,
+) => {
   const entry = app.manifest[path];
 
   if (!entry) return new Response(null, { status: 404 });
+
+  if (request.headers.get("if-none-match") === `"${entry.hash}"`)
+    return new Response(null, { status: 304, headers: { etag: `"${entry.hash}"` } });
   const object = await environment.WIDEFLEET_PACKAGES.get(`apps/${app.appId}/assets/${entry.hash}`);
 
   if (!object) return new Response("Published asset is missing", { status: 502 });
@@ -109,12 +117,13 @@ export const webManifest = async (
 };
 
 export const servePublic = async (
+  request: Request,
   environment: ParentEnvironment,
   app: PublishedApp,
   path: string,
 ) => {
   if (path !== manifestPath || app.manifest[manifestPath])
-    return publicAsset(environment, app, path);
+    return publicAsset(request, environment, app, path);
 
   return app.displayName
     ? webManifest(environment, app, app.displayName)

@@ -35,8 +35,6 @@
 
   let installed = $state(false);
 
-  let asking = $state(false);
-
   let open = $state(false);
 
   let quiet = $state(false);
@@ -44,17 +42,13 @@
   $effect(() => {
     supported = "HTMLInstallElement" in window;
     installed = read(installedKey) === "installed";
-    asking = read(promptKey) !== "off";
   });
 
   // The installresult event of <install>.
   const installResult = z.object({ result: z.literal("success") });
 
   const close = () => {
-    if (quiet) {
-      write(promptKey, "off");
-      asking = false;
-    }
+    if (quiet) write(promptKey, "off");
 
     open = false;
   };
@@ -85,7 +79,8 @@
     variant="ghost"
     size="sm"
     onclick={(event: MouseEvent) => {
-      if (!supported || !asking) return;
+      // Read on each click: another card may have turned the question off.
+      if (!supported || read(promptKey) === "off") return;
       event.preventDefault();
       open = true;
     }}>Open app<ArrowUpRight /><span class="sr-only"> {app.displayName} in a new tab</span></Button
