@@ -4,6 +4,7 @@ import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -131,6 +132,53 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
         server.close((error) => (error ? reject(error) : resolve())),
       );
       await rm(directory, { recursive: true, force: true });
+    }, 60_000);
+
+    it("type-checks a consumer of widefleet/config from the packed release", async () => {
+      const project = join(directory, "config consumer");
+      await mkdir(project);
+      await writeFile(
+        join(project, "package.json"),
+        JSON.stringify({ private: true, type: "module" }),
+      );
+      await runPnpm(
+        [
+          "add",
+          "--registry",
+          registry.url,
+          "--ignore-scripts",
+          "--no-optional",
+          `widefleet@${version}`,
+        ],
+        project,
+        environment,
+      );
+
+      const file = join(project, "widefleet.config.ts");
+
+      const config = (origin: string) => `import type { WidefleetConfig } from "widefleet/config";
+export default { network: { backend: [${origin}] } } satisfies WidefleetConfig;`;
+
+      const check = () =>
+        execute(
+          process.execPath,
+          [
+            fileURLToPath(import.meta.resolve("typescript/bin/tsc")),
+            "--noEmit",
+            "--strict",
+            "--module",
+            "NodeNext",
+            "--target",
+            "ES2022",
+            file,
+          ],
+          { cwd: project },
+        );
+
+      await writeFile(file, config('"https://api.example.test"'));
+      await check();
+      await writeFile(file, config("42"));
+      await expect(check()).rejects.toHaveProperty("stdout", expect.stringContaining("TS2322"));
     }, 60_000);
 
     it("preserves starter ignore rules through npm exec", async () => {

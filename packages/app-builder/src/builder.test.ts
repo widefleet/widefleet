@@ -570,7 +570,7 @@ export default { network: { backend: hosts.map(host => "https://" + host) } } sa
     expect(await failure(conflict)).toContain("Use only one");
   });
 
-  it("validates CLI config results and runs with no host APIs", async () => {
+  it("validates CLI config results and interrupts unbounded execution", async () => {
     const valid = await post("/config", {
       program: 'widefleetConfig({network: {backend: ["https://example.org"]}});',
     });
@@ -579,16 +579,20 @@ export default { network: { backend: hosts.map(host => "https://" + host) } } sa
       network: { backend: ["https://example.org"], browser: [] },
     });
 
-    for (const program of [
-      'widefleetConfig({network: {backend: ["no"]}});',
-      'widefleetConfig(await fetch("https://example.org"));',
-      "widefleetConfig(process.env);",
-      "while (true) {}",
-    ]) {
+    for (const program of ['widefleetConfig({network: {backend: ["no"]}});', "while (true) {}"]) {
       const invalid = await post("/config", { program });
       expect(invalid.status).toBe(422);
       expect(await failure(invalid)).toContain("widefleet.config.ts");
     }
+  });
+
+  it.each(["fetch", "process"])("keeps %s outside the configuration interpreter", async (name) => {
+    const response = await post("/config", {
+      program: `const host = ${name}; widefleetConfig({});`,
+    });
+
+    expect(response.status).toBe(422);
+    expect(await failure(response)).toContain(`Unknown identifier '${name}'`);
   });
 
   it("adds the network origins widefleet.jsonc declares, as widefleet deploy does", async () => {
