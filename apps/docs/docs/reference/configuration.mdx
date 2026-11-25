@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: App configuration fields, storage bindings and settings managed by the platform.
-lastModified: 2026-10-29
+lastModified: 2026-11-25
 ---
 
 App projects use `wrangler.jsonc`. Start with the generated starter and use the
@@ -47,6 +47,37 @@ and no `assets` has no browser URL. See [app services](/guides/app-services).
 Changing `name` selects another app on the next deployment. It does not rename an
 existing app or move its data. The CLI uses your saved or company-provided
 platform URL to select the installation; see [CLI configuration](/reference/cli-configuration).
+
+## Widefleet app configuration
+
+Create an optional `widefleet.config.ts` beside the Wrangler configuration to
+declare the network origins your app requests. With the `widefleet` npm package
+installed as a development dependency, your editor can check the default export.
+
+```ts
+import type { WidefleetConfig } from "widefleet/config";
+
+export default {
+  network: { backend: ["https://api.example.com"] },
+} satisfies WidefleetConfig;
+```
+
+Use `network.backend` for server requests and `network.browser` for browser
+requests. You can import values and functions from local project modules. The
+native CLI bundles the file with its included esbuild. The installation's app
+builder evaluates the default export with a JavaScript interpreter. Write
+synchronous code using local values. Host APIs such as `fetch`, filesystem
+access and environment variables are unavailable. The bundled config must fit
+in 64 KiB. The type import and `satisfies` are optional.
+
+Run `widefleet deploy`, then `widefleet network` to see the origins awaiting
+approval. An app owner or administrator can grant them through the app page or
+the CLI. See [network permissions](/guides/network).
+
+Existing projects can keep `widefleet.jsonc`. To migrate, first update the CLI,
+control plane and app builder together. Rename the file to `widefleet.config.ts`,
+remove any `$schema` field and add `export default` before the object. Deploy
+with exactly one of the two files in the project.
 
 ## Resources
 
