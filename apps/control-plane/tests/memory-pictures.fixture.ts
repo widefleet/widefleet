@@ -10,8 +10,5 @@ export const memoryPictures = (): PictureStorage & { keys: () => string[] } => {
     put: async (key, value, options) => {
       entries.set(key, { value: value.slice().buffer, metadata: options.metadata });
     },
-    delete: async (key) => {
-      entries.delete(key);
-    },
   };
 };

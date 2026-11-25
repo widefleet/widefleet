@@ -195,9 +195,10 @@ const pictureLifetime = 30 * 24 * 60 * 60;
 // Sign-in and session renewal ask the provider again at most once a day.
 const pictureRecheck = 24 * 60 * 60 * 1000;
 
+// An entry without a picture records only when the provider was last asked.
 const pictureMetadata = z.object({
-  contentType: z.string(),
-  version: z.string(),
+  contentType: z.string().nullable(),
+  version: z.string().nullable(),
   checkedAt: z.number(),
 });
 
@@ -212,7 +213,6 @@ export interface PictureStorage {
     value: Uint8Array<ArrayBuffer>,
     options: { expirationTtl: number; metadata: z.infer<typeof pictureMetadata> },
   ): Promise<void>;
-  delete(key: string): Promise<void>;
 }
 
 /** Copies of the pictures that people of one organization's sign-in report. */
@@ -229,7 +229,7 @@ export const pictureStore = (storage: PictureStorage, organizationId: string, is
     return `${organizationId}/${issuerId}/${subject}`;
   };
 
-  const read = async (subject: string) => {
+  const entry = async (subject: string) => {
     const stored = await storage.getWithMetadata(await key(subject), "arrayBuffer");
     const metadata = pictureMetadata.safeParse(stored.metadata);
 
@@ -238,29 +238,53 @@ export const pictureStore = (storage: PictureStorage, organizationId: string, is
       : null;
   };
 
-  return {
-    read,
-    /** The version of the subject's copy, after asking the provider when it is due. */
-    refresh: async (subject: string, fetchPicture: () => Promise<PictureResult>) => {
-      const current = await read(subject);
+  const write = async (subject: string, picture: Picture | null, version: string | null) =>
+    storage.put(await key(subject), picture?.bytes ?? new Uint8Array(), {
+      expirationTtl: pictureLifetime,
+      metadata: { contentType: picture?.contentType ?? null, version, checkedAt: Date.now() },
+    });
 
-      if (current && Date.now() - current.checkedAt < pictureRecheck) return current.version;
+  return {
+    read: async (subject: string) => {
+      const stored = await entry(subject);
+
+      return stored?.version && stored.contentType
+        ? { bytes: stored.bytes, contentType: stored.contentType, version: stored.version }
+        : null;
+    },
+    /**
+     * The version of the subject's copy, after asking the provider when it is due. Every
+     * answer, including no picture or a failure, waits a day before the provider is asked again.
+     */
+    refresh: async (subject: string, fetchPicture: () => Promise<PictureResult>) => {
+      const current = await entry(subject);
+
+      if (current && Date.now() - current.checkedAt < pictureRecheck)
+        return current.version ?? undefined;
       const picture = await fetchPicture();
 
-      if (picture === null) return current?.version;
+      if (picture === null) {
+        // A failed read keeps the current copy.
+        await write(
+          subject,
+          current?.version && current.contentType
+            ? { bytes: current.bytes, contentType: current.contentType }
+            : null,
+          current?.version ?? null,
+        );
+
+        return current?.version ?? undefined;
+      }
 
       if (picture === "none") {
-        if (current) await storage.delete(await key(subject));
+        await write(subject, null, null);
 
         return undefined;
       }
 
       const version = await pictureVersion(picture);
 
-      await storage.put(await key(subject), picture.bytes, {
-        expirationTtl: pictureLifetime,
-        metadata: { contentType: picture.contentType, version, checkedAt: Date.now() },
-      });
+      await write(subject, picture, version);
 
       return version;
     },
@@ -281,6 +305,8 @@ export const providerPicture = (
   if (provider.type === "entra")
     return accessToken ? fetchGraphPicture(accessToken) : Promise.resolve(null);
 
+  // A provider that names no picture has none, for example after the person removed it.
+  if (claims["picture"] === undefined || claims["picture"] === null) return Promise.resolve("none");
   const url = pictureUrl.safeParse(claims["picture"]);
 
   return url.success

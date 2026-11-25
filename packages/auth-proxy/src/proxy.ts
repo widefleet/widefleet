@@ -157,7 +157,12 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
     try {
       const headers = new Headers({ "cache-control": "no-store" });
 
-      const session = await signInEmbedded(configuration, input.data.token, request.headers);
+      const session = await signInEmbedded(
+        configuration,
+        input.data.token,
+        request.headers,
+        pictures,
+      );
 
       for (const cookie of session.cookies) headers.append("set-cookie", cookie);
       observe({ trigger: "embedded_sign_in", identity: session.identity });

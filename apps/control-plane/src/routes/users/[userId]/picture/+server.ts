@@ -5,6 +5,8 @@ import { getRuntime } from "#server/runtime";
 import { readUserPicture, tokenViewer } from "#server/user-pictures";
 import type { RequestHandler } from "./$types";
 
+// This route checks access itself, outside the `(auth)` pages: the app proxy sends only an
+// access token, and those pages send requests without a browser session to sign-in.
 // Pictures are copies of what sign-in providers report. The bytes were checked to be PNG,
 // JPEG, GIF or WebP; they are never sniffed, scripted or embedded on another site.
 export const GET: RequestHandler = async ({ params, locals, request }) => {

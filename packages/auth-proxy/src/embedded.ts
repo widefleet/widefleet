@@ -11,6 +11,7 @@ import { z } from "zod";
 import { cookiePrefix } from "./authentication.ts";
 import { sessionVersion, type AuthConfiguration } from "./configuration.ts";
 import { graphGroups, issuer, proxyIdentity } from "./identity.ts";
+import { fetchGraphPicture, type PictureStore } from "./picture.ts";
 
 // A page embedding apps proves the user's identity with a token from its own host,
 // such as Microsoft Teams. The resulting session is partitioned by the top-level
@@ -85,7 +86,11 @@ const graphProfile = z.object({
 
 // The token's audience is the client that also signs users in to apps, so it
 // authenticates the same person a regular company sign-in would.
-const entraIdentity = async (configuration: AuthConfiguration, token: string) => {
+const entraIdentity = async (
+  configuration: AuthConfiguration,
+  token: string,
+  pictures: PictureStore,
+) => {
   const provider = configuration.provider;
 
   if (provider.type !== "entra") throw new EmbeddedSignInFailure(401, "invalid_token");
@@ -192,9 +197,15 @@ const entraIdentity = async (configuration: AuthConfiguration, token: string) =>
     throw new EmbeddedSignInFailure(503, "temporarily_unavailable");
   }
 
+  // A missing picture never blocks sign-in.
+  const picture = await pictures
+    .refresh(claims.oid, () => fetchGraphPicture(accessToken))
+    .catch(() => undefined);
+
   // Regular Entra sign-in uses the same object ID, so apps see one caller.
   const identity = proxyIdentity.safeParse({
     id: claims.oid,
+    picture,
     name: profile.displayName ?? "",
     // Accounts without a mailbox have no mail address; their sign-in name is
     // the address colleagues know them by.
@@ -278,8 +289,9 @@ export const signInEmbedded = async (
   configuration: AuthConfiguration,
   token: string,
   headers: Headers,
+  pictures: PictureStore,
 ) => {
-  const { identity, expiresAt } = await entraIdentity(configuration, token);
+  const { identity, expiresAt } = await entraIdentity(configuration, token, pictures);
   const callback = new URL(configuration.redirectUrl);
 
   const value = await new EncryptJWT({
