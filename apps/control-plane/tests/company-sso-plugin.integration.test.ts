@@ -564,13 +564,20 @@ describe("Better Auth SSO provider integration", () => {
         email_verified: true,
       };
 
-      const idToken = await new SignJWT(profile)
-        .setProtectedHeader({ alg: "RS256", kid: publicKey.kid })
-        .setIssuer(issuer)
-        .setAudience("synthetic-client")
-        .setIssuedAt()
-        .setExpirationTime("5m")
-        .sign(keys.privateKey);
+      const picture = `https://pictures.example.test/${kind}`;
+
+      // The picture is only in the ID token, which the sign-in hook reads after Better Auth
+      // has created the user from the user-info response.
+      const signedIdToken = (claims: Record<string, string>) =>
+        new SignJWT({ ...profile, ...claims })
+          .setProtectedHeader({ alg: "RS256", kid: publicKey.kid })
+          .setIssuer(issuer)
+          .setAudience("synthetic-client")
+          .setIssuedAt()
+          .setExpirationTime("5m")
+          .sign(keys.privateKey);
+
+      let idToken = await signedIdToken({ picture });
 
       const visited = new Set<string>();
 
@@ -756,8 +763,36 @@ describe("Better Auth SSO provider integration", () => {
 
         expect(authenticated.status).toBe(200);
         expect(await authenticated.json()).toMatchObject({
-          user: { email: profile.email, name: profile.name },
+          user: { email: profile.email, name: profile.name, image: picture },
           session: { identityOrganizationId: "widefleet" },
+        });
+
+        // A returning sign-in replaces only the picture.
+        idToken = await signedIdToken({ picture: `${picture}/new`, name: "Renamed at provider" });
+        const again = await environment.auth.handler(signIn.clone());
+        const againTarget = z.object({ url: z.url() }).parse(await again.json());
+        const againCallback = new URL(callback);
+        againCallback.searchParams.set(
+          "state",
+          z.string().min(1).parse(new URL(againTarget.url).searchParams.get("state")),
+        );
+        againCallback.searchParams.set("code", "synthetic-code");
+
+        const returned = await environment.auth.handler(
+          new Request(againCallback, { headers: { cookie: cookie(again) } }),
+        );
+
+        expect(returned.status).toBe(302);
+        expect(
+          await (
+            await environment.auth.handler(
+              new Request(`${origin}/api/auth/get-session`, {
+                headers: { cookie: cookie(returned) },
+              }),
+            )
+          ).json(),
+        ).toMatchObject({
+          user: { email: profile.email, name: profile.name, image: `${picture}/new` },
         });
 
         request.mockClear();

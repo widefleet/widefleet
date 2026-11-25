@@ -6,11 +6,15 @@ export const memberQuery = z.object({
   page: z.number().int().min(1).max(100_000).default(1),
 });
 
+// Sign-in providers supply the picture URL; only HTTPS addresses are shown.
+export const profileImage = z.url({ protocol: /^https$/ }).max(2048);
+
 export const memberEntry = z.object({
   id: z.string(),
   userId: z.string(),
   name: z.string(),
   email: z.email(),
+  image: profileImage.nullable(),
   role: organizationChoice.shape.role,
 });
 

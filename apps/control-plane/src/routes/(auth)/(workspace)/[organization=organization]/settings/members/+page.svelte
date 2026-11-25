@@ -22,6 +22,7 @@
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import DomainAccess from "#shadcn/components/DomainAccess.svelte";
+  import UserAvatar from "#shadcn/components/UserAvatar.svelte";
   import { page } from "$app/state";
   import { toast } from "@platform/ui/sonner";
   import { z } from "zod";
@@ -173,10 +174,7 @@
       {@const removeForm = deleteMember.for(person.id)}
       <li class="flex flex-wrap items-center justify-between gap-4 py-5">
         <div class="flex min-w-0 items-center gap-3">
-          <span
-            class="bg-muted grid size-9 shrink-0 place-items-center rounded-full text-xs font-medium"
-            >{person.name.slice(0, 2).toUpperCase()}</span
-          >
+          <UserAvatar name={person.name} image={person.image} class="size-9" />
           <div class="min-w-0">
             <div class="flex items-center gap-2">
               <p class="truncate text-sm font-medium">{person.name}</p>

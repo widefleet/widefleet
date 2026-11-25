@@ -17,6 +17,7 @@ export const findMembers = (
       userId: user.id,
       name: user.name,
       email: user.email,
+      image: user.image,
       role: member.role,
     })
     .from(member)

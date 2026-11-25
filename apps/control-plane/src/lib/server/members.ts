@@ -2,7 +2,12 @@ import { companySignInLimit, companySsoAvailableSql, type SignIn } from "./sso-p
 import { and, eq, gt } from "drizzle-orm";
 import { APIError } from "better-auth/api";
 import { Result } from "better-result";
-import { invitationEntry, invitationInput, memberRoleInput } from "@platform/contracts";
+import {
+  invitationEntry,
+  invitationInput,
+  memberRoleInput,
+  profileImage,
+} from "@platform/contracts";
 import type { z } from "zod";
 import { installationOrganizationId, organizationRole } from "../organization.ts";
 import { organizationSettings } from "./schema.ts";
@@ -44,9 +49,11 @@ export const listMembers = async (
       );
 
       return {
-        members: members
-          .slice(0, 50)
-          .map((person) => ({ ...person, role: organizationRole.parse(person.role) })),
+        members: members.slice(0, 50).map((person) => ({
+          ...person,
+          image: profileImage.nullable().catch(null).parse(person.image),
+          role: organizationRole.parse(person.role),
+        })),
         hasNext: members.length > 50,
       };
     },

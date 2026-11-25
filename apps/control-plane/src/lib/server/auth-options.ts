@@ -16,6 +16,7 @@ import type { SignIn } from "./sso-policy.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
 import { organizationMemberLimit } from "./organization.ts";
 import { personalSocialAccounts, socialProviders, validateSocialUser } from "./social-sign-in.ts";
+import { signInPicture } from "./sign-in-picture.ts";
 
 export const cliClientId = "platform-cli";
 
@@ -300,6 +301,7 @@ export const authenticationOptions = (
     rateLimit: rateLimit ?? { storage: "memory" },
     plugins: [
       personalSocialAccounts,
+      signInPicture,
       lastLoginMethod({
         cookieName: "platform.last_used_login_method",
         beforeStoreCookie: (context) => Boolean(context.context.newSession),

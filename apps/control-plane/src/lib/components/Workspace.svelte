@@ -27,14 +27,17 @@
   import * as Sidebar from "@platform/ui/sidebar";
   import { mergeProps } from "bits-ui";
   import Feedback from "./Feedback.svelte";
+  import UserAvatar from "./UserAvatar.svelte";
 
   let {
     principal,
+    image,
     organization,
     organizations,
     children,
   }: {
     principal: Principal;
+    image: string | null;
     organization: { id: string; name: string; slug: string };
     organizations: z.infer<typeof organizationChoice>[];
     children: Snippet;
@@ -139,15 +142,6 @@
     currentPath === item.href || item.paths.some((prefix) => currentPath.startsWith(prefix));
 
   const section = $derived(navigation.find((item) => active(item))?.label ?? "Workspace");
-
-  const initials = $derived(
-    principal.name
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part[0])
-      .join("")
-      .toUpperCase(),
-  );
 
   const signOut = async () => {
     signingOut = true;
@@ -345,10 +339,7 @@
             class="hover:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md p-2 text-left"
             aria-label={`Account: ${principal.name}`}
           >
-            <span
-              class="bg-background grid size-8 shrink-0 place-items-center rounded-lg border text-xs font-medium"
-              >{initials}</span
-            >
+            <UserAvatar name={principal.name} {image} class="size-8 rounded-lg" />
             <span class="min-w-0 flex-1"
               ><span class="block truncate text-xs font-medium">{principal.name}</span><span
                 class="text-muted-foreground block text-[11px]">{roleLabel(principal.role)}</span

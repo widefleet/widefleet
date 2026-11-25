@@ -269,6 +269,44 @@ describe("personal social sign-in", () => {
     }
   });
 
+  it("refreshes only the profile picture from each sign-in", async () => {
+    const f = await fixture();
+    const userId = z.string().parse(f.user?.id);
+    const google = { email_verified: true, hd: "example.test" };
+
+    const signInWith = async (
+      provider: "google" | "microsoft",
+      claims: ConstructorParameters<typeof SignJWT>[0],
+    ) => {
+      f.cookies.clear();
+      expect((await f.signIn(provider, claims)).headers.get("location")).toContain("/device?");
+
+      return f.internalAdapter.findUserById(userId);
+    };
+
+    expect(
+      await signInWith("google", { ...google, picture: "https://pictures.example.test/first" }),
+    ).toMatchObject({ image: "https://pictures.example.test/first" });
+    expect(
+      await signInWith("google", {
+        ...google,
+        name: "Renamed at provider",
+        picture: "https://pictures.example.test/second",
+      }),
+    ).toMatchObject({
+      name: "Synthetic member",
+      email,
+      image: "https://pictures.example.test/second",
+    });
+    // A provider without a usable picture leaves the current one in place.
+    expect(
+      await signInWith("google", { ...google, picture: "http://pictures.example.test/plain" }),
+    ).toMatchObject({ image: "https://pictures.example.test/second" });
+    expect(await signInWith("microsoft", { xms_edov: true })).toMatchObject({
+      image: "https://pictures.example.test/second",
+    });
+  });
+
   it("sends email codes for company addresses to company SSO", async () => {
     const f = await fixture({ companySso: "company-alpha" });
 
