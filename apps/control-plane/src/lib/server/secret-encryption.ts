@@ -48,17 +48,51 @@ export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
     keyring.some((candidate) => candidate.id === version.id && candidate.jwk.k === version.jwk.k),
   );
 
-// Ciphertexts are JWE compact serializations (RFC 7516): direct encryption
-// with the key version's 32 bytes, A256GCM, and the version's ID as `kid`.
+// Ciphertexts are JWE compact serializations (RFC 7516): direct encryption with
+// A256GCM, `kid` naming the key version and the kind of value as
+// `<version>:<kind>`, and the value's context as `ctx`. Each version derives
+// one key per kind with HKDF-SHA256 (RFC 5869). The protected header is
+// authenticated, and decryption requires the context the caller names, so a
+// value cannot be moved to another row, organization or kind.
 const header = { alg: "dir", enc: "A256GCM" } as const;
 
-/** The key version a JWE ciphertext names, or `null` when it names none or is malformed. */
-export const ciphertextKeyVersion = (ciphertext: string) => {
+const encoder = new TextEncoder();
+
+// A fixed salt of hash length, as RFC 5869 recommends when no random salt is kept.
+const salt = new Uint8Array(32);
+
+/** The canonical form of a context: its fields in a fixed order. */
+const contextLabel = (context: SecretContext) =>
+  JSON.stringify(
+    context.kind === "app-secret"
+      ? [context.kind, context.organizationId, context.appId, context.name]
+      : context.kind === "sso-provider-config"
+        ? [context.kind, context.field]
+        : [context.kind, context.organizationId],
+  );
+
+const keyId = (version: KeyVersion, context: SecretContext) => `${version.id}:${context.kind}`;
+
+const protectedKeyId = (ciphertext: string) => {
   try {
     return decodeProtectedHeader(ciphertext).kid ?? null;
   } catch {
     return null;
   }
+};
+
+/** The key version a JWE ciphertext names, or `null` when it names none or is malformed. */
+export const ciphertextKeyVersion = (ciphertext: string) =>
+  protectedKeyId(ciphertext)?.split(":")[0] ?? null;
+
+/**
+ * Temporary: whether a ciphertext names only a key version, as values written
+ * before keys per kind do. `reencrypt` moves them; remove with their reader.
+ */
+export const isEarlierCiphertextFormat = (ciphertext: string) => {
+  const kid = protectedKeyId(ciphertext);
+
+  return kid !== null && !kid.includes(":");
 };
 
 /**
@@ -67,33 +101,79 @@ export const ciphertextKeyVersion = (ciphertext: string) => {
  * active key version of `keyring`.
  */
 export const createSecretEncryption = ({ keyring }: { keyring: Keyring }) => {
-  const keys = new Map<string, ReturnType<typeof importJWK>>();
+  const keys = new Map<string, Promise<CryptoKey>>();
 
-  const key = (version: KeyVersion) => {
-    const existing = keys.get(version.id);
+  const key = (version: KeyVersion, context: SecretContext) => {
+    const id = keyId(version, context);
+    let derived = keys.get(id);
 
-    if (existing) return existing;
-    const imported = importJWK(version.jwk);
-    keys.set(version.id, imported);
+    if (!derived) {
+      derived = crypto.subtle
+        .importKey("raw", Buffer.from(version.jwk.k, "base64url"), "HKDF", false, ["deriveKey"])
+        .then((root) =>
+          crypto.subtle.deriveKey(
+            {
+              name: "HKDF",
+              hash: "SHA-256",
+              salt,
+              info: encoder.encode(`widefleet control-plane ${context.kind} v1`),
+            },
+            root,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"],
+          ),
+        );
+      keys.set(id, derived);
+    }
+
+    return derived;
+  };
+
+  // Temporary: values written before keys per kind used the version's bytes.
+  const earlierKeys = new Map<string, ReturnType<typeof importJWK>>();
+
+  const earlierKey = (version: KeyVersion) => {
+    let imported = earlierKeys.get(version.id);
+
+    if (!imported) {
+      imported = importJWK(version.jwk);
+      earlierKeys.set(version.id, imported);
+    }
 
     return imported;
   };
 
-  const decryptJwe = async (ciphertext: string) => {
-    const { plaintext } = await compactDecrypt(
+  const decryptJwe = async (context: SecretContext, ciphertext: string) => {
+    let earlier = false;
+
+    const { plaintext, protectedHeader } = await compactDecrypt(
       ciphertext,
       (protectedHeader) => {
-        const version = keyring.find((candidate) => candidate.id === protectedHeader.kid);
+        const [id, kind, ...rest] = (protectedHeader.kid ?? "").split(":");
+        const version = keyring.find((candidate) => candidate.id === id);
 
-        if (!version) throw new Error("The ciphertext names an unknown key version");
+        if (!version || rest.length > 0)
+          throw new Error("The ciphertext names an unknown key version");
 
-        return key(version);
+        if (kind === undefined) {
+          earlier = true;
+
+          return earlierKey(version);
+        }
+
+        if (kind !== context.kind) throw new Error("The ciphertext belongs to another kind");
+
+        return key(version, context);
       },
       {
         keyManagementAlgorithms: [header.alg],
         contentEncryptionAlgorithms: [header.enc],
       },
     );
+
+    if (!earlier && protectedHeader["ctx"] !== contextLabel(context))
+      throw new Error("The ciphertext belongs to another context");
 
     return new TextDecoder().decode(plaintext);
   };
@@ -103,18 +183,19 @@ export const createSecretEncryption = ({ keyring }: { keyring: Keyring }) => {
     activeKeyVersion: keyring[0].id,
     /** Every version this installation can decrypt, active first. */
     keyVersions: keyring.map((version) => version.id),
-    // The context is not yet bound to the ciphertext. Callers already pass it,
-    // so binding it in a later format changes only this module.
-    encrypt: async (_context: SecretContext, value: string) => {
+    /** Whether `ciphertext` uses the active version's key for the kind of `context`. */
+    isCurrent: (context: SecretContext, ciphertext: string) =>
+      protectedKeyId(ciphertext) === keyId(keyring[0], context),
+    encrypt: async (context: SecretContext, value: string) => {
       const [active] = keyring;
 
-      return new CompactEncrypt(new TextEncoder().encode(value))
-        .setProtectedHeader({ ...header, kid: active.id })
-        .encrypt(await key(active));
+      return new CompactEncrypt(encoder.encode(value))
+        .setProtectedHeader({ ...header, kid: keyId(active, context), ctx: contextLabel(context) })
+        .encrypt(await key(active, context));
     },
-    decrypt: async (_context: SecretContext, ciphertext: string) => {
+    decrypt: async (context: SecretContext, ciphertext: string) => {
       try {
-        return await decryptJwe(ciphertext);
+        return await decryptJwe(context, ciphertext);
       } catch {
         throw new InvalidOperation({
           code: "BAD_REQUEST",

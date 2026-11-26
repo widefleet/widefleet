@@ -41,9 +41,14 @@ const oldest = keyVersion("oldest");
 const service = (keys: ReturnType<typeof keyVersion>[]) =>
   createSecretEncryption({ keyring: parseKeyring(keySet(...keys), "test") });
 
-/** Writes values under the oldest key version, with a context no reader checks. */
+/**
+ * Writes values as they were stored before keys per kind and context binding:
+ * the oldest version's bytes and its ID alone as `kid`.
+ */
 const older = (value: string) =>
-  service([oldest]).encrypt({ kind: "directory-client-secret", organizationId: "fixture" }, value);
+  new CompactEncrypt(new TextEncoder().encode(value))
+    .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: oldest.kid })
+    .encrypt(Buffer.from(oldest.k, "base64url"));
 
 /** The environment's key versions, which encrypted its fixture values. */
 const environmentKeys = () => keysOf(environment.environment.PLATFORM_ENCRYPTION_KEYS);
@@ -125,7 +130,7 @@ describe("re-encryption", () => {
     const encryption = rotated();
     const before = await readSecretEncryption(database, encryption);
 
-    expect(before).toMatchObject({ activeKeyVersion: "current", failed: 0 });
+    expect(before).toMatchObject({ activeKeyVersion: "current", earlierFormat: 5, failed: 0 });
     expect(before.keyVersions).toMatchObject({ current: 0, previous: 3, oldest: 5 });
     expect(incomplete(before)).toBe(true);
 
@@ -134,7 +139,7 @@ describe("re-encryption", () => {
 
     expect(result).toMatchObject({ changed: 0, failed: 0 });
     expect(result.reencrypted).toBe(Object.values(before.keyVersions).reduce((a, b) => a + b, 0));
-    expect(after).toMatchObject({ failed: 0 });
+    expect(after).toMatchObject({ earlierFormat: 0, failed: 0 });
     expect(after.keyVersions).toMatchObject({
       current: result.reencrypted,
       previous: 0,

@@ -1,9 +1,9 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeProtectedHeader } from "jose";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { configurationSchema } from "../src/lib/server/config.ts";
+import { ciphertextKeyVersion } from "../src/lib/server/secret-encryption.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
 import { keySet, keyVersion, keysOf } from "./keyring.fixture.ts";
 
@@ -40,7 +40,7 @@ it("creates a private keyring on first start and keeps using it", async () => {
   const ciphertext = await first.encryption.encrypt(context, "synthetic secret");
 
   expect((await stat(path)).mode & 0o777).toBe(0o600);
-  expect(decodeProtectedHeader(ciphertext).kid).toBe(keysOf(await readFile(path, "utf8"))[0]?.kid);
+  expect(ciphertextKeyVersion(ciphertext)).toBe(keysOf(await readFile(path, "utf8"))[0]?.kid);
   expect(console.info).toHaveBeenCalledWith(expect.stringContaining(path));
 
   const restarted = await installationKeys(configuration());
@@ -68,7 +68,7 @@ it("uses a configured keyring from the environment or a file", async () => {
   const fromFile = await installationKeys(configuration({ PLATFORM_ENCRYPTION_KEYS_FILE: path }));
   const ciphertext = await fromEnvironment.encryption.encrypt(context, "value");
 
-  expect(decodeProtectedHeader(ciphertext).kid).toBe("current");
+  expect(ciphertextKeyVersion(ciphertext)).toBe("current");
   expect(await fromFile.encryption.decrypt(context, ciphertext)).toBe("value");
   await expect(readFile(join(directory, "encryption.keys"))).rejects.toThrow();
 
@@ -99,7 +99,7 @@ it("requires a configured keyring to keep the generated key versions", async () 
   );
 
   expect(await configured.encryption.decrypt(context, ciphertext)).toBe("value");
-  expect(decodeProtectedHeader(await configured.encryption.encrypt(context, "value")).kid).toBe(
+  expect(ciphertextKeyVersion(await configured.encryption.encrypt(context, "value"))).toBe(
     "operator",
   );
 });
