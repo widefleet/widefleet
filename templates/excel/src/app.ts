@@ -26,7 +26,8 @@ import type { Environment, Properties } from "./context.ts";
  * `nextLink` to the same method to read the next page.
  *
  * For a series of calls, `createSession` with `{ persistChanges: true }`
- * returns a `sessionId` that makes them faster. With `persistChanges: false`,
+ * returns a session whose `data.id`, passed as `sessionId` to later calls,
+ * makes them faster. With `persistChanges: false`,
  * changes stay in a temporary copy. Sessions end after a few minutes without
  * calls; `refreshSession` keeps one open, and a call in an ended session
  * returns `graph_error` with status 404.

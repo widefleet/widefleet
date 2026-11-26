@@ -24,7 +24,9 @@ from your own app, connect it from the app's directory:
 widefleet connect linear --as LINEAR
 ```
 
-Every query and mutation of Linear's GraphQL API is a method with the same name,
-such as `issues`, `issueCreate` and `commentCreate`. See [using a template
+Linear's GraphQL queries and mutations for a person's workspace are methods with the
+same name, such as `issues`, `issueCreate` and `commentCreate`. Linear's sign-in
+flows, agent-app and OAuth application management and internal operations are left
+out; `scripts/operations.ts` lists each with its reason. See [using a template
 app](https://widefleet.com/docs/guides/app-templates#use-from-agents-and-apps) for
 calls, approvals and results.

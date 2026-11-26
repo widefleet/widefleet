@@ -37,7 +37,9 @@ your own app, connect it from the app's directory:
 widefleet connect gmail --as GMAIL
 ```
 
-Every method of the Gmail API is a method named after its resource and action, such
-as `messagesList`, `messagesSend` and `labelsCreate`. See [using a template
+Gmail API methods for a person's own mailbox are methods named after their resource
+and action, such as `messagesList`, `messagesSend` and `labelsCreate`. Delegates,
+forwarding addresses, send-as aliases and auto-forwarding need a service account
+with domain-wide delegation and are left out. See [using a template
 app](https://widefleet.com/docs/guides/app-templates#use-from-agents-and-apps) for
 calls, approvals and results.

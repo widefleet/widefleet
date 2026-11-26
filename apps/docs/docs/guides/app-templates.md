@@ -126,8 +126,10 @@ in [Ask the user before continuing](/guides/app-services#ask-the-user-before-con
 ## Customize a template
 
 Open **View source** on the template page and copy the template's directory into
-your project. Keep `pnpm-workspace.yaml` and `patches/` with the source. Then
-deploy it like any other app:
+your project. Keep `pnpm-workspace.yaml` and `patches/` with the source.
+
+To change an installed template app, set `name` in `wrangler.jsonc` to the app's
+name and deploy. The app keeps its secrets and connected accounts:
 
 ```sh
 pnpm install
@@ -135,7 +137,17 @@ pnpm test
 widefleet deploy
 ```
 
-Set the app's name in `wrangler.jsonc` before deploying. See [saving and recovering source code](/guides/source-code)
+To deploy the source as a new app, create it and save the secrets the template
+requires first, such as for Gmail:
+
+```sh
+widefleet create my-gmail --name "My Gmail"
+widefleet secret put GOOGLE_CLIENT_ID --file ./client-id
+widefleet secret put GOOGLE_CLIENT_SECRET --file ./client-secret
+widefleet deploy
+```
+
+Set the same name in `wrangler.jsonc`. See [saving and recovering source code](/guides/source-code)
 to continue from another session or machine.
 
 Template methods are generated from the service's published API description. To

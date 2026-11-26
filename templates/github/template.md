@@ -26,7 +26,10 @@ from your own app, connect it from the app's directory:
 widefleet connect github --as GITHUB
 ```
 
-Every query and mutation of GitHub's GraphQL API is a method with the same name,
-such as `repository`, `search` and `addComment`. See [using a template
+GitHub's GraphQL queries and mutations for a person's account are methods with the
+same name, such as `repository`, `search` and `addComment`. Enterprise and
+organization administration, migrations, GitHub Sponsors and GitHub App-only
+operations are left out; `scripts/operations.ts` lists each with its reason. See
+[using a template
 app](https://widefleet.com/docs/guides/app-templates#use-from-agents-and-apps) for
 calls, approvals and results.

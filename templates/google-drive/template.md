@@ -38,8 +38,9 @@ it from your own app, connect it from the app's directory:
 widefleet connect google-drive --as DRIVE
 ```
 
-Every method of the Google Drive API is a method named after its resource and
-action, such as `filesList`, `filesCreateWithContent` and `permissionsCreate`. See
-[using a template
+Google Drive API methods are methods named after their resource and action, such as
+`filesList`, `filesCreateWithContent` and `permissionsCreate`. The replaced team
+drives methods, client-side encrypted files and installed Drive apps are left out.
+See [using a template
 app](https://widefleet.com/docs/guides/app-templates#use-from-agents-and-apps) for
 calls, approvals and results.
