@@ -3,7 +3,6 @@ import { approvalForm } from "./approval-page.ts";
 import { authorizationPage as continuePage, copyable, oauthConnectionPage } from "./layout.ts";
 
 export const connectionPage = (
-  name: string,
   account: string | null,
   missing: string[],
   origin: string,
@@ -15,7 +14,6 @@ export const connectionPage = (
     description:
       "Read your profile, activities, streams, clubs, gear, routes and segments, and create, upload and update activities.",
     account: "Strava account",
-    user: name,
     connected: account,
     failed,
     missing,

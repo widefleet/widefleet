@@ -3,7 +3,6 @@ import { approvalForm } from "./approval-page.ts";
 import { authorizationPage as continuePage, copyable, oauthConnectionPage } from "./layout.ts";
 
 export const connectionPage = (
-  name: string,
   account: string | null,
   missing: string[],
   origin: string,
@@ -15,7 +14,6 @@ export const connectionPage = (
     description:
       "Find workbooks, read and write ranges, and work with worksheets, tables, named ranges and charts.",
     account: "Microsoft account",
-    user: name,
     connected: account,
     failed,
     missing,

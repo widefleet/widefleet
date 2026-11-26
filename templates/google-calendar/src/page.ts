@@ -3,7 +3,6 @@ import { approvalForm } from "./approval-page.ts";
 import { authorizationPage as continuePage, copyable, oauthConnectionPage } from "./layout.ts";
 
 export const connectionPage = (
-  name: string,
   account: string | null,
   missing: string[],
   origin: string,
@@ -15,7 +14,6 @@ export const connectionPage = (
     description:
       "Read, create and change events, calendars, sharing and settings, and find free time.",
     account: "Google account",
-    user: name,
     connected: account,
     failed,
     missing,

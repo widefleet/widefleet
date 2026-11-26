@@ -1,4 +1,4 @@
-import { escapeHtml, heading, page, signedIn } from "./layout.ts";
+import { escapeHtml, heading, page } from "./layout.ts";
 
 /** The user's saved key, as the connection page describes it. */
 export type SavedKeyState =
@@ -18,7 +18,6 @@ const errors: Record<SaveError, string> = {
 };
 
 export const connectionPage = (
-  name: string,
   key: SavedKeyState,
   ticket: string | null,
   error: SaveError | null,
@@ -39,8 +38,7 @@ export const connectionPage = (
     `${heading("Garmin Connect", "Read activities and their files, sleep, heart rate, HRV, Body Battery, stress, steps, VO2 max, weight, nutrition and more.")}
 ${error ? `<p class="alert" role="alert">${errors[error]}</p>` : key.status === "rejected" ? `<p class="alert" role="alert">Garmin no longer accepts the key you saved on ${day(key.savedAt)}. It expired or was deleted. Create a new key and save it here.</p>` : ""}
 ${account}
-<section>${key.status === "connected" ? "<h2>Replace key</h2>" : key.status === "none" ? "<p>Connect your Garmin account with a Personal API key so apps and agents can read your data for you.</p>" : "<h2>New key</h2>"}${form}</section>
-${signedIn(name)}`,
+<section>${key.status === "connected" ? "<h2>Replace key</h2>" : key.status === "none" ? "<p>Connect your Garmin account with a Personal API key so apps and agents can read your data for you.</p>" : "<h2>New key</h2>"}${form}</section>`,
   );
 };
 

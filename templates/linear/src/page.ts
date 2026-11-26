@@ -3,7 +3,6 @@ import { approvalForm } from "./approval-page.ts";
 import { authorizationPage as continuePage, copyable, oauthConnectionPage } from "./layout.ts";
 
 export const connectionPage = (
-  name: string,
   account: string | null,
   missing: string[],
   origin: string,
@@ -14,7 +13,6 @@ export const connectionPage = (
     service: "Linear",
     description: "Read and change issues, projects, comments, documents and more.",
     account: "Linear account",
-    user: name,
     connected: account,
     failed,
     missing,

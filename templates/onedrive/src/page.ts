@@ -3,7 +3,6 @@ import { approvalForm } from "./approval-page.ts";
 import { authorizationPage as continuePage, copyable, oauthConnectionPage } from "./layout.ts";
 
 export const connectionPage = (
-  name: string,
   account: string | null,
   missing: string[],
   origin: string,
@@ -14,7 +13,6 @@ export const connectionPage = (
     service: "OneDrive",
     description: "Browse, search, upload, move, share and restore files and folders.",
     account: "Microsoft account",
-    user: name,
     connected: account,
     failed,
     missing,

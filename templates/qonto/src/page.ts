@@ -3,7 +3,6 @@ import { approvalForm } from "./approval-page.ts";
 import { authorizationPage as continuePage, copyable, oauthConnectionPage } from "./layout.ts";
 
 export const connectionPage = (
-  name: string,
   account: string | null,
   missing: string[],
   origin: string,
@@ -15,7 +14,6 @@ export const connectionPage = (
     description:
       "Work with accounts, transactions, transfers, cards, invoicing and team. Payments to beneficiaries your organization has not trusted still need your approval in the Qonto app on your paired phone.",
     account: "Qonto account",
-    user: name,
     connected: account,
     failed,
     missing,

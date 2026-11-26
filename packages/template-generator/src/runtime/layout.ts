@@ -46,11 +46,11 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(-
 fieldset{min-width:0;border:0;margin:0;padding:0}
 legend{padding:0}
 .options{margin-top:12px;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--card)}
-.options label{display:flex;gap:10px;align-items:center;padding:10px 16px;cursor:pointer}
+.options label{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;cursor:pointer}
+.options label>span{display:grid;gap:2px}
 .options label+label{border-top:1px solid var(--border)}
 .options label:hover{background:var(--hover)}
-input[type=radio]{margin:0;accent-color:var(--primary)}
-footer{margin-top:40px;border-top:1px solid var(--border);padding-top:16px}
+input[type=radio]{margin:4px 0 0;flex:none;accent-color:var(--primary)}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);border-radius:8px;background:var(--foreground);color:var(--background);padding:10px 16px}
 .toast[hidden]{display:none}
 @media (prefers-reduced-motion:reduce){button{transition:none}}`;
@@ -79,10 +79,6 @@ export const page = (title: string, content: string, cookies: string[] = []) => 
 export const heading = (service: string, description: string) =>
   `<header><img src="/favicon.svg" alt=""><div><h1>${escapeHtml(service)}</h1><p class="muted">${description}</p></div></header>`;
 
-/** The Widefleet user whose account the page connects. */
-export const signedIn = (name: string) =>
-  `<footer class="muted small">Signed in to Widefleet as ${escapeHtml(name)}. Everyone connects their own account.</footer>`;
-
 /** A value to copy into the provider's settings, such as a callback URL. */
 export const copyable = (value: string) => `<code class="value">${escapeHtml(value)}</code>`;
 
@@ -96,7 +92,6 @@ export const oauthConnectionPage = (connection: {
   description: string;
   /** Where the account lives, such as "Google account". */
   account: string;
-  user: string;
   connected: string | null;
   failed: boolean;
   /** Steps to create the OAuth client, as HTML, before its secrets are set. */
@@ -133,8 +128,7 @@ ${connection.approvals ?? ""}`;
     `${heading(connection.service, connection.description)}
 ${connection.failed ? '<p class="alert" role="alert">The connection could not be completed. Try again. To switch accounts, disconnect the current account first.</p>' : ""}
 ${connection.missing.length ? setup : ""}
-${connection.connected ? connected(connection.connected) : connection.missing.length ? "" : disconnected}
-${signedIn(connection.user)}`,
+${connection.connected ? connected(connection.connected) : connection.missing.length ? "" : disconnected}`,
   );
 };
 

@@ -27,9 +27,16 @@ export const loosens = (from: ApprovalLevel, to: ApprovalLevel) =>
   approvalLevels.indexOf(to) > approvalLevels.indexOf(from);
 
 export const levelDescriptions: Record<ApprovalLevel, string> = {
-  all_changes: "Ask before every change",
-  updates_and_deletions: "Ask before changing, deleting or sending",
+  all_changes: "Always ask",
+  updates_and_deletions: "Ask except for new items",
   none: "Never ask",
+};
+
+/** What each level asks about, under its name on the app's page. */
+export const levelDetails: Record<ApprovalLevel, string> = {
+  all_changes: "Creating, changing, deleting and sending ask first.",
+  updates_and_deletions: "New items are created at once. Changing, deleting and sending ask first.",
+  none: "Every change runs at once.",
 };
 
 /** Each Widefleet user's level, kept in the app's database. */

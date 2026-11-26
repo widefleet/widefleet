@@ -1,6 +1,6 @@
 // Shared by the generated templates: the template generator copies this file into
 // each template's src. Edit it in packages/template-generator/src/runtime.
-import { type ApprovalLevel, approvalLevels, levelDescriptions } from "./approval.ts";
+import { type ApprovalLevel, approvalLevels, levelDescriptions, levelDetails } from "./approval.ts";
 
 const escape = (value: string) =>
   value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
@@ -10,7 +10,7 @@ const escape = (value: string) =>
 export const approvalForm = (service: string, level: ApprovalLevel) => `
 <section><fieldset id="approval"><legend><h2>Approvals</h2></legend>
 <p class="muted">When apps and agents change ${escape(service)} data with your account. Reading never asks.</p>
-<div class="options">${approvalLevels.map((option) => `<label><input type="radio" name="level" value="${option}"${option === level ? " checked" : ""}> ${escape(levelDescriptions[option])}</label>`).join("")}</div></fieldset></section>
+<div class="options">${approvalLevels.map((option) => `<label><input type="radio" name="level" value="${option}"${option === level ? " checked" : ""}><span><span>${escape(levelDescriptions[option])}</span><span class="muted small">${escape(levelDetails[option])}</span></span></label>`).join("")}</div></fieldset></section>
 <p class="toast" role="status" hidden></p>
 <script>
 const form = document.getElementById("approval");
