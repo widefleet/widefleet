@@ -94,9 +94,9 @@ async fn rekey(api: &Api, credentials: &crate::auth::Credentials) -> Result<()> 
             break;
         }
     }
-    let complete = passes.last().is_some_and(|last| {
-        last.rewritten == 0 && last.unreadable == 0 && last.conflicts == 0
-    });
+    let complete = passes
+        .last()
+        .is_some_and(|last| last.rewritten == 0 && last.unreadable == 0 && last.conflicts == 0);
     super::print_json(&RekeyResult { passes, complete })?;
     if !complete {
         return Err(Error::invalid(

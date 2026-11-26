@@ -60,7 +60,9 @@ pub async fn secrets_keys(store: &dyn ObjectStore, organization_id: &str) -> Res
         .ok()
         .and_then(|keyring| keyring["keys"].as_array().map(Vec::len));
     if !keys.is_some_and(|count| count > 0) {
-        return Err(Error::invalid("Invalid app secret encryption keyring".into()));
+        return Err(Error::invalid(
+            "Invalid app secret encryption keyring".into(),
+        ));
     }
     Ok(value)
 }
