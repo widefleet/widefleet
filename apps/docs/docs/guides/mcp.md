@@ -85,8 +85,29 @@ return { configured: status.configured };
 
 Scripts use `async`/`await`, loops and data transformations, and reach services
 through `tools.call`. A script can make up to 32 calls, run for 30 seconds and
-return up to 1 MiB of JSON. Calls that completed before an error keep their
-effects, so check them before running a script again.
+return up to 1 MiB of JSON plus 5 MiB of base64-encoded images and files, about
+3.7 MiB of file content. Calls that completed before an error keep their effects,
+so check them before running a script again.
+
+### Return images and files
+
+A script returns an image or a file as an MCP block, anywhere in its result. The
+client receives it as an image the model sees or as a file, and the JSON keeps the
+block's `contentIndex` in its place:
+
+```js
+const file = await tools.call({
+  hostname: "drive.apps.example.com",
+  entrypoint: "GoogleDriveApi",
+  method: "filesGetContent",
+  arguments: [{ fileId: "1a2b3c" }],
+});
+if (file.status !== "connected") return file;
+return { type: "image", mimeType: file.data.contentType, data: file.data.base64 };
+```
+
+Return other files as `{ type: "resource", resource: { uri, mimeType, blob } }`
+with base64 `blob`, and text as text.
 
 ### Build apps
 
