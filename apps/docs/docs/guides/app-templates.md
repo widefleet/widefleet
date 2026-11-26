@@ -1,7 +1,7 @@
 ---
 title: Use an app template
 description: Install a ready-made app, connect accounts and use it from agents and other apps.
-lastModified: 2026-11-26
+lastModified: 2026-11-27
 ---
 
 App templates are ready-made apps for the tools your team already uses, such as
@@ -58,9 +58,12 @@ Agents in [MCP clients](/guides/mcp) find the app's methods through Widefleet an
 call them for the signed-in person. Ask for what you need, such as "Show my
 unread emails from today".
 
-To use the app from your own app, connect it from the calling app's directory:
+To use the app from your own app, connect it from the calling app's directory. A
+new app that has not been deployed yet is created first, under the `name` in its
+`wrangler.jsonc`:
 
 ```sh
+widefleet create my-app --name "My app"
 widefleet connect gmail --as GMAIL
 ```
 

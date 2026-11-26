@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-23
+lastModified: 2026-11-27
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -324,8 +324,10 @@ external service remains separate from this approval.
 
 ## Activation and updates
 
-Connections can be saved before the caller's first deployment. Otherwise the
-CLI waits for activation unless `--no-wait` is set. **Saved**, **pending**,
+Connections can be saved before the caller's first deployment. Create the caller
+first, with `widefleet create SLUG --name NAME` using the `name` from its
+`wrangler.jsonc`, then connect it. For a deployed caller, the CLI waits for
+activation unless `--no-wait` is set. **Saved**, **pending**,
 **active** and **failed** describe grant activation independently of code updates.
 Retry a failed change by submitting it again and inspect `widefleet connections`.
 App owners and collaborators can retry an unchanged saved connection even when
