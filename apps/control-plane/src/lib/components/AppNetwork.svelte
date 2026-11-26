@@ -5,9 +5,10 @@
   import { Badge } from "@platform/ui/badge";
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
-  import { Label } from "@platform/ui/label";
   import { NativeSelect } from "@platform/ui/native-select";
   import Network from "@lucide/svelte/icons/network";
+  import Plus from "@lucide/svelte/icons/plus";
+  import X from "@lucide/svelte/icons/x";
   import { changeAppNetwork, getAppNetwork } from "#lib/network.remote";
   import { failureMessage } from "#lib/sso-setup.svelte";
   import { getWorkspaceContext } from "#lib/workspace-context";
@@ -46,12 +47,15 @@
   const undeclared = (target: Target, origin: string) =>
     network.undeclared?.[target].includes(origin) ?? false;
 
+  // Shown only while the lists differ from what the running app enforces.
   const stateHints = {
-    active: "Applied to the running app",
-    saved: "Applies from the first deployment",
-    pending: "Being applied. The previous permissions stay in effect until then.",
-    failed: "Could not be applied. The previous permissions stay in effect.",
-  } satisfies Record<View["network"]["state"], string>;
+    saved: "Applies with the first deployment",
+    pending: "Applying changes",
+    failed: "Could not apply the changes. The previous permissions stay in effect.",
+  } satisfies Record<Exclude<View["network"]["state"], "active">, string>;
+
+  // Every origin is HTTPS, so the host alone names it.
+  const host = (origin: string) => URL.parse(origin)?.host ?? origin;
 
   // The lists change at once. The deployment's declaration stays the same, so the requested and
   // no longer declared origins follow from the new lists; the server's answer replaces them all.
@@ -129,11 +133,26 @@
       );
   };
 
+  let adding = $state(false);
+
+  let field = $state<HTMLInputElement | null>(null);
+
+  // Opening the form moves focus to the origin field.
+  $effect(() => {
+    if (adding) field?.focus();
+  });
+
   let draft = $state("");
 
   let draftTarget = $state<Target>("backend");
 
   let draftError = $state("");
+
+  const cancel = () => {
+    adding = false;
+    draft = "";
+    draftError = "";
+  };
 
   const add = (event: SubmitEvent) => {
     event.preventDefault();
@@ -150,9 +169,11 @@
 
     draft = "";
     draftError = "";
+    adding = false;
     change({ target, action: "allow", origins: [origin] }, `Could not allow ${origin}.`, () => {
       // Keep what was typed when the server rejects it, unless something new was typed since.
       if (!draft) {
+        adding = true;
         draft = origin;
         draftTarget = target;
       }
@@ -160,13 +181,13 @@
   };
 </script>
 
-{#snippet origin(entry: { target: Target; origin: string }, note: string)}
-  <span class="min-w-0 flex-1"
-    ><code class="block text-xs wrap-anywhere">{entry.origin}</code><span
-      class="text-muted-foreground mt-1 block text-xs font-normal"
-      >{targetLabels[entry.target]}{note}</span
-    ></span
-  >
+{#snippet row(entry: { target: Target; origin: string }, note?: string)}
+  <span class="min-w-0 flex-1 text-xs">
+    <span class="wrap-anywhere">{host(entry.origin)}</span>
+    {#if entry.target === "browser" || note}<span class="text-muted-foreground block"
+        >{[entry.target === "browser" ? "Browser" : "", note].filter(Boolean).join(" · ")}</span
+      >{/if}
+  </span>
 {/snippet}
 
 <div class="bg-background rounded-lg border shadow-xs">
@@ -178,101 +199,112 @@
   </div>
 
   {#if requested.length}
-    <div class="border-b px-4 py-4">
-      <p class="text-muted-foreground text-xs">Requested by the latest deployment</p>
-      <ul class="divide-y" aria-label="Requested origins">
-        {#each requested as entry (`${entry.target} ${entry.origin}`)}
-          <li class="flex items-center gap-3 py-3">
-            {@render origin(entry, "")}
-            {#if view.canManage}<Button
-                size="sm"
-                variant="outline"
-                aria-label={`Allow ${entry.origin} for the ${entry.target}`}
-                onclick={() => allow(entry.target, entry.origin)}>Allow</Button
-              >{/if}
-          </li>
-        {/each}
-      </ul>
-    </div>
-  {/if}
-
-  {#if allowed.length === 0}
-    <div class="px-4 py-6">
-      <p class="text-sm">No external origins allowed</p>
-      <p class="text-muted-foreground mt-2 text-xs leading-5">
-        The app cannot reach other origins. Its storage, queues and app connections keep working.
-      </p>
-    </div>
-  {:else}
-    <div class="px-4 pt-4">
-      <p class="text-muted-foreground text-xs">Allowed</p>
-    </div>
-    <ul class="divide-y px-4" aria-label="Allowed origins">
-      {#each allowed as entry (`${entry.target} ${entry.origin}`)}
-        <li class="flex items-center gap-3 py-3">
-          {@render origin(
-            entry,
-            undeclared(entry.target, entry.origin)
-              ? " · Not requested by the latest deployment"
-              : "",
-          )}
+    <ul class="divide-y border-b px-4" aria-label="Requested origins">
+      {#each requested as entry (`${entry.target} ${entry.origin}`)}
+        <li class="flex min-h-12 items-center gap-3 py-2">
+          {@render row(entry, "Requested by the app")}
           {#if view.canManage}<Button
-              size="sm"
-              variant="ghost"
-              aria-label={`Remove ${entry.origin} from the ${entry.target}`}
-              onclick={() => remove(entry.target, entry.origin)}>Remove</Button
+              size="xs"
+              variant="secondary"
+              aria-label={`Allow ${entry.origin} for the ${entry.target}`}
+              onclick={() => allow(entry.target, entry.origin)}>Allow</Button
             >{/if}
         </li>
       {/each}
     </ul>
   {/if}
 
+  {#if allowed.length}
+    <ul class="divide-y px-4" aria-label="Allowed origins">
+      {#each allowed as entry (`${entry.target} ${entry.origin}`)}
+        <li class="flex min-h-12 items-center gap-3 py-2">
+          {@render row(
+            entry,
+            undeclared(entry.target, entry.origin) ? "No longer requested" : undefined,
+          )}
+          {#if view.canManage}<Button
+              size="icon-xs"
+              variant="ghost"
+              class="text-muted-foreground"
+              aria-label={`Remove ${entry.origin} from the ${entry.target}`}
+              onclick={() => remove(entry.target, entry.origin)}><X /></Button
+            >{/if}
+        </li>
+      {/each}
+    </ul>
+  {:else if !requested.length}
+    <div class="px-4 py-6">
+      <p class="text-sm">No external origins</p>
+      <p class="text-muted-foreground mt-2 text-xs leading-5">
+        Requests to other websites and APIs are blocked.
+      </p>
+    </div>
+  {/if}
+
   {#if view.canManage}
-    <form class="space-y-2 border-t px-4 py-4" onsubmit={add} novalidate>
-      <Label for="network-origin" class="text-xs">Allow an origin</Label>
-      <Input
-        id="network-origin"
-        placeholder="https://api.example.com"
-        autocomplete="off"
-        spellcheck={false}
-        aria-invalid={draftError ? true : undefined}
-        aria-describedby={draftError ? "network-origin-error" : "network-origin-help"}
-        bind:value={draft}
-        oninput={() => (draftError = "")}
-      />
-      <div class="flex gap-2">
-        <NativeSelect
-          aria-label="Where the app reaches the origin"
-          class="flex-1"
-          bind:value={draftTarget}
+    {#if adding}
+      <form class="space-y-2 border-t px-4 py-3" onsubmit={add} novalidate>
+        <div class="flex gap-2">
+          <Input
+            class="h-8 min-w-0 flex-1 text-xs"
+            placeholder="https://api.example.com"
+            aria-label="Origin to allow"
+            autocomplete="off"
+            spellcheck={false}
+            aria-invalid={draftError ? true : undefined}
+            aria-describedby={draftError ? "network-origin-error" : undefined}
+            bind:value={draft}
+            oninput={() => (draftError = "")}
+            onkeydown={(event) => {
+              if (event.key === "Escape") cancel();
+            }}
+            bind:ref={field}
+          />
+          <NativeSelect
+            size="sm"
+            class="max-sm:[&_select]:h-8"
+            aria-label="Where the app reaches the origin"
+            bind:value={draftTarget}
+          >
+            {#each targets as target (target)}<option value={target}>{targetLabels[target]}</option
+              >{/each}
+          </NativeSelect>
+        </div>
+        {#if draftError}<p id="network-origin-error" class="text-destructive text-xs">
+            {draftError}
+          </p>{/if}
+        <div class="flex justify-end gap-2">
+          <Button size="xs" variant="ghost" onclick={cancel}>Cancel</Button>
+          <Button type="submit" size="xs">Allow</Button>
+        </div>
+      </form>
+    {:else}
+      <div class="border-t px-2 py-1.5">
+        <Button
+          size="sm"
+          variant="ghost"
+          class="text-muted-foreground w-full justify-start"
+          onclick={() => (adding = true)}><Plus />Add origin</Button
         >
-          {#each targets as target (target)}<option value={target}>{targetLabels[target]}</option
-            >{/each}
-        </NativeSelect>
-        <Button type="submit" variant="outline" class="max-sm:h-10">Allow</Button>
       </div>
-      {#if draftError}<p id="network-origin-error" class="text-destructive text-xs">
-          {draftError}
-        </p>{:else}<p id="network-origin-help" class="text-muted-foreground text-xs leading-5">
-          Backend covers requests from the app’s server code. Browser lets its pages load and
-          connect to the origin.
-        </p>{/if}
-    </form>
+    {/if}
   {:else}
-    <p class="text-muted-foreground border-t px-4 py-3 text-xs leading-5">
-      Only the app’s owner or an administrator can change network permissions.
+    <p class="text-muted-foreground border-t px-4 py-3 text-[11px]">
+      Only the app’s owner or an administrator can change these.
     </p>
   {/if}
 
-  <div class="flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-4 py-3">
-    <CapabilityStatus state={network.state} />
-    <p class="text-muted-foreground min-w-0 flex-1 text-[11px] leading-4">
-      {stateHints[network.state]}{#if network.error}{" "}{network.error}{/if}
-    </p>
-    {#if network.state === "failed" && view.canManage && allowed.length}<Button
-        size="sm"
-        variant="outline"
-        onclick={retry}>Retry</Button
-      >{/if}
-  </div>
+  {#if network.state !== "active"}
+    <div class="flex items-center gap-3 border-t px-4 py-3">
+      <CapabilityStatus state={network.state} />
+      <p class="text-muted-foreground min-w-0 flex-1 text-[11px] leading-4">
+        {stateHints[network.state]}{#if network.error}{" "}{network.error}{/if}
+      </p>
+      {#if network.state === "failed" && view.canManage && allowed.length}<Button
+          size="xs"
+          variant="outline"
+          onclick={retry}>Retry</Button
+        >{/if}
+    </div>
+  {/if}
 </div>

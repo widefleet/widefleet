@@ -584,7 +584,7 @@ test(`lets owners allow and remove network origins beside the app's connections`
     const allowed = page.getByRole("list", { name: "Allowed origins" });
     await expect(requested.getByRole("listitem")).toHaveCount(3);
     await expect(allowed.getByRole("listitem")).toHaveText([
-      /https:\/\/legacy\.example\.test\s*Backend · Not requested by the latest deployment/,
+      /legacy\.example\.test\s*No longer requested/,
     ]);
 
     for (const width of [1280, 390]) {
@@ -609,28 +609,45 @@ test(`lets owners allow and remove network origins beside the app's connections`
     await page
       .getByRole("button", { name: "Allow https://api.example.test for the backend" })
       .click();
-    await expect(allowed.getByText("https://api.example.test")).toBeVisible();
-    await expect(requested.getByText("https://api.example.test")).toHaveCount(0);
+    await expect(allowed.getByText("api.example.test")).toBeVisible();
+    await expect(requested.getByText("api.example.test")).toHaveCount(0);
     await release();
     await expect.poll(policy).toEqual({
       policy: { backend: ["https://api.example.test", "https://legacy.example.test"], browser: [] },
       error: null,
     });
-    await expect(allowed.getByText("https://api.example.test")).toBeVisible();
+    await expect(allowed.getByText("api.example.test")).toBeVisible();
 
     // An origin with a path is rejected beside the field before anything is sent.
-    const field = page.getByLabel("Allow an origin");
+    await page.getByRole("button", { name: "Add origin" }).click();
+    const field = page.getByLabel("Origin to allow");
+    await expect(field).toBeFocused();
     await field.fill("https://partner.example.test/orders");
     await field.press("Enter");
     await expect(page.getByText("Use an exact HTTPS origin", { exact: false })).toBeVisible();
     await expect(field).toHaveValue("https://partner.example.test/orders");
     expect(held).toHaveLength(0);
 
+    for (const [width, colorScheme] of [
+      [1280, "light"],
+      [390, "dark"],
+    ] as const) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await page.screenshot({
+        path: testInfo.outputPath(`network-adding-${width}-${colorScheme}.png`),
+        fullPage: true,
+      });
+    }
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.emulateMedia({ colorScheme: "light" });
+
     await field.fill("https://partner.example.test");
     await page.getByLabel("Where the app reaches the origin").selectOption("browser");
     await page.getByRole("button", { name: "Allow", exact: true }).click();
-    await expect(field).toHaveValue("");
-    await expect(allowed.getByText("https://partner.example.test")).toBeVisible();
+    await expect(field).toHaveCount(0);
+    await expect(allowed.getByText("partner.example.test")).toBeVisible();
     await release();
     await expect
       .poll(async () => (await policy()).policy.browser)
@@ -640,7 +657,7 @@ test(`lets owners allow and remove network origins beside the app's connections`
     await page
       .getByRole("button", { name: "Remove https://legacy.example.test from the backend" })
       .click();
-    await expect(page.getByText("https://legacy.example.test")).toHaveCount(0);
+    await expect(page.getByText("legacy.example.test")).toHaveCount(0);
     await release();
     await expect
       .poll(async () => (await policy()).policy.backend)
@@ -650,7 +667,7 @@ test(`lets owners allow and remove network origins beside the app's connections`
     await page
       .getByRole("button", { name: "Remove https://api.example.test from the backend" })
       .click();
-    await expect(requested.getByText("https://api.example.test")).toBeVisible();
+    await expect(requested.getByText("api.example.test")).toBeVisible();
     await release();
     await expect.poll(async () => (await policy()).policy.backend).toEqual([]);
 
@@ -662,7 +679,7 @@ test(`lets owners allow and remove network origins beside the app's connections`
     await expect(allowed).toHaveCount(0);
     await release();
     await expect(page.getByText("Could not remove https://partner.example.test.")).toBeVisible();
-    await expect(allowed.getByText("https://partner.example.test")).toBeVisible();
+    await expect(allowed.getByText("partner.example.test")).toBeVisible();
     await environment.database.db.update(apps).set({ state: "active" }).where(eq(apps.id, appId));
 
     // A failed activation offers to apply the same permissions again.
@@ -683,13 +700,11 @@ test(`lets owners allow and remove network origins beside the app's connections`
     await expect(
       collaboratorPage
         .getByRole("list", { name: "Allowed origins" })
-        .getByText("https://partner.example.test"),
+        .getByText("partner.example.test"),
     ).toBeVisible();
     await expect(collaboratorPage.getByRole("button", { name: /^(Allow|Remove)/ })).toHaveCount(0);
     await expect(
-      collaboratorPage.getByText(
-        "Only the app’s owner or an administrator can change network permissions.",
-      ),
+      collaboratorPage.getByText("Only the app’s owner or an administrator can change these."),
     ).toBeVisible();
     await collaboratorPage.screenshot({
       path: testInfo.outputPath(`network-collaborator-1280-light.png`),
