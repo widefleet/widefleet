@@ -88,11 +88,15 @@ export const setBrowserWorkers = command(
   organizationSelection.extend({ enabled: z.boolean() }),
   async ({ enabled, organizationId }) => {
     const { runtime, principal } = await commandContext({ organizationId });
-    await remoteOperation(() => runtime.settings.setBrowserWorkers(principal, enabled, true));
-    await Promise.all([
-      getSettings({ organizationId }).refresh(),
-      getSettingsActivation({ organizationId }).refresh(),
-    ]);
+
+    const result = await remoteOperation(() =>
+      runtime.settings.setBrowserWorkers(principal, enabled, true),
+    );
+
+    getSettingsActivation({ organizationId }).set(result.activation);
+    await getSettings({ organizationId }).refresh();
+
+    return result.error;
   },
 );
 

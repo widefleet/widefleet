@@ -218,6 +218,26 @@ describe("Platform setup and managed settings", () => {
     expect(environment.authControl.read().configuration).not.toHaveProperty("allowBrowserWorkers");
   });
 
+  it("reports a saved disable that has not reached the runtime and permits retry", async () => {
+    await environment.settings.setBrowserWorkers(principal(), true, true);
+    environment.authControl.available(false);
+
+    try {
+      const saved = await environment.settings.setBrowserWorkers(principal(), false, true);
+      expect(saved.settings.allowBrowserWorkers).toBe(false);
+      expect(saved.error).toBeTruthy();
+      expect(saved.activation.state).not.toBe("active");
+      expect(environment.authControl.read().configuration?.allowBrowserWorkers).toBe(true);
+    } finally {
+      environment.authControl.available(true);
+    }
+
+    const retried = await environment.settings.setBrowserWorkers(principal(), false, true);
+    expect(retried.error).toBeNull();
+    expect(retried.activation.state).toBe("active");
+    expect(environment.authControl.read().configuration).not.toHaveProperty("allowBrowserWorkers");
+  });
+
   it("publishes embedding origins and keeps them when a settings file omits them", async () => {
     const update = async (embeddingOrigins?: string[]) => {
       const { embeddingOrigins: _, ...current } = await input();

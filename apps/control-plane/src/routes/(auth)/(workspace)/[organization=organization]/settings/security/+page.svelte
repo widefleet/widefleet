@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getWorkspaceContext } from "#lib/workspace-context";
-  import { getSettings, setBrowserWorkers } from "#lib/settings.remote";
-  import { failureMessage } from "#lib/sso-setup.svelte";
+  import { getSettings, getSettingsActivation, setBrowserWorkers } from "#lib/settings.remote";
+  import { toast } from "@platform/ui/sonner";
   import { Button } from "@platform/ui/button";
   import { Switch } from "@platform/ui/switch";
   import * as Tooltip from "@platform/ui/tooltip";
@@ -23,7 +23,14 @@
 
   const readonly = $derived(data.view.settings.externallyManaged);
 
-  let message = $state("");
+  let publicationError = $state<string | null>(null);
+
+  const activation = $derived(getSettingsActivation({ organizationId: workspace.organizationId }));
+
+  const unconfirmed = $derived(
+    data.view.settings.allowBrowserWorkers !== undefined &&
+      (activation.error || activation.current?.state !== "active"),
+  );
 
   let confirmOpen = $state(false);
 
@@ -36,16 +43,16 @@
   const toggle = async (next: boolean) => {
     enabled = next;
     busy = true;
-    message = "";
+    publicationError = null;
 
     try {
-      await setBrowserWorkers({
+      publicationError = await setBrowserWorkers({
         enabled: next,
         organizationId: workspace.organizationId,
       });
-    } catch (cause) {
+    } catch {
       enabled = data.view.settings.allowBrowserWorkers ?? false;
-      message = failureMessage(cause, "Could not apply the change.");
+      toast.error("Couldn’t save browser worker settings. Try again.");
     } finally {
       busy = false;
     }
@@ -55,8 +62,34 @@
 <svelte:head><title>Security · Widefleet</title></svelte:head>
 <PageHeading title="Security" />
 <div class="mt-8 max-w-2xl space-y-6">
-  {#if message}<Feedback kind="error">{message}</Feedback>{/if}
-  {#if data.view.error}<Feedback kind="error">{data.view.error}</Feedback>{/if}
+  {#if !busy && (publicationError || data.view.error || unconfirmed)}
+    <Feedback
+      kind={publicationError ||
+      data.view.error ||
+      activation.error ||
+      activation.current?.state === "failed"
+        ? "error"
+        : "info"}
+    >
+      {publicationError || data.view.error || ""}
+      {#if unconfirmed}
+        The switch shows the saved setting. Widefleet has not confirmed that it is active.
+        {activation.current?.message ?? ""}
+        {#if !readonly && (publicationError || activation.error || activation.current?.state === "failed" || activation.current?.state === "waiting")}
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={() => toggle(data.view.settings.allowBrowserWorkers ?? false)}
+            >Reapply saved setting</Button
+          >
+        {:else if activation.current?.state === "applying"}
+          <Button variant="outline" size="sm" onclick={() => activation.refresh()}
+            >Check status</Button
+          >
+        {/if}
+      {/if}
+    </Feedback>
+  {/if}
   <section class="border-t py-5">
     <div class="flex items-start justify-between gap-4">
       <div>

@@ -174,6 +174,14 @@ test("confirms browser worker access before changing organization security", asy
     await page.waitForLoadState("networkidle");
     const control = page.getByRole("switch", { name: "Browser workers" });
     await expect(control).not.toBeChecked();
+    await page.route("**/*", (route) =>
+      route.request().method() === "POST" ? route.abort("failed") : route.continue(),
+    );
+    await control.click();
+    await page.getByRole("button", { name: "Allow browser workers", exact: true }).click();
+    await expect(control).not.toBeChecked();
+    await expect(page.getByText("Couldn’t save browser worker settings. Try again.")).toBeVisible();
+    await page.unrouteAll({ behavior: "wait" });
     await control.click();
     const dialog = page.getByRole("dialog", { name: "Allow browser workers?" });
     await dialog.getByRole("button", { name: "Cancel" }).click();
@@ -186,10 +194,13 @@ test("confirms browser worker access before changing organization security", asy
     await page.reload();
     await page.waitForLoadState("networkidle");
     await expect(control).toBeChecked();
+    environment.authControl.available(false);
     await control.click();
     await expect(control).not.toBeChecked();
     await expect(control).toBeEnabled();
+    await expect(page.getByText(/Widefleet has not confirmed/)).toBeVisible();
   } finally {
+    environment.authControl.available(true);
     await context.close();
   }
 });
