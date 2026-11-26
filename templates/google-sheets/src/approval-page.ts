@@ -1,16 +1,13 @@
-// Shared by the generated templates: the template generator copies this file into
-// each template's src. Edit it in packages/template-generator/src/runtime.
-import { type ApprovalLevel, approvalLevels, levelDescriptions, levelDetails } from "./approval.ts";
-
-const escape = (value: string) =>
-  value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
+import type { ApprovalLevel } from "./approval.ts";
+import { approvalIntro, approvalLevels, levelTexts } from "./approval-levels.ts";
+import { escapeHtml } from "./layout.ts";
 
 // Saves a new level at once. When saving fails, the page shows the stored level
 // again, which the failed request may or may not have changed.
-export const approvalForm = (service: string, level: ApprovalLevel) => `
+export const approvalForm = (level: ApprovalLevel) => `
 <section><fieldset id="approval"><legend><h2>Approvals</h2></legend>
-<p class="muted">When apps and agents change ${escape(service)} data with your account. Reading never asks.</p>
-<div class="options">${approvalLevels.map((option) => `<label><input type="radio" name="level" value="${option}"${option === level ? " checked" : ""}><span><span>${escape(levelDescriptions[option])}</span><span class="muted small">${escape(levelDetails[option])}</span></span></label>`).join("")}</div></fieldset></section>
+<p class="muted">${escapeHtml(approvalIntro)}</p>
+<div class="options">${approvalLevels.map((option) => `<label><input type="radio" name="level" value="${option}"${option === level ? " checked" : ""}><span><span>${escapeHtml(levelTexts[option].title)}</span><span class="muted small">${escapeHtml(levelTexts[option].detail)}</span></span></label>`).join("")}</div></fieldset></section>
 <p class="toast" role="status" hidden></p>
 <script>
 const form = document.getElementById("approval");

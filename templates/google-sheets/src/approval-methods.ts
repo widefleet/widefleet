@@ -7,10 +7,10 @@ import {
   approvalLevel,
   type ApprovalQuestion,
   approvals,
-  levelDescriptions,
   loosens,
   question,
 } from "./approval.ts";
+import { levelTexts } from "./approval-levels.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
 
@@ -67,7 +67,7 @@ export const changeApprovalLevel = async (
 
     if (!answer)
       return question(
-        `Ask less before ${service} changes run?\n\nNow: ${levelDescriptions[current]}\nNew: ${levelDescriptions[level]}`,
+        `Ask less before ${service} changes run?\n\nNow: ${levelTexts[current].title}\nNew: ${levelTexts[level].title}`,
       );
 
     if (answer.action !== "accept") return { status: "declined" };

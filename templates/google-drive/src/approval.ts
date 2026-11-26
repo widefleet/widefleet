@@ -2,42 +2,29 @@
 // each template's src. Edit it in packages/template-generator/src/runtime.
 
 import { z } from "zod";
+import { approvalLevels, defaultApprovalLevel } from "./approval-levels.ts";
 import type { JsonValue } from "./selection.ts";
 
 /**
  * When a user is asked before a change runs, from most to least careful:
  * every change, changes that alter, delete or send, or never. Reads never ask.
+ * Each app offers the levels that differ for it in approval-levels.ts.
  */
-export const approvalLevels = ["all_changes", "updates_and_deletions", "none"] as const;
+export type Level = "all_changes" | "updates_and_deletions" | "none";
 
 export type ApprovalLevel = (typeof approvalLevels)[number];
 
 export const approvalLevel = z.enum(approvalLevels);
 
-export const defaultApprovalLevel: ApprovalLevel = "updates_and_deletions";
-
 export type Change = "create" | "update" | "delete" | "send";
 
 /** Whether a change asks the user first at an approval level. */
-export const asks = (level: ApprovalLevel, change: Change) =>
+export const asks = (level: Level, change: Change) =>
   change === "create" ? level === "all_changes" : level !== "none";
 
 /** Whether moving from one level to another asks fewer questions. */
 export const loosens = (from: ApprovalLevel, to: ApprovalLevel) =>
   approvalLevels.indexOf(to) > approvalLevels.indexOf(from);
-
-export const levelDescriptions: Record<ApprovalLevel, string> = {
-  all_changes: "Always ask",
-  updates_and_deletions: "Ask except for new items",
-  none: "Never ask",
-};
-
-/** What each level asks about, under its name on the app's page. */
-export const levelDetails: Record<ApprovalLevel, string> = {
-  all_changes: "Creating, changing, deleting and sending ask first.",
-  updates_and_deletions: "New items are created at once. Changing, deleting and sending ask first.",
-  none: "Every change runs at once.",
-};
 
 /** Each Widefleet user's level, kept in the app's database. */
 export const approvals = (database: D1Database, userId: string) => ({

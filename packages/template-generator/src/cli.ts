@@ -186,11 +186,11 @@ const changes =
       : Object.values(rules.operations).some((value) => change.safeParse(value.change).success) ||
         Object.keys(rules.undescribed ?? {}).length > 0;
 
-// Runtime files the generated templates share, kept once in this package.
+// Files the generated code calls, kept once in this package. A template writes
+// its page and its approval levels itself.
 const runtime = [
   "selection.ts",
-  "layout.ts",
-  ...(changes ? ["approval.ts", "approval-page.ts", "approval-methods.ts"] : []),
+  ...(changes ? ["approval.ts", "approval-methods.ts"] : []),
   "input.ts",
   ...{
     graphql: ["graphql.ts"],

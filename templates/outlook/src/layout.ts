@@ -1,5 +1,4 @@
-// Shared by the templates: the template generator copies this file into each
-// template's src. Edit it in packages/template-generator/src/runtime.
+// This app's look, in Widefleet's colors.
 
 export const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
@@ -82,55 +81,9 @@ export const heading = (service: string, description: string) =>
 /** A value to copy into the provider's settings, such as a callback URL. */
 export const copyable = (value: string) => `<code class="value">${escapeHtml(value)}</code>`;
 
-/**
- * The page of a connection made through OAuth: setup while the administrator's
- * client is missing, then the account, approvals and disconnecting.
- */
-export const oauthConnectionPage = (connection: {
-  service: string;
-  /** What a connection lets apps do, as HTML. */
-  description: string;
-  /** Where the account lives, such as "Google account". */
-  account: string;
-  connected: string | null;
-  failed: boolean;
-  /** Steps to create the OAuth client, as HTML, before its secrets are set. */
-  setup: string[];
-  missing: string[];
-  /** Shown before connecting, as HTML. */
-  connectNote?: string;
-  /** The approval form, when the app makes changes. */
-  approvals?: string;
-}) => {
-  const service = escapeHtml(connection.service);
-  const account = escapeHtml(connection.account);
-
-  const setup = `<section><h2>Finish setup</h2>
-<p class="muted">An administrator adds an OAuth client to this app before anyone can connect.</p>
-<ol class="card steps">${[
-    ...connection.setup,
-    `Set ${connection.missing.map((key) => `<code>${escapeHtml(key)}</code>`).join(" and ")} on this app's Secrets page in Widefleet.`,
-  ]
-    .map((step) => `<li>${step}</li>`)
-    .join("")}</ol></section>`;
-
-  const connected = (name: string) => `<section><h2>Account</h2>
-<div class="card row"><div class="status"><span class="dot" aria-hidden="true"></span><div><strong>${escapeHtml(name)}</strong><p class="muted small">Connected ${account}</p></div></div>
-<div class="actions">${connection.missing.length ? "" : '<form method="post" action="/connect"><button class="outline">Reconnect</button></form>'}<form method="post" action="/disconnect"><button class="ghost">Disconnect</button></form></div></div>
-<p class="muted small note">Disconnecting deletes the saved tokens from this app. To revoke access, also remove it in your ${account} settings.</p></section>
-${connection.approvals ?? ""}`;
-
-  const disconnected = `<section><div class="card stack"><p>Connect your ${account} so apps and agents can use ${service} for you.${connection.connectNote ? ` ${connection.connectNote}` : ""}</p>
-<form method="post" action="/connect"><button class="primary">Connect ${service}</button></form></div></section>`;
-
-  return page(
-    connection.service,
-    `${heading(connection.service, connection.description)}
-${connection.failed ? '<p class="alert" role="alert">The connection could not be completed. Try again. To switch accounts, disconnect the current account first.</p>' : ""}
-${connection.missing.length ? setup : ""}
-${connection.connected ? connected(connection.connected) : connection.missing.length ? "" : disconnected}`,
-  );
-};
+/** The secrets still to set, as code. */
+export const secretNames = (missing: string[]) =>
+  missing.map((key) => `<code>${escapeHtml(key)}</code>`).join(" and ");
 
 /** Opens the provider from a document, so the form's POST completes first. */
 export const authorizationPage = (service: string, destination: string, cookies: string[]) => {

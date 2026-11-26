@@ -229,7 +229,9 @@ describe("WHOOP personal account app", () => {
     await connect(alice, "10129");
     const page = await (await alice.request("/")).text();
     expect(page).toContain("<strong>member10129@example.test</strong>");
-    expect(page).toContain('value="updates_and_deletions" checked');
+    // Nothing here is created without asking, so no level lies between always and never.
+    expect(page).toContain('value="all_changes" checked');
+    expect(page).not.toContain('value="updates_and_deletions"');
 
     const save = (level: string, requestOrigin = origin) =>
       runtime.dispatchFetch(`${origin}/approval-level`, {
@@ -244,6 +246,7 @@ describe("WHOOP personal account app", () => {
 
     expect((await save("none", "https://other.example.test")).status).toBe(403);
     expect((await save("sometimes")).status).toBe(400);
+    expect((await save("updates_and_deletions")).status).toBe(400);
     expect(await (await save("none")).json()).toEqual({ level: "none" });
     expect(await (await alice.request("/rpc/level")).json()).toMatchObject({ level: "none" });
   });
