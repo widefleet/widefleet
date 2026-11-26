@@ -16,7 +16,7 @@ export const prepareAppSecrets = async (request: Request, environment: ParentEnv
   if (request.method !== "POST") return new Response(null, { status: 405 });
   const input = appSecretPreparation.parse(await request.json());
   const path = secretKey(input);
-  const ciphertext = await encryptSecrets(environment, path, input.values);
+  const ciphertext = await encryptSecrets(environment, "app-secrets", path, input.values);
   await environment.WIDEFLEET_PACKAGES.put(path, JSON.stringify({ ciphertext }));
 
   return Response.json({ result: { revision: input.revision } });
@@ -35,6 +35,7 @@ export class AppSecrets extends WorkerEntrypoint<
 
     const values = await decryptSecrets(
       this.env,
+      "app-secrets",
       path,
       snapshot.parse(await stored.json()).ciphertext,
     );

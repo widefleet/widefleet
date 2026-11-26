@@ -89,7 +89,7 @@ describe("app keys", () => {
     expect(decodeProtectedHeader(record.ciphertext)).toEqual({
       alg: "dir",
       enc: "A256GCM",
-      kid: "test",
+      kid: "test:app-keys",
       ctx: `app-keys/${first}/tokens.json`,
     });
   });

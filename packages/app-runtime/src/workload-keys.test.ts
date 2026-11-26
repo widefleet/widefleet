@@ -172,7 +172,7 @@ it("starts an independent RSA authority without changing a persisted Ed25519 rin
   const legacyPublicKey = await exportJWK(legacyKey.publicKey);
   const legacyPrivateKey = await exportJWK(legacyKey.privateKey);
 
-  const ciphertext = await encryptSecrets(env, legacyPath, {
+  const ciphertext = await encryptSecrets(env, "workload-keys", legacyPath, {
     KEYRING: JSON.stringify({
       keys: legacyRing.keys.map((key) => ({
         ...key,

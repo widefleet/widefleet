@@ -71,7 +71,7 @@ export const workloadKeys = async (
     let changed = false;
 
     if (object) {
-      const values = await decryptSecrets(environment, path, await object.text());
+      const values = await decryptSecrets(environment, "workload-keys", path, await object.text());
       ring = keyRing.parse(JSON.parse(z.string().parse(values["KEYRING"])));
     } else {
       ring = { keys: await Promise.all([generate(now), generate(now + workloadRotationInterval)]) };
@@ -105,7 +105,9 @@ export const workloadKeys = async (
     }
 
     if (changed) {
-      const ciphertext = await encryptSecrets(environment, path, { KEYRING: JSON.stringify(ring) });
+      const ciphertext = await encryptSecrets(environment, "workload-keys", path, {
+        KEYRING: JSON.stringify(ring),
+      });
 
       const result = await environment.WIDEFLEET_PACKAGES.put(path, ciphertext, {
         onlyIf: object ? { etagMatches: object.etag } : { etagDoesNotMatch: "*" },

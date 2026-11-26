@@ -2,7 +2,7 @@ import { runtimeRekeyInput, runtimeRekeyPage } from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 import { openAppKey, parseAppKey, sealAppKey } from "./keys.ts";
-import { open, runtimeKeyring, seal, sealedKeyVersion } from "./secrets.ts";
+import { open, seal, sealedUnderActiveVersion } from "./secrets.ts";
 import type { ParentEnvironment } from "./types.ts";
 
 // Seals stored runtime values again under the active key version, one bounded
@@ -51,21 +51,21 @@ type Environment = Pick<ParentEnvironment, "WIDEFLEET_PACKAGES" | "WIDEFLEET_SEC
 
 /** The stored body sealed under the active key version, or `null` when it already is. */
 const resealed = async (environment: Environment, path: string, body: string) => {
-  const [active] = runtimeKeyring(environment).keyring;
-
   if (path === ringPath) {
-    const plaintext = await open(environment, path, body);
+    const plaintext = await open(environment, "workload-keys", path, body);
 
-    return sealedKeyVersion(body) === active.id ? null : seal(environment, path, plaintext);
+    return sealedUnderActiveVersion(environment, "workload-keys", body)
+      ? null
+      : seal(environment, "workload-keys", path, plaintext);
   }
 
   if (snapshotPath.test(path)) {
     const { ciphertext } = snapshot.parse(JSON.parse(body));
-    const plaintext = await open(environment, path, ciphertext);
+    const plaintext = await open(environment, "app-secrets", path, ciphertext);
 
-    return sealedKeyVersion(ciphertext) === active.id
+    return sealedUnderActiveVersion(environment, "app-secrets", ciphertext)
       ? null
-      : JSON.stringify({ ciphertext: await seal(environment, path, plaintext) });
+      : JSON.stringify({ ciphertext: await seal(environment, "app-secrets", path, plaintext) });
   }
 
   const appId = appKeyPath.exec(path)?.[1];
@@ -75,7 +75,8 @@ const resealed = async (environment: Environment, path: string, body: string) =>
   const record = parseAppKey(body);
   const key = await openAppKey(environment, appId, path, record);
 
-  return "ciphertext" in record && sealedKeyVersion(record.ciphertext) === active.id
+  return "ciphertext" in record &&
+    sealedUnderActiveVersion(environment, "app-keys", record.ciphertext)
     ? null
     : sealAppKey(environment, path, key);
 };

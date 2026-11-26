@@ -56,7 +56,7 @@ const keyPath = (appId: string, name: string) => `app-keys/${appId}/${name}.json
 
 /** Formats the stored record of an app key's bytes. */
 export const sealAppKey = async (environment: Environment, path: string, key: Uint8Array) =>
-  JSON.stringify(sealedKey.parse({ ciphertext: await seal(environment, path, key) }));
+  JSON.stringify(sealedKey.parse({ ciphertext: await seal(environment, "app-keys", path, key) }));
 
 /** The exact bytes of a stored app key record at `path`. */
 export const openAppKey = async (
@@ -66,7 +66,7 @@ export const openAppKey = async (
   record: StoredAppKey,
 ) =>
   "ciphertext" in record
-    ? open(environment, path, record.ciphertext)
+    ? open(environment, "app-keys", path, record.ciphertext)
     : unwrapLegacyAppKey(runtimeKeyring(environment).keyring, appId, unbase64url(record.wrapped));
 
 export type KeyOwner = { appId: string; hostname: string };
