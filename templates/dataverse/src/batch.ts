@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Change } from "./approval.ts";
 import { accountConnection } from "./connection.ts";
 import type { Environment } from "./context.ts";
+import { changesExisting, knownChange, segments } from "./classify.ts";
 import { boundedBody, definedJson, InvalidRequest, maximumResponseBytes } from "./input.ts";
 import { restRequest } from "./rest.ts";
 import type { DataverseResult } from "./results.ts";
@@ -84,66 +85,41 @@ type Request = z.infer<typeof request>;
 // Dataverse runs up to 1000 requests in a batch.
 const maximumRequests = 1000;
 
-/** A path's segments, split at slashes outside quoted key values. */
-const segments = (path: string) => {
-  const parts = [""];
-  let quoted = false;
+// The row an earlier request of a change set addressed, which a later request
+// names by its Content-ID: a row created in a table, or one it changed.
+const rowAddress = (item: Request, path: string) => {
+  const parts = segments(path);
+  const [only] = parts;
 
-  for (const character of path) {
-    if (character === "'") quoted = !quoted;
+  if (parts.length !== 1 || only === undefined || only.startsWith("$")) return null;
 
-    if (character === "/" && !quoted) parts.push("");
-    else parts[parts.length - 1] += character;
-  }
+  if (item.method === "POST" && !only.includes("(")) return `${only}(id)`;
 
-  return parts;
+  return item.method === "PATCH" || item.method === "PUT" ? only : null;
 };
-
-// The methods that address any table or action; their address, not their
-// method, says what a request of a batch does.
-const named = Object.values(operations).flatMap((operation) =>
-  operation.change !== null &&
-  operation.httpMethod === "POST" &&
-  operation.path
-    .split("/")
-    .some(
-      (segment) =>
-        segment !== "" && !segment.startsWith("$") && !/^\{[^}]+\}(\(\{[^}]+\}\))?$/.test(segment),
-    )
-    ? [
-        {
-          change: operation.change,
-          pattern: new RegExp(
-            `^${operation.path
-              .replace(/^\//, "")
-              .split(/(\{[^}]+\})/)
-              .map((part) =>
-                /^\{[^}]+\}$/.test(part) ? "[^/]+" : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-              )
-              .join("")}$`,
-            "i",
-          ),
-        },
-      ]
-    : [],
-);
 
 /** What a request changes, or null for one that only reads. */
 const changeOf = (
   item: Request,
   path: string,
   sets: Set<string> | null,
-  contentIds: ReadonlySet<string>,
+  rows: ReadonlyMap<string, string | null>,
 ): Change | null => {
-  if (item.method === "GET") return null;
   const parts = segments(path);
   const root = /^[^(]*/.exec(parts[0] ?? "")?.[0] ?? "";
   const reference = root.startsWith("$");
 
-  if (reference && !contentIds.has(root.slice(1)))
+  if (reference && !rows.has(root.slice(1)))
     throw new InvalidRequest(
       `batch's ${path} refers to ${root}, which no earlier request of its change set names`,
     );
+
+  // A Content-ID stands for its row, so the operations of its table apply.
+  const row = reference ? rows.get(root.slice(1)) : null;
+  const known = knownChange(item.method, row ? [row, ...parts.slice(1)].join("/") : path);
+
+  // Some functions write, though OData functions only read.
+  if (item.method === "GET") return known ?? null;
 
   // A segment qualified by a namespace calls a bound action; a root that is no
   // entity set, an unbound one.
@@ -151,16 +127,16 @@ const changeOf = (
     parts.some((part) => (/^[^(]*/.exec(part)?.[0] ?? "").includes(".")) ||
     (!reference && sets !== null && !sets.has(root));
 
-  if (action) {
-    const known = named.find((operation) => operation.pattern.test(path));
-
-    // What a solution's action changes is unknown, so it counts as an update.
-    return known?.change ?? "update";
-  }
+  // What a solution's action changes is unknown, so it counts as an update.
+  if (action) return known === undefined ? "update" : known;
 
   if (item.method === "DELETE") return "delete";
 
-  return item.method === "POST" && parts.at(-1) !== "$ref" ? "create" : "update";
+  // A new row that binds existing rows changes them.
+  if (item.method === "POST" && parts.at(-1) !== "$ref")
+    return changesExisting(item.body) ? "update" : "create";
+
+  return "update";
 };
 
 const severity: Change[] = ["create", "update", "send", "delete"];
@@ -201,6 +177,40 @@ const boundaryOf = (contentType: string | undefined) =>
 const header = (headers: Record<string, string>, name: string) =>
   Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
 
+// Text media types: `text/*`, JSON and XML, with structured suffixes such as
+// `application/ld+json`.
+const textMedia = /^(?:text\/[^;]+|application\/(?:[^;]+\+)?(?:json|xml))\s*(?:;|$)/i;
+
+// Spreading a whole file into fromCharCode would exceed the argument limit.
+const chunkBytes = 0x8000;
+
+/** Bytes as a string of one character per byte, which multipart framing is parsed in. */
+const byteString = (bytes: Uint8Array) => {
+  let text = "";
+
+  for (let start = 0; start < bytes.length; start += chunkBytes)
+    text += String.fromCharCode(...bytes.subarray(start, start + chunkBytes));
+
+  return text;
+};
+
+/**
+ * An answer's content as its media type says: JSON, text in UTF-8, or other
+ * bytes as base64 with their media type.
+ */
+const contentOf = (headers: Record<string, string>, content: string): JsonValue => {
+  if (content === "") return null;
+  const type = header(headers, "content-type") ?? "application/octet-stream";
+  const bytes = Uint8Array.from(content, (character) => character.charCodeAt(0));
+
+  if (!textMedia.test(type)) return { contentType: type, base64: btoa(content) };
+  const text = byteString(bytes);
+
+  if (!type.toLowerCase().startsWith("application/json")) return text;
+
+  return text.trim() === "" ? null : definedJson.parse(JSON.parse(text));
+};
+
 /** The answers of a multipart batch response, with those of change sets in order. */
 const responsesOf = (text: string, boundary: string): BatchResponse[] =>
   partsOf(text, boundary).flatMap((part) => {
@@ -215,15 +225,8 @@ const responsesOf = (text: string, boundary: string): BatchResponse[] =>
 
     if (!Number.isInteger(status)) throw new Error("Dataverse's batch response has no status");
     const headers = headersOf(lines.join("\n"));
-    const body = content.trim();
-    const json = (header(headers, "content-type") ?? "").startsWith("application/json");
     const contentId = header(partHeaders, "content-id");
-
-    const answer: BatchResponse = {
-      status,
-      headers,
-      body: body === "" ? null : json ? definedJson.parse(JSON.parse(body)) : body,
-    };
+    const answer: BatchResponse = { status, headers, body: contentOf(headers, content) };
 
     if (contentId !== undefined) answer.contentId = contentId;
 
@@ -330,12 +333,12 @@ export const batch = async (
   if (sets?.status === "failed") return sets.result;
 
   const changes = plan.flatMap((part) => {
-    const seen = new Set<string>();
+    const rows = new Map<string, string | null>();
 
     return part.items.flatMap(({ item, path }) => {
-      const change = changeOf(item, path, sets?.names ?? null, seen);
+      const change = changeOf(item, path, sets?.names ?? null, rows);
 
-      if (item.contentId !== undefined) seen.add(item.contentId);
+      if (item.contentId !== undefined) rows.set(item.contentId, rowAddress(item, path));
 
       return change === null ? [] : [change];
     });
@@ -428,7 +431,7 @@ export const batch = async (
 
   const error = (() => {
     try {
-      return dataverseError.safeParse(JSON.parse(text)).data ?? null;
+      return dataverseError.safeParse(JSON.parse(new TextDecoder().decode(bytes))).data ?? null;
     } catch {
       return null;
     }

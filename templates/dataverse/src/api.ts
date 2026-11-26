@@ -4488,6 +4488,12 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
            */
           $count?: boolean;
           /**
+           * The values of parameter aliases the query options use, such as `@p1` in `$filter`, as OData literals, such as `{ "@p1": "'Contoso'" }`.
+           */
+          parameterAliases?: {
+            [key: string]: string;
+          };
+          /**
            * A FetchXML query instead of the OData query options.
            */
           fetchXml?: string;
@@ -4503,6 +4509,10 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
            * `true` to read masked columns unmasked, which needs the column's privilege.
            */
           UnMaskedData?: boolean;
+          /**
+           * The language codes of the labels to return, such as `1033`, for definitions.
+           */
+          LabelLanguages?: string;
           /**
            * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
            */
@@ -4565,6 +4575,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
       }[];
       "@odata.count"?: number;
       "@odata.nextLink"?: string;
+      "@odata.deltaLink"?: string;
     }>
   > {
     return run(this.env, this.ctx.props, "listRows", input);
@@ -4639,6 +4650,10 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     partitionId?: string;
     /**
+     * The language codes of the labels to return, such as `1033`, for definitions.
+     */
+    LabelLanguages?: string;
+    /**
      * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
     prefer?: string;
@@ -4688,6 +4703,10 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The columns to return, by logical name. Lookup columns are named `_<name>_value`.
      */
     $select?: string[];
+    /**
+     * Related rows to include, by navigation property, such as `primarycontactid($select=fullname)`.
+     */
+    $expand?: string;
     /**
      * A value plug-ins read as the `tag` shared variable.
      */
@@ -5233,6 +5252,10 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     transferMode?: string;
     /**
+     * The file's name, as the chunks of an upload send it; names that are not ASCII go in the `x-ms-file-name` query parameter.
+     */
+    fileName?: string;
+    /**
      * The bytes a chunk holds, such as `bytes 0-4194303/25870370`.
      */
     contentRange?: string;
@@ -5307,9 +5330,19 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
            */
           $count?: boolean;
           /**
+           * The values of parameter aliases the query options use, such as `@p1` in `$filter`, as OData literals, such as `{ "@p1": "'Contoso'" }`.
+           */
+          parameterAliases?: {
+            [key: string]: string;
+          };
+          /**
            * `true` to read masked columns unmasked, which needs the column's privilege.
            */
           UnMaskedData?: boolean;
+          /**
+           * The language codes of the labels to return, such as `1033`, for definitions.
+           */
+          LabelLanguages?: string;
           /**
            * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
            */
@@ -5372,6 +5405,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
       }[];
       "@odata.count"?: number;
       "@odata.nextLink"?: string;
+      "@odata.deltaLink"?: string;
     }>
   > {
     return run(this.env, this.ctx.props, "listRelatedRows", input);
@@ -5533,6 +5567,10 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * `true` to read masked columns unmasked, which needs the column's privilege.
      */
     UnMaskedData?: boolean;
+    /**
+     * The language codes of the labels to return, such as `1033`, for definitions.
+     */
+    LabelLanguages?: string;
     /**
      * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
@@ -8226,21 +8264,36 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     return run(this.env, this.ctx.props, "calculatePrice", input);
   }
 
+  /**
+   * Asks the user first unless their approval level is `none`.
+   */
   async calculateRollupField(input: {
     Target: Crmbaseentity;
     FieldName: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
     /**
      * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
     prefer?: string;
     /**
-     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
      */
-    consistency?: string;
+    bypassBusinessLogicExecution?: string;
     /**
-     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     * The IDs of plug-in steps to skip, separated by commas.
      */
-    sessionToken?: string;
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
     /**
      * The Microsoft Entra object ID of a user to act for.
      */
@@ -8698,7 +8751,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async cloneAsPatch(input: {
     /**
@@ -14637,23 +14690,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     return run(this.env, this.ctx.props, "importTranslationAsync", input);
   }
 
+  /**
+   * Asks the user first unless their approval level is `none`.
+   */
   async incrementKnowledgeArticleViewCount(input: {
     Source: Crmbaseentity;
     ViewDate: string;
     Location: number;
     Count: number;
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
      * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
     prefer?: string;
     /**
-     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
      */
-    consistency?: string;
+    bypassBusinessLogicExecution?: string;
     /**
-     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     * The IDs of plug-in steps to skip, separated by commas.
      */
-    sessionToken?: string;
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
     /**
      * The Microsoft Entra object ID of a user to act for.
      */
@@ -17755,21 +17823,36 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     return run(this.env, this.ctx.props, "removeActiveCustomization", input);
   }
 
+  /**
+   * Asks the user first unless their approval level is `none`.
+   */
   async removeActiveCustomizations(input: {
     SolutionComponentName: string;
     ComponentId: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
     /**
      * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
     prefer?: string;
     /**
-     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
      */
-    consistency?: string;
+    bypassBusinessLogicExecution?: string;
     /**
-     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     * The IDs of plug-in steps to skip, separated by commas.
      */
-    sessionToken?: string;
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
     /**
      * The Microsoft Entra object ID of a user to act for.
      */
@@ -18361,20 +18444,35 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     return run(this.env, this.ctx.props, "reschedule", input);
   }
 
+  /**
+   * Asks the user first unless their approval level is `none`.
+   */
   async resetInheritedAccess(input: {
     FetchXml: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
     /**
      * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
     prefer?: string;
     /**
-     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
      */
-    consistency?: string;
+    bypassBusinessLogicExecution?: string;
     /**
-     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     * The IDs of plug-in steps to skip, separated by commas.
      */
-    sessionToken?: string;
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
     /**
      * The Microsoft Entra object ID of a user to act for.
      */

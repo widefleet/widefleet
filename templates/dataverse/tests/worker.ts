@@ -208,6 +208,30 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
         }),
       );
 
+    // A new account that takes over existing tasks.
+    if (path === "/rpc/create-binding")
+      return Response.json(
+        await app.createRow({
+          environment: sales,
+          entitySet: "accounts",
+          body: {
+            name: "New",
+            "Account_Tasks@odata.bind": ["/tasks(00000000-0000-0000-0000-000000000002)"],
+          },
+        }),
+      );
+
+    // A function that writes, called by name.
+    if (path === "/rpc/increment")
+      return Response.json(
+        await app.callFunction({
+          environment: sales,
+          function:
+            "IncrementKnowledgeArticleViewCount(Source=@s,ViewDate=2026-11-26,Location=1,Count=1)",
+          parameterAliases: { "@s": '{"@odata.id":"knowledgearticles(1)"}' },
+        }),
+      );
+
     if (path === "/rpc/related")
       return Response.json(
         await app.createRelatedRow({

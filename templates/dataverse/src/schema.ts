@@ -11,6 +11,8 @@ export type Operation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[];
+  /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
+  explodedParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -79,10 +81,12 @@ export const operations = {
       $expand: ["$expand", null, false],
       $apply: ["$apply", null, false],
       $count: ["$count", null, false],
+      parameterAliases: ["parameterAliases", null, false],
       fetchXml: ["fetchXml", null, false],
       savedQuery: ["savedQuery", null, false],
       userQuery: ["userQuery", null, false],
       UnMaskedData: ["UnMaskedData", null, false],
+      LabelLanguages: ["LabelLanguages", null, false],
     },
     headerParameters: {
       prefer: "Prefer",
@@ -97,6 +101,7 @@ export const operations = {
     pageable: true,
     change: null,
     optionalPathParameters: ["type"],
+    explodedParameters: ["parameterAliases"],
   },
   countRows: {
     httpMethod: "GET",
@@ -125,6 +130,7 @@ export const operations = {
       $expand: ["$expand", null, false],
       UnMaskedData: ["UnMaskedData", null, false],
       partitionId: ["partitionId", null, false],
+      LabelLanguages: ["LabelLanguages", null, false],
     },
     headerParameters: {
       prefer: "Prefer",
@@ -145,7 +151,11 @@ export const operations = {
     httpMethod: "POST",
     path: "/{entitySet}",
     pathParameters: { entitySet: "entitySet" },
-    queryParameters: { $select: ["$select", ",", false], tag: ["tag", null, false] },
+    queryParameters: {
+      $select: ["$select", ",", false],
+      $expand: ["$expand", null, false],
+      tag: ["tag", null, false],
+    },
     headerParameters: {
       prefer: "Prefer",
       bypassBusinessLogicExecution: "MSCRM.BypassBusinessLogicExecution",
@@ -322,6 +332,7 @@ export const operations = {
       bypassCustomPluginExecution: "MSCRM.BypassCustomPluginExecution",
       suppressCallbackRegistrationExpanderJob: "MSCRM.SuppressCallbackRegistrationExpanderJob",
       transferMode: "x-ms-transfer-mode",
+      fileName: "x-ms-file-name",
       contentRange: "Content-Range",
       callerObjectId: "CallerObjectId",
       mscrmCallerId: "MSCRMCallerID",
@@ -349,7 +360,9 @@ export const operations = {
       $expand: ["$expand", null, false],
       $apply: ["$apply", null, false],
       $count: ["$count", null, false],
+      parameterAliases: ["parameterAliases", null, false],
       UnMaskedData: ["UnMaskedData", null, false],
+      LabelLanguages: ["LabelLanguages", null, false],
     },
     headerParameters: {
       prefer: "Prefer",
@@ -364,6 +377,7 @@ export const operations = {
     pageable: true,
     change: null,
     optionalPathParameters: ["type"],
+    explodedParameters: ["parameterAliases"],
   },
   countRelatedRows: {
     httpMethod: "GET",
@@ -419,6 +433,7 @@ export const operations = {
       $select: ["$select", ",", false],
       $expand: ["$expand", null, false],
       UnMaskedData: ["UnMaskedData", null, false],
+      LabelLanguages: ["LabelLanguages", null, false],
     },
     headerParameters: {
       prefer: "Prefer",
@@ -694,6 +709,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    explodedParameters: ["parameterAliases"],
   },
   callTableFunction: {
     httpMethod: "GET",
@@ -712,6 +728,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    explodedParameters: ["parameterAliases"],
   },
   callRowFunction: {
     httpMethod: "GET",
@@ -730,6 +747,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    explodedParameters: ["parameterAliases"],
   },
   addAppComponents: {
     httpMethod: "POST",
@@ -1437,11 +1455,13 @@ export const operations = {
     httpMethod: "GET",
     path: "/CalculateRollupField(Target=@Target,FieldName='{FieldName}')",
     pathParameters: { FieldName: "FieldName" },
-    queryParameters: { Target: ["@Target", null, true] },
+    queryParameters: { Target: ["@Target", null, true], tag: ["tag", null, false] },
     headerParameters: {
       prefer: "Prefer",
-      consistency: "Consistency",
-      sessionToken: "MSCRM.SessionToken",
+      bypassBusinessLogicExecution: "MSCRM.BypassBusinessLogicExecution",
+      bypassBusinessLogicExecutionStepIds: "MSCRM.BypassBusinessLogicExecutionStepIds",
+      bypassCustomPluginExecution: "MSCRM.BypassCustomPluginExecution",
+      suppressCallbackRegistrationExpanderJob: "MSCRM.SuppressCallbackRegistrationExpanderJob",
       callerObjectId: "CallerObjectId",
       mscrmCallerId: "MSCRMCallerID",
     },
@@ -1449,7 +1469,7 @@ export const operations = {
     bodyRequired: false,
     response: "json",
     pageable: false,
-    change: null,
+    change: "update",
   },
   canBeReferenced: {
     httpMethod: "POST",
@@ -1684,7 +1704,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   cloneAsSolution: {
     httpMethod: "POST",
@@ -4198,11 +4218,13 @@ export const operations = {
     httpMethod: "GET",
     path: "/IncrementKnowledgeArticleViewCount(Source=@Source,ViewDate={ViewDate},Location={Location},Count={Count})",
     pathParameters: { ViewDate: "ViewDate", Location: "Location", Count: "Count" },
-    queryParameters: { Source: ["@Source", null, true] },
+    queryParameters: { Source: ["@Source", null, true], tag: ["tag", null, false] },
     headerParameters: {
       prefer: "Prefer",
-      consistency: "Consistency",
-      sessionToken: "MSCRM.SessionToken",
+      bypassBusinessLogicExecution: "MSCRM.BypassBusinessLogicExecution",
+      bypassBusinessLogicExecutionStepIds: "MSCRM.BypassBusinessLogicExecutionStepIds",
+      bypassCustomPluginExecution: "MSCRM.BypassCustomPluginExecution",
+      suppressCallbackRegistrationExpanderJob: "MSCRM.SuppressCallbackRegistrationExpanderJob",
       callerObjectId: "CallerObjectId",
       mscrmCallerId: "MSCRMCallerID",
     },
@@ -4210,7 +4232,7 @@ export const operations = {
     bodyRequired: false,
     response: "json",
     pageable: false,
-    change: null,
+    change: "update",
   },
   inferEntityDefinition: {
     httpMethod: "POST",
@@ -5550,11 +5572,13 @@ export const operations = {
     httpMethod: "GET",
     path: "/RemoveActiveCustomizations(SolutionComponentName='{SolutionComponentName}',ComponentId={ComponentId})",
     pathParameters: { SolutionComponentName: "SolutionComponentName", ComponentId: "ComponentId" },
-    queryParameters: {},
+    queryParameters: { tag: ["tag", null, false] },
     headerParameters: {
       prefer: "Prefer",
-      consistency: "Consistency",
-      sessionToken: "MSCRM.SessionToken",
+      bypassBusinessLogicExecution: "MSCRM.BypassBusinessLogicExecution",
+      bypassBusinessLogicExecutionStepIds: "MSCRM.BypassBusinessLogicExecutionStepIds",
+      bypassCustomPluginExecution: "MSCRM.BypassCustomPluginExecution",
+      suppressCallbackRegistrationExpanderJob: "MSCRM.SuppressCallbackRegistrationExpanderJob",
       callerObjectId: "CallerObjectId",
       mscrmCallerId: "MSCRMCallerID",
     },
@@ -5562,7 +5586,7 @@ export const operations = {
     bodyRequired: false,
     response: "json",
     pageable: false,
-    change: null,
+    change: "delete",
   },
   removeAppComponents: {
     httpMethod: "POST",
@@ -5788,11 +5812,13 @@ export const operations = {
     httpMethod: "GET",
     path: "/ResetInheritedAccess(FetchXml='{FetchXml}')",
     pathParameters: { FetchXml: "FetchXml" },
-    queryParameters: {},
+    queryParameters: { tag: ["tag", null, false] },
     headerParameters: {
       prefer: "Prefer",
-      consistency: "Consistency",
-      sessionToken: "MSCRM.SessionToken",
+      bypassBusinessLogicExecution: "MSCRM.BypassBusinessLogicExecution",
+      bypassBusinessLogicExecutionStepIds: "MSCRM.BypassBusinessLogicExecutionStepIds",
+      bypassCustomPluginExecution: "MSCRM.BypassCustomPluginExecution",
+      suppressCallbackRegistrationExpanderJob: "MSCRM.SuppressCallbackRegistrationExpanderJob",
       callerObjectId: "CallerObjectId",
       mscrmCallerId: "MSCRMCallerID",
     },
@@ -5800,7 +5826,7 @@ export const operations = {
     bodyRequired: false,
     response: "json",
     pageable: false,
-    change: null,
+    change: "update",
   },
   resetUserFilters: {
     httpMethod: "POST",

@@ -134,6 +134,14 @@ const unmasked = [
   },
 ];
 
+// Definitions carry labels in every installed language unless limited.
+const labelLanguages = {
+  name: "LabelLanguages",
+  in: "query",
+  description: "The language codes of the labels to return, such as `1033`, for definitions.",
+  schema: { type: "string" },
+};
+
 const partition = {
   name: "partitionId",
   in: "query",
@@ -198,12 +206,12 @@ const offered = {
       },
     ],
   },
-  "entitySet.list": { name: "listRows", parameters: [...views, ...unmasked] },
+  "entitySet.list": { name: "listRows", parameters: [...views, ...unmasked, labelLanguages] },
   "entitySet.count": { name: "countRows" },
   "entitySet.get": {
     name: "getRow",
     headers: unchanged,
-    parameters: [...unmasked, partition],
+    parameters: [...unmasked, partition, labelLanguages],
   },
   "entitySet.create": {
     name: "createRow",
@@ -250,6 +258,11 @@ const offered = {
         description:
           "`chunked`, without a body, to start an upload in chunks; the answer's `Location` header is the address of the chunks and `x-ms-chunk-size` their size.",
       },
+      fileName: {
+        name: "x-ms-file-name",
+        description:
+          "The file's name, as the chunks of an upload send it; names that are not ASCII go in the `x-ms-file-name` query parameter.",
+      },
       contentRange: {
         name: "Content-Range",
         description: "The bytes a chunk holds, such as `bytes 0-4194303/25870370`.",
@@ -270,14 +283,20 @@ const offered = {
       },
     ],
   },
-  "entitySet.listRelated": { name: "listRelatedRows", parameters: unmasked },
+  "entitySet.listRelated": {
+    name: "listRelatedRows",
+    parameters: [...unmasked, labelLanguages],
+  },
   "entitySet.countRelated": { name: "countRelatedRows" },
   "entitySet.createRelated": {
     name: "createRelatedRow",
     change: "create",
     headers: { ...solution, ...duplicateDetection },
   },
-  "entitySet.getRelated": { name: "getRelatedRow", parameters: unmasked },
+  "entitySet.getRelated": {
+    name: "getRelatedRow",
+    parameters: [...unmasked, labelLanguages],
+  },
   "entitySet.updateRelated": {
     name: "updateRelatedRow",
     change: "update",
@@ -356,7 +375,8 @@ const offered = {
   },
   BulkRetain: { name: "bulkRetain", change: "update" },
   CalculatePrice: { name: "calculatePrice", change: "update" },
-  CalculateRollupField: { name: "calculateRollupField" },
+  // Functions that write, though OData functions only read.
+  CalculateRollupField: { name: "calculateRollupField", change: "update" },
   CanBeReferenced: { name: "canBeReferenced", change: "read" },
   CanBeReferencing: { name: "canBeReferencing", change: "read" },
   "workflow.CancelAllCloudFlowRuns": { name: "cancelAllCloudFlowRuns", change: "update" },
@@ -368,7 +388,8 @@ const offered = {
   CheckIncomingEmail: { name: "checkIncomingEmail" },
   CheckPromoteEmail: { name: "checkPromoteEmail" },
   "workqueue.ClearWorkQueue": { name: "clearWorkQueue", change: "delete" },
-  CloneAsPatch: { name: "cloneAsPatch", change: "create" },
+  // A patch locks its parent solution against changes and export.
+  CloneAsPatch: { name: "cloneAsPatch", change: "update" },
   CloneAsSolution: { name: "cloneAsSolution", change: "update" },
   "mobileofflineprofile.CloneMobileOfflineProfile": {
     name: "cloneMobileOfflineProfile",
@@ -525,7 +546,10 @@ const offered = {
   ImportSolutions: { name: "importSolutions", change: "update" },
   ImportTranslation: { name: "importTranslation", change: "update" },
   ImportTranslationAsync: { name: "importTranslationAsync", change: "update" },
-  IncrementKnowledgeArticleViewCount: { name: "incrementKnowledgeArticleViewCount" },
+  IncrementKnowledgeArticleViewCount: {
+    name: "incrementKnowledgeArticleViewCount",
+    change: "update",
+  },
   InferEntityDefinition: { name: "inferEntityDefinition", change: "read" },
   InitializeAnnotationBlocksDownload: {
     name: "initializeAnnotationBlocksDownload",
@@ -610,7 +634,7 @@ const offered = {
   RegisterFlowMachine: { name: "registerFlowMachine", change: "create" },
   "queueitem.ReleaseToQueue": { name: "releaseToQueue", change: "update" },
   RemoveActiveCustomization: { name: "removeActiveCustomization", change: "delete" },
-  RemoveActiveCustomizations: { name: "removeActiveCustomizations" },
+  RemoveActiveCustomizations: { name: "removeActiveCustomizations", change: "delete" },
   RemoveAppComponents: { name: "removeAppComponents", change: "delete" },
   RemoveCertificateCredential: { name: "removeCertificateCredential", change: "delete" },
   "flowgroup.RemoveFlowFromFlowGroup": { name: "removeFlowFromFlowGroup", change: "delete" },
@@ -622,7 +646,7 @@ const offered = {
   "systemuser.RemoveUserFromRecordTeam": { name: "removeUserFromRecordTeam", change: "delete" },
   "role.ReplacePrivilegesRole": { name: "replacePrivilegesRole", change: "update" },
   Reschedule: { name: "reschedule", change: "update" },
-  ResetInheritedAccess: { name: "resetInheritedAccess" },
+  ResetInheritedAccess: { name: "resetInheritedAccess", change: "update" },
   ResetUserFilters: { name: "resetUserFilters", change: "update" },
   "flowmachine.RestartHostedMachine": { name: "restartHostedMachine", change: "update" },
   Restore: { name: "restore", change: "update" },

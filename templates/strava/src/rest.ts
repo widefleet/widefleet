@@ -13,6 +13,8 @@ export type RestOperation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[] | undefined;
+  /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
+  explodedParameters?: string[] | undefined;
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -308,9 +310,11 @@ export const restRequest = (
 
     // An object that repeats sends each of its fields as a parameter, as
     // OpenAPI's exploded form style does, such as OData's parameter aliases.
-    const fields = separator === null ? z.record(z.string(), definedJson).safeParse(value) : null;
+    if (operation.explodedParameters?.includes(key)) {
+      const fields = z.record(z.string(), definedJson).safeParse(value);
 
-    if (fields?.success) {
+      if (!fields.success) throw new InvalidRequest(`${method}'s ${key} takes values by name`);
+
       for (const [field, item] of Object.entries(fields.data)) {
         const parsed = scalar.safeParse(item);
 

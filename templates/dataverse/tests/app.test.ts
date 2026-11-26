@@ -343,6 +343,13 @@ describe("Dataverse personal account app", () => {
     ])
       expect(sent?.body).toContain(line);
 
+    // Binding existing rows to a new one changes them, and some functions write,
+    // whichever method sends them.
+    for (const path of ["/rpc/create-binding", "/rpc/increment"])
+      expect(await (await alice.request(path)).json()).toMatchObject({
+        resultType: "input_required",
+      });
+
     // A batch asks once for its strongest change: an action or a deletion asks.
     upstream.calls.length = 0;
 
@@ -351,11 +358,61 @@ describe("Dataverse personal account app", () => {
       { method: "POST", url: "WinOpportunity", body: { Status: 3 } },
       { method: "POST", url: "accounts(a-1)/Microsoft.Dynamics.CRM.new_Approve" },
       { method: "POST", url: "accounts%2FMicrosoft.Dynamics.CRM.new_Approve" },
+      {
+        method: "POST",
+        url: "accounts",
+        body: { name: "A", "Account_Tasks@odata.bind": ["/tasks(1)"] },
+      },
+      { method: "PATCH", url: "accounts(1)", body: { name: "B" } },
     ])
       expect(
         await (await batch({ ...created, requests: [{ changeSet: [request] }] })).json(),
       ).toMatchObject({ resultType: "input_required" });
+    expect(
+      await (
+        await batch({
+          ...created,
+          requests: [
+            {
+              method: "GET",
+              url: "IncrementKnowledgeArticleViewCount(Source=@s,ViewDate=2026-11-26,Location=1,Count=1)",
+            },
+          ],
+        })
+      ).json(),
+    ).toMatchObject({ resultType: "input_required" });
+
+    // An action on a row a change set created keeps its own change.
+    const sending = await (
+      await batch({
+        ...created,
+        requests: [
+          {
+            changeSet: [
+              { method: "POST", url: "emails", body: { subject: "Hi" }, contentId: "1" },
+              {
+                method: "POST",
+                url: "$1/Microsoft.Dynamics.CRM.SendEmail",
+                body: { IssueSend: true },
+              },
+            ],
+          },
+        ],
+      })
+    ).text();
+
+    expect(sending).toContain("sends something to other people");
     expect(upstream.calls.filter(({ url }) => url.endsWith("$batch"))).toHaveLength(0);
+
+    // A known action that only reads asks nothing.
+    expect(
+      await (
+        await batch({
+          ...created,
+          requests: [{ method: "POST", url: "searchquery", body: { search: "x" } }],
+        })
+      ).json(),
+    ).toMatchObject({ status: "connected" });
 
     // No request can add lines, leave the service or refer to a row no request creates.
     for (const request of [

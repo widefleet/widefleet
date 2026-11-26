@@ -118,7 +118,8 @@ describe("REST requests", () => {
       path: "/{entitySet}/{type}",
       pathParameters: { entitySet: "entitySet", type: "type" },
       optionalPathParameters: ["type"],
-      queryParameters: { aliases: ["aliases", null, false] },
+      explodedParameters: ["aliases"],
+      queryParameters: { aliases: ["aliases", null, false], tag: ["tag", null, false] },
       headerParameters: {},
       body: null,
       bodyRequired: false,
@@ -144,6 +145,10 @@ describe("REST requests", () => {
     expect(() =>
       restRequest(base, "list", cast, { entitySet: "rows", aliases: { "@a": ["x"] } }),
     ).toThrow("list's aliases takes values");
+    // Only a map input sends its fields; another parameter takes no object.
+    expect(() =>
+      restRequest(base, "list", cast, { entitySet: "rows", tag: { page: "2" } }),
+    ).toThrow("list's tag takes a value or a list");
   });
 
   it("sends a file body as its bytes with its media type", async () => {

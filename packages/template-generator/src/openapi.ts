@@ -240,6 +240,8 @@ export type OpenapiOperation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[];
+  /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
+  explodedParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -265,6 +267,20 @@ const inputName = (name: string) =>
   /^[A-Za-z_$][\w$]*$/.test(name)
     ? name
     : name.replace(/[^\w$]+(\w)?/g, (_, next?: string) => next?.toUpperCase() ?? "");
+
+// A query parameter in the exploded form style whose value is a map of values,
+// each sent as its own parameter.
+const explodedMap = (
+  value: { style?: string | undefined; explode?: boolean | undefined },
+  target: Schema | undefined,
+) =>
+  (value.style ?? "form") === "form" &&
+  value.explode !== false &&
+  target?.type === "object" &&
+  !target.properties &&
+  z
+    .object({ type: z.enum(["string", "number", "integer", "boolean"]) })
+    .safeParse(target.additionalProperties).success;
 
 const queryParameter = (
   name: string,
@@ -1093,6 +1109,20 @@ export const generateOpenapi = (
     );
 
     if (optionalPath.length) call.optionalPathParameters = optionalPath;
+
+    const explodedInputs = parameters.flatMap((value) =>
+      value.in === "query" &&
+      explodedMap(
+        value,
+        value.schema?.$ref
+          ? schemas[value.schema.$ref.replace("#/components/schemas/", "")]
+          : value.schema,
+      )
+        ? [aliasInput(value.name)]
+        : [],
+    );
+
+    if (explodedInputs.length) call.explodedParameters = explodedInputs;
     runtime[rule.name] = call;
 
     const inputOf = (value: z.infer<typeof parameter>) =>
@@ -1140,14 +1170,7 @@ export const generateOpenapi = (
       // Queries carry values and lists of them, and in the exploded form style
       // a map of values, each sent as its own parameter; the runtime sends no
       // other objects.
-      const exploded =
-        (value.style ?? "form") === "form" &&
-        value.explode !== false &&
-        target?.type === "object" &&
-        !target.properties &&
-        z
-          .object({ type: z.enum(["string", "number", "integer", "boolean"]) })
-          .safeParse(target.additionalProperties).success;
+      const exploded = explodedMap(value, target);
 
       if (
         value.in === "query" &&
@@ -1319,6 +1342,8 @@ export type Operation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[];
+  /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
+  explodedParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.

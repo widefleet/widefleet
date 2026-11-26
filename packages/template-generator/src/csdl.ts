@@ -384,6 +384,15 @@ export const csdlDescription = (
     queryOption("$count", "Whether the answer includes the number of matching rows.", {
       type: "boolean",
     }),
+    {
+      name: "parameterAliases",
+      in: "query",
+      style: "form",
+      explode: true,
+      description:
+        'The values of parameter aliases the query options use, such as `@p1` in `$filter`, as OData literals, such as `{ "@p1": "\'Contoso\'" }`.',
+      schema: { type: "object", additionalProperties: { type: "string" } },
+    },
   ];
 
   const rows = {
@@ -397,6 +406,7 @@ export const csdlDescription = (
               value: { type: "array", items: row },
               "@odata.count": { type: "integer" },
               "@odata.nextLink": { type: "string" },
+              "@odata.deltaLink": { type: "string" },
             },
           },
         },
@@ -473,7 +483,7 @@ export const csdlDescription = (
     post: {
       operationId: "entitySet.create",
       summary: "Create a row. Lookups are set with `<navigation property>@odata.bind`.",
-      parameters: [entitySet, select],
+      parameters: [entitySet, select, expand],
       requestBody: { required: true, ...rowContent },
       responses: { "201": { description: "The created row.", ...rowContent }, ...noContent },
     },

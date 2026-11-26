@@ -9,6 +9,7 @@ import {
   InvalidRequest,
   maximumResponseBytes,
 } from "./input.ts";
+import { changesExisting, knownChange } from "./classify.ts";
 import { binaryContent } from "./content.ts";
 import { type RestOperation, restRequest } from "./rest.ts";
 import type { DataverseResult } from "./results.ts";
@@ -99,8 +100,49 @@ export const run = async <T>(
   properties: DataverseProperties,
   method: keyof typeof operations,
   input: Arguments,
-): Promise<DataverseResult<T>> =>
-  runOperation<T>(environment, properties, method, operations[method], base, input);
+): Promise<DataverseResult<T>> => {
+  const operation = operations[method];
+
+  return runOperation<T>(
+    environment,
+    properties,
+    method,
+    { ...operation, change: changeOf(method, operation, input) },
+    base,
+    input,
+  );
+};
+
+// Actions and functions called by name, whose address names the operation.
+const byName = new Set([
+  "callAction",
+  "callTableAction",
+  "callRowAction",
+  "callFunction",
+  "callTableFunction",
+  "callRowFunction",
+]);
+
+/**
+ * The change a call makes. A new row whose body binds existing rows changes
+ * them; an action or function called by name makes the change of the known
+ * operation it is, and an unknown action counts as an update.
+ */
+const changeOf = (
+  method: keyof typeof operations,
+  operation: (typeof operations)[keyof typeof operations],
+  input: Arguments,
+): Change | null => {
+  if (method === "createRow" || method === "createRelatedRow")
+    return changesExisting(definedJson.optional().parse(input["body"])) ? "update" : "create";
+
+  if (!byName.has(method)) return operation.change;
+  const { url } = restRequest(base, method, operation, input);
+  const path = decodeURIComponent(new URL(url).pathname.slice(serviceRoot(url).pathname.length));
+  const known = knownChange(operation.httpMethod, path);
+
+  return known === undefined ? operation.change : known;
+};
 
 // The headers Dataverse answers with that carry results: a created row's
 // address, a chunked upload's address and chunk size, an elastic table's
@@ -113,6 +155,7 @@ const answerHeaders = [
   "ETag",
   "x-ms-file-name",
   "x-ms-file-size",
+  "mimetype",
   "Preference-Applied",
 ];
 
