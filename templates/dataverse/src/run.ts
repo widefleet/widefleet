@@ -56,8 +56,15 @@ export const run = async <T>(
     if (listed.status !== "connected") return listed;
     const read = await boundedJson(listed.response);
 
-    if (!listed.response.ok || read.status === "too_large")
-      throw new Error(`Dataverse service document failed (HTTP ${listed.response.status})`);
+    if (read.status === "too_large") throw new Error("Dataverse's service document is too large");
+
+    if (!listed.response.ok)
+      return failure(
+        environment,
+        listed.response,
+        request.url,
+        dataverseError.safeParse(read.body).data ?? null,
+      );
     const sets = serviceDocument.parse(read.body).value;
 
     if (
@@ -88,13 +95,9 @@ export const run = async <T>(
 
   if (sent.status !== "connected") return sent;
   const { response } = sent;
-  const connectUrl = environment.WIDEFLEET_ORIGIN;
 
-  if (response.status === 401) return { status: "reconnect_required", connectUrl };
-
-  // Dataverse limits requests per user with 429.
-  if (response.status === 429 || (response.status === 503 && response.headers.has("retry-after")))
-    return { status: "rate_limited", retryAfter: response.headers.get("retry-after") };
+  if (response.status === 401 || throttled(response))
+    return failure(environment, response, request.url, null);
 
   const tooLarge = { status: "too_large", maximumBytes: maximumResponseBytes } as const;
 
@@ -116,14 +119,35 @@ export const run = async <T>(
     // generated signature types as T.
     return { status: "connected", data: (operation.response === "json" ? body : null) as T };
 
-  const error = dataverseError.safeParse(body);
+  return failure(environment, response, request.url, dataverseError.safeParse(body).data ?? null);
+};
 
-  if (error.success)
-    return { status: "dataverse_error", error: { ...error.data.error, status: response.status } };
+// Dataverse limits requests per user with 429.
+const throttled = (response: Response) =>
+  response.status === 429 || (response.status === 503 && response.headers.has("retry-after"));
+
+/** Why a request to an environment failed, so the user or an administrator can fix it. */
+const failure = (
+  environment: Environment,
+  response: Response,
+  url: string,
+  error: z.infer<typeof dataverseError> | null,
+) => {
+  if (response.status === 401)
+    return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
+  if (throttled(response))
+    return { status: "rate_limited", retryAfter: response.headers.get("retry-after") } as const;
+
+  if (error)
+    return {
+      status: "dataverse_error",
+      error: { ...error.error, status: response.status },
+    } as const;
 
   // Widefleet answers a destination the app may not reach with a plain 403.
   if (response.status === 403)
-    return { status: "network_required", origin: new URL(request.url).origin };
+    return { status: "network_required", origin: new URL(url).origin } as const;
 
   throw new Error(`Dataverse request failed (HTTP ${response.status})`);
 };

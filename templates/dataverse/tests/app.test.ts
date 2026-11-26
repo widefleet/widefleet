@@ -334,12 +334,18 @@ describe("Dataverse personal account app", () => {
       status: "rate_limited",
       retryAfter: "20",
     });
-    // Widefleet answers an origin the app may not reach with a plain 403.
-    upstream.state.answer = { status: 403, body: null, headers: {} };
-    expect(await (await alice.request("/rpc/list")).json()).toEqual({
-      status: "network_required",
-      origin: environments.sales,
-    });
+
+    // Widefleet answers an origin the app may not reach with a plain 403,
+    // also when creating a row first reads the service document.
+    for (const path of ["/rpc/list", "/rpc/create"]) {
+      upstream.state.answer = { status: 403, body: null, headers: {} };
+
+      expect(await (await alice.request(path)).json()).toEqual({
+        status: "network_required",
+        origin: environments.sales,
+      });
+    }
+
     upstream.state.answer = {
       status: 200,
       body: { value: [{ name: "x".repeat(9 * 1024 * 1024) }] },
