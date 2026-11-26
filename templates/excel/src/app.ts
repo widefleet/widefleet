@@ -10,6 +10,49 @@ import type { Environment, Properties } from "./context.ts";
  * Microsoft Graph. Each offered Graph operation is a method. Reading never asks;
  * methods that create, change or delete ask the user first according to their
  * approval level.
+ *
+ * @remarks
+ * A workbook is addressed by its drive and item IDs: `myDrive` returns the
+ * user's drive and `search` finds workbooks in it. Worksheets, tables and names
+ * are addressed by ID or name.
+ *
+ * `getRange`, `usedRange` and `getNamedRange` return `values`, `formulas`,
+ * `text` and `numberFormat` as one list of cells per row. `updateRange` writes
+ * them the same way and leaves `null` cells unchanged. Whole columns or rows,
+ * such as `C:C`, read as `null`: use `usedRange` or a bounded address.
+ *
+ * Graph's query options keep their names, such as `$select`, `$top`, `$filter`
+ * and `$orderby`. A list with more items carries `@odata.nextLink`: pass it as
+ * `nextLink` to the same method to read the next page.
+ *
+ * For a series of calls, `createSession` with `{ persistChanges: true }`
+ * returns a session whose `data.id`, passed as `sessionId` to later calls,
+ * makes them faster. With `persistChanges: false`,
+ * changes stay in a temporary copy. Sessions end after a few minutes without
+ * calls; `refreshSession` keeps one open, and a call in an ended session
+ * returns `graph_error` with status 404.
+ *
+ * @example
+ * ```ts
+ * const drive = await env.EXCEL.myDrive();
+ * const found =
+ *   drive.status === "connected" && drive.data.id
+ *     ? await env.EXCEL.search({ driveId: drive.data.id, q: "Budget.xlsx" })
+ *     : null;
+ * const workbook = found?.status === "connected" ? found.data.value?.[0] : undefined;
+ *
+ * if (drive.status === "connected" && drive.data.id && workbook?.id) {
+ *   const at = { driveId: drive.data.id, driveItemId: workbook.id, workbookWorksheetId: "Sheet1" };
+ *   const range = await env.EXCEL.getRange({ ...at, address: "A1:C10" });
+ *   if (range.status === "connected") console.log(range.data?.values);
+ *
+ *   await env.EXCEL.updateRange({
+ *     ...at,
+ *     address: "D2:D3",
+ *     body: { formulas: [["=SUM(A2:C2)"], ["=SUM(A3:C3)"]] },
+ *   });
+ * }
+ * ```
  */
 export default class Excel extends ExcelApi {
   /** Check account setup and linking. Connect the Microsoft account on this app's page. */

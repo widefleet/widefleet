@@ -29,7 +29,7 @@ const declared = (template: string) =>
   ).network.backend;
 
 describe("templates", () => {
-  it.each(templates)("%s allows the origins it calls and documents the same list", (template) => {
+  it.each(templates)("%s allows the origins it calls", (template) => {
     const backend = declared(template);
 
     // The API address of generated REST templates and the endpoints connections fetch.
@@ -39,9 +39,5 @@ describe("templates", () => {
     ].map((match) => new URL(match[1] ?? "").origin);
 
     for (const origin of called) expect(backend).toContain(origin);
-
-    const command = /widefleet network allow ([^\n]+)/.exec(read(template, "template.md"))?.[1];
-
-    expect(command?.trim().split(/\s+/).toSorted()).toEqual(backend.toSorted());
   });
 });

@@ -9,6 +9,22 @@ import type { Environment, Properties } from "./context.ts";
  * Use the current user's WHOOP data through WHOOP's API. Each offered
  * operation is a method. Reading never asks; revoking the app's access asks
  * the user first according to their approval level.
+ *
+ * @remarks
+ * Inputs and results keep WHOOP's field names. Lists take `start`, `end` and
+ * `limit` and answer with `records` and a `next_token` while more remain: pass
+ * it as `nextToken` for the next page. Scores are present when `score_state` is
+ * `SCORED`.
+ *
+ * @example
+ * ```ts
+ * const cycles = await env.WHOOP.listCycles({ start: "2026-11-01T00:00:00.000Z", limit: 10 });
+ * if (cycles.status === "connected") {
+ *   for (const cycle of cycles.data.records ?? []) {
+ *     console.log(cycle.start, cycle.score?.strain);
+ *   }
+ * }
+ * ```
  */
 export default class Whoop extends WhoopApi {
   /** Check account setup and linking. Connect the WHOOP account on this app's page. */

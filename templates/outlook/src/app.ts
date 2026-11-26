@@ -9,6 +9,34 @@ import type { Environment, Properties } from "./context.ts";
  * Use the current user's Outlook mailbox through Microsoft Graph. Each offered
  * Graph operation is a method. Reading never asks; methods that create, change,
  * delete or send ask the user first according to their approval level.
+ *
+ * @remarks
+ * Well-known folder names such as `inbox`, `drafts` and `sentitems` work as
+ * folder IDs. Action bodies use Graph's parameter names, such as `{ Message,
+ * SaveToSentItems }` for `sendMail`.
+ *
+ * Graph's query options keep their names, such as `$select`, `$top`, `$filter`
+ * and `$orderby`. A list with more items carries `@odata.nextLink`: pass it as
+ * `nextLink` to the same method to read the next page. Delta methods answer
+ * with `@odata.deltaLink`, which `nextLink` also takes.
+ *
+ * `getMessageMime` returns the message as MIME. Treat email HTML as untrusted
+ * content.
+ *
+ * @example
+ * ```ts
+ * const inbox = await env.OUTLOOK.listFolderMessages({
+ *   mailFolderId: "inbox",
+ *   $top: 10,
+ *   $filter: "isRead eq false",
+ *   $select: ["subject", "from", "receivedDateTime"],
+ * });
+ * if (inbox.status === "connected") {
+ *   for (const message of inbox.data.value ?? []) {
+ *     console.log(message.subject, message.from?.emailAddress?.address);
+ *   }
+ * }
+ * ```
  */
 export default class Outlook extends OutlookApi {
   /** Check account setup and linking. Connect the Outlook account on this app's page. */
