@@ -190,15 +190,15 @@ describe("re-encryption", () => {
 
     try {
       const encryption = rotated();
+      const before = await readSecretEncryption(database, encryption);
 
-      expect(await readSecretEncryption(database, encryption)).toMatchObject({
-        earlierFormat: 1,
-        failed: 0,
-      });
+      expect(before).toMatchObject({ earlierFormat: 1, failed: 0 });
+      expect(incomplete(before)).toBe(true);
       expect(await reencryptSecrets(database, encryption)).toMatchObject({
         reencrypted: 1,
         failed: 0,
       });
+      expect(incomplete(await readSecretEncryption(database, encryption))).toBe(false);
       expect(decodeProtectedHeader(await directorySecret()).kid).toBe(
         "current:directory-client-secret",
       );
