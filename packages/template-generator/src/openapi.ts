@@ -9,6 +9,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { checkTypeNames, comment, identifier, propertyName } from "./emit.ts";
 import { reservedMethod } from "./reserved.ts";
+import { csdlDescription, isCsdl } from "./csdl.ts";
 import { isOpenapi31, upgradeOpenapi31 } from "./openapi31.ts";
 import {
   type Change,
@@ -204,7 +205,18 @@ const pathItem = z.looseObject({
 
 const document = z.looseObject({
   openapi: z.string().startsWith("3."),
-  servers: z.array(z.object({ url: z.url() })).min(1),
+  // A server variable, such as the host of a customer's environment, is an
+  // input of every method.
+  servers: z
+    .array(
+      z.object({
+        url: z.string(),
+        variables: z
+          .record(z.string(), z.object({ default: z.string(), description: z.string().optional() }))
+          .optional(),
+      }),
+    )
+    .min(1),
   paths: z.record(z.string(), pathItem),
   components: z
     .looseObject({
@@ -252,7 +264,13 @@ const queryParameter = (
   name: string,
   separator: string | null,
   required: boolean,
-): [string, [string, string | null, boolean]] => [name, [name, separator, required]];
+): [string, [string, string | null, boolean]] => [aliasInput(name), [name, separator, required]];
+
+// An OData parameter alias, such as `@Target`, carries a function's list,
+// object or row as JSON; its input drops the `@`.
+const isAlias = (name: string) => name.startsWith("@");
+
+const aliasInput = (name: string) => (isAlias(name) ? name.slice(1) : name);
 
 // The characters of a type, and whether each lies outside nested types and quoted values.
 const characters = (type: string) => {
@@ -320,8 +338,19 @@ const constraining = [
 const annotationOnly = (value: Schema) => constraining.every((key) => value[key] === undefined);
 
 /** A description's JSON or YAML text, parsed. */
-export const parseDescription = (source: string) => {
+export const parseDescription = (
+  source: string,
+  url?: string,
+  variables: Readonly<Record<string, string>> = {},
+) => {
   const text = source.trimStart();
+
+  // OData's service root is the address of its `$metadata` without that segment.
+  if (isCsdl(text)) {
+    if (!url) throw new Error("A CSDL description needs the address of its $metadata");
+
+    return csdlDescription(text, url.replace(/\/\$metadata$/, ""), variables);
+  }
 
   return json.parse(
     text.startsWith("{") ? JSON.parse(text) : parseYaml(text, { maxAliasCount: -1 }),
@@ -425,6 +454,22 @@ export const generateOpenapi = (
       : isOpenapi31(description)
         ? upgradeOpenapi31(description)
         : description,
+  );
+
+  const server = api.servers[0];
+  const serverVariables = Object.entries(server?.variables ?? {});
+
+  // The address must be a URL whatever the variables hold.
+  z.url().parse(
+    serverVariables.reduce(
+      (url, [name, variable]) => url.replaceAll(`{${name}}`, variable.default),
+      server?.url ?? "",
+    ),
+  );
+
+  const serverFields = serverVariables.map(
+    ([name, variable]) =>
+      `${comment(variable.description, "    ")}    ${propertyName(name)}: string;`,
   );
 
   const components = api.components ?? {};
@@ -1006,7 +1051,9 @@ export const generateOpenapi = (
             ? [
                 queryParameter(
                   value.name,
-                  separator(`${id}'s query parameter ${value.name}`, value),
+                  isAlias(value.name)
+                    ? null
+                    : separator(`${id}'s query parameter ${value.name}`, value),
                   value.required === true,
                 ),
               ]
@@ -1025,7 +1072,7 @@ export const generateOpenapi = (
     runtime[rule.name] = call;
 
     const inputOf = (value: z.infer<typeof parameter>) =>
-      value.in === "path" ? inputName(value.name) : value.name;
+      value.in === "path" ? inputName(value.name) : aliasInput(value.name);
 
     const inputs = [
       ...parameters.map(inputOf),
@@ -1033,6 +1080,7 @@ export const generateOpenapi = (
       ...(bodyKind ? ["body"] : []),
       ...(bodyKind === "text" ? ["contentType"] : []),
       ...(pageable ? ["nextLink"] : []),
+      ...serverVariables.map(([name]) => name),
     ];
 
     const repeated = inputs.find((name, index) => inputs.indexOf(name) !== index);
@@ -1066,7 +1114,11 @@ export const generateOpenapi = (
         );
 
       // Queries carry values and lists of them; the runtime sends no objects.
-      if (value.in === "query" && (target?.type === "object" || target?.properties))
+      if (
+        value.in === "query" &&
+        !isAlias(value.name) &&
+        (target?.type === "object" || target?.properties)
+      )
         throw new Error(
           `${id} has the object query parameter ${value.name}, which is not supported`,
         );
@@ -1078,7 +1130,7 @@ export const generateOpenapi = (
         "    ",
       )}${target?.type === "integer" && target.format === "int64" ? " | string" : ""}`;
 
-      return `${comment(single(value.description), "    ")}    ${propertyName(inputOf(value))}${value.in === "path" || value.required ? "" : "?"}: ${type};`;
+      return `${comment(single(value.description), "    ")}    ${propertyName(inputOf(value))}${(value.in === "path" && value.required !== false) || value.required ? "" : "?"}: ${type};`;
     });
 
     // Header inputs, such as a session, apply to every page.
@@ -1087,7 +1139,7 @@ export const generateOpenapi = (
         `${comment(description, "    ")}    ${propertyName(input)}?: string;`,
     );
 
-    fields.push(...headerFields);
+    fields.push(...headerFields, ...serverFields);
 
     // A form's fields are typed by its schema; a multipart form's binary fields are files.
     const bodyType = () => {
@@ -1132,13 +1184,17 @@ export const generateOpenapi = (
     if (responseKind === "binary") usesBinary = true;
 
     const required =
-      parameters.some((value) => value.in === "path" || value.required) || bodyRequired;
+      parameters.some(
+        (value) => (value.in === "path" && value.required !== false) || value.required,
+      ) ||
+      bodyRequired ||
+      serverVariables.length > 0;
 
     const firstPage = fields.length ? `{\n${fields.join("\n")}\n  }` : "Record<string, never>";
 
     // A later page needs only its address and the headers of the first.
     const input = pageable
-      ? `${firstPage} | {\n    /**\n     * The \`@odata.nextLink\` of an earlier answer, or its \`@odata.deltaLink\`.\n     */\n    nextLink: string;\n${headerFields.map((field) => `${field}\n`).join("")}  }`
+      ? `${firstPage} | {\n    /**\n     * The \`@odata.nextLink\` of an earlier answer, or its \`@odata.deltaLink\`.\n     */\n    nextLink: string;\n${[...headerFields, ...serverFields].map((field) => `${field}\n`).join("")}  }`
       : firstPage;
 
     const approval =
