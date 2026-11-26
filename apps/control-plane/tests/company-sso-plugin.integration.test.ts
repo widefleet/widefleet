@@ -15,9 +15,10 @@ import { editableSettings } from "./settings-input.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { organizationSettings, ssoDomains } from "../src/lib/server/schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
-import { organization, ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { account, organization, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { companySsoOrigins } from "../src/lib/server/company-sso.ts";
 import { verifySsoDomains } from "../src/lib/server/sso-domains.ts";
+import { lockSsoChanges } from "../src/lib/server/sso-settings.ts";
 
 describe("Better Auth SSO provider integration", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -531,6 +532,146 @@ describe("Better Auth SSO provider integration", () => {
         }),
       ).rejects.toThrow();
     expect((await environment.settings.read(principal)).ssoDomains).toEqual(before.ssoDomains);
+  });
+
+  it("requires the client secret again before an update changes where it is sent", async () => {
+    const principal = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const credential = await organizationCredential(environment, principal);
+
+    const other = await createIdentityProvider(`${origin}/api/auth/sso/callback/test-company`);
+
+    const stored = async () => {
+      const [provider] = await environment.database.db.select().from(ssoProvider);
+
+      return {
+        issuer: provider?.issuer,
+        oidcConfig: z
+          .object({ clientSecret: z.string() })
+          .loose()
+          .parse(
+            JSON.parse(
+              await environment.encryption.decrypt(
+                { kind: "sso-provider-config", field: "oidcConfig" },
+                provider?.oidcConfig ?? "",
+              ),
+            ),
+          ),
+      };
+    };
+
+    const message = "Enter the client secret again to change the issuer or token endpoint";
+
+    try {
+      const before = await stored();
+      const next = editableSettings(await environment.settings.read(principal));
+
+      if (!next.sso) throw new Error("Missing fixture provider");
+      delete next.sso.domain;
+      delete next.sso.oidcConfig.clientSecret;
+
+      // Saving other changes without the secret keeps working.
+      expect(before.oidcConfig).not.toMatchObject({ mapping: { name: "given_name" } });
+      next.sso.oidcConfig.mapping.name = "given_name";
+      await environment.settings.update(
+        principal,
+        { ...next, acknowledgeRestart: false },
+        false,
+        credential,
+      );
+      expect((await stored()).oidcConfig).toMatchObject({
+        clientSecret: before.oidcConfig.clientSecret,
+        mapping: { name: "given_name" },
+      });
+
+      // Better Auth refuses issuer changes once accounts are linked. Before that, for
+      // example while a connection is being set up, the saved secret must not follow.
+      await environment.database.db
+        .delete(account)
+        .where(eq(account.providerId, next.sso.providerId));
+
+      await expect(
+        environment.settings.update(
+          principal,
+          { ...next, sso: { ...next.sso, issuer: other.origin }, acknowledgeRestart: false },
+          false,
+          credential,
+        ),
+      ).rejects.toThrow(message);
+
+      for (const oidcConfig of [
+        { tokenEndpoint: `${other.origin}/token` },
+        { discoveryEndpoint: `${other.origin}/.well-known/openid-configuration` },
+      ])
+        await expect(
+          credential.auth.api.updateSSOProvider({
+            headers: credential.headers,
+            body: { providerId: next.sso.providerId, oidcConfig },
+          }),
+        ).rejects.toThrow(message);
+
+      expect(await stored()).toMatchObject({
+        issuer: before.issuer,
+        oidcConfig: { clientSecret: before.oidcConfig.clientSecret },
+      });
+
+      await environment.settings.update(
+        principal,
+        {
+          ...next,
+          sso: {
+            ...next.sso,
+            issuer: other.origin,
+            oidcConfig: { ...next.sso.oidcConfig, clientSecret: "replacement-client-secret" },
+          },
+          acknowledgeRestart: false,
+        },
+        false,
+        credential,
+      );
+      expect(await stored()).toMatchObject({
+        issuer: other.origin,
+        oidcConfig: { clientSecret: "replacement-client-secret" },
+      });
+    } finally {
+      await other.stop();
+    }
+  });
+
+  it("rejects an SSO save while another save of the organization runs", async () => {
+    const principal = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const credential = await organizationCredential(environment, principal);
+    const next = editableSettings(await environment.settings.read(principal));
+
+    if (!next.sso) throw new Error("Missing fixture provider");
+    delete next.sso.domain;
+
+    const save = () =>
+      environment.settings.update(
+        principal,
+        { ...next, acknowledgeRestart: false },
+        false,
+        credential,
+      );
+
+    await environment.database.db.transaction(async (transaction) => {
+      await lockSsoChanges(transaction, principal.application.organizationId);
+      await expect(save()).rejects.toThrow("Another SSO change is still in progress");
+    });
+    await save();
   });
 
   // A partial connection was registered while its provider advertised no user info endpoint.
