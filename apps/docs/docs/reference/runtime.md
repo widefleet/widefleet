@@ -32,10 +32,10 @@ Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the load
 
 The runtime encrypts what it stores itself: app secret snapshots, the keys behind the `WIDEFLEET_KEYS` binding and the workload signing keys. It also encrypts the managed OAuth access tokens, refresh tokens and authorization state that clients hold. It uses its own keyring, in the format of the control plane's `PLATFORM_ENCRYPTION_KEYS`: a JWK Set of 32-byte keys, active key first, `{"keys":[{"kty":"oct","kid":"ID","k":"KEY"}]}`. Hosted operators supply it as `WIDEFLEET_SECRETS_KEYS`. Self-hosted runtimes generate it in object storage, one per organization.
 
-Each key derives a separate key for every purpose with HKDF-SHA256. Every value names its key and purpose and is bound to the object or flow it belongs to. To rotate the keyring:
+To rotate the keyring:
 
 1. Add a new key at the front of the keyring and keep the earlier keys after it. Deploy.
-2. Run `widefleet runtime rekey` with an administrator login. It encrypts every stored value again with the active key, page by page, and prints the counts. It exits with a nonzero status if a value cannot be read or changed during the run; run it again then.
+2. Run `widefleet runtime rekey` with an administrator login. It checks every stored value, encrypts those under an earlier key or format again with the active key, and prints the counts. If a value cannot be read or changed during the run, it exits with a nonzero status; run it again.
 3. Remove the earlier keys and deploy again.
 
 Managed OAuth tokens and authorization state are accepted only under the active key. Once a new key is active, clients authorize again.
