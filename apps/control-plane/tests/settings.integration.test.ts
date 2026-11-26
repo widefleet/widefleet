@@ -374,10 +374,13 @@ describe("Platform setup and managed settings", () => {
     }
   });
 
-  it("completes concurrent native saves without holding outer transaction connections", async () => {
+  // More saves than pool connections: each settles instead of waiting for a connection that a
+  // waiting save holds. One save runs at a time and the others are rejected.
+  it("settles concurrent native saves one at a time without exhausting the pool", async () => {
     const saved = await input();
     const credential = await organizationCredential(environment, principal());
-    await Promise.all(
+
+    const results = await Promise.allSettled(
       Array.from({ length: 12 }, () =>
         environment.settings.update(
           principal(),
@@ -387,6 +390,14 @@ describe("Platform setup and managed settings", () => {
         ),
       ),
     );
+
+    expect(results.some((result) => result.status === "fulfilled")).toBe(true);
+
+    for (const result of results)
+      if (result.status === "rejected")
+        expect(result.reason).toMatchObject({
+          message: "Another SSO change is still in progress. Try again shortly.",
+        });
     expect((await environment.settings.read(principal())).sso).toMatchObject(saved.sso ?? {});
   });
 

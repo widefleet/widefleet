@@ -18,6 +18,7 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import { account, organization, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { companySsoOrigins } from "../src/lib/server/company-sso.ts";
 import { verifySsoDomains } from "../src/lib/server/sso-domains.ts";
+import { lockSsoChanges } from "../src/lib/server/sso-settings.ts";
 
 describe("Better Auth SSO provider integration", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -641,6 +642,36 @@ describe("Better Auth SSO provider integration", () => {
     } finally {
       await other.stop();
     }
+  });
+
+  it("rejects an SSO save while another save of the organization runs", async () => {
+    const principal = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const credential = await organizationCredential(environment, principal);
+    const next = editableSettings(await environment.settings.read(principal));
+
+    if (!next.sso) throw new Error("Missing fixture provider");
+    delete next.sso.domain;
+
+    const save = () =>
+      environment.settings.update(
+        principal,
+        { ...next, acknowledgeRestart: false },
+        false,
+        credential,
+      );
+
+    await environment.database.db.transaction(async (transaction) => {
+      await lockSsoChanges(transaction, principal.application.organizationId);
+      await expect(save()).rejects.toThrow("Another SSO change is still in progress");
+    });
+    await save();
   });
 
   // A partial connection was registered while its provider advertised no user info endpoint.
