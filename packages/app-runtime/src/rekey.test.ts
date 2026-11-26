@@ -165,9 +165,13 @@ describe("runtime storage rewrite", () => {
     const earlierRing = "workload/signing-keys.json";
 
     // Values before the keyring were sealed with the raw bytes of today's active version.
+    // Snapshots from before fingerprints were removed still carry one.
     packages.write(
       snapshot(1),
-      JSON.stringify({ ciphertext: await sealedBeforeKeyring(2, snapshot(1), '{"A":"one"}') }),
+      JSON.stringify({
+        ciphertext: await sealedBeforeKeyring(2, snapshot(1), '{"A":"one"}'),
+        fingerprint: "earlier-fingerprint",
+      }),
     );
     packages.write(
       snapshot(2),
@@ -201,6 +205,7 @@ describe("runtime storage rewrite", () => {
         ciphertext.parse(JSON.parse(stored(snapshot(1)))).ciphertext,
       ),
     ).toBe('{"A":"one"}');
+    expect(stored(snapshot(1))).not.toContain("fingerprint");
     expect(keyVersion(stored(ring))).toBe("two");
     expect(await decryptText(rotated, ring, stored(ring))).toBe('{"KEYRING":"ring"}');
     expect(keyVersion(ciphertext.parse(JSON.parse(stored(appKey))).ciphertext)).toBe("two");

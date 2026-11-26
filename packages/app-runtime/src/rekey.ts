@@ -44,7 +44,8 @@ const appKeyPath = /^app-keys\/([^/]+)\/[^/]+\.json$/;
 // no longer read and stays as it is.
 const ringPath = "workload/signing-keys-rs256.json";
 
-const snapshot = z.strictObject({ ciphertext: z.string() });
+// Snapshots written before fingerprints were removed still carry one; the rewrite drops it.
+const snapshot = z.object({ ciphertext: z.string() });
 
 type Environment = Pick<ParentEnvironment, "WIDEFLEET_PACKAGES" | "WIDEFLEET_SECRETS_KEYS">;
 
