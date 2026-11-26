@@ -516,6 +516,7 @@ const createOrganizationSettingsService = (
       requireAdmin(principal, organizationId);
       await database.transaction(async (transaction) => {
         await lockSettings(transaction);
+
         if (
           browser &&
           (await readOrganizationSettings(transaction, organizationId)).externallyManaged
@@ -531,6 +532,7 @@ const createOrganizationSettingsService = (
           })
           .where(eq(organizationSettings.organizationId, organizationId));
       });
+
       return inspect(true);
     },
     setExternalManagement: async (principal: Principal, enabled: boolean) => {
