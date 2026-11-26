@@ -1,7 +1,7 @@
 ---
 title: Application runtime
 description: Runtime versions, activation, recovery, storage and supported app APIs.
-lastModified: 2026-11-18
+lastModified: 2026-11-26
 ---
 
 The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. Starting with platform 0.4.0, apps and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
@@ -15,6 +15,7 @@ widefleet login
 widefleet runtime status
 widefleet runtime update VERSION
 widefleet runtime rollback PREVIOUS_VERSION
+widefleet runtime rekey
 ```
 
 Use the normal login with administrator membership and `platform:read platform:write`. `status` reports the selected version, last acknowledged active version, latest update state and stored versions. Update and rollback wait for the executor's result; `--no-wait` returns after queueing. Failed activation returns a nonzero exit status. Rollback selects an already stored version without downloading it again. A newer submitted update stops an older CLI waiter with an explicit message.
@@ -26,6 +27,22 @@ If an update returns `409: Runtime versions are immutable`, the installation alr
 Widefleet 0.7.6 includes app runtime 0.7.6 and celld 0.6.3-widefleet.1. Use matching control-plane, agent and CLI releases. The platform checks runtime compatibility before activation. [MCP](/guides/mcp) requires app runtime 0.7.6 or newer.
 
 Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
+
+## Encryption keys
+
+The runtime encrypts what it stores itself: app secret snapshots, the keys behind the `WIDEFLEET_KEYS` binding and the workload signing keys. It also encrypts the managed OAuth access tokens, refresh tokens and authorization state that clients hold. It uses its own keyring, in the format of the control plane's `PLATFORM_ENCRYPTION_KEYS`: a JWK Set of 32-byte keys, active key first, `{"keys":[{"kty":"oct","kid":"ID","k":"KEY"}]}`. Hosted operators supply it as `WIDEFLEET_SECRETS_KEYS`. Self-hosted runtimes generate it in object storage, one per organization.
+
+To rotate the keyring:
+
+1. Add a new key at the front of the keyring and keep the earlier keys after it. Deploy.
+2. Run `widefleet runtime rekey` with an administrator login. It checks every stored value, encrypts those under an earlier key or format again with the active key, and prints the counts. If a value cannot be read or changed during the run, it exits with a nonzero status; run it again.
+3. Remove the earlier keys and deploy again.
+
+Managed OAuth tokens and authorization state are accepted only under the active key. Once a new key is active, clients authorize again.
+
+Rewriting does not replace a key or secret that may have been exposed. If a runtime key leaked together with read access to runtime storage, also replace the affected app secrets at their providers, revoke provider tokens, and replace the app keys and workload signing keys.
+
+Runtimes before the keyring used a single key, `WIDEFLEET_SECRETS_KEY`, 64 hexadecimal characters. Upgrade a hosted installation with a keyring whose only key holds the same 32 bytes in unpadded base64url, then run `widefleet runtime rekey` before rotating. Deployments keep secrets they do not name, so delete the earlier `WIDEFLEET_SECRETS_KEY` secret from the runtime Worker once with `wrangler secret delete`. Self-hosted installations from before the keyring are not upgraded in place: their runtime storage is encrypted with the earlier key, which the agent no longer provides. Set them up anew with matching agent and runtime releases.
 
 ## Activation and recovery
 

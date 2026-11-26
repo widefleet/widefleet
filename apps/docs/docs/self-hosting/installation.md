@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure and recover a company installation.
-lastModified: 2026-11-18
+lastModified: 2026-11-26
 ---
 
 This guide installs Widefleet **0.7.6** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -282,7 +282,7 @@ Durable Object APIs are no longer available. Apps use their own browser URLs and
 receive the verified user through `ctx.props.caller`; see
 [app caller identity](/guides/app-services#user-identity). Users reconnect their
 personal accounts in the recreated provider apps.
-Hosted configuration uses `WIDEFLEET_SECRETS_KEY` and the `service` execution-limit
+Hosted configuration uses the [runtime keyring](/reference/runtime#encryption-keys) and the `service` execution-limit
 profile. Follow the normal versioned deployment process for these changes.
 
 An application-only code rollback cannot reverse this database or Worker

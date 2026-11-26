@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-23
+lastModified: 2026-11-26
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -374,9 +374,9 @@ while retaining their pinned code version.
 
 Back up PostgreSQL with its installation encryption key. Also preserve runtime
 object storage and its encryption key. Hosted operators supply
-`WIDEFLEET_SECRETS_KEY`, 32 random bytes encoded as 64 lowercase hexadecimal
-characters, through their deployment configuration. Self-hosted runtimes persist
-the generated key in their runtime state. Retained snapshots require that key.
+`WIDEFLEET_SECRETS_KEYS`, the [runtime keyring](/reference/runtime#encryption-keys),
+through their deployment configuration. Self-hosted runtimes persist the generated
+keyring in object storage. Retained snapshots require its keys.
 
 ## Runtime limits and troubleshooting
 
