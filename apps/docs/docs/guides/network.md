@@ -23,7 +23,7 @@ Each deployment requests these origins. The app's owner or an administrator gran
 
 ## Allow origins in management
 
-Open the app and choose **Connections**. The **Network permissions** card lists the origins the latest deployment requests; choose **Allow** to grant one. Use **Allow an origin** to add another origin for the backend or the browser, and **Remove** to revoke one. The card shows whether the permissions are saved, pending or active. After a failed activation, choose **Retry**.
+Open the app and choose **Connections**. The **Network permissions** card lists the origins the latest deployment requests; choose **Allow** to grant one. Choose **Add origin** to allow another origin for the backend or the browser, and the remove button beside an origin to revoke it. While a change is being applied, the card shows its status; after a failed activation, choose **Retry**.
 
 App owners and administrators change the lists; collaborators see them.
 
