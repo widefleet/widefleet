@@ -3,6 +3,7 @@
   import { getSettings, setBrowserWorkers } from "#lib/settings.remote";
   import { failureMessage } from "#lib/sso-setup.svelte";
   import { Button } from "@platform/ui/button";
+  import { Switch } from "@platform/ui/switch";
   import * as Dialog from "@platform/ui/dialog";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
@@ -25,7 +26,7 @@
 
   let confirmOpen = $state(false);
 
-  let trigger = $state<HTMLElement | null>(null);
+  let trigger = $state<HTMLButtonElement | null>(null);
 
   let busy = $state(false);
 
@@ -58,19 +59,23 @@
   <section class="border-t py-5">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h2 class="text-base font-semibold">Browser workers</h2>
+        <label for="browser-workers" class="text-base font-semibold">Browser workers</label>
         <p class="text-muted-foreground mt-1 text-sm leading-6">
-          {enabled ? "Allowed" : "Blocked"} for apps in this organization.
+          Let apps run background tasks and work offline.
         </p>
       </div>
-      <Button
+      <Switch
+        id="browser-workers"
         bind:ref={trigger}
-        variant="outline"
+        bind:checked={
+          () => enabled || confirmOpen,
+          (next) => {
+            if (next) confirmOpen = true;
+            else void toggle(false);
+          }
+        }
         disabled={busy || readonly}
-        onclick={() => (enabled ? toggle(false) : (confirmOpen = true))}
-      >
-        {enabled ? "Disable" : "Enable…"}
-      </Button>
+      />
     </div>
     {#if readonly}
       <p class="text-muted-foreground mt-2 text-sm">

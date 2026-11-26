@@ -172,20 +172,23 @@ test("confirms browser worker access before changing organization security", asy
     const page = await context.newPage();
     await page.goto(`/${alpha}/settings/security`);
     await page.waitForLoadState("networkidle");
-    const enable = page.getByRole("button", { name: "Enable…" });
-    await enable.click();
+    const control = page.getByRole("switch", { name: "Browser workers" });
+    await expect(control).not.toBeChecked();
+    await control.click();
     const dialog = page.getByRole("dialog", { name: "Allow browser workers?" });
-    await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Cancel" }).click();
-    await expect(enable).toBeFocused();
-    await enable.press("Enter");
+    await expect(control).toBeFocused();
+    await expect(control).not.toBeChecked();
+    await control.press("Space");
     await dialog.getByRole("button", { name: "Allow browser workers" }).click();
-    const disable = page.getByRole("button", { name: "Disable", exact: true });
-    await expect(disable).toBeEnabled();
+    await expect(control).toBeChecked();
+    await expect(control).toBeEnabled();
     await page.reload();
     await page.waitForLoadState("networkidle");
-    await disable.click();
-    await expect(enable).toBeEnabled();
+    await expect(control).toBeChecked();
+    await control.click();
+    await expect(control).not.toBeChecked();
+    await expect(control).toBeEnabled();
   } finally {
     await context.close();
   }
