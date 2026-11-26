@@ -1,20 +1,13 @@
-// Shared by the generated templates: the template generator copies this file into
-// each template's src. Edit it in packages/template-generator/src/runtime.
-import { type ApprovalLevel, approvalLevels, levelDescriptions } from "./approval.ts";
-
-const escape = (value: string) =>
-  value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
-
-/** Styles of the approval form, added to the page's own styles. */
-export const approvalStyles =
-  "fieldset{border:0;margin:24px 0;padding:0}legend{font-weight:600;margin-bottom:8px;padding:0}input[type=radio]{margin:0}label{display:flex;gap:10px;align-items:center;padding:6px 0;cursor:pointer}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#202124;color:white;border-radius:7px;padding:10px 18px;font-size:14px}.toast[hidden]{display:none}";
+import type { ApprovalLevel } from "./approval.ts";
+import { approvalIntro, approvalLevels, levelTexts } from "./approval-levels.ts";
+import { escapeHtml } from "./layout.ts";
 
 // Saves a new level at once. When saving fails, the page shows the stored level
 // again, which the failed request may or may not have changed.
-export const approvalForm = (service: string, level: ApprovalLevel) => `
-<fieldset id="approval"><legend>Before ${escape(service)} changes run</legend>
-${approvalLevels.map((option) => `<label><input type="radio" name="level" value="${option}"${option === level ? " checked" : ""}> ${escape(levelDescriptions[option])}</label>`).join("")}
-<p class="muted">Applies when apps and agents change ${escape(service)} data with your account. Reading never asks.</p></fieldset>
+export const approvalForm = (level: ApprovalLevel) => `
+<section><fieldset id="approval"><legend><h2>Approvals</h2></legend>
+<p class="muted">${escapeHtml(approvalIntro)}</p>
+<div class="options">${approvalLevels.map((option) => `<label><input type="radio" name="level" value="${option}"${option === level ? " checked" : ""}><span><span>${escapeHtml(levelTexts[option].title)}</span><span class="muted small">${escapeHtml(levelTexts[option].detail)}</span></span></label>`).join("")}</div></fieldset></section>
 <p class="toast" role="status" hidden></p>
 <script>
 const form = document.getElementById("approval");

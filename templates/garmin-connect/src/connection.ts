@@ -312,7 +312,7 @@ export const keyConnection = (environment: Environment, properties: Properties) 
     },
     fetch: async (request: Request) => {
       if (!caller.safeParse(properties.caller).success) return new Response(null, { status: 401 });
-      const { identity, id } = await context();
+      const { id } = await context();
       const url = new URL(request.url);
 
       if (url.origin !== environment.WIDEFLEET_ORIGIN) return new Response(null, { status: 400 });
@@ -349,7 +349,6 @@ export const keyConnection = (environment: Environment, properties: Properties) 
         const error = saveError.safeParse(url.searchParams.get("error"));
 
         return connectionPage(
-          identity.name,
           state(await saved(id)),
           returning.success ? returning.data : null,
           error.success ? error.data : null,

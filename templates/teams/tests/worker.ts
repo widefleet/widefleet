@@ -229,9 +229,7 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
     if (path === "/rpc/set-level")
       return Response.json(
         await app.setApprovalLevel({
-          level: z
-            .enum(["all_changes", "updates_and_deletions", "none"])
-            .parse(url.searchParams.get("level")),
+          level: z.enum(["all_changes", "none"]).parse(url.searchParams.get("level")),
         }),
       );
 

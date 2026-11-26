@@ -302,7 +302,6 @@ export const accountConnection = (environment: Environment, properties: Properti
         const config = await configuration();
 
         return connectionPage(
-          identity.name,
           linked?.providerEmail ?? linked?.accountId ?? null,
           config.status === "setup_required" ? config.missing : [],
           url.origin,
