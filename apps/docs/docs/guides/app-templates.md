@@ -112,12 +112,17 @@ is sent.
 ## Approve changes
 
 Reading never asks. Methods that change data ask the person first, according to
-their approval level on the app's page:
+their approval level on the app's page. Each template names its levels after what
+they cover in that service:
 
-- **Always ask**: creating, changing, deleting and sending ask first.
-- **Ask except for new items** (default): new items, such as a draft or a label,
-  are created at once. Changing, deleting and sending ask first.
+- **Always ask**: every change asks first.
+- **Ask except for** new items (default): the level names what is created at
+  once, such as **Ask except for drafts and labels** in Gmail. Changing,
+  deleting and sending ask first.
 - **Never ask**: every change runs at once.
+
+Templates that create nothing without asking, such as Strava and Teams, offer
+only **Always ask** and **Never ask**, and always ask by default.
 
 A method that asks returns `input_required`. MCP clients show the question to the
 person. A calling app shows it itself and answers with `withInput`, as described
@@ -161,9 +166,10 @@ pnpm --filter @platform/template-generator generate /path/to/your/app
 
 `scripts/operations.ts` lists the offered operations and whether each one
 creates, updates, deletes or sends. The generator rewrites `src/api.ts`,
-`src/schema.ts` and the shared runtime files, so keep your own code in other
-files. When the service adds an operation that changes data, add it to
-`scripts/operations.ts`. Review the diff before deploying.
+`src/schema.ts` and the helper files the generated methods call, so keep your
+own code in other files. It leaves the app's page in `src/page.ts` and its
+approval levels in `src/approval-levels.ts` as you wrote them. When the service
+adds an operation that changes data, add it to `scripts/operations.ts`. Review the diff before deploying.
 
 ## Create an app for another use case
 
