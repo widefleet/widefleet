@@ -595,6 +595,19 @@ export const createApi = (runtime: Runtime) => {
           runtime.settings.setExternalManagement(context.principal, input.enabled),
         ),
       ),
+    browserWorkers: write
+      .route({ method: "PUT", path: "/settings/browser-workers" })
+      .input(z.object({ enabled: z.boolean() }))
+      .output(contract.settingsView)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.settings.setBrowserWorkers(
+            context.principal,
+            input.enabled,
+            !context.request.headers.has("authorization"),
+          ),
+        ),
+      ),
     domainSso: write
       .route({ method: "PUT", path: "/settings/domain-sso" })
       .input(z.object({ enabled: z.boolean() }))

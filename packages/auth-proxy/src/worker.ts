@@ -230,6 +230,7 @@ export const createAuthHandler = (
     organizationId: string,
     caller: z.infer<typeof appCaller>,
     frameAncestors: string[],
+    allowBrowserWorkers: boolean,
   ) => Promise<Response>,
   observe?: (
     activity: Omit<AppUserActivity, "hostname"> & { organizationId: string; appId?: string },
@@ -307,6 +308,7 @@ export const createAuthHandler = (
             route.organizationId,
             caller,
             installed.configuration.embeddingOrigins ?? [],
+            installed.configuration.allowBrowserWorkers ?? false,
           );
         },
         observe: ({ hostname, ...activity }) => {

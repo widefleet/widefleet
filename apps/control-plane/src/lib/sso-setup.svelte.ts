@@ -77,6 +77,7 @@ export const ssoDraft = (view: View, organizationId: string): SsoDraft => ({
   // Embedding hosts change in their own section. Leaving them out of the
   // connection draft keeps a connection save from restoring an older list.
   embeddingOrigins: undefined,
+  allowBrowserWorkers: undefined,
   directory: view.settings.directory ? { ...view.settings.directory, clientSecret: "" } : null,
   sso: view.sso
     ? {

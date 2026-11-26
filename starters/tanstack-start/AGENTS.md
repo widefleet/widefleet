@@ -13,7 +13,7 @@ Run `pnpm types` after adding routes or changing bindings. Do not edit `.platfor
 ## Network and connectors
 
 External destinations require platform grants. Inspect `widefleet network` before assuming an API is reachable. An authorized owner/admin can use `widefleet network allow https://api.example.com`; add `--browser` only for browser access. Use the normal login with `network:manage` when changing grants. Network state is separate from Wrangler configuration and survives code rollback.
-CSP allows same-origin worker scripts and blocks frames and objects; do not bypass platform controls in app code.
+CSP allows same-origin worker scripts when enabled by an organization administrator and blocks frames and objects; do not bypass platform controls in app code.
 Inspect `widefleet connector bindings` for granted IT connectors. Call their native RPC methods, such as `env.ERP.listCustomers()`, using the interface supplied by IT. There is no connection initialization or generic invocation API.
 
 ## Error reporting

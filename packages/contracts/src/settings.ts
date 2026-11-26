@@ -134,6 +134,7 @@ export const embeddingOrigins = z
 export const installationSettings = z.strictObject({
   directory: client.nullable().default(null),
   externallyManaged: z.boolean().default(false),
+  allowBrowserWorkers: z.boolean().optional(),
   embeddingOrigins: embeddingOrigins.default([]),
 });
 

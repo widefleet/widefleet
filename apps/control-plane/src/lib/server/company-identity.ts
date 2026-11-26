@@ -11,6 +11,7 @@ export const companyIdentity = z.object({
   scopes: z.array(z.string()).optional(),
   management: credentials,
   directory: credentials.nullable().default(null),
+  allowBrowserWorkers: z.boolean().optional(),
   embeddingOrigins: z.array(z.string()).default([]),
 });
 
