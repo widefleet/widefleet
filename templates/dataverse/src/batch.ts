@@ -204,7 +204,7 @@ const contentOf = (headers: Record<string, string>, content: string): JsonValue 
   const bytes = Uint8Array.from(content, (character) => character.charCodeAt(0));
 
   if (!textMedia.test(type)) return { contentType: type, base64: btoa(content) };
-  const text = byteString(bytes);
+  const text = new TextDecoder().decode(bytes);
 
   if (!type.toLowerCase().startsWith("application/json")) return text;
 
@@ -423,7 +423,7 @@ export const batch = async (
   const bytes = await boundedBody(response);
 
   if (!bytes) return { status: "too_large", maximumBytes: maximumResponseBytes };
-  const text = new TextDecoder().decode(bytes);
+  const text = byteString(bytes);
   const answerBoundary = boundaryOf(response.headers.get("content-type") ?? undefined);
 
   if (answerBoundary)

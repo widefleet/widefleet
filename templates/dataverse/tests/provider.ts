@@ -262,35 +262,56 @@ export const provider = () => {
         );
 
       // A batch with a change set and a read.
-      if (path === `${api}/$batch` && request.method === "POST")
-        return new Response(
-          [
-            "--batchresponse_1",
-            "Content-Type: multipart/mixed; boundary=changesetresponse_1",
-            "",
-            "--changesetresponse_1",
-            "Content-Type: application/http",
-            "Content-Transfer-Encoding: binary",
-            "Content-ID: 1",
-            "",
-            "HTTP/1.1 204 No Content",
-            `OData-EntityId: ${api}/accounts(a-1)`,
-            "",
-            "",
-            "--changesetresponse_1--",
-            "--batchresponse_1",
-            "Content-Type: application/http",
-            "Content-Transfer-Encoding: binary",
-            "",
-            "HTTP/1.1 200 OK",
-            "Content-Type: application/json; odata.metadata=minimal",
-            "",
-            '{"value":[]}',
-            "--batchresponse_1--",
-            "",
-          ].join("\r\n"),
-          { headers: { "content-type": "multipart/mixed; boundary=batchresponse_1" } },
-        );
+      if (path === `${api}/$batch` && request.method === "POST") {
+        const [before = "", after = ""] = [
+          "--batchresponse_1",
+          "Content-Type: multipart/mixed; boundary=changesetresponse_1",
+          "",
+          "--changesetresponse_1",
+          "Content-Type: application/http",
+          "Content-Transfer-Encoding: binary",
+          "Content-ID: 1",
+          "",
+          "HTTP/1.1 204 No Content",
+          `OData-EntityId: ${api}/accounts(a-1)`,
+          "",
+          "",
+          "--changesetresponse_1--",
+          "--batchresponse_1",
+          "Content-Type: application/http",
+          "Content-Transfer-Encoding: binary",
+          "",
+          "HTTP/1.1 200 OK",
+          "Content-Type: application/json; odata.metadata=minimal",
+          "",
+          '{"value":[{"name":"Müller"}]}',
+          "--batchresponse_1",
+          "Content-Type: application/http",
+          "Content-Transfer-Encoding: binary",
+          "",
+          "HTTP/1.1 200 OK",
+          "Content-Type: application/octet-stream",
+          "",
+          "\u0000\u0001\u00fa\u00ff",
+          "--batchresponse_1--",
+          "",
+        ]
+          .join("\r\n")
+          .split("\u0000\u0001\u00fa\u00ff");
+
+        // Bytes as they are: UTF-8 text and file content beside each other.
+        const head = new TextEncoder().encode(before);
+        const tail = new TextEncoder().encode(after);
+        const body = new Uint8Array(head.length + 4 + tail.length);
+
+        body.set(head);
+        body.set([0, 1, 250, 255], head.length);
+        body.set(tail, head.length + 4);
+
+        return new Response(body, {
+          headers: { "content-type": "multipart/mixed; boundary=batchresponse_1" },
+        });
+      }
 
       if (
         path === `${api}/accounts(00000000-0000-0000-0000-000000000001)` &&

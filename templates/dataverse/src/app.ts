@@ -39,13 +39,14 @@ import type { Environment, Properties } from "./context.ts";
  *
  * One column is read with `getColumn`, set with `setColumn` and cleared with
  * `deleteColumn`. `getColumnContent` reads a file or image column's content and
- * `uploadColumnContent` uploads it, at once or, with `transferMode` `chunked`,
- * in chunks to the `Location` its answer names.
+ * `uploadColumnContent` uploads it as `application/octet-stream`, at once or,
+ * with `transferMode` `chunked`, in chunks to the `Location` its answer names.
  *
  * The rows a row relates to through a navigation property, such as an account's
  * `contact_customer_accounts`, are read with `listRelatedRows`,
- * `getRelatedRow` and `countRelatedRows`, created with `createRelatedRow` and
- * changed with `updateRelatedRow`, `replaceRelatedRow` and `deleteRelatedRow`.
+ * `getRelatedRow` and `countRelatedRows`, created with `createRelatedRow`, whose
+ * answer names no new row, and
+ * replaced and deleted with `replaceRelatedRow` and `deleteRelatedRow`.
  * `associateRows`, `setReference`, `disassociateRows` and
  * `disassociateRelatedRow` link and unlink rows; `listReferences` lists the
  * linked rows' addresses.
@@ -57,7 +58,8 @@ import type { Environment, Properties } from "./context.ts";
  * `LogicalName='<column>'`. A choice column's options are read with `type`
  * `Microsoft.Dynamics.CRM.PicklistAttributeMetadata` and `$expand` `OptionSet`.
  * Definitions change only as a whole: read one, change it and pass it to
- * `replaceRow` or `replaceRelatedRow` with `mergeLabels` `true`. Name the
+ * `replaceRow` or `replaceRelatedRow` with `mergeLabels` `true`, keeping its
+ * `@odata.type` or naming it as `type`. Name the
  * solution of a new table or column with `solutionUniqueName`; changes take
  * effect after `publishXml`, and `consistency` `Strong` reads them at once. Add
  * privileges with `addPrivilegesRole` and assign roles with `associateRows` on

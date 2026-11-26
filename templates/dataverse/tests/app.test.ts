@@ -320,10 +320,16 @@ describe("Dataverse personal account app", () => {
             headers: { "OData-EntityId": `${sales}/accounts(a-1)` },
             body: null,
           },
+          // UTF-8 text decodes as text, and file bytes stay bytes.
           {
             status: 200,
             headers: { "Content-Type": "application/json; odata.metadata=minimal" },
-            body: { value: [] },
+            body: { value: [{ name: "Müller" }] },
+          },
+          {
+            status: 200,
+            headers: { "Content-Type": "application/octet-stream" },
+            body: { contentType: "application/octet-stream", base64: "AAH6/w==" },
           },
         ],
       },

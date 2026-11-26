@@ -159,11 +159,22 @@ const answerHeaders = [
   "Preference-Applied",
 ];
 
+// Dataverse sends a file's name in UTF-8, which Fetch reads one byte per character.
+const utf8 = (value: string) => {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+      Uint8Array.from(value, (character) => character.charCodeAt(0)),
+    );
+  } catch {
+    return value;
+  }
+};
+
 const headersOf = (response: Response) => {
   const present = answerHeaders.flatMap((name) => {
     const value = response.headers.get(name);
 
-    return value === null ? [] : [[name, value] as const];
+    return value === null ? [] : [[name, utf8(value)] as const];
   });
 
   return present.length ? { headers: Object.fromEntries(present) } : {};
