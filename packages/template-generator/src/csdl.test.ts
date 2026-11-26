@@ -26,6 +26,10 @@ const csdl = `<?xml version="1.0" encoding="utf-8"?>
         <Property Name="Depth" Type="svc.Depth" />
         <Property Name="PrivilegeId" Type="Edm.Guid" />
       </ComplexType>
+      <ComplexType Name="PrincipalAccess">
+        <Property Name="AccessMask" Type="Edm.String" />
+        <NavigationProperty Name="Principal" Type="svc.baseentity" />
+      </ComplexType>
       <ComplexType Name="WhoAmIResponse">
         <Property Name="UserId" Type="Edm.Guid" Nullable="false" />
       </ComplexType>
@@ -149,6 +153,13 @@ describe("CSDL descriptions", () => {
         name: { type: "string", nullable: true },
       },
     });
+    // A complex type carries its navigation properties, an entity type does not.
+    expect(schemas["Example.Service.PrincipalAccess"]).toMatchObject({
+      properties: {
+        AccessMask: { type: "string", nullable: true },
+        Principal: { anyOf: [{ $ref: "#/components/schemas/Example.Service.baseentity" }] },
+      },
+    });
     expect(schemas["Example.Service.Depth"]).toEqual({ type: "string", enum: ["Basic", "Global"] });
     expect(schemas["Example.Service.Filters"]).toMatchObject({ type: "string" });
     expect(schemas["Example.Service.baseentity"]).toMatchObject({
@@ -188,6 +199,9 @@ describe("CSDL descriptions", () => {
     const schema = generated.files["src/schema.ts"] ?? "";
     expect(schema).toMatch(/Target"?:\s*\[\s*"@Target",\s*null,\s*true\s*\]/);
     expect(schema).toMatch(/Since"?:\s*"Since"/);
+    expect(schema).toMatch(/optionalPathParameters"?:\s*\[\s*"Since"\s*\]/);
+    // OData answers a primitive inside `value`.
+    expect(api).toMatch(/retrieveCount[\s\S]*?Promise<ExampleResult<\{\s*value: number;?\s*\}>>/);
 
     const call = {
       httpMethod: "GET",
@@ -202,6 +216,7 @@ describe("CSDL descriptions", () => {
       ...call,
       path: "/RetrieveCount(EntityName='{EntityName}',Since={Since},Depth=Example.Service.Depth'{Depth}',Target=@Target)",
       pathParameters: { EntityName: "EntityName", Since: "Since", Depth: "Depth" },
+      optionalPathParameters: ["Since"],
       queryParameters: { Target: ["@Target", null, true] },
     };
 
@@ -234,6 +249,20 @@ describe("CSDL descriptions", () => {
       ),
     ).toContain("RetrieveCount(EntityName='account',Since=2026-01-01T00:00:00Z,Depth=");
     expect(restRequest(`${server}/`, "whoAmI", whoAmI, {}).url).toBe(`${server}/WhoAmI()`);
+
+    // Only a parameter the description makes optional is left out.
+    expect(() =>
+      restRequest(
+        `${server}/`,
+        "retrieveCount",
+        { ...count, optionalPathParameters: [] },
+        {
+          EntityName: "account",
+          Depth: "Basic",
+          Target: {},
+        },
+      ),
+    ).toThrow("retrieveCount needs Since");
   });
 
   it("make a variable of the address an input of every method", () => {
@@ -292,5 +321,22 @@ describe("CSDL descriptions", () => {
     for (const environment of ["contoso.example.test/other", "user@contoso.example.test", ""])
       expect(() => restRequest(base, "whoAmI", whoAmI, { environment })).toThrow("a host name");
     expect(() => restRequest(base, "whoAmI", whoAmI, {})).toThrow("needs environment");
+
+    // A variable becomes an input, so its name must be one.
+    expect(() =>
+      generateOpenapi(
+        parseDescription(csdl, "https://{environment-host}/api/data/v9.2/$metadata", {
+          "environment-host": "The environment's host.",
+        }),
+        { operations: {} },
+        {
+          name: "Example",
+          className: "ExampleApi",
+          result: "ExampleResult",
+          properties: "ExampleProperties",
+        },
+        "",
+      ),
+    ).toThrow("Server variable names are identifiers");
   });
 });

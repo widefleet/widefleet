@@ -19,8 +19,10 @@ type State = {
   unavailable: boolean;
   // The scopes a consent grants; tests narrow them to check reauthorization.
   scope: string;
-  // An answer that replaces the next Dataverse response.
+  // An answer that replaces the next Dataverse or discovery response.
   answer: Answer | null;
+  // Runs while a refresh is answered, as another request would meanwhile.
+  duringRefresh: (() => Promise<void>) | null;
 };
 
 const discovery = "https://globaldisco.crm.dynamics.com";
@@ -54,6 +56,7 @@ export const provider = () => {
     unavailable: false,
     scope: `openid profile email offline_access ${discovery}/user_impersonation`,
     answer: null,
+    duringRefresh: null,
   };
 
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -166,6 +169,7 @@ export const provider = () => {
           const user = refresh.get(form.get("refresh_token") ?? "");
 
           if (!user) return Response.json({ error: "invalid_grant" }, { status: 400 });
+          await state.duringRefresh?.();
 
           // A refresh for another resource names it in its scope.
           const resource = /(https:\/\/[^/\s]+)\/user_impersonation/.exec(
@@ -190,15 +194,6 @@ export const provider = () => {
         type: request.headers.get("content-type"),
       });
 
-      if (url.origin === discovery && url.pathname === "/api/discovery/v2.0/Instances")
-        return Response.json({
-          value: [
-            { FriendlyName: "Sales", ApiUrl: environments.sales, State: 0, IsUserSysAdmin: true },
-            { FriendlyName: "Test", ApiUrl: environments.test, State: 0, IsUserSysAdmin: false },
-            { FriendlyName: "Disabled", ApiUrl: "https://off.api.crm4.dynamics.com", State: 1 },
-          ],
-        });
-
       if (state.answer) {
         const { status, body, headers } = state.answer;
         state.answer = null;
@@ -208,8 +203,21 @@ export const provider = () => {
           : Response.json(body, { status, headers });
       }
 
+      if (url.origin === discovery && url.pathname === "/api/discovery/v2.0/Instances")
+        return Response.json({
+          value: [
+            { FriendlyName: "Sales", ApiUrl: environments.sales, State: 0, IsUserSysAdmin: true },
+            { FriendlyName: "Test", ApiUrl: environments.test, State: 0, IsUserSysAdmin: false },
+            { FriendlyName: "Disabled", ApiUrl: "https://off.api.crm4.dynamics.com", State: 1 },
+          ],
+        });
+
       // Every environment answers alike; the tests check which one was called.
       const path = `${api}${url.pathname.replace(/^\/api\/data\/v9\.2/, "")}`;
+
+      // The service document lists entity sets; unbound actions are not among them.
+      if (path === `${api}/` && request.method === "GET")
+        return Response.json({ value: [{ name: "accounts", kind: "EntitySet", url: "accounts" }] });
 
       if (path === `${api}/accounts` && request.method === "GET")
         return Response.json(

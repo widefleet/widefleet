@@ -20,17 +20,19 @@ export interface EnvironmentListing {
 
 // The environments the user can open, and the command an administrator runs
 // once for each the app may reach.
-const environmentList = (environments: EnvironmentListing[]) =>
+const environmentList = (environments: EnvironmentListing[] | null) =>
   `<section><h2>Environments</h2>${
-    environments.length
-      ? `<p class="muted">Methods take the environment's host as <code>environment</code>. An administrator allows the app to reach each environment once.</p>
+    environments === null
+      ? '<p class="card muted">Your environments could not be listed. Reload the page to try again, or reconnect.</p>'
+      : environments.length
+        ? `<p class="muted">Methods take the environment's host as <code>environment</code>. An administrator allows the app to reach each environment once.</p>
 <ul class="card steps">${environments
-          .map(
-            (listing) =>
-              `<li><strong>${escapeHtml(listing.name)}</strong>${listing.administrator ? ' <span class="muted small">· administrator</span>' : ""}${copyable(`widefleet network allow https://${listing.environment}`)}</li>`,
-          )
-          .join("")}</ul>`
-      : '<p class="card muted">Your account has no Dataverse environment you can open.</p>'
+            .map(
+              (listing) =>
+                `<li><strong>${escapeHtml(listing.name)}</strong>${listing.administrator ? ' <span class="muted small">· administrator</span>' : ""}${copyable(`widefleet network allow https://${listing.environment}`)}</li>`,
+            )
+            .join("")}</ul>`
+        : '<p class="card muted">Your account has no Dataverse environment you can open.</p>'
   }</section>`;
 
 /** The app's page: setup until the OAuth client is set, then the account, environments and approvals. */
@@ -40,7 +42,7 @@ export const connectionPage = (
   origin: string,
   failed: boolean,
   level: ApprovalLevel,
-  environments: EnvironmentListing[],
+  environments: EnvironmentListing[] | null,
 ) => {
   const setup = `<section><h2>Finish setup</h2>
 <p class="muted">An administrator registers a Microsoft application for this app before anyone can connect.</p>

@@ -211,8 +211,12 @@ const document = z.looseObject({
     .array(
       z.object({
         url: z.string(),
+        // Variables become inputs, so their names are identifiers.
         variables: z
-          .record(z.string(), z.object({ default: z.string(), description: z.string().optional() }))
+          .record(
+            z.string().regex(/^[A-Za-z_]\w*$/, "Server variable names are identifiers"),
+            z.object({ default: z.string(), description: z.string().optional() }),
+          )
           .optional(),
       }),
     )
@@ -234,6 +238,8 @@ export type OpenapiOperation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
+  /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
+  optionalPathParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -1069,6 +1075,12 @@ export const generateOpenapi = (
     };
 
     if (Object.keys(formLists).length) call.formLists = formLists;
+
+    const optionalPath = parameters.flatMap((value) =>
+      value.in === "path" && value.required === false ? [value.name] : [],
+    );
+
+    if (optionalPath.length) call.optionalPathParameters = optionalPath;
     runtime[rule.name] = call;
 
     const inputOf = (value: z.infer<typeof parameter>) =>
@@ -1275,6 +1287,8 @@ export type Operation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
+  /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
+  optionalPathParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.

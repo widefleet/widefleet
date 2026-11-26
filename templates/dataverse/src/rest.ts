@@ -11,6 +11,8 @@ export type RestOperation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
+  /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
+  optionalPathParameters?: string[] | undefined;
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -240,7 +242,11 @@ export const restRequest = (
       (piece, before: string, _, name: string) => {
         const key = own(operation.pathParameters, name);
 
-        return key !== undefined && own(values, key) === undefined ? before : piece;
+        return operation.optionalPathParameters?.includes(name) &&
+          key !== undefined &&
+          own(values, key) === undefined
+          ? before
+          : piece;
       },
     )
     .replace(/\(,+/g, "(")

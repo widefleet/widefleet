@@ -402,6 +402,7 @@ export type AISentimentResponse = {
 
 export type AISummarizeRecordResponse = {
   SummarizedText?: string | null;
+  AdditionalInformation?: Crmbaseentity;
 };
 
 export type AISummarizeResponse = {
@@ -418,6 +419,8 @@ export type AnalyticsStoreDetails = {
 
 export type AnalyzeSentimentResponse = {
   sentiment?: string | null;
+  documentScores?: Crmbaseentity;
+  sentences?: Crmbaseentity[];
 };
 
 export type Appconfig = {
@@ -726,7 +729,9 @@ export type AttributeTypeDisplayName = {
   Value?: string | null;
 };
 
-export type AuditDetail = JsonObject;
+export type AuditDetail = {
+  AuditRecord?: Crmbaseentity;
+};
 
 export type AuditDetailCollection = {
   AuditDetails?: AuditDetail[];
@@ -754,6 +759,7 @@ export type AuditStorageDetailsResult = {
 
 export type BackgroundSendEmailResponse = {
   HasAttachments?: boolean[];
+  EntityCollection?: Email[];
 };
 
 export type BatchGetFlowMachineStatusResponse = {
@@ -945,6 +951,7 @@ export type CascadeType =
 
 export type CategorizeTextResponse = {
   originalText?: string | null;
+  categories?: Crmbaseentity[];
 };
 
 export type ChannelAccessProfilePrivilege = {
@@ -1302,6 +1309,7 @@ export type ComponentDetail = {
 export type ComponentPrincipalAccess = {
   ShareAccessMask?: ShareAccessRights | null;
   RequestType?: number | null;
+  SharePrincipal?: Crmbaseentity;
 };
 
 export type Computeruseagent = {
@@ -1520,6 +1528,7 @@ export type CreateVirtualConnectorTableMetadata = {
   ConnectionReferenceLogicalName?: string | null;
   DataSourceId?: string | null;
   DataSourceName?: string | null;
+  EnvironmentVariables?: Crmbaseentity[];
 };
 
 export type CreateVirtualConnectorTableResponse = {
@@ -1807,6 +1816,7 @@ export type EndpointType = "OrganizationService" | "OrganizationDataService" | "
 
 export type EnqueueWorkQueueItemResponse = {
   workQueueItemId?: string | null;
+  workQueueItemRecord?: Crmbaseentity;
 };
 
 export type EntityClusterMode = "Partitioned" | "Replicated" | "Local" | "Inherited";
@@ -1842,6 +1852,7 @@ export type EntityRecordCountCollection = {
 export type EntitySetting = {
   Name?: string | null;
   ChildSettings?: EntitySetting[];
+  Value?: Crmbaseentity;
 };
 
 export type ErrorInfo = {
@@ -1902,11 +1913,13 @@ export type ExportTranslationResponse = {
 
 export type ExtractKeyPhrasesResponse = {
   countOfPhrases?: number | null;
+  phrases?: Crmbaseentity[];
 };
 
 export type ExtractTextEntitiesResponse = {
   originalText?: string | null;
   textScore?: number | null;
+  entities?: Crmbaseentity[];
 };
 
 export type FeatureControlSettingData = {
@@ -2025,6 +2038,7 @@ export type GetJobStatusResponse = {
 
 export type GetLinkedChatsResponse = {
   LinkedChatDetails?: string | null;
+  LinkedChatList?: Crmbaseentity[];
 };
 
 export type GetNextAutoNumberValueResponse = {
@@ -2748,6 +2762,7 @@ export type Principal = {
 
 export type PrincipalAccess = {
   AccessMask?: AccessRights | null;
+  Principal?: Crmbaseentity;
 };
 
 export type Privilege = {
@@ -2942,6 +2957,7 @@ export type Queueitem = {
 
 export type RecognizeTextResponse = {
   countOfPages?: number | null;
+  pages?: Crmbaseentity[];
 };
 
 export type Recurrencerule = {
@@ -3431,6 +3447,7 @@ export type RunDataProcessingModuleResponse = {
 
 export type RunDesktopFlowResponse = {
   flowsessionId?: string | null;
+  licenseCheck?: Crmbaseentity;
 };
 
 export type SaveAsDesktopFlowModuleResponse = {
@@ -3718,6 +3735,7 @@ export type SolutionComponentDetails = {
 export type SolutionComponentOption = {
   ImportDecision?: ImportDecision | null;
   ComponentPrincipalAccessItems?: ComponentPrincipalAccess[];
+  Component?: Crmbaseentity;
 };
 
 export type SolutionComponentReference = {
@@ -3754,6 +3772,7 @@ export type SolutionParameters = {
   StageSolutionUploadId?: string | null;
   SolutionComponentOptions?: SolutionComponentOption[];
   DeployMissingPackagesBeforeSolutionImport?: boolean | null;
+  PackageHistoryReference?: Crmbaseentity;
 };
 
 export type SolutionValidationResult = {
@@ -3845,6 +3864,7 @@ export type SubstitutionStatus = "Success" | "Error" | "Warning";
 
 export type SummarizeRecordResponse = {
   SummarizedText?: string | null;
+  AdditionalInformation?: Crmbaseentity;
 };
 
 export type SyncBulkOperationResponse = {
@@ -4674,7 +4694,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addAppComponents(input: {
     /**
@@ -4713,7 +4733,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addChannelAccessProfilePrivileges(input: {
     /**
@@ -4732,7 +4752,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addComponentsToSolutionAsync(input: {
     /**
@@ -4752,7 +4772,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addComponentToSolutionAsync(input: {
     /**
@@ -4775,7 +4795,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addMembersTeam(input: {
     /**
@@ -4797,7 +4817,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addPrincipalToQueue(input: {
     /**
@@ -4819,7 +4839,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addPrivilegesRole(input: {
     /**
@@ -4841,7 +4861,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addRecurrence(input: {
     /**
@@ -4863,7 +4883,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addRequiredDesktopFlowComponentsToSolutions(input: {
     /**
@@ -4879,7 +4899,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addRequiredUIElementCollectionComponentsToSolutions(input: {
     /**
@@ -4900,7 +4920,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addSolutionComponent(input: {
     /**
@@ -4923,7 +4943,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addToQueue(input: {
     /**
@@ -4947,7 +4967,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async addUserToRecordTeam(input: {
     /**
@@ -5587,7 +5607,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async cloneAsSolution(input: {
     /**
@@ -5886,7 +5906,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async createAsyncJobToRevokeInheritedAccess(input: {
     /**
@@ -5924,7 +5944,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async createException(input: {
     /**
@@ -7128,7 +7148,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
       StateCode: number;
       QueryExpression?: QueryBase | null;
     };
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "fullTextSearchKnowledgeArticle", input);
   }
 
@@ -7196,12 +7220,16 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
       OperationId: string;
       ConnectionReference: Crmbaseentity;
     };
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "generatePowerFxFormula", input);
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async generateSharedLink(input: {
     /**
@@ -7243,7 +7271,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "getAllTimeZonesWithDisplayName", input);
   }
 
@@ -7284,7 +7316,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
       entityId: string;
       entityLogicalName: string;
     };
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "getCertificateCredential", input);
   }
 
@@ -7766,7 +7802,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importCardTypeSchema(input: {
     /**
@@ -7784,7 +7820,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importFieldTranslation(input: {
     /**
@@ -7802,7 +7838,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importMappingsImportMap(input: {
     /**
@@ -7821,7 +7857,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importRecordsImport(input: {
     /**
@@ -7837,7 +7873,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importSolution(input: {
     /**
@@ -7871,7 +7907,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importSolutionAsync(input: {
     /**
@@ -7905,7 +7941,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importSolutions(input: {
     /**
@@ -7929,7 +7965,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importTranslation(input: {
     /**
@@ -7948,7 +7984,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async importTranslationAsync(input: {
     /**
@@ -8157,7 +8193,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async insertOptionValue(input: {
     /**
@@ -8185,7 +8221,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async insertStatusValue(input: {
     /**
@@ -8257,7 +8293,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
       ObjectType: string;
       ObjectId: string;
     };
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "instantiateTemplate", input);
   }
 
@@ -8404,7 +8444,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "listFlowsInFlowGroup", input);
   }
 
@@ -8723,7 +8767,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async provisionDelegation(input: {
     /**
@@ -9491,7 +9535,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Role[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Role[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveAadUserRoles", input);
   }
 
@@ -9571,7 +9619,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Processstage[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Processstage[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveActivePath", input);
   }
 
@@ -9584,7 +9636,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Systemuser[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Systemuser[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveAllChildUsersSystemUser", input);
   }
 
@@ -9594,7 +9650,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveAllCompositeDataSources", input);
   }
 
@@ -9624,7 +9684,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveAppComponents", input);
   }
 
@@ -9648,7 +9712,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     body: {
       cloud: number;
     };
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveAppsWithDelegatedAccessPermissions", input);
   }
 
@@ -9720,7 +9788,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Businessunit[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Businessunit[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveBusinessHierarchyBusinessUnit", input);
   }
 
@@ -9733,7 +9805,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Kbarticle[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Kbarticle[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveByTopIncidentSubjectKbArticle", input);
   }
 
@@ -9774,7 +9850,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveCompositeDataSource", input);
   }
 
@@ -9789,7 +9869,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     body: {
       ConnectionReference: Crmbaseentity;
     };
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveConnectorActions", input);
   }
 
@@ -9798,7 +9882,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveConnectorSettings", input);
   }
 
@@ -9828,7 +9916,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Dependency[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Dependency[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveDependenciesForDelete", input);
   }
 
@@ -9838,7 +9930,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Dependency[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Dependency[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveDependenciesForUninstall", input);
   }
 
@@ -9849,7 +9945,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Dependency[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Dependency[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveDependentComponents", input);
   }
 
@@ -9879,7 +9979,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveDuplicates", input);
   }
 
@@ -9913,7 +10017,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveEnvironmentVariables", input);
   }
 
@@ -9949,7 +10057,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveExchangeAppointments", input);
   }
 
@@ -10042,7 +10154,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Systemform[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Systemform[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveFilteredForms", input);
   }
 
@@ -10066,7 +10182,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     body: {
       ObjectId: string;
     };
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveFlowUpdates", input);
   }
 
@@ -10171,7 +10291,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveMissingDependencies", input);
   }
 
@@ -10229,7 +10353,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Post[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Post[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrievePersonalWall", input);
   }
 
@@ -10238,7 +10366,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrievePowerAppsConnections", input);
   }
 
@@ -10247,7 +10379,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrievePowerAppsConnectorApis", input);
   }
 
@@ -10390,7 +10526,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Privilege[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Privilege[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrievePrivilegeSet", input);
   }
 
@@ -10401,7 +10541,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveProcessInstances", input);
   }
 
@@ -10450,7 +10594,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Post[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Post[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveRecordWall", input);
   }
 
@@ -10461,7 +10609,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveRequiredComponents", input);
   }
 
@@ -10492,7 +10644,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Team[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Team[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveSharedLinks", input);
   }
 
@@ -10856,7 +11012,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Aiplugin[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Aiplugin[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForAiplugin", input);
   }
 
@@ -10865,7 +11025,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Aipluginconversationstarter[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Aipluginconversationstarter[];
+    }>
+  > {
     return run(
       this.env,
       this.ctx.props,
@@ -10879,7 +11043,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Aipluginconversationstartermapping[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Aipluginconversationstartermapping[];
+    }>
+  > {
     return run(
       this.env,
       this.ctx.props,
@@ -10893,7 +11061,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Aipluginoperation[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Aipluginoperation[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForAipluginoperation", input);
   }
 
@@ -10902,7 +11074,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Aipluginoperationparameter[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Aipluginoperationparameter[];
+    }>
+  > {
     return run(
       this.env,
       this.ctx.props,
@@ -10916,7 +11092,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Aipluginoperationresponsetemplate[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Aipluginoperationresponsetemplate[];
+    }>
+  > {
     return run(
       this.env,
       this.ctx.props,
@@ -10930,7 +11110,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Aiplugintitle[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Aiplugintitle[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForAiplugintitle", input);
   }
 
@@ -10939,7 +11123,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Appconfig[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Appconfig[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForAppconfig", input);
   }
 
@@ -10948,7 +11136,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Appconfiginstance[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Appconfiginstance[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForAppconfiginstance", input);
   }
 
@@ -10957,7 +11149,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Appmodule[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Appmodule[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForAppmodule", input);
   }
 
@@ -10966,7 +11162,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Computeruseagent[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Computeruseagent[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForComputeruseagent", input);
   }
 
@@ -10975,7 +11175,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Customcontroldefaultconfig[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Customcontroldefaultconfig[];
+    }>
+  > {
     return run(
       this.env,
       this.ctx.props,
@@ -10989,7 +11193,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Desktopflowbinary[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Desktopflowbinary[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForDesktopflowbinary", input);
   }
 
@@ -10998,7 +11206,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Mobileofflineprofile[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Mobileofflineprofile[];
+    }>
+  > {
     return run(
       this.env,
       this.ctx.props,
@@ -11012,7 +11224,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Mobileofflineprofileitem[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Mobileofflineprofileitem[];
+    }>
+  > {
     return run(
       this.env,
       this.ctx.props,
@@ -11026,7 +11242,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Navigationsetting[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Navigationsetting[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForNavigationsetting", input);
   }
 
@@ -11035,7 +11255,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Savedquery[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Savedquery[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForSavedquery", input);
   }
 
@@ -11044,7 +11268,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Savedqueryvisualization[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Savedqueryvisualization[];
+    }>
+  > {
     return run(
       this.env,
       this.ctx.props,
@@ -11058,7 +11286,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Sitemap[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Sitemap[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForSitemap", input);
   }
 
@@ -11067,7 +11299,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Systemform[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Systemform[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForSystemform", input);
   }
 
@@ -11076,7 +11312,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Webresource[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Webresource[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForWebresource", input);
   }
 
@@ -11085,7 +11325,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Workflow[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Workflow[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUnpublishedMultipleForWorkflow", input);
   }
 
@@ -11169,7 +11413,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Queue[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Queue[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "retrieveUserQueues", input);
   }
 
@@ -11292,7 +11540,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Crmbaseentity[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Crmbaseentity[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "rollup", input);
   }
 
@@ -11485,7 +11737,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Kbarticle[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Kbarticle[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "searchByBodyKbArticle", input);
   }
 
@@ -11497,7 +11753,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Kbarticle[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Kbarticle[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "searchByKeywordsKbArticle", input);
   }
 
@@ -11509,7 +11769,11 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<Kbarticle[]>> {
+  }): Promise<
+    DataverseResult<{
+      value: Kbarticle[];
+    }>
+  > {
     return run(this.env, this.ctx.props, "searchByTitleKbArticle", input);
   }
 
@@ -11957,7 +12221,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async stageAndUpgrade(input: {
     /**
@@ -11986,7 +12250,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async stageAndUpgradeAsync(input: {
     /**

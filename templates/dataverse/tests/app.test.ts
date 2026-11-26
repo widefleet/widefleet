@@ -219,16 +219,23 @@ describe("Dataverse personal account app", () => {
       status: "connected",
       data: { accountid: "account-new" },
     });
-    expect(upstream.calls[0]).toMatchObject({
-      method: "POST",
-      url: `${sales}/accounts`,
+    expect(upstream.calls.map(({ method, url }) => `${method} ${url}`)).toEqual([
+      `GET ${sales}/`,
+      `POST ${sales}/accounts`,
+    ]);
+    expect(upstream.calls[1]).toMatchObject({
       body: JSON.stringify({ name: "New" }),
       type: "application/json",
     });
     expect(await (await alice.request("/rpc/delete")).json()).toMatchObject({
       resultType: "input_required",
     });
-    expect(upstream.calls).toHaveLength(1);
+    expect(upstream.calls).toHaveLength(2);
+
+    // An action at the address of a table is never created as a row.
+    expect((await alice.request("/rpc/create?set=BulkDelete")).status).toBe(500);
+    expect(upstream.calls.at(-1)).toMatchObject({ method: "GET", url: `${sales}/` });
+    upstream.calls.length = 0;
 
     alice.identity.answer = "decline";
     expect(await (await alice.request("/rpc/delete")).json()).toEqual({ status: "declined" });
@@ -351,8 +358,39 @@ describe("Dataverse personal account app", () => {
     ).toBe(500);
     expect(upstream.calls).toEqual([]);
     upstream.state.answer = { status: 401, body: null, headers: {} };
+    const db = await runtime.getD1Database("DB");
+    const before = upstream.state.refreshes;
     expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
       status: "reconnect_required",
     });
+    // The rejected token is not offered again.
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM resource_token").first("count")).toBe(0);
+    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({ status: "connected" });
+    expect(upstream.state.refreshes).toBe(before + 1);
+  });
+
+  it("keeps the account's controls when discovery fails and never restores an old grant", async () => {
+    const alice = browser("alice");
+    await ready(alice, "101");
+    const db = await runtime.getD1Database("DB");
+
+    upstream.state.answer = { status: 503, body: null, headers: {} };
+    const page = await (await alice.request("/")).text();
+    expect(page).toContain("Your environments could not be listed");
+    expect(page).toContain('action="/disconnect"');
+
+    // A refresh answered after the account was disconnected and connected
+    // again is not saved over the new grant.
+    await db.prepare("DELETE FROM resource_token").run();
+    upstream.state.duringRefresh = async () => {
+      await db.prepare("UPDATE account SET refreshToken = 'v1.new-grant'").run();
+    };
+
+    expect(await (await alice.request("/rpc/who")).json()).toMatchObject({ status: "connected" });
+    upstream.state.duringRefresh = null;
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM resource_token").first("count")).toBe(0);
+    expect(await db.prepare("SELECT refreshToken FROM account").first("refreshToken")).toBe(
+      "v1.new-grant",
+    );
   });
 });

@@ -195,7 +195,7 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
       return Response.json(
         await app.createRow({
           environment: sales,
-          entitySet: "accounts",
+          entitySet: url.searchParams.get("set") ?? "accounts",
           body: { name: url.searchParams.get("name") ?? "New" },
           prefer: "return=representation",
         }),

@@ -2,7 +2,13 @@ import { z } from "zod";
 import { approvalAnswer, approvals, asks, changeQuestion } from "./approval.ts";
 import { accountConnection } from "./connection.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
-import { type Arguments, boundedJson, definedJson, maximumResponseBytes } from "./input.ts";
+import {
+  type Arguments,
+  boundedJson,
+  definedJson,
+  InvalidRequest,
+  maximumResponseBytes,
+} from "./input.ts";
 import { binaryContent } from "./content.ts";
 import { restRequest } from "./rest.ts";
 import type { DataverseResult } from "./results.ts";
@@ -12,6 +18,11 @@ import { base, operations } from "./schema.ts";
 export type DataverseProperties = Properties & { input?: z.input<typeof approvalAnswer> };
 
 const dataverseError = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+
+// The service document names the environment's entity sets.
+const serviceDocument = z.object({
+  value: z.array(z.object({ name: z.string(), kind: z.string().optional() })),
+});
 
 /**
  * Runs one Dataverse Web API operation for the current user in their
@@ -33,6 +44,31 @@ export const run = async <T>(
 
   if (status.status !== "connected") return status;
   const request = restRequest(base, method, operation, input);
+
+  // OData addresses a table and an unbound action the same way, so a new row
+  // goes only to an entity set the environment lists. An action keeps its own
+  // method and the change it makes.
+  if (method === "createRow") {
+    const listed = await connection.send(new URL("./", request.url).href, {
+      headers: { accept: "application/json" },
+    });
+
+    if (listed.status !== "connected") return listed;
+    const read = await boundedJson(listed.response);
+
+    if (!listed.response.ok || read.status === "too_large")
+      throw new Error(`Dataverse service document failed (HTTP ${listed.response.status})`);
+    const sets = serviceDocument.parse(read.body).value;
+
+    if (
+      !sets.some(
+        (set) => set.name === input["entitySet"] && (set.kind ?? "EntitySet") === "EntitySet",
+      )
+    )
+      throw new InvalidRequest(
+        "createRow's entitySet must be an entity set of the environment, such as accounts. Call actions with their own method or callAction.",
+      );
+  }
 
   if (operation.change) {
     const id = await callerId(caller.parse(properties.caller));

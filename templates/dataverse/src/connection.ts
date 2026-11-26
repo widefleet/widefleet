@@ -157,6 +157,12 @@ export const accountConnection = (environment: Environment, properties: Properti
       },
     );
 
+    if (response.status === 401)
+      return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
+
+    if (response.status === 429)
+      return { status: "rate_limited", retryAfter: response.headers.get("retry-after") } as const;
+
     if (!response.ok) throw new Error(`Dataverse discovery failed (HTTP ${response.status})`);
 
     return {
@@ -234,9 +240,16 @@ export const accountConnection = (environment: Environment, properties: Properti
     if (!response.ok) return { status: "refresh_failed" } as const;
     const issued = environmentTokens.parse(await response.json());
 
+    // Saved only while the account still holds the refresh token this request
+    // used, so a request still running after a disconnect or a reconnect never
+    // restores the previous grant. The token is cached first because the
+    // rotation below changes the refresh token it checks.
     await environment.DB.batch([
       environment.DB.prepare(
-        `INSERT INTO resource_token (userId, resource, accessToken, expiresAt) VALUES (?, ?, ?, ?)
+        `INSERT INTO resource_token (userId, resource, accessToken, expiresAt)
+         SELECT ?, ?, ?, ? WHERE EXISTS (
+           SELECT 1 FROM account WHERE userId = ? AND providerId = ? AND refreshToken = ?
+         )
          ON CONFLICT (userId, resource) DO UPDATE SET accessToken = excluded.accessToken,
          expiresAt = excluded.expiresAt`,
       ).bind(
@@ -244,16 +257,20 @@ export const accountConnection = (environment: Environment, properties: Properti
         url,
         await environment.WIDEFLEET_KEYS.encrypt("tokens", issued.access_token),
         Date.now() + issued.expires_in * 1000,
+        id,
+        "microsoft",
+        stored,
       ),
       // Microsoft may rotate the refresh token; the newest one stays usable.
       ...(issued.refresh_token
         ? [
             environment.DB.prepare(
-              "UPDATE account SET refreshToken = ? WHERE userId = ? AND providerId = ?",
+              "UPDATE account SET refreshToken = ? WHERE userId = ? AND providerId = ? AND refreshToken = ?",
             ).bind(
               await environment.WIDEFLEET_KEYS.encrypt("tokens", issued.refresh_token),
               id,
               "microsoft",
+              stored,
             ),
           ]
         : []),
@@ -385,6 +402,12 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       const response = await fetch(url, { ...init, headers, redirect: "manual" });
 
+      // A rejected token is not offered again; the next call asks Microsoft.
+      if (response.status === 401)
+        await environment.DB.prepare("DELETE FROM resource_token WHERE userId = ? AND resource = ?")
+          .bind(id, new URL(url).origin)
+          .run();
+
       return { status: "connected", response } as const;
     },
     fetch: async (request: Request) => {
@@ -436,7 +459,8 @@ export const accountConnection = (environment: Environment, properties: Properti
       if (url.pathname === "/" && request.method === "GET") {
         const linked = await account(id);
         const config = await configuration();
-        const listed = linked && granted(linked) ? await environments() : null;
+        // A failing discovery leaves the account's controls on the page.
+        const listed = linked && granted(linked) ? await environments().catch(() => null) : null;
 
         return connectionPage(
           linked?.providerEmail ?? linked?.accountId ?? null,
@@ -444,7 +468,7 @@ export const accountConnection = (environment: Environment, properties: Properti
           url.origin,
           url.searchParams.has("error"),
           await approvals(environment.DB, id).level(),
-          listed?.status === "connected" ? listed.environments : [],
+          listed?.status === "connected" ? listed.environments : null,
         );
       }
 
@@ -467,6 +491,9 @@ export const accountConnection = (environment: Environment, properties: Properti
         if (config.status !== "configured") return redirect("/");
 
         const auth = authentication(environment, identity, id, config.credentials);
+
+        // Tokens of the previous grant never outlive a new connection.
+        await environment.DB.prepare("DELETE FROM resource_token WHERE userId = ?").bind(id).run();
 
         const session = await auth.api.getSession({ headers: request.headers });
 

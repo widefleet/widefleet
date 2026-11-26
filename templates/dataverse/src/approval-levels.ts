@@ -18,15 +18,16 @@ export const approvalIntro =
 export const levelTexts = {
   all_changes: {
     title: "Always ask",
-    detail: "Every new row asks first, and so do changing, deleting and calling actions.",
+    detail:
+      "Every new row, table and column asks first, and so do changing, linking, sharing, deleting and calling actions.",
   },
   updates_and_deletions: {
     title: "Ask except for new rows",
     detail:
-      "New rows and links between rows are created at once. Changing, deleting and calling actions ask first.",
+      "New rows, tables and columns are created at once. Changing, linking, sharing, deleting and calling actions ask first.",
   },
   none: {
     title: "Never ask",
-    detail: "Rows are created, changed and deleted, and actions run, at once.",
+    detail: "Rows are created, changed, linked and deleted, and actions run, at once.",
   },
 } satisfies Record<(typeof approvalLevels)[number], { title: string; detail: string }>;

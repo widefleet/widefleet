@@ -9,6 +9,8 @@ export type Operation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
+  /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
+  optionalPathParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -156,7 +158,7 @@ export const operations = {
     bodyRequired: true,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addCertificateCredential: {
     httpMethod: "POST",
@@ -180,7 +182,7 @@ export const operations = {
     bodyRequired: true,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addComponentsToSolutionAsync: {
     httpMethod: "POST",
@@ -192,7 +194,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addComponentToSolutionAsync: {
     httpMethod: "POST",
@@ -204,7 +206,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addMembersTeam: {
     httpMethod: "POST",
@@ -216,7 +218,7 @@ export const operations = {
     bodyRequired: true,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addPrincipalToQueue: {
     httpMethod: "POST",
@@ -228,7 +230,7 @@ export const operations = {
     bodyRequired: true,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addPrivilegesRole: {
     httpMethod: "POST",
@@ -240,7 +242,7 @@ export const operations = {
     bodyRequired: false,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addRecurrence: {
     httpMethod: "POST",
@@ -252,7 +254,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addRequiredDesktopFlowComponentsToSolutions: {
     httpMethod: "POST",
@@ -264,7 +266,7 @@ export const operations = {
     bodyRequired: false,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addRequiredUIElementCollectionComponentsToSolutions: {
     httpMethod: "POST",
@@ -276,7 +278,7 @@ export const operations = {
     bodyRequired: false,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addSolutionComponent: {
     httpMethod: "POST",
@@ -288,7 +290,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addToQueue: {
     httpMethod: "POST",
@@ -300,7 +302,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addUserToRecordTeam: {
     httpMethod: "POST",
@@ -312,7 +314,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   addWorkQueueItemProcessingHistoryEntry: {
     httpMethod: "POST",
@@ -704,6 +706,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["Subject"],
   },
   checkPromoteEmail: {
     httpMethod: "GET",
@@ -716,6 +719,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["Subject", "DirectionCode"],
   },
   clearWorkQueue: {
     httpMethod: "POST",
@@ -751,7 +755,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   cloneMobileOfflineProfile: {
     httpMethod: "POST",
@@ -931,7 +935,7 @@ export const operations = {
     bodyRequired: true,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   createCustomerRelationships: {
     httpMethod: "POST",
@@ -955,7 +959,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   createFlowCredentialApplication: {
     httpMethod: "POST",
@@ -1466,6 +1470,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["PageSize", "PagingCookie", "PartitionId"],
   },
   executeFxExpression: {
     httpMethod: "POST",
@@ -1735,7 +1740,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   generateSocialProfile: {
     httpMethod: "POST",
@@ -1885,6 +1890,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["DataSource"],
   },
   getFileSasUrlForUpload: {
     httpMethod: "GET",
@@ -1975,6 +1981,13 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: [
+      "workflowIds",
+      "startTime",
+      "runCount",
+      "connectionReferenceIds",
+      "triggerIds",
+    ],
   },
   getNextRunsForFlowTrigger: {
     httpMethod: "GET",
@@ -2131,6 +2144,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["ReferencingEntityName"],
   },
   getValidReferencingEntities: {
     httpMethod: "GET",
@@ -2143,6 +2157,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["ReferencedEntityName"],
   },
   getWorkIQTaskStatus: {
     httpMethod: "POST",
@@ -2214,7 +2229,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   importFieldTranslation: {
     httpMethod: "POST",
@@ -2226,7 +2241,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   importMappingsImportMap: {
     httpMethod: "POST",
@@ -2238,7 +2253,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   importRecordsImport: {
     httpMethod: "POST",
@@ -2250,7 +2265,7 @@ export const operations = {
     bodyRequired: false,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   importSolution: {
     httpMethod: "POST",
@@ -2262,7 +2277,7 @@ export const operations = {
     bodyRequired: true,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   importSolutionAsync: {
     httpMethod: "POST",
@@ -2274,7 +2289,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   importSolutions: {
     httpMethod: "POST",
@@ -2286,7 +2301,7 @@ export const operations = {
     bodyRequired: true,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   importTranslation: {
     httpMethod: "POST",
@@ -2298,7 +2313,7 @@ export const operations = {
     bodyRequired: true,
     response: null,
     pageable: false,
-    change: "create",
+    change: "update",
   },
   importTranslationAsync: {
     httpMethod: "POST",
@@ -2310,7 +2325,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   incrementKnowledgeArticleViewCount: {
     httpMethod: "GET",
@@ -2424,6 +2439,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["SkipParentalRelationshipMapping", "RetrieveConsumableRecord"],
   },
   initializeModernFlowFromAsyncWorkflow: {
     httpMethod: "POST",
@@ -2459,7 +2475,7 @@ export const operations = {
     bodyRequired: false,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   insertStatusValue: {
     httpMethod: "POST",
@@ -2471,7 +2487,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   installSampleData: {
     httpMethod: "POST",
@@ -2867,7 +2883,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   provisionLanguage: {
     httpMethod: "POST",
@@ -3819,6 +3835,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["LogicalName"],
   },
   retrieveEntityRibbon: {
     httpMethod: "GET",
@@ -4088,6 +4105,12 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: [
+      "DeletedMetadataFilters",
+      "ClientVersionStamp",
+      "AppModuleId",
+      "RetrieveAllSettings",
+    ],
   },
   retrieveMissingComponents: {
     httpMethod: "GET",
@@ -4185,6 +4208,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["StartDate", "EndDate", "Type", "Source", "SortDirection", "Keyword"],
   },
   retrievePowerAppsConnections: {
     httpMethod: "POST",
@@ -4399,6 +4423,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["StartDate", "EndDate", "Type", "Source", "SortDirection", "Keyword"],
   },
   retrieveRequiredComponents: {
     httpMethod: "GET",
@@ -4435,6 +4460,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["AppUniqueName"],
   },
   retrieveSharedLinks: {
     httpMethod: "GET",
@@ -4483,6 +4509,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["RollupType"],
   },
   retrieveTimestamp: {
     httpMethod: "GET",
@@ -5071,6 +5098,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["ExcludeTeamBasic"],
   },
   retrieveUserPrivilegeByPrivilegeName: {
     httpMethod: "GET",
@@ -5087,6 +5115,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["ExcludeTeamBasic"],
   },
   retrieveUserPrivileges: {
     httpMethod: "GET",
@@ -5123,6 +5152,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["ExcludeTeamBasic"],
   },
   retrieveUserSetOfPrivilegesByNames: {
     httpMethod: "GET",
@@ -5135,6 +5165,7 @@ export const operations = {
     response: "json",
     pageable: false,
     change: null,
+    optionalPathParameters: ["ExcludeTeamBasic"],
   },
   retrieveUsersPrivilegesThroughTeams: {
     httpMethod: "GET",
@@ -5630,7 +5661,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   stageAndUpgradeAsync: {
     httpMethod: "POST",
@@ -5642,7 +5673,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   stageSolution: {
     httpMethod: "POST",

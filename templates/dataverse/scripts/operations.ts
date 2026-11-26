@@ -10,7 +10,10 @@
 // Actions Dataverse calls itself, such as `OnExternalCreated`, and those of
 // Copilot Studio's own designer are not offered. Operations that change data
 // name the change they make, which decides when they ask the user first (see
-// src/approval.ts). Actions that only read are `read`.
+// src/approval.ts). `create` only adds something new; anything that also
+// changes what exists, such as granting privileges, adding members or
+// importing over existing customizations, is `update`. Actions that only read
+// are `read`.
 
 /** Where the generator reads the API, and the names of the generated code. */
 export const generator = {
@@ -73,29 +76,29 @@ export const operations = {
   "action.call": { name: "callAction", change: "update" },
 
   // Actions and functions
-  AddAppComponents: { name: "addAppComponents", change: "create" },
+  AddAppComponents: { name: "addAppComponents", change: "update" },
   AddCertificateCredential: { name: "addCertificateCredential", change: "create" },
   AddChannelAccessProfilePrivileges: {
     name: "addChannelAccessProfilePrivileges",
-    change: "create",
+    change: "update",
   },
-  AddComponentsToSolutionAsync: { name: "addComponentsToSolutionAsync", change: "create" },
-  AddComponentToSolutionAsync: { name: "addComponentToSolutionAsync", change: "create" },
-  "team.AddMembersTeam": { name: "addMembersTeam", change: "create" },
-  "queue.AddPrincipalToQueue": { name: "addPrincipalToQueue", change: "create" },
-  "role.AddPrivilegesRole": { name: "addPrivilegesRole", change: "create" },
-  "appointment.AddRecurrence": { name: "addRecurrence", change: "create" },
+  AddComponentsToSolutionAsync: { name: "addComponentsToSolutionAsync", change: "update" },
+  AddComponentToSolutionAsync: { name: "addComponentToSolutionAsync", change: "update" },
+  "team.AddMembersTeam": { name: "addMembersTeam", change: "update" },
+  "queue.AddPrincipalToQueue": { name: "addPrincipalToQueue", change: "update" },
+  "role.AddPrivilegesRole": { name: "addPrivilegesRole", change: "update" },
+  "appointment.AddRecurrence": { name: "addRecurrence", change: "update" },
   "workflow.AddRequiredDesktopFlowComponentsToSolutions": {
     name: "addRequiredDesktopFlowComponentsToSolutions",
-    change: "create",
+    change: "update",
   },
   "desktopflowmodule.AddRequiredUIElementCollectionComponentsToSolutions": {
     name: "addRequiredUIElementCollectionComponentsToSolutions",
-    change: "create",
+    change: "update",
   },
-  AddSolutionComponent: { name: "addSolutionComponent", change: "create" },
-  "queue.AddToQueue": { name: "addToQueue", change: "create" },
-  "systemuser.AddUserToRecordTeam": { name: "addUserToRecordTeam", change: "create" },
+  AddSolutionComponent: { name: "addSolutionComponent", change: "update" },
+  "queue.AddToQueue": { name: "addToQueue", change: "update" },
+  "systemuser.AddUserToRecordTeam": { name: "addUserToRecordTeam", change: "update" },
   "workqueueitem.AddWorkQueueItemProcessingHistoryEntry": {
     name: "addWorkQueueItemProcessingHistoryEntry",
     change: "create",
@@ -137,7 +140,7 @@ export const operations = {
   CheckPromoteEmail: { name: "checkPromoteEmail" },
   "workqueue.ClearWorkQueue": { name: "clearWorkQueue", change: "delete" },
   CloneAsPatch: { name: "cloneAsPatch", change: "create" },
-  CloneAsSolution: { name: "cloneAsSolution", change: "create" },
+  CloneAsSolution: { name: "cloneAsSolution", change: "update" },
   "mobileofflineprofile.CloneMobileOfflineProfile": {
     name: "cloneMobileOfflineProfile",
     change: "create",
@@ -160,10 +163,10 @@ export const operations = {
   CreateAndSendNewEmail: { name: "createAndSendNewEmail", change: "send" },
   CreateAsyncJobToRevokeInheritedAccess: {
     name: "createAsyncJobToRevokeInheritedAccess",
-    change: "create",
+    change: "update",
   },
   CreateCustomerRelationships: { name: "createCustomerRelationships", change: "create" },
-  "recurringappointmentmaster.CreateException": { name: "createException", change: "create" },
+  "recurringappointmentmaster.CreateException": { name: "createException", change: "update" },
   "flowmachinegroup.CreateFlowCredentialApplication": {
     name: "createFlowCredentialApplication",
     change: "create",
@@ -242,7 +245,7 @@ export const operations = {
   GenerateAutomatedPlugin: { name: "generateAutomatedPlugin", change: "create" },
   GenerateInstantPlugin: { name: "generateInstantPlugin", change: "create" },
   GeneratePowerFxFormula: { name: "generatePowerFxFormula", change: "create" },
-  GenerateSharedLink: { name: "generateSharedLink", change: "create" },
+  GenerateSharedLink: { name: "generateSharedLink", change: "update" },
   "socialprofile.GenerateSocialProfile": { name: "generateSocialProfile", change: "create" },
   "timezonedefinition.GetAllTimeZonesWithDisplayName": { name: "getAllTimeZonesWithDisplayName" },
   GetAuditStorageDetails: { name: "getAuditStorageDetails", change: "read" },
@@ -284,15 +287,15 @@ export const operations = {
   GrantAccessUsingSharedLink: { name: "grantAccessUsingSharedLink", change: "update" },
   GrantDelegatedAccess: { name: "grantDelegatedAccess", change: "update" },
   ImmediateBook: { name: "immediateBook", change: "update" },
-  ImportCardTypeSchema: { name: "importCardTypeSchema", change: "create" },
-  ImportFieldTranslation: { name: "importFieldTranslation", change: "create" },
-  ImportMappingsImportMap: { name: "importMappingsImportMap", change: "create" },
-  "import.ImportRecordsImport": { name: "importRecordsImport", change: "create" },
-  ImportSolution: { name: "importSolution", change: "create" },
-  ImportSolutionAsync: { name: "importSolutionAsync", change: "create" },
-  ImportSolutions: { name: "importSolutions", change: "create" },
-  ImportTranslation: { name: "importTranslation", change: "create" },
-  ImportTranslationAsync: { name: "importTranslationAsync", change: "create" },
+  ImportCardTypeSchema: { name: "importCardTypeSchema", change: "update" },
+  ImportFieldTranslation: { name: "importFieldTranslation", change: "update" },
+  ImportMappingsImportMap: { name: "importMappingsImportMap", change: "update" },
+  "import.ImportRecordsImport": { name: "importRecordsImport", change: "update" },
+  ImportSolution: { name: "importSolution", change: "update" },
+  ImportSolutionAsync: { name: "importSolutionAsync", change: "update" },
+  ImportSolutions: { name: "importSolutions", change: "update" },
+  ImportTranslation: { name: "importTranslation", change: "update" },
+  ImportTranslationAsync: { name: "importTranslationAsync", change: "update" },
   IncrementKnowledgeArticleViewCount: { name: "incrementKnowledgeArticleViewCount" },
   InferEntityDefinition: { name: "inferEntityDefinition", change: "read" },
   InitializeAnnotationBlocksDownload: {
@@ -316,8 +319,8 @@ export const operations = {
     name: "initializeTemporaryFileBlocksUpload",
     change: "create",
   },
-  InsertOptionValue: { name: "insertOptionValue", change: "create" },
-  InsertStatusValue: { name: "insertStatusValue", change: "create" },
+  InsertOptionValue: { name: "insertOptionValue", change: "update" },
+  InsertStatusValue: { name: "insertStatusValue", change: "update" },
   InstallSampleData: { name: "installSampleData", change: "create" },
   "systemuser.InstantiateFilters": { name: "instantiateFilters", change: "create" },
   InstantiateTemplate: { name: "instantiateTemplate", change: "read" },
@@ -353,7 +356,7 @@ export const operations = {
   PowerAutomateProxy: { name: "powerAutomateProxy", change: "update" },
   PreferredSolutionUsedBy: { name: "preferredSolutionUsedBy" },
   PreValidateGitComponents: { name: "preValidateGitComponents", change: "read" },
-  ProvisionDelegation: { name: "provisionDelegation", change: "create" },
+  ProvisionDelegation: { name: "provisionDelegation", change: "update" },
   ProvisionLanguage: { name: "provisionLanguage", change: "create" },
   ProvisionLanguageAsync: { name: "provisionLanguageAsync", change: "create" },
   PublishAllXml: { name: "publishAllXml", change: "update" },
@@ -663,8 +666,8 @@ export const operations = {
   SetReportRelated: { name: "setReportRelated", change: "update" },
   SetupAiConnection: { name: "setupAiConnection", change: "update" },
   SnapshotDatasource: { name: "snapshotDatasource", change: "update" },
-  StageAndUpgrade: { name: "stageAndUpgrade", change: "create" },
-  StageAndUpgradeAsync: { name: "stageAndUpgradeAsync", change: "create" },
+  StageAndUpgrade: { name: "stageAndUpgrade", change: "update" },
+  StageAndUpgradeAsync: { name: "stageAndUpgradeAsync", change: "update" },
   StageSolution: { name: "stageSolution", change: "create" },
   SubstituteForAttribute: { name: "substituteForAttribute", change: "update" },
   SubstituteForComponent: { name: "substituteForComponent", change: "update" },

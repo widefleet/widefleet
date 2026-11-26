@@ -224,9 +224,15 @@ export const csdlDescription = (
     return nullable ? { anyOf: [reference(name)], nullable: true } : reference(name);
   };
 
-  const propertiesOf = (element: Element) =>
+  // A complex type's navigation properties are values it carries, such as the
+  // principal a sharing action's `PrincipalAccess` names. An entity type's are
+  // relationships, which are read with `$expand` and set with `@odata.bind`.
+  const propertiesOf = (element: Element, navigation: boolean) =>
     Object.fromEntries(
-      childrenNamed(element, "Property").map((property) => [
+      [
+        ...childrenNamed(element, "Property"),
+        ...(navigation ? childrenNamed(element, "NavigationProperty") : []),
+      ].map((property) => [
         required(property, "Name"),
         valueSchema(required(property, "Type"), property.attributes["Nullable"] !== "false"),
       ]),
@@ -242,7 +248,10 @@ export const csdlDescription = (
         additionalProperties: true,
       };
 
-    const own: JsonObject = { type: "object", properties: propertiesOf(element) };
+    const own: JsonObject = {
+      type: "object",
+      properties: propertiesOf(element, complexTypes.has(name)),
+    };
 
     if (element.attributes["OpenType"] === "true") own["additionalProperties"] = true;
     const base = element.attributes["BaseType"];
@@ -501,16 +510,23 @@ export const csdlDescription = (
     const returned = childrenNamed(element, "ReturnType").at(0);
 
     if (!returned) return noContent;
+    const type = required(returned, "Type");
+    const value = valueSchema(type, returned.attributes["Nullable"] !== "false");
+
+    // OData answers a structured value as itself, and a collection, a primitive
+    // or an enum member inside an object's `value`.
+    const structured =
+      collection(type) === undefined &&
+      (entityTypes.has(qualified(type)) || complexTypes.has(qualified(type)));
 
     return {
       "200": {
         description: "The result.",
         content: {
           "application/json": {
-            schema: valueSchema(
-              required(returned, "Type"),
-              returned.attributes["Nullable"] !== "false",
-            ),
+            schema: structured
+              ? value
+              : { type: "object", properties: { value }, required: ["value"] },
           },
         },
       },
@@ -642,7 +658,7 @@ export const csdlDescription = (
       {
         url: server,
         variables: Object.fromEntries(
-          [...server.matchAll(/\{(\w+)\}/g)].map(([, name = ""]) => [
+          [...server.matchAll(/\{([^}]+)\}/g)].map(([, name = ""]) => [
             name,
             { default: name, description: variables[name] ?? `The \`${name}\` of the address.` },
           ]),
