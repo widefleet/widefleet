@@ -199,8 +199,8 @@ export const operations = {
   },
   replaceRow: {
     httpMethod: "PUT",
-    path: "/{entitySet}({id})",
-    pathParameters: { entitySet: "entitySet", id: "id" },
+    path: "/{entitySet}({id})/{type}",
+    pathParameters: { entitySet: "entitySet", id: "id", type: "type" },
     queryParameters: { tag: ["tag", null, false] },
     headerParameters: {
       prefer: "Prefer",
@@ -218,6 +218,7 @@ export const operations = {
     response: null,
     pageable: false,
     change: "update",
+    optionalPathParameters: ["type"],
   },
   deleteRow: {
     httpMethod: "DELETE",
@@ -449,42 +450,15 @@ export const operations = {
     change: null,
     optionalPathParameters: ["type"],
   },
-  updateRelatedRow: {
-    httpMethod: "PATCH",
-    path: "/{entitySet}({id})/{navigationProperty}({relatedId})",
-    pathParameters: {
-      entitySet: "entitySet",
-      id: "id",
-      navigationProperty: "navigationProperty",
-      relatedId: "relatedId",
-    },
-    queryParameters: { tag: ["tag", null, false] },
-    headerParameters: {
-      prefer: "Prefer",
-      bypassBusinessLogicExecution: "MSCRM.BypassBusinessLogicExecution",
-      bypassBusinessLogicExecutionStepIds: "MSCRM.BypassBusinessLogicExecutionStepIds",
-      bypassCustomPluginExecution: "MSCRM.BypassCustomPluginExecution",
-      suppressCallbackRegistrationExpanderJob: "MSCRM.SuppressCallbackRegistrationExpanderJob",
-      ifMatch: "If-Match",
-      ifNoneMatch: "If-None-Match",
-      suppressDuplicateDetection: "MSCRM.SuppressDuplicateDetection",
-      callerObjectId: "CallerObjectId",
-      mscrmCallerId: "MSCRMCallerID",
-    },
-    body: "json",
-    bodyRequired: true,
-    response: "json",
-    pageable: false,
-    change: "update",
-  },
   replaceRelatedRow: {
     httpMethod: "PUT",
-    path: "/{entitySet}({id})/{navigationProperty}({relatedId})",
+    path: "/{entitySet}({id})/{navigationProperty}({relatedId})/{type}",
     pathParameters: {
       entitySet: "entitySet",
       id: "id",
       navigationProperty: "navigationProperty",
       relatedId: "relatedId",
+      type: "type",
     },
     queryParameters: { tag: ["tag", null, false] },
     headerParameters: {
@@ -503,6 +477,7 @@ export const operations = {
     response: null,
     pageable: false,
     change: "update",
+    optionalPathParameters: ["type"],
   },
   deleteRelatedRow: {
     httpMethod: "DELETE",

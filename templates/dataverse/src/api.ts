@@ -4456,7 +4456,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
            */
           entitySet: string;
           /**
-           * A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+           * A derived type the rows are, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
            */
           type?: string;
           /**
@@ -4630,7 +4630,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     id: string;
     /**
-     * A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+     * A derived type the rows are, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
      */
     type?: string;
     /**
@@ -4863,6 +4863,10 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A derived type the rows are, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+     */
+    type?: string;
     /**
      * A value plug-ins read as the `tag` shared variable.
      */
@@ -5298,7 +5302,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
            */
           navigationProperty: string;
           /**
-           * A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+           * A derived type the rows are, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
            */
           type?: string;
           /**
@@ -5552,7 +5556,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     relatedId: string;
     /**
-     * A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+     * A derived type the rows are, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
      */
     type?: string;
     /**
@@ -5604,90 +5608,6 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Change the columns of a row a row relates to through a navigation property.
-   *
-   * Asks the user first unless their approval level is `none`.
-   */
-  async updateRelatedRow(input: {
-    /**
-     * The entity set of the table, its plural name, such as `accounts`.
-     */
-    entitySet: string;
-    /**
-     * The row's ID, or an alternate key, such as `LogicalName='account'`.
-     */
-    id: string;
-    /**
-     * The navigation property that relates the rows, such as `contact_customer_accounts`.
-     */
-    navigationProperty: string;
-    /**
-     * The related row's ID, or an alternate key, such as `LogicalName='name'`.
-     */
-    relatedId: string;
-    /**
-     * A value plug-ins read as the `tag` shared variable.
-     */
-    tag?: string;
-    /**
-     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
-     */
-    prefer?: string;
-    /**
-     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
-     */
-    bypassBusinessLogicExecution?: string;
-    /**
-     * The IDs of plug-in steps to skip, separated by commas.
-     */
-    bypassBusinessLogicExecutionStepIds?: string;
-    /**
-     * `true` to skip custom synchronous plug-ins.
-     */
-    bypassCustomPluginExecution?: string;
-    /**
-     * `true` to not trigger Power Automate flows.
-     */
-    suppressCallbackRegistrationExpanderJob?: string;
-    /**
-     * `*` to change only an existing row, or the row's `@odata.etag` to change only that version.
-     */
-    ifMatch?: string;
-    /**
-     * `*` to only create a row that does not exist.
-     */
-    ifNoneMatch?: string;
-    /**
-     * `false` to check the row against the environment's duplicate detection rules and refuse a duplicate.
-     */
-    suppressDuplicateDetection?: string;
-    /**
-     * The Microsoft Entra object ID of a user to act for.
-     */
-    callerObjectId?: string;
-    /**
-     * The `systemuserid` of a user to act for.
-     */
-    mscrmCallerId?: string;
-    /**
-     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
-     */
-    environment: string;
-    /**
-     * The request body.
-     */
-    body: {
-      [key: string]: JsonValue;
-    };
-  }): Promise<
-    DataverseResult<{
-      [key: string]: JsonValue;
-    } | null>
-  > {
-    return run(this.env, this.ctx.props, "updateRelatedRow", input);
-  }
-
-  /**
    * Replace a row a row relates to with the body, such as a column's definition, which cannot be changed in part.
    *
    * Asks the user first unless their approval level is `none`.
@@ -5709,6 +5629,10 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The related row's ID, or an alternate key, such as `LogicalName='name'`.
      */
     relatedId: string;
+    /**
+     * A derived type the rows are, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+     */
+    type?: string;
     /**
      * A value plug-ins read as the `tag` shared variable.
      */
@@ -5969,7 +5893,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     body: {
       /**
-       * The other row's address, such as `contacts(<id>)`, relative to the service or absolute.
+       * The other row's absolute address, such as `https://<environment>/api/data/v9.2/contacts(<id>)`.
        */
       "@odata.id"?: string;
     };
@@ -6036,7 +5960,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     body: {
       /**
-       * The other row's address, such as `contacts(<id>)`, relative to the service or absolute.
+       * The other row's absolute address, such as `https://<environment>/api/data/v9.2/contacts(<id>)`.
        */
       "@odata.id"?: string;
     };
@@ -6063,7 +5987,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     navigationProperty: string;
     /**
-     * For a collection-valued navigation property, the other row's address, such as `contacts(<id>)`.
+     * For a collection-valued navigation property, the other row's absolute address, such as `https://<environment>/api/data/v9.2/contacts(<id>)`.
      */
     $id?: string;
     /**

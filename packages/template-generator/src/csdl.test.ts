@@ -123,7 +123,6 @@ describe("CSDL descriptions", () => {
         "entitySet.setProperty",
         "entitySet.setReference",
         "entitySet.update",
-        "entitySet.updateRelated",
         "entitySet.uploadProperty",
         "function.call",
         "metadata.get",

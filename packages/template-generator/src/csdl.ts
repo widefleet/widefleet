@@ -331,7 +331,7 @@ export const csdlDescription = (
     in: "path",
     required: false,
     description:
-      "A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.",
+      "A derived type the rows are, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.",
     schema: { type: "string" },
   };
 
@@ -496,6 +496,14 @@ export const csdlDescription = (
       parameters: [entitySet, id, cast, select, expand],
       responses: { "200": { description: "The row.", ...rowContent } },
     },
+    put: {
+      operationId: "entitySet.replace",
+      summary:
+        "Replace a row with the body, such as a table's definition, which cannot be changed in part.",
+      parameters: [entitySet, id, cast],
+      requestBody: { required: true, ...rowContent },
+      responses: noContent,
+    },
   };
 
   paths["/{entitySet}({id})"] = {
@@ -505,14 +513,6 @@ export const csdlDescription = (
       parameters: [entitySet, id, select],
       requestBody: { required: true, ...rowContent },
       responses: { "200": { description: "The changed row.", ...rowContent }, ...noContent },
-    },
-    put: {
-      operationId: "entitySet.replace",
-      summary:
-        "Replace a row with the body, such as a table's definition, which cannot be changed in part.",
-      parameters: [entitySet, id],
-      requestBody: { required: true, ...rowContent },
-      responses: noContent,
     },
     delete: {
       operationId: "entitySet.delete",
@@ -648,24 +648,17 @@ export const csdlDescription = (
       parameters: [entitySet, id, navigationProperty, relatedId, cast, select, expand],
       responses: { "200": { description: "The row.", ...rowContent } },
     },
-  };
-
-  paths["/{entitySet}({id})/{navigationProperty}({relatedId})"] = {
-    patch: {
-      operationId: "entitySet.updateRelated",
-      summary: "Change the columns of a row a row relates to through a navigation property.",
-      parameters: [entitySet, id, navigationProperty, relatedId],
-      requestBody: { required: true, ...rowContent },
-      responses: { "200": { description: "The changed row.", ...rowContent }, ...noContent },
-    },
     put: {
       operationId: "entitySet.replaceRelated",
       summary:
         "Replace a row a row relates to with the body, such as a column's definition, which cannot be changed in part.",
-      parameters: [entitySet, id, navigationProperty, relatedId],
+      parameters: [entitySet, id, navigationProperty, relatedId, cast],
       requestBody: { required: true, ...rowContent },
       responses: noContent,
     },
+  };
+
+  paths["/{entitySet}({id})/{navigationProperty}({relatedId})"] = {
     delete: {
       operationId: "entitySet.deleteRelated",
       summary: "Delete a row a row relates to, such as a column of a table.",
@@ -674,7 +667,7 @@ export const csdlDescription = (
     },
   };
 
-  // Addresses of other rows, relative to the service or absolute.
+  // Addresses of other rows, which Dataverse takes only absolute.
   const address = {
     required: true,
     content: {
@@ -686,7 +679,7 @@ export const csdlDescription = (
             "@odata.id": {
               type: "string",
               description:
-                "The other row's address, such as `contacts(<id>)`, relative to the service or absolute.",
+                "The other row's absolute address, such as `https://<environment>/api/data/v9.2/contacts(<id>)`.",
             },
           },
         },
@@ -744,7 +737,7 @@ export const csdlDescription = (
         navigationProperty,
         queryOption(
           "$id",
-          "For a collection-valued navigation property, the other row's address, such as `contacts(<id>)`.",
+          "For a collection-valued navigation property, the other row's absolute address, such as `https://<environment>/api/data/v9.2/contacts(<id>)`.",
         ),
       ],
       responses: noContent,

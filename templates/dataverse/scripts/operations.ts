@@ -297,11 +297,6 @@ const offered = {
     name: "getRelatedRow",
     parameters: [...unmasked, labelLanguages],
   },
-  "entitySet.updateRelated": {
-    name: "updateRelatedRow",
-    change: "update",
-    headers: { ...conditions, ...duplicateDetection },
-  },
   "entitySet.replaceRelated": {
     name: "replaceRelatedRow",
     change: "update",
