@@ -40,11 +40,15 @@ export const createCliLogin = (database: DatabaseExecutor, configuration: Config
       .where(eq(verification.id, prefix + token.parse(id)));
 
     if (!row || row.expiresAt <= new Date())
-      throw new APIError("GONE", { message: "This login expired. Run widefleet login again." });
+      throw new APIError("GONE", {
+        message: "This sign-in link expired. Start the sign-in again.",
+      });
     const value = stored.parse(JSON.parse(row.value));
 
     if (!timingSafeEqual(Buffer.from(hash(token.parse(credential))), Buffer.from(value[channel])))
-      throw new APIError("UNAUTHORIZED", { message: "Invalid CLI login request" });
+      throw new APIError("UNAUTHORIZED", {
+        message: "This sign-in link is invalid. Start the sign-in again.",
+      });
 
     return { row, value };
   };
@@ -63,7 +67,7 @@ export const createCliLogin = (database: DatabaseExecutor, configuration: Config
       .returning({ id: verification.id });
 
     if (!changed.length)
-      throw new APIError("CONFLICT", { message: "This login changed. Reload the page." });
+      throw new APIError("CONFLICT", { message: "This sign-in changed. Reload the page." });
   };
 
   const inspect = (value: z.infer<typeof stored>) => {
@@ -194,3 +198,23 @@ export const cliLoginPlugin = (login: ReturnType<typeof createCliLogin>) => ({
     ),
   },
 });
+
+// The browser names the person's address once, on the normal sign-in or through its session.
+// Its domain selects the installation unless this login already has one.
+export const selectCliPlatformByEmail = async (
+  cliLogin: ReturnType<typeof createCliLogin>,
+  discover: (domain: string) => Promise<string>,
+  request: { id: string; ticket: string; email: string },
+) => {
+  const login = await cliLogin.inspect(request.id, request.ticket);
+
+  const origin =
+    login.platformUrl ??
+    (await discover(request.email.slice(request.email.lastIndexOf("@") + 1)).catch(() => {
+      throw new APIError("SERVICE_UNAVAILABLE", {
+        message: "Could not find where your company signs in. Try again in a moment.",
+      });
+    }));
+
+  return cliLogin.select(request.id, request.ticket, origin);
+};

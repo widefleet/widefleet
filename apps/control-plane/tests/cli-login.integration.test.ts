@@ -167,17 +167,17 @@ describe("CLI discovery followed by Better Auth device authorization", () => {
     const first = await begin();
     const second = await begin();
     await expect(cloud.cliLogin.poll(first.request_id, first.ticket)).rejects.toThrow(
-      "Invalid CLI",
+      "sign-in link is invalid",
     );
     await expect(cloud.cliLogin.inspect(first.request_id, first.cli_token)).rejects.toThrow(
-      "Invalid CLI",
+      "sign-in link is invalid",
     );
     await expect(cloud.cliLogin.ready(first.request_id, second.cli_token, "CODE")).rejects.toThrow(
-      "Invalid CLI",
+      "sign-in link is invalid",
     );
     await expect(
       cloud.cliLogin.select(first.request_id, second.ticket, companyOrigin),
-    ).rejects.toThrow("Invalid CLI");
+    ).rejects.toThrow("sign-in link is invalid");
   });
 
   it("pins the selected origin and public device code", async () => {

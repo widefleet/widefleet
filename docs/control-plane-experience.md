@@ -20,7 +20,7 @@ The [app-management browser tests](../apps/control-plane/tests/e2e/auth.spec.ts)
 
 Initial setup crosses local-owner creation, identity configuration, company sign-in and account verification. Preserve progress through redirects and keep temporary password access until the owner has linked and verified a company account using the saved provider configuration.
 
-CLI authorization must let the user compare the device code and understand whether approval or rejection succeeded before returning to the terminal. Keep this flow focused on the request they arrived to verify.
+People often reach CLI authorization through a link their coding agent relays, without seeing the terminal. The pages must make sense on their own: name the organization, account and permissions in plain language instead of asking to compare a device code, continue with an address the person already entered and confirm whether approval or rejection succeeded. Keep this flow focused on the request they arrived to confirm.
 
 See the [setup tests](../apps/control-plane/tests/e2e/setup.spec.ts) and [authentication tests](../apps/control-plane/tests/e2e/auth.spec.ts) when changing these boundaries.
 

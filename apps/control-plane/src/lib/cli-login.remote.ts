@@ -1,8 +1,9 @@
-import { command, query } from "$app/server";
+import { command, getRequestEvent, query } from "$app/server";
 import { error } from "@sveltejs/kit";
 import { z } from "zod";
 import { getRuntime } from "#server/runtime";
 import { remoteOperation } from "#server/remote-support";
+import { selectCliPlatformByEmail } from "#server/cli-login";
 
 const browserRequest = z.object({ request: z.string().max(128), ticket: z.string().max(128) });
 
@@ -12,21 +13,18 @@ export const inspectCliLogin = query(browserRequest, async ({ request, ticket })
   return remoteOperation(() => runtime.cliLogin.inspect(request, ticket));
 });
 
-export const chooseCliPlatform = command(
-  browserRequest.extend({ email: z.string().trim().toLowerCase().pipe(z.email().max(254)) }),
-  async ({ request, ticket, email }) => {
-    const runtime = await getRuntime();
-    const login = await remoteOperation(() => runtime.cliLogin.inspect(request, ticket));
-    let origin = login.platformUrl;
+// A signed-in visitor continues with the address of their session.
+export const chooseCliPlatform = command(browserRequest, async ({ request, ticket }) => {
+  const { user } = getRequestEvent().locals;
 
-    if (!origin) {
-      try {
-        origin = await runtime.discoverPlatform(email.slice(email.lastIndexOf("@") + 1));
-      } catch {
-        error(503, "Could not find your company's platform. Retry or use its direct sign-in link.");
-      }
-    }
+  if (!user) error(401, "Sign in to continue");
+  const runtime = await getRuntime();
 
-    return remoteOperation(() => runtime.cliLogin.select(request, ticket, origin));
-  },
-);
+  return remoteOperation(() =>
+    selectCliPlatformByEmail(runtime.cliLogin, runtime.discoverPlatform, {
+      id: request,
+      ticket,
+      email: user.email,
+    }),
+  );
+});
