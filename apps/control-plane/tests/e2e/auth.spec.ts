@@ -3484,7 +3484,7 @@ test.describe(`app templates`, () => {
     );
     await expect(setup.getByLabel("Prompt for your agent")).toHaveValue(detail.prompt);
 
-    const configure = page.getByRole("heading", { name: "Configure Google", exact: true });
+    const configure = page.getByRole("heading", { name: "Set up", exact: true });
 
     await expect(configure).toBeVisible();
     // Required secrets render their own help, so name the template's README by its content.

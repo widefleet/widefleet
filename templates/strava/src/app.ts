@@ -9,6 +9,26 @@ import type { Environment, Properties } from "./context.ts";
  * Use the current user's Strava account through Strava's API. Each offered
  * operation is a method. Reading never asks; methods that create, change or
  * publish activities ask the user first according to their approval level.
+ *
+ * @remarks
+ * Inputs and results keep Strava's field names. Lists take `page` and
+ * `per_page`. Use the `id_str` fields of results as IDs, since some Strava IDs
+ * exceed what a JSON number holds exactly.
+ *
+ * `getActivityStreams` takes the stream `keys` and `key_by_type: true`.
+ * `createUpload` sends a FIT, TCX or GPX file as `file`, `{ mimeType, text }`
+ * or `{ mimeType, base64 }`, with its `data_type`; `getUpload` reports when
+ * Strava has processed it.
+ *
+ * @example
+ * ```ts
+ * const recent = await env.STRAVA.listActivities({ after: 1764547200, per_page: 10 });
+ * if (recent.status === "connected") {
+ *   for (const activity of recent.data) {
+ *     console.log(activity.id_str, activity.name, activity.distance);
+ *   }
+ * }
+ * ```
  */
 export default class Strava extends StravaApi {
   /** Check account setup and linking. Connect the Strava account on this app's page. */
