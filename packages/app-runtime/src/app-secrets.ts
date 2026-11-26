@@ -2,46 +2,22 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { appSecretPreparation, appSecretName } from "@platform/contracts";
 import { z } from "zod";
 import { encryptSecrets, decryptSecrets } from "./secrets.ts";
-
-const digest = async (value: string) =>
-  Array.from(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))),
-    (byte) => byte.toString(16).padStart(2, "0"),
-  ).join("");
-
 import type { ParentEnvironment } from "./types.ts";
 
 const secretKey = (identity: { appId: string; revision: number }) =>
   `app-secrets/${identity.appId}/${identity.revision}.json`;
 
-const snapshot = z.object({ fingerprint: z.string(), ciphertext: z.string() });
+const snapshot = z.object({ ciphertext: z.string() });
 
+// The control plane reads a revision together with its values, so a retried deployment sends
+// the same values again. A used revision with other values comes only from a control plane that
+// lost its revision counter, for example after a database restore, and its values are current.
 export const prepareAppSecrets = async (request: Request, environment: ParentEnvironment) => {
   if (request.method !== "POST") return new Response(null, { status: 405 });
   const input = appSecretPreparation.parse(await request.json());
   const path = secretKey(input);
-
-  const fingerprint = await digest(
-    JSON.stringify(Object.entries(input.values).sort(([a], [b]) => a.localeCompare(b))),
-  );
-
-  const existing = await environment.WIDEFLEET_PACKAGES.get(path);
-
-  if (existing) {
-    if (snapshot.parse(await existing.json()).fingerprint !== fingerprint)
-      throw new Error("App secret revision is immutable");
-  } else {
-    const ciphertext = await encryptSecrets(environment, path, input.values);
-
-    if (
-      !(await environment.WIDEFLEET_PACKAGES.put(
-        path,
-        JSON.stringify({ fingerprint, ciphertext }),
-        { onlyIf: { etagDoesNotMatch: "*" } },
-      ))
-    )
-      throw new Error("Concurrent app secret publication; retry this operation");
-  }
+  const ciphertext = await encryptSecrets(environment, path, input.values);
+  await environment.WIDEFLEET_PACKAGES.put(path, JSON.stringify({ ciphertext }));
 
   return Response.json({ result: { revision: input.revision } });
 };
