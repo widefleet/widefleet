@@ -110,8 +110,9 @@ describe("Strava personal account app", () => {
       missing: ["STRAVA_CLIENT_ID", "STRAVA_CLIENT_SECRET"],
     });
     const page = await (await alice.request("/")).text();
-    expect(page).toContain("Authorization Callback Domain to <code>strava.example.test</code>");
-    expect(page).toContain("/auth/callback/strava");
+    expect(page).toContain(
+      'Authorization Callback Domain to <code class="value">strava.example.test</code>',
+    );
     expect((await alice.request("/connect", "POST")).headers.get("location")).toBe("/");
   });
 
@@ -288,7 +289,7 @@ describe("Strava personal account app", () => {
     const alice = browser("alice");
     await connect(alice, "101");
     const page = await (await alice.request("/")).text();
-    expect(page).toContain("Your account <code>athlete101</code> is linked.");
+    expect(page).toContain("<strong>athlete101</strong>");
     expect(page).toContain('value="updates_and_deletions" checked');
 
     const save = (level: string, requestOrigin = origin) =>

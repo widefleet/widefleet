@@ -193,7 +193,7 @@ describe("Garmin Connect personal API app", () => {
     expect(saved.accessToken).toMatch(/^v1\./);
     expect(JSON.stringify(saved)).not.toContain("synthetic-");
     const page = await (await alice.request("/")).text();
-    expect(page).toContain("<code>alice-runner</code> is connected");
+    expect(page).toContain("<strong>alice-runner</strong>");
     expect(page).not.toContain(key);
   });
 

@@ -228,7 +228,7 @@ describe("WHOOP personal account app", () => {
     const alice = browser("alice");
     await connect(alice, "10129");
     const page = await (await alice.request("/")).text();
-    expect(page).toContain("Your account <code>member10129@example.test</code> is linked.");
+    expect(page).toContain("<strong>member10129@example.test</strong>");
     expect(page).toContain('value="updates_and_deletions" checked');
 
     const save = (level: string, requestOrigin = origin) =>

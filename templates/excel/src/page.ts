@@ -1,27 +1,6 @@
 import type { ApprovalLevel } from "./approval.ts";
-import { approvalForm, approvalStyles } from "./approval-page.ts";
-
-const escapeHtml = (value: string) =>
-  value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
-
-const page = (title: string, content: string, cookies: string[] = []) => {
-  const headers = new Headers({
-    "content-type": "text/html; charset=utf-8",
-    "cache-control": "no-store",
-    "referrer-policy": "same-origin",
-  });
-
-  for (const cookie of cookies) headers.append("set-cookie", cookie);
-
-  return new Response(
-    `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<meta name="referrer" content="same-origin"><link rel="icon" href="/favicon.svg"><title>${escapeHtml(title)}</title>
-<style>*{box-sizing:border-box}body{margin:0;background:#fafafa;color:#202124;font:16px/1.6 system-ui,sans-serif}main{max-width:640px;margin:10vh auto;padding:32px}h1{font-size:30px;line-height:1.2;letter-spacing:-.7px}.muted{color:#666;font-size:14px}.notice{border-left:3px solid #b45309;padding:8px 16px;background:#fffbeb}${approvalStyles}form{margin:16px 0}button{font:inherit;border:1px solid #ddd;border-radius:7px;padding:10px 18px;cursor:pointer;background:white}.primary{background:#202124;color:white;border-color:#202124}code{overflow-wrap:anywhere}</style>
-</head><body><main>${content}</main></body></html>`,
-    { headers },
-  );
-};
+import { approvalForm } from "./approval-page.ts";
+import { authorizationPage as continuePage, copyable, oauthConnectionPage } from "./layout.ts";
 
 export const connectionPage = (
   name: string,
@@ -31,26 +10,21 @@ export const connectionPage = (
   failed: boolean,
   level: ApprovalLevel,
 ) =>
-  page(
-    "Connect Excel",
-    `
-<p class="muted">Personal connection</p><h1>Excel ${account ? "connected" : "connection"}</h1>
-<p>Widefleet user: ${escapeHtml(name)}</p><p>Use your Excel workbooks through Microsoft Graph: find workbooks, read and write ranges, and work with worksheets, tables, named ranges and charts.</p>
-${failed ? '<p class="notice" role="alert">The connection could not be completed. Try again. To switch accounts, disconnect the current account first.</p>' : ""}
-${missing.length ? `<p class="notice">Setup is required before accounts can be connected.</p><p>Register a Microsoft application supporting the account types you use. Add the delegated Files.ReadWrite.All permission and the web callback URL below.</p><p>Ask your administrator to set these app secrets: ${missing.map((key) => `<code>${escapeHtml(key)}</code>`).join(", ")}.</p><p>OAuth callback URL: <code>${escapeHtml(`${origin}/auth/callback/microsoft`)}</code></p>` : `<p>${account ? `Your account <code>${escapeHtml(account)}</code> is linked.` : "Connect your account to use it through Widefleet apps."}</p><p>Connected apps use your account when you use them. Other users connect their own accounts.</p><form method="post" action="/connect"><button class="primary">${account ? "Reconnect account" : "Connect account"}</button></form>`}
-${account ? approvalForm("Excel", level) : ""}
-${account ? '<form method="post" action="/disconnect"><button>Disconnect</button></form><p class="muted">Disconnect removes the saved tokens from this app. It does not revoke access in your provider account settings.</p>' : ""}
-<p class="muted">After connecting, return to your app and retry its action.</p>`,
-  );
+  oauthConnectionPage({
+    service: "Excel",
+    description:
+      "Find workbooks, read and write ranges, and work with worksheets, tables, named ranges and charts.",
+    account: "Microsoft account",
+    user: name,
+    connected: account,
+    failed,
+    missing,
+    setup: [
+      "Register a Microsoft application that supports the account types you use, and add the delegated permission Files.ReadWrite.All.",
+      `Add this web redirect URI: ${copyable(`${origin}/auth/callback/microsoft`)}`,
+    ],
+    approvals: approvalForm("Excel", level),
+  });
 
-export const authorizationPage = (destination: string, cookies: string[]) => {
-  const url = escapeHtml(destination);
-
-  // Chromium's form-action policy also constrains form redirects. Complete the
-  // POST in a document, then navigate to the provider from that document.
-  return page(
-    "Continue to Excel",
-    `<meta http-equiv="refresh" content="0;url=${url}"><p>Opening Excel to connect your account. <a href="${url}">Continue</a></p>`,
-    cookies,
-  );
-};
+export const authorizationPage = (destination: string, cookies: string[]) =>
+  continuePage("Excel", destination, cookies);

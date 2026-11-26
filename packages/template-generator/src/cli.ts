@@ -189,6 +189,7 @@ const changes =
 // Runtime files the generated templates share, kept once in this package.
 const runtime = [
   "selection.ts",
+  "layout.ts",
   ...(changes ? ["approval.ts", "approval-page.ts", "approval-methods.ts"] : []),
   "input.ts",
   ...{
