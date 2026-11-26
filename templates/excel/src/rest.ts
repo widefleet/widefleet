@@ -11,6 +11,8 @@ export type RestOperation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
+  /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
+  optionalPathParameters?: string[] | undefined;
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -131,7 +133,23 @@ export const restRequest = (
   const values = z.record(z.string(), definedJson.optional()).parse(input);
   const pathNames = Object.values(operation.pathParameters);
 
+  // A server variable, such as the host of a customer's environment, is an
+  // input of every method. It holds a host or a name, never a path.
+  const serverNames = [...base.matchAll(/\{(\w+)\}/g)].map(([, name = ""]) => name);
+
+  const address = base.replace(/\{(\w+)\}/g, (_, name: string) => {
+    const value = z
+      .string()
+      .regex(/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$/)
+      .safeParse(own(values, name));
+
+    if (!value.success) throw new InvalidRequest(`${method} needs ${name}, a host name`);
+
+    return value.data;
+  });
+
   const known = new Set([
+    ...serverNames,
     ...pathNames,
     ...Object.keys(operation.queryParameters),
     ...Object.keys(operation.headerParameters),
@@ -205,7 +223,9 @@ export const restRequest = (
 
     // A later page of this operation: its path, with any parameter values and
     // query, so a link cannot read other data than the method does.
-    const relative = next.success && next.data.startsWith(base) ? next.data.slice(base.length) : "";
+    const relative =
+      next.success && next.data.startsWith(address) ? next.data.slice(address.length) : "";
+
     const page = /^[^?#]*/.exec(relative)?.[0] ?? "";
 
     if (!next.success || !pathPattern(operation.path).test(page))
@@ -214,8 +234,27 @@ export const restRequest = (
     return { url: next.data, init };
   }
 
+  // An OData function's optional parameter without a value is left out of the
+  // call, as in `f(a={a},b='{b}')` without `b`.
+  const called = operation.path
+    .replace(
+      /([(,])(\w+)=[^,()]*\{(\w+)\}[^,()]*(?=[,)])/g,
+      (piece, before: string, _, name: string) => {
+        const key = own(operation.pathParameters, name);
+
+        return operation.optionalPathParameters?.includes(name) &&
+          key !== undefined &&
+          own(values, key) === undefined
+          ? before
+          : piece;
+      },
+    )
+    .replace(/\(,+/g, "(")
+    .replace(/,+\)/g, ")")
+    .replace(/,{2,}/g, ",");
+
   // A value in quotes, as in OData's `search(q='{q}')`, doubles its own quotes.
-  const path = operation.path.replace(/('?)\{([^}]+)\}/g, (_, quote: string, name: string) => {
+  const path = called.replace(/('?)\{([^}]+)\}/g, (_, quote: string, name: string) => {
     const key = own(operation.pathParameters, name);
     const value = scalar.safeParse(key === undefined ? undefined : own(values, key));
 
@@ -228,7 +267,7 @@ export const restRequest = (
     return `${quote}${encodeURIComponent(quote ? text.replaceAll("'", "''") : text)}`;
   });
 
-  const url = new URL(path.replace(/^\//, ""), base);
+  const url = new URL(path.replace(/^\//, ""), address);
 
   for (const [key, [name, separator, required]] of Object.entries(operation.queryParameters)) {
     const value = own(values, key);
@@ -236,6 +275,13 @@ export const restRequest = (
     if (value === undefined && required) throw new InvalidRequest(`${method} needs ${key}`);
 
     if (value === undefined) continue;
+
+    // An OData parameter alias, such as `@Target`, carries any value as JSON.
+    if (name.startsWith("@")) {
+      url.searchParams.set(name, JSON.stringify(value));
+      continue;
+    }
+
     const list = Array.isArray(value) ? value : [value];
 
     const items = list.map((item) => {

@@ -32,9 +32,13 @@ describe("templates", () => {
   it.each(templates)("%s allows the origins it calls", (template) => {
     const backend = declared(template);
 
-    // The API address of generated REST templates and the endpoints connections fetch.
+    // The API address of generated REST templates and the endpoints
+    // connections fetch. An address whose host is a variable, such as a
+    // Dataverse environment, differs per customer and is allowed by them.
     const called = [
-      ...read(template, "src/schema.ts").matchAll(/export const base = "([^"]+)"/g),
+      ...[...read(template, "src/schema.ts").matchAll(/export const base = "([^"]+)"/g)].filter(
+        (match) => !match[1]?.includes("{"),
+      ),
       ...read(template, "src/connection.ts").matchAll(/fetch\("(https:\/\/[^"]+)"/g),
     ].map((match) => new URL(match[1] ?? "").origin);
 

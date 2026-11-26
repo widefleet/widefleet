@@ -69,7 +69,12 @@ const configuration = z.discriminatedUnion("kind", [
     kind: z.literal("openapi"),
     generator: z.object({
       kind: z.literal("openapi"),
-      source: z.url(),
+      // A CSDL source's address may hold variables, such as `{environment}`
+      // for a host that differs per customer, with their descriptions.
+      source: z.string().refine((url) => URL.canParse(url.replaceAll(/\{(\w+)\}/g, "$1")), {
+        error: "The source must be a URL",
+      }),
+      variables: z.record(z.string(), z.string()).optional(),
       service: service.extend({ typePrefix: z.string().optional() }),
     }),
     operations: z.record(
@@ -139,7 +144,7 @@ if (Array.isArray(source) && rules.kind !== "openapi")
   throw new Error(`A ${rules.kind} description cannot be published in parts`);
 
 const text = Array.isArray(source)
-  ? JSON.stringify(mergeDescriptions(source.map(parseDescription)))
+  ? JSON.stringify(mergeDescriptions(source.map((part) => parseDescription(part))))
   : source;
 
 // A file the description refers to: next to the source file when there is one
@@ -164,7 +169,11 @@ const generated =
     : rules.kind === "discovery"
       ? generateDiscovery(text, rules, rules.generator.service, header)
       : generateOpenapi(
-          await bundleReferences(parseDescription(text), generator.source, load),
+          await bundleReferences(
+            parseDescription(text, generator.source, rules.generator.variables),
+            generator.source,
+            load,
+          ),
           rules,
           rules.generator.service,
           header,

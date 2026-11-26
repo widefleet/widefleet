@@ -1,0 +1,8 @@
+{
+  // The provider origins this connector calls. Deploying requests them; the
+  // app's owner or an administrator allows them. Each Dataverse environment
+  // has its own origin, which an administrator allows once it is chosen.
+  "network": {
+    "backend": ["https://login.microsoftonline.com", "https://globaldisco.crm.dynamics.com"],
+  },
+}
