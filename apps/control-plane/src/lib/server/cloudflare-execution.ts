@@ -173,8 +173,6 @@ export const createCloudflareExecution = (
 
       if (options?.firstDeployment) input.firstDeployment = true;
 
-      if (options?.secrets) input.secrets = { ...options.secrets };
-
       if (actor)
         input.attribution = { userId: actor.id, organizationId: actor.application.organizationId };
 

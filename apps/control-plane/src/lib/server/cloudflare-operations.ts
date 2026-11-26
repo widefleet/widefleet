@@ -10,7 +10,6 @@ import type { Database } from "./database.ts";
 import { deploymentCommand } from "./deployment-execution.ts";
 import { InvalidOperation } from "./errors.ts";
 import { applyNetworkChange } from "./network.ts";
-import { saveAppSecrets } from "./app-secrets.ts";
 import { appAlreadyDeployed } from "./uploads.ts";
 import { runtimeReference } from "./runtime-releases.ts";
 import {
@@ -113,7 +112,7 @@ export const registerCloudflareOperation = (
             message: "Deployment artifact not found",
           });
 
-        const release = contract.artifact.parse({
+        contract.artifact.parse({
           id: artifact.id,
           appId: artifact.appId,
           metadata: artifact.metadata,
@@ -122,8 +121,8 @@ export const registerCloudflareOperation = (
         });
 
         // A template install claims the app's first deployment here, under the app
-        // lock, together with saving its secrets. A deployment recorded earlier
-        // rejects it, so its secrets never reach other code.
+        // lock. A deployment recorded earlier rejects it, so the install never
+        // replaces other code.
         if (command.firstDeployment) {
           const [deployed] = await transaction
             .select({ id: deployments.id })
@@ -134,13 +133,6 @@ export const registerCloudflareOperation = (
           if (deployed)
             return yield* new InvalidOperation({ code: "CONFLICT", message: appAlreadyDeployed });
         }
-
-        if (command.secrets)
-          await saveAppSecrets(transaction, app, command.secrets, {
-            hosted: true,
-            variables: release.metadata.bindings.filter((binding) => binding.type === "plain_text")
-              .length,
-          });
 
         await transaction
           .insert(deployments)
@@ -226,17 +218,12 @@ export const registerCloudflareOperation = (
         });
       }
 
-      // The history keeps the command without secret values, which the app now holds.
-      const recorded = { ...command };
-
-      if (recorded.kind === "deploy") delete recorded.secrets;
-
       const [record] = await transaction
         .insert(cloudflareOperations)
         .values({
           id: command.id,
           appId: app.id,
-          command: recorded,
+          command,
           targets,
           result,
           createdAt: new Date(command.createdAt),

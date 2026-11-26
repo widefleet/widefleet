@@ -52,7 +52,7 @@ export const createUploadService = (
   database: Database,
   storage: ArtifactStorage,
   configuration: Configuration,
-  execution?: HostedExecution,
+  execution?: Pick<HostedExecution, "deploy">,
   source?: SourceBackend,
 ) => ({
   start: (principal: Principal, appId: string, manifest: z.infer<typeof contract.assetManifest>) =>
@@ -135,7 +135,7 @@ export const createUploadService = (
     requestId: string,
     options: {
       firstDeployment?: boolean;
-      /** Encrypted secrets saved with this deployment, as a template install provides them. */
+      /** Encrypted secrets saved before this deployment, as a template install provides them. */
       secrets?: Readonly<Record<string, string>>;
     } = {},
   ) => {
@@ -161,19 +161,16 @@ export const createUploadService = (
 
         const variables = metadata.bindings.filter((binding) => binding.type === "plain_text");
 
-        // Secrets reach only the deployment they come with. An agent installation
-        // accepts that deployment in this transaction, under the app lock. Cloudflare
-        // accepts it later, so the hosted command carries them, and recording the
-        // accepted deployment saves them; see registerCloudflareOperation.
-        const record =
-          options.secrets && !execution
-            ? await saveAppSecrets(transaction, locked, options.secrets, {
-                hosted: false,
-                variables: variables.length,
-              })
-            : locked;
-
-        const supplied = execution ? Object.keys(options.secrets ?? {}) : [];
+        // A template install saves its secrets here, under the app lock. Cloudflare
+        // accepts the deployment later, so another deployment prepared meanwhile can
+        // still be accepted first and reject the install, while the app keeps the
+        // install's secrets. Whoever can deploy to the app can read them anyway.
+        const record = options.secrets
+          ? await saveAppSecrets(transaction, locked, options.secrets, {
+              hosted: Boolean(execution),
+              variables: variables.length,
+            })
+          : locked;
 
         if (
           metadata.source &&
@@ -202,10 +199,7 @@ export const createUploadService = (
         checkCapabilityNames(metadata, contract.capabilityGrants.parse(record.capabilities));
 
         if (
-          new Set([
-            ...Object.keys(z.record(z.string(), z.string()).parse(record.secrets)),
-            ...supplied,
-          ]).size +
+          Object.keys(z.record(z.string(), z.string()).parse(record.secrets)).length +
             variables.length >
           contract.appEnvironmentMaxBindings
         )
@@ -306,7 +300,6 @@ export const createUploadService = (
 
           return enqueueDeployment(transaction, record, artifactId, requestId, {
             hosted: Boolean(execution),
-            suppliedSecrets: supplied,
           });
         }
 
@@ -325,7 +318,6 @@ export const createUploadService = (
 
         return enqueueDeployment(transaction, record, artifactId, requestId, {
           hosted: Boolean(execution),
-          suppliedSecrets: supplied,
         });
       }),
     );
@@ -333,7 +325,6 @@ export const createUploadService = (
     if (prepared.isErr() || !execution) return prepared;
 
     return execution.deploy(prepared.value, requestId, false, principal, {
-      ...(options.secrets && { secrets: options.secrets }),
       ...(options.firstDeployment && { firstDeployment: true }),
     });
   },
