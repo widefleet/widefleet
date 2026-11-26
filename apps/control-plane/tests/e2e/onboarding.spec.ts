@@ -297,6 +297,25 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     const domains = operator.getByRole("list", { name: "Email domains" });
     await expect(domains.getByText("example.test", { exact: true })).toBeVisible();
 
+    // Sign-in sends the client secret to the issuer, so a changed issuer needs the secret again.
+    await operator.getByRole("button", { name: "Edit configuration", exact: true }).click();
+    const issuer = operator.getByLabel("Issuer URL");
+    const secret = operator.getByLabel("Client secret", { exact: true });
+    const savedIssuer = await issuer.inputValue();
+    await expect(secret).toHaveJSProperty("required", false);
+    await issuer.fill("https://login.example.test");
+    await expect(secret).toHaveJSProperty("required", true);
+    await expect(
+      operator.getByText("The issuer changed. Enter the client secret again.", { exact: true }),
+    ).toBeVisible();
+    await issuer.fill(savedIssuer);
+    await expect(secret).toHaveJSProperty("required", false);
+    await expect(
+      operator.getByText("Leave blank to keep the saved secret.", { exact: true }),
+    ).toBeVisible();
+    await operator.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(operator.getByRole("button", { name: "Edit configuration" })).toBeVisible();
+
     await operator.getByRole("button", { name: "Add domain", exact: true }).click();
     const dialog = operator.getByRole("dialog");
     await dialog.getByLabel("Domain", { exact: true }).fill("https://alias.example.test");

@@ -25,6 +25,9 @@
       ? "https://login.microsoftonline.com/TENANT-ID/v2.0"
       : "https://login.example.com",
   );
+
+  // Sign-in sends the client secret to the issuer, so a saved secret never follows a new one.
+  const issuerChanged = $derived(!creating && draft.sso.issuer !== view.sso?.issuer);
 </script>
 
 <div class="space-y-5">
@@ -75,11 +78,13 @@
       type="password"
       autocomplete="new-password"
       bind:value={draft.sso.oidcConfig.clientSecret}
-      required={creating}
+      required={creating || issuerChanged}
       aria-describedby={creating ? undefined : "sso-secret-help"}
     />
     {#if !creating}<p id="sso-secret-help" class="text-muted-foreground text-xs">
-        Leave blank to keep the saved secret.
+        {issuerChanged
+          ? "The issuer changed. Enter the client secret again."
+          : "Leave blank to keep the saved secret."}
       </p>{/if}
   </div>
   {#if creating}
