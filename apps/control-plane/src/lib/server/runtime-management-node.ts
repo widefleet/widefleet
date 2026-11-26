@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Configuration } from "./config.ts";
 
 export const runtimeManagementRequest = async (
-  configuration: Configuration,
+  configuration: Pick<Configuration, "PLATFORM_RUNTIME_DIRECTORY" | "PLATFORM_APP_RUNTIME_URL">,
   path: string,
   method: string,
   body?: string | null,

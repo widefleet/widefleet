@@ -1004,13 +1004,6 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.releases.rollback(context.principal, input)),
       ),
-    rekeyRuntime: write
-      .route({ method: "POST", path: "/runtime/rekey" })
-      .input(contract.runtimeRekeyInput)
-      .output(contract.runtimeRekeyPage)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.rekey.page(context.principal, input)),
-      ),
     runtimePackages: agent
       .route({ method: "GET", path: "/agent/jobs/{jobId}/packages" })
       .input(leaseInput)

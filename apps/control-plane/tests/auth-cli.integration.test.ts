@@ -31,7 +31,6 @@ import { createJobService } from "../src/lib/server/jobs.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
 import { createNetworkService } from "../src/lib/server/network.ts";
 import { createRuntimeReleaseService } from "../src/lib/server/runtime-releases.ts";
-import { createRuntimeRekey } from "../src/lib/server/runtime-rekey.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
@@ -171,7 +170,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         connections: createConnectionService(environment.database.db, storage),
         appSecrets: createAppSecrets(environment.database.db, environment.encryption),
         releases: createRuntimeReleaseService(database, storage),
-        rekey: createRuntimeRekey(),
         uploads: createUploadService(database, storage, configuration),
         templates: createTemplateInstalls(
           configuration,

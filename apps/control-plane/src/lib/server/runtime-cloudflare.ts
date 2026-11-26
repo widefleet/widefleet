@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { tracing } from "cloudflare:workers";
 import { userConnectionControlPath } from "@platform/contracts";
-import { runtimeRekeyPath } from "./runtime-rekey.ts";
 import { createProductAnalytics } from "./analytics.ts";
 import { getRequestEvent } from "$app/server";
 import { sveltekitCookies } from "better-auth/svelte-kit";
@@ -115,15 +114,6 @@ const createSharedRuntime = (
         // SAFETY: Both environments provide the Web AbortSignal implementation.
         signal: (signal ??
           AbortSignal.timeout(15_000)) as import("@cloudflare/workers-types").AbortSignal,
-      });
-    },
-    runtimeRekeyRequest: async (input) => {
-      if (!bindings.APP_RUNTIME) throw new Error("App runtime management binding is missing");
-
-      return bindings.APP_RUNTIME.fetch(`https://runtime.invalid${runtimeRekeyPath}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
       });
     },
     discoveryTransport: "cloudflare",

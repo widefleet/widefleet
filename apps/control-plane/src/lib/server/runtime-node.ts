@@ -1,6 +1,5 @@
 import { userConnectionControlPath } from "@platform/contracts";
 import { runtimeManagementRequest } from "./runtime-management-node.ts";
-import { runtimeRekeyPath } from "./runtime-rekey.ts";
 import { getRequestEvent } from "$app/server";
 import { sveltekitCookies } from "better-auth/svelte-kit";
 import { initializeRuntime } from "./runtime-initialization.ts";
@@ -56,8 +55,6 @@ const startRuntime = async () => {
         JSON.stringify(input),
         signal,
       ),
-    runtimeRekeyRequest: (input) =>
-      runtimeManagementRequest(configuration, runtimeRekeyPath, "POST", JSON.stringify(input)),
     authCookies: sveltekitCookies(getRequestEvent),
     bundledRuntime: loadBundledRuntime,
   };

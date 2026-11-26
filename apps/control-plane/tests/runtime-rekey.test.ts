@@ -1,49 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
-import { createRuntimeRekey } from "../src/lib/server/runtime-rekey.ts";
-import type { Principal } from "../src/lib/server/identity.ts";
+import { rekeyRuntime } from "../src/lib/server/runtime-rekey.ts";
 
-const principal = (admin: boolean): Principal => ({
-  id: "owner",
-  name: "Owner",
-  email: "owner@example.test",
-  role: "owner",
-  admin,
-  creator: true,
-  application: { organizationId: "widefleet", admin: true },
+const page = (counts: { rewritten?: number; current?: number }, cursor: string | null) => ({
+  result: { current: 0, rewritten: 0, unreadable: 0, conflicts: 0, ...counts, cursor },
 });
 
-const page = { current: 1, rewritten: 2, unreadable: 0, conflicts: 0, cursor: "next" };
-
 describe("runtime storage rewrite", () => {
-  it("forwards one page for installation administrators", async () => {
-    const request = vi.fn(async () => Response.json({ result: page }));
+  it("drives every page and adds up the counts", async () => {
+    const pages = [page({ rewritten: 3 }, "next"), page({ rewritten: 1, current: 2 }, null)];
+    const request = vi.fn(async () => Response.json(pages.shift()));
 
-    expect(
-      (await createRuntimeRekey(request).page(principal(true), { cursor: "start" })).unwrap(),
-    ).toEqual(page);
-    expect(request).toHaveBeenCalledWith({ cursor: "start" });
-  });
-
-  it("rejects other members before reaching the runtime", async () => {
-    const request = vi.fn(async () => Response.json({ result: page }));
-    const result = await createRuntimeRekey(request).page(principal(false), {});
-
-    expect(result.isErr() && result.error).toMatchObject({ code: "FORBIDDEN" });
-    expect(request).not.toHaveBeenCalled();
+    expect(await rekeyRuntime(request)).toEqual({
+      current: 2,
+      rewritten: 4,
+      unreadable: 0,
+      conflicts: 0,
+    });
+    expect(request.mock.calls).toEqual([["{}"], ['{"cursor":"next"}']]);
   });
 
   it("reports a runtime that cannot rewrite its storage", async () => {
-    const failed = await createRuntimeRekey(async () => new Response(null, { status: 503 })).page(
-      principal(true),
-      {},
-    );
-
-    expect(failed.isErr() && failed.error.message).toBe(
+    await expect(rekeyRuntime(async () => new Response(null, { status: 503 }))).rejects.toThrow(
       "The app runtime could not rewrite its storage (status 503)",
     );
-
-    const missing = await createRuntimeRekey().page(principal(true), {});
-
-    expect(missing.isErr() && missing.error).toMatchObject({ code: "CONFLICT" });
   });
 });

@@ -33,61 +33,6 @@ enum Command {
         #[arg(long)]
         no_wait: bool,
     },
-    /// Seal stored runtime values again under the active version of the runtime keyring.
-    Rekey,
-}
-
-#[derive(Default, Deserialize, Serialize)]
-struct RekeyCounts {
-    current: u64,
-    rewritten: u64,
-    unreadable: u64,
-    conflicts: u64,
-}
-
-#[derive(Deserialize)]
-struct RekeyPage {
-    #[serde(flatten)]
-    counts: RekeyCounts,
-    cursor: Option<String>,
-}
-
-// One pass opens every stored value and seals each one found under an earlier
-// version again under the active one. A pass without unreadable values or
-// conflicts leaves every value under the active version, so earlier versions
-// can be removed from the keyring.
-async fn rekey(api: &Api, credentials: &crate::auth::Credentials) -> Result<()> {
-    let mut counts = RekeyCounts::default();
-    let mut cursor: Option<String> = None;
-    loop {
-        let token = crate::auth::access_token(api, credentials).await?;
-        let body = match &cursor {
-            Some(cursor) => value!({ "cursor": cursor }),
-            None => value!({}),
-        };
-        let page: RekeyPage = json(
-            api.authenticated(Method::POST, "/runtime/rekey", &token)
-                .json(&body)
-                .send()
-                .await?,
-        )
-        .await?;
-        counts.current += page.counts.current;
-        counts.rewritten += page.counts.rewritten;
-        counts.unreadable += page.counts.unreadable;
-        counts.conflicts += page.counts.conflicts;
-        cursor = page.cursor;
-        if cursor.is_none() {
-            break;
-        }
-    }
-    super::print_json(&counts)?;
-    if counts.unreadable > 0 || counts.conflicts > 0 {
-        return Err(Error::invalid(
-            "Stored runtime values are unreadable or changed during the rewrite. Keep earlier key versions and run widefleet runtime rekey again".into(),
-        ));
-    }
-    Ok(())
 }
 
 #[derive(Deserialize, Serialize)]
@@ -221,7 +166,6 @@ pub async fn run(
 ) -> Result<()> {
     let (mut current, no_wait) = match options.command {
         Command::Status => return super::print_json(&status(api, token).await?),
-        Command::Rekey => return rekey(api, credentials).await,
         Command::Update { version, no_wait } => {
             let release = download(&version).await?;
             let token = crate::auth::access_token(api, credentials).await?;

@@ -3,7 +3,6 @@ import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { createRuntimeReleaseService } from "../src/lib/server/runtime-releases.ts";
-import { createRuntimeRekey } from "../src/lib/server/runtime-rekey.ts";
 import { createDirectory } from "../src/lib/server/directory.ts";
 import * as contract from "@platform/contracts";
 import { createHash } from "node:crypto";
@@ -213,7 +212,6 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         identity: createIdentityService(environment.auth, environment.database.db, configuration),
         jobs: createJobService(environment.database.db, storage, environment.encryption),
         releases: createRuntimeReleaseService(environment.database.db, storage),
-        rekey: createRuntimeRekey(),
         uploads: createUploadService(environment.database.db, storage, configuration),
         templates: createTemplateInstalls(
           configuration,
