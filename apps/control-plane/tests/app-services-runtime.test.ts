@@ -1573,6 +1573,16 @@ export default { async fetch(request, env, ctx) {
       await request("/signal", { key: "release" });
       expect(await (await pending).json()).toEqual({ version: "v1", secret: "synthetic-one" });
     });
+    // A control plane that lost its revision counter, for example after a database restore,
+    // prepares a used revision again. Its values are current and replace the earlier ones.
+    it("replaces the secrets of a revision that is prepared again", async () => {
+      await secrets(2, "synthetic-restored");
+      expect(await (await request("/read")).json()).toEqual({
+        version: "v2",
+        secret: "synthetic-restored",
+      });
+      expect(await (await request("/stored")).text()).not.toContain("fingerprint");
+    });
     it("blocks cached service invocations while the organization is suspended or unreadable", async () => {
       expect((await request("/read")).status).toBe(200);
 
