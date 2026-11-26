@@ -2,7 +2,7 @@ import { base64url } from "jose";
 import type { Keyring } from "@platform/contracts/keyring";
 
 // Temporary. Values written before the runtime keyring used its active key
-// version as a raw key. `widefleet runtime rekey` rewrites stored values in the
+// version as a raw key. Each runtime deployment rewrites stored values in the
 // keyring format; remove this module once storage is rewritten.
 
 const encoder = new TextEncoder();

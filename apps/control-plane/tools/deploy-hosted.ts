@@ -16,6 +16,7 @@ import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-conf
 import { socialSignInConfiguration } from "../src/lib/server/social-sign-in.ts";
 import { createCloudflareProvisioner } from "../src/lib/server/cloudflare-provisioning.ts";
 import {
+  readCloudflareRuntimeKeyVersion,
   readCloudflareRuntimeVersion,
   validateCloudflareRuntime,
 } from "../src/lib/server/cloudflare-runtime-package.ts";
@@ -23,6 +24,7 @@ import { createDatabase } from "../src/lib/server/database.ts";
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeInstallation, readInstallation } from "../src/lib/server/installation-store.ts";
 import { StorageUnavailable } from "../src/lib/server/errors.ts";
+import { rekeyRuntime, runtimeRekeyPath } from "../src/lib/server/runtime-rekey.ts";
 import {
   hostedConfigurations,
   hostedResourceIds,
@@ -93,7 +95,7 @@ const secrets = z
   .parse(process.env);
 
 // Validated with the rest of the configuration, before any change.
-parseKeyring(secrets.WIDEFLEET_SECRETS_KEYS, "WIDEFLEET_SECRETS_KEYS");
+const [runtimeKey] = parseKeyring(secrets.WIDEFLEET_SECRETS_KEYS, "WIDEFLEET_SECRETS_KEYS");
 
 // A trusted installation may supply additional Wrangler configuration.
 const runtimeOverrides = z
@@ -347,6 +349,11 @@ try {
         async () => readCloudflareRuntimeVersion(await platform()),
         release.version,
       );
+      // A new keyring can keep the release, so its active key marks the new version too.
+      await waitForRuntimeVersion(
+        async () => readCloudflareRuntimeKeyVersion(await platform()),
+        runtimeKey.id,
+      );
     },
   );
 
@@ -418,6 +425,31 @@ try {
     controlSecrets,
   ]);
   console.info(`Hosted installation deployed: ${installation.platformUrl}`);
+
+  // Seals values under earlier key versions again under the active one. It runs
+  // last, so runtime instances with the earlier keyring have stopped writing.
+  const runtime = (await platform()).APP_RUNTIME;
+
+  if (!runtime) throw new Error("App runtime is not configured");
+
+  const storage = await rekeyRuntime((body) =>
+    runtime.fetch(`https://runtime.internal${runtimeRekeyPath}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    }),
+  );
+
+  console.info(
+    `Runtime storage: ${storage.current} current, ${storage.rewritten} rewritten, ${storage.unreadable} unreadable, ${storage.conflicts} conflicts`,
+  );
+
+  if (storage.unreadable > 0 || storage.conflicts > 0) {
+    console.error(
+      "Some runtime values are unreadable or changed during the rewrite. Keep earlier key versions and deploy again.",
+    );
+    process.exitCode = 1;
+  }
 } finally {
   try {
     await proxy?.dispose();

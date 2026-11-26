@@ -327,6 +327,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
   it("uses the private service binding without a token and does not forward app requests", async () => {
     expect(await json("/.well-known/widefleet/runtime")).toEqual({
       runtimeVersion: release.version,
+      keyVersion: "test",
     });
     expect(await json("/.well-known/widefleet/ready")).toMatchObject({ version: app.version });
 
@@ -1407,7 +1408,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         await writeFile(join(directory, "runtime.js"), source);
         worker = await start();
 
-        expect(await json("/.well-known/widefleet/runtime")).toEqual({ runtimeVersion: version });
+        expect(await json("/.well-known/widefleet/runtime")).toEqual({
+          runtimeVersion: version,
+          keyVersion: "test",
+        });
         expect(
           await Promise.all(
             [hostname, previewHostname].map((host) => json("/resources", undefined, host)),
