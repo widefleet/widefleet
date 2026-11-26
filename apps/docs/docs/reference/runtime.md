@@ -35,14 +35,14 @@ The runtime encrypts what it stores itself: app secret snapshots, the keys behin
 Each key derives a separate key for every purpose with HKDF-SHA256. Every value names its key and purpose and is bound to the object or flow it belongs to. To rotate the keyring:
 
 1. Add a new key at the front of the keyring and keep the earlier keys after it. Deploy.
-2. Run `widefleet runtime rekey` with an administrator login. It encrypts every stored value again with the active key, page by page, and repeats until a complete pass changes nothing. It prints the count of each pass and exits with a nonzero status while values remain under earlier keys, cannot be read, or changed during the last pass.
+2. Run `widefleet runtime rekey` with an administrator login. It encrypts every stored value again with the active key, page by page, and prints the counts. It exits with a nonzero status if a value cannot be read or changed during the run; run it again then.
 3. Remove the earlier keys and deploy again.
 
 Managed OAuth tokens and authorization state are accepted only under the active key. Once a new key is active, clients authorize again.
 
 Rewriting does not replace a key or secret that may have been exposed. If a runtime key leaked together with read access to runtime storage, also replace the affected app secrets at their providers, revoke provider tokens, and replace the app keys and workload signing keys.
 
-Runtimes before the keyring used a single key, `WIDEFLEET_SECRETS_KEY`, 64 hexadecimal characters. Upgrade a hosted installation with a keyring whose only key holds the same 32 bytes in unpadded base64url, then run `widefleet runtime rekey` before rotating. Self-hosted installations from before the keyring are not upgraded in place: their runtime storage is encrypted with the earlier key, which the agent no longer provides. Set them up anew with matching agent and runtime releases.
+Runtimes before the keyring used a single key, `WIDEFLEET_SECRETS_KEY`, 64 hexadecimal characters. Upgrade a hosted installation with a keyring whose only key holds the same 32 bytes in unpadded base64url, then run `widefleet runtime rekey` before rotating. Deployments keep secrets they do not name, so delete the earlier `WIDEFLEET_SECRETS_KEY` secret from the runtime Worker once with `wrangler secret delete`. Self-hosted installations from before the keyring are not upgraded in place: their runtime storage is encrypted with the earlier key, which the agent no longer provides. Set them up anew with matching agent and runtime releases.
 
 ## Activation and recovery
 
