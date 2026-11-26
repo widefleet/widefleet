@@ -163,6 +163,33 @@ const organizationSession = async (browser: Browser) => {
   return { person, alpha, beta, context };
 };
 
+test("confirms browser worker access before changing organization security", async ({
+  browser,
+}) => {
+  const { alpha, context } = await organizationSession(browser);
+  try {
+    const page = await context.newPage();
+    await page.goto(`/${alpha}/settings/security`);
+    await page.waitForLoadState("networkidle");
+    const enable = page.getByRole("button", { name: "Enable…" });
+    await enable.click();
+    const dialog = page.getByRole("dialog", { name: "Allow browser workers?" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(enable).toBeFocused();
+    await enable.press("Enter");
+    await dialog.getByRole("button", { name: "Allow browser workers" }).click();
+    const disable = page.getByRole("button", { name: "Disable", exact: true });
+    await expect(disable).toBeEnabled();
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await disable.click();
+    await expect(enable).toBeEnabled();
+  } finally {
+    await context.close();
+  }
+});
+
 test("opens organization settings without installation reporting privileges", async ({
   browser,
 }) => {
