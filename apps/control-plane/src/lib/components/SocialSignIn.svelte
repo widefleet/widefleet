@@ -38,9 +38,12 @@
       const result = await authClient.signIn.social({
         provider: `widefleet-${provider}`,
         callbackURL: next,
-        newUserCallbackURL: register
-          ? next
-          : `/organizations?${new URLSearchParams({ next: next === "/" ? workspacePath(organizationPlaceholder, "/apps") : next })}`,
+        // A CLI login finds its installation from the account's address, so a new account
+        // continues there as after an email sign-in, before any Cloud onboarding.
+        newUserCallbackURL:
+          register || next.startsWith("/cli-login?")
+            ? next
+            : `/organizations?${new URLSearchParams({ next: next === "/" ? workspacePath(organizationPlaceholder, "/apps") : next })}`,
         errorCallbackURL: `/sign-in/connect?${new URLSearchParams({ provider, next })}`,
       });
 

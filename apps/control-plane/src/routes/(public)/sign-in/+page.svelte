@@ -61,7 +61,7 @@
         callbackURL: data.next,
       };
 
-      const hint = data.continueAs ?? (data.autoStart ? data.email : null);
+      const hint = data.continueAs ?? (data.email || null);
 
       if (hint) input.loginHint = hint;
 
