@@ -31,6 +31,7 @@ export const authConfiguration = z
     // Company email domains the organization's SSO admits, for MCP organization discovery.
     emailDomains: z.array(companyDomain).max(maxCompanyDomains).optional(),
     // Omitted unless configured, so existing publications keep their revision.
+    allowBrowserWorkers: z.boolean().optional(),
     embeddingOrigins: embeddingOrigins.min(1).optional(),
   })
   .superRefine((configuration, context) => {

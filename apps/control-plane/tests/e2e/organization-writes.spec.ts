@@ -163,6 +163,76 @@ const organizationSession = async (browser: Browser) => {
   return { person, alpha, beta, context };
 };
 
+test("confirms browser worker access before changing organization security", async ({
+  browser,
+}) => {
+  const { alpha, context } = await organizationSession(browser);
+
+  try {
+    const page = await context.newPage();
+    await page.goto(`/${alpha}/settings/security`);
+    await page.waitForLoadState("networkidle");
+    const control = page.getByRole("switch", { name: "Browser workers" });
+    await expect(control).not.toBeChecked();
+    await page.route("**/*", (route) =>
+      route.request().method() === "POST" ? route.abort("failed") : route.continue(),
+    );
+    await control.click();
+    await page.getByRole("button", { name: "Allow browser workers", exact: true }).click();
+    await expect(control).not.toBeChecked();
+    await expect(page.getByText("Couldn’t save browser worker settings. Try again.")).toBeVisible();
+    await page.unrouteAll({ behavior: "wait" });
+    await control.click();
+    const dialog = page.getByRole("dialog", { name: "Allow browser workers?" });
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(control).toBeFocused();
+    await expect(control).not.toBeChecked();
+    await control.press("Space");
+    await dialog.getByRole("button", { name: "Allow browser workers" }).click();
+    await expect(control).toBeChecked();
+    await expect(control).toBeEnabled();
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(control).toBeChecked();
+    environment.authControl.available(false);
+    await control.click();
+    await expect(control).not.toBeChecked();
+    await expect(control).toBeEnabled();
+    await expect(page.getByText(/Widefleet has not confirmed/)).toBeVisible();
+  } finally {
+    environment.authControl.available(true);
+    await context.close();
+  }
+});
+
+test("explains a locked browser worker switch on hover and keyboard focus", async ({ browser }) => {
+  const { alpha, context } = await organizationSession(browser);
+
+  try {
+    const page = await context.newPage();
+    await page.goto(`/${alpha}/settings/administration`);
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: "Manage settings externally" }).click();
+    await expect(page.getByRole("button", { name: "Enable browser editing" })).toBeVisible();
+    await page.goto(`/${alpha}/settings/security`);
+    await page.waitForLoadState("networkidle");
+    const locked = page.getByRole("group", { name: "Browser workers, externally managed" });
+    const tooltip = page.getByRole("tooltip");
+    await expect(locked.getByRole("switch")).toBeDisabled();
+    await expect(tooltip).toBeHidden();
+    await locked.hover();
+    await expect(tooltip).toHaveText("Managed through the API or CLI.");
+    await page.mouse.move(0, 0);
+    await expect(tooltip).toBeHidden();
+    await locked.focus();
+    await expect(tooltip).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(tooltip).toBeHidden();
+  } finally {
+    await context.close();
+  }
+});
+
 test("opens organization settings without installation reporting privileges", async ({
   browser,
 }) => {

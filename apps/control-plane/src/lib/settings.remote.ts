@@ -84,6 +84,22 @@ export const setExternalManagement = command(
   },
 );
 
+export const setBrowserWorkers = command(
+  organizationSelection.extend({ enabled: z.boolean() }),
+  async ({ enabled, organizationId }) => {
+    const { runtime, principal } = await commandContext({ organizationId });
+
+    const result = await remoteOperation(() =>
+      runtime.settings.setBrowserWorkers(principal, enabled, true),
+    );
+
+    getSettingsActivation({ organizationId }).set(result.activation);
+    await getSettings({ organizationId }).refresh();
+
+    return result.error;
+  },
+);
+
 export const setDomainSso = command(
   organizationSelection.extend({ enabled: z.boolean() }),
   async ({ enabled, organizationId }) => {

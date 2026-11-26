@@ -153,6 +153,12 @@ describe("Platform setup and managed settings", () => {
 
     await expect(environment.settings.read(viewer)).rejects.toMatchObject({ code: "FORBIDDEN" });
     await environment.settings.setExternalManagement(principal(), true);
+    await expect(environment.settings.setBrowserWorkers(viewer, true, false)).rejects.toMatchObject(
+      { code: "FORBIDDEN" },
+    );
+    await expect(
+      environment.settings.setBrowserWorkers(principal(), true, true),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const current = await input();
     await expect(
       environment.settings.update(
@@ -194,6 +200,42 @@ describe("Platform setup and managed settings", () => {
 
     expect(bundle.configuration?.clientId).toBe("replacement-app-client");
     expect(bundle.configuration?.clientSecret).toBe("rotated-app-secret");
+  });
+
+  it("publishes and revokes the organization browser worker permission", async () => {
+    await environment.settings.setBrowserWorkers(principal(), true, true);
+    expect(environment.authControl.read().configuration?.allowBrowserWorkers).toBe(true);
+
+    const current = await input();
+    await environment.settings.update(
+      principal(),
+      { ...current, allowBrowserWorkers: undefined, acknowledgeRestart: false },
+      false,
+      await organizationCredential(environment, principal()),
+    );
+    expect(environment.authControl.read().configuration?.allowBrowserWorkers).toBe(true);
+    await environment.settings.setBrowserWorkers(principal(), false, true);
+    expect(environment.authControl.read().configuration).not.toHaveProperty("allowBrowserWorkers");
+  });
+
+  it("reports a saved disable that has not reached the runtime and permits retry", async () => {
+    await environment.settings.setBrowserWorkers(principal(), true, true);
+    environment.authControl.available(false);
+
+    try {
+      const saved = await environment.settings.setBrowserWorkers(principal(), false, true);
+      expect(saved.settings.allowBrowserWorkers).toBe(false);
+      expect(saved.error).toBeTruthy();
+      expect(saved.activation.state).not.toBe("active");
+      expect(environment.authControl.read().configuration?.allowBrowserWorkers).toBe(true);
+    } finally {
+      environment.authControl.available(true);
+    }
+
+    const retried = await environment.settings.setBrowserWorkers(principal(), false, true);
+    expect(retried.error).toBeNull();
+    expect(retried.activation.state).toBe("active");
+    expect(environment.authControl.read().configuration).not.toHaveProperty("allowBrowserWorkers");
   });
 
   it("publishes embedding origins and keeps them when a settings file omits them", async () => {

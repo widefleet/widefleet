@@ -167,6 +167,7 @@ const createOrganizationSettingsService = (
         if (appSignIn) {
           try {
             if (identity) {
+              identity.allowBrowserWorkers = current.state.settings.allowBrowserWorkers;
               const secret = identity.management.clientSecret;
 
               const [company] = await transaction
@@ -449,6 +450,9 @@ const createOrganizationSettingsService = (
           settings: installationSettings.parse({
             directory,
             externallyManaged: next.externallyManaged,
+            allowBrowserWorkers:
+              next.allowBrowserWorkers ??
+              installationSettings.parse(current?.settings ?? {}).allowBrowserWorkers,
             embeddingOrigins:
               next.embeddingOrigins ??
               installationSettings.parse(current?.settings ?? {}).embeddingOrigins,
@@ -507,6 +511,29 @@ const createOrganizationSettingsService = (
         throw new InvalidOperation({ code: "CONFLICT", message: plan.message });
 
       return save(next, credential);
+    },
+    setBrowserWorkers: async (principal: Principal, enabled: boolean, browser: boolean) => {
+      requireAdmin(principal, organizationId);
+      await database.transaction(async (transaction) => {
+        await lockSettings(transaction);
+
+        if (
+          browser &&
+          (await readOrganizationSettings(transaction, organizationId)).externallyManaged
+        )
+          throw new InvalidOperation({
+            code: "FORBIDDEN",
+            message: "Configuration is externally managed.",
+          });
+        await transaction
+          .update(organizationSettings)
+          .set({
+            settings: sql`jsonb_set(${organizationSettings.settings}, '{allowBrowserWorkers}', to_jsonb(${enabled}::boolean))`,
+          })
+          .where(eq(organizationSettings.organizationId, organizationId));
+      });
+
+      return inspect(true);
     },
     setExternalManagement: async (principal: Principal, enabled: boolean) => {
       requireAdmin(principal, organizationId);
@@ -735,6 +762,8 @@ export const createSettingsService = (
       browser: boolean,
       credential: OrganizationCredential,
     ) => scoped(principal.application.organizationId).update(principal, input, browser, credential),
+    setBrowserWorkers: (principal: Principal, enabled: boolean, browser: boolean) =>
+      scoped(principal.application.organizationId).setBrowserWorkers(principal, enabled, browser),
     setExternalManagement: (principal: Principal, enabled: boolean) =>
       scoped(principal.application.organizationId).setExternalManagement(principal, enabled),
     domainVerification: (principal: Principal) =>
