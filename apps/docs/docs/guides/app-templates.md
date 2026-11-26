@@ -114,10 +114,10 @@ is sent.
 Reading never asks. Methods that change data ask the person first, according to
 their approval level on the app's page:
 
-- **Ask before every change**
-- **Ask before changing, deleting or sending** (default): creating new items,
-  such as a draft or a label, runs at once.
-- **Never ask**
+- **Always ask**: creating, changing, deleting and sending ask first.
+- **Ask except for new items** (default): new items, such as a draft or a label,
+  are created at once. Changing, deleting and sending ask first.
+- **Never ask**: every change runs at once.
 
 A method that asks returns `input_required`. MCP clients show the question to the
 person. A calling app shows it itself and answers with `withInput`, as described
