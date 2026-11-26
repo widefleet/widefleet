@@ -31,7 +31,7 @@ export const connectionPage = (
       : `<section><h2>Account</h2>
 <div class="card row"><div class="status">${key.status === "connected" ? '<span class="dot" aria-hidden="true"></span>' : ""}<div><strong>${escapeHtml((key.status === "connected" && key.displayName) || "Garmin account")}</strong><p class="muted small">${key.status === "connected" ? `Connected with the key saved on ${day(key.savedAt)}` : `The key saved on ${day(key.savedAt)} no longer works`}</p></div></div>
 <form method="post" action="/disconnect"><button class="ghost">Disconnect</button></form></div>
-<p class="muted small note">Disconnecting removes your key from this app. The key keeps working until you delete it on Garmin Connect.</p></section>`;
+${key.status === "connected" ? '<p class="muted small note">Disconnecting removes your key from this app. The key keeps working until you delete it on Garmin Connect.</p>' : ""}</section>`;
 
   return page(
     "Garmin Connect",
