@@ -38,12 +38,14 @@ export const download = () => {
   throw new Error("Save an environment's $metadata and pass it as the source file");
 };
 
-// OData's request headers, which the CSDL does not describe.
+// OData's and Dataverse's request headers and query options, which the CSDL
+// does not describe. Dataverse checks each against the user's privileges, such
+// as `prvActOnBehalfOfAnotherUser` for acting for another user.
 const prefer = {
   prefer: {
     name: "Prefer",
     description:
-      'Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values or `odata.maxpagesize=50`.',
+      'Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.',
   },
 };
 
@@ -59,21 +61,267 @@ const conditions = {
   },
 };
 
-export const operations = {
-  // Rows of any table
-  "entitySet.list": { name: "listRows", headers: prefer },
-  "entitySet.get": { name: "getRow", headers: prefer },
-  "entitySet.create": { name: "createRow", change: "create", headers: prefer },
+const unchanged = {
+  ifNoneMatch: {
+    name: "If-None-Match",
+    description:
+      "The row's `@odata.etag` to answer `not_modified` when the row has not changed since.",
+  },
+};
+
+// Every request can act for another user.
+const impersonation = {
+  callerObjectId: {
+    name: "CallerObjectId",
+    description: "The Microsoft Entra object ID of a user to act for.",
+  },
+  mscrmCallerId: {
+    name: "MSCRMCallerID",
+    description: "The `systemuserid` of a user to act for.",
+  },
+};
+
+// Every change can skip custom business logic and flows.
+const bypass = {
+  bypassBusinessLogicExecution: {
+    name: "MSCRM.BypassBusinessLogicExecution",
+    description:
+      "`CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.",
+  },
+  bypassBusinessLogicExecutionStepIds: {
+    name: "MSCRM.BypassBusinessLogicExecutionStepIds",
+    description: "The IDs of plug-in steps to skip, separated by commas.",
+  },
+  bypassCustomPluginExecution: {
+    name: "MSCRM.BypassCustomPluginExecution",
+    description: "`true` to skip custom synchronous plug-ins.",
+  },
+  suppressCallbackRegistrationExpanderJob: {
+    name: "MSCRM.SuppressCallbackRegistrationExpanderJob",
+    description: "`true` to not trigger Power Automate flows.",
+  },
+};
+
+// Every read can skip the cache of definitions and permissions, and read an
+// elastic table's latest writes.
+const consistency = {
+  consistency: {
+    name: "Consistency",
+    description:
+      "`Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.",
+  },
+  sessionToken: {
+    name: "MSCRM.SessionToken",
+    description:
+      "An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.",
+  },
+};
+
+// A plug-in reads the tag of the request that runs it.
+const tag = {
+  name: "tag",
+  in: "query",
+  description: "A value plug-ins read as the `tag` shared variable.",
+  schema: { type: "string" },
+};
+
+const unmasked = [
+  {
+    name: "UnMaskedData",
+    in: "query",
+    description: "`true` to read masked columns unmasked, which needs the column's privilege.",
+    schema: { type: "boolean" },
+  },
+];
+
+// Definitions carry labels in every installed language unless limited.
+const labelLanguages = {
+  name: "LabelLanguages",
+  in: "query",
+  description: "The language codes of the labels to return, such as `1033`, for definitions.",
+  schema: { type: "string" },
+};
+
+const partition = {
+  name: "partitionId",
+  in: "query",
+  description: "The `partitionid` of an elastic table's row.",
+  schema: { type: "string" },
+};
+
+// A table, column or other solution component a person creates for a company
+// app belongs in that app's solution.
+const solution = {
+  solutionUniqueName: {
+    name: "MSCRM.SolutionUniqueName",
+    description:
+      "The unique name of the unmanaged solution to add a new table, column, relationship or other solution component to.",
+  },
+};
+
+// Replacing a definition without merging drops the labels of other languages.
+const mergeLabels = {
+  mergeLabels: {
+    name: "MSCRM.MergeLabels",
+    description:
+      "`true` to keep the labels of languages the body leaves out, which replacing a definition otherwise removes.",
+  },
+};
+
+const duplicateDetection = {
+  suppressDuplicateDetection: {
+    name: "MSCRM.SuppressDuplicateDetection",
+    description:
+      "`false` to check the row against the environment's duplicate detection rules and refuse a duplicate.",
+  },
+};
+
+// A person's saved views, and the system views of a table.
+const views = [
+  {
+    name: "savedQuery",
+    in: "query",
+    description: "The ID of a system view to run, from `savedqueries`.",
+    schema: { type: "string", format: "uuid" },
+  },
+  {
+    name: "userQuery",
+    in: "query",
+    description: "The ID of a view the person saved, from `userqueries`.",
+    schema: { type: "string", format: "uuid" },
+  },
+];
+
+const offered = {
+  // The service and its rows of any table
+  "service.get": { name: "getServiceDocument" },
+  "metadata.get": {
+    name: "getMetadata",
+    parameters: [
+      {
+        name: "annotations",
+        in: "query",
+        description: "`true` to include annotations, such as descriptions of tables.",
+        schema: { type: "boolean" },
+      },
+    ],
+  },
+  "entitySet.list": { name: "listRows", parameters: [...views, ...unmasked, labelLanguages] },
+  "entitySet.count": { name: "countRows" },
+  "entitySet.get": {
+    name: "getRow",
+    headers: unchanged,
+    parameters: [...unmasked, partition, labelLanguages],
+  },
+  "entitySet.create": {
+    name: "createRow",
+    change: "create",
+    headers: { ...solution, ...duplicateDetection },
+  },
   "entitySet.update": {
     name: "updateRow",
     change: "update",
-    headers: { ...prefer, ...conditions },
+    headers: { ...conditions, ...solution, ...duplicateDetection },
   },
-  "entitySet.delete": { name: "deleteRow", change: "delete" },
+  "entitySet.replace": {
+    name: "replaceRow",
+    change: "update",
+    headers: { ...mergeLabels, ...solution },
+  },
+  "entitySet.delete": { name: "deleteRow", change: "delete", parameters: [partition] },
+  "entitySet.getProperty": { name: "getColumn" },
+  "entitySet.setProperty": { name: "setColumn", change: "update" },
+  "entitySet.deleteProperty": { name: "deleteColumn", change: "delete" },
+  "entitySet.getPropertyValue": {
+    name: "getColumnContent",
+    headers: {
+      range: {
+        name: "Range",
+        description: "Bytes of the content to read, such as `bytes=0-4194303`, for large files.",
+      },
+    },
+    parameters: [
+      {
+        name: "size",
+        in: "query",
+        description: "`full` for an image column's full-size image instead of its thumbnail.",
+        schema: { type: "string" },
+      },
+    ],
+  },
+  "entitySet.uploadProperty": {
+    name: "uploadColumnContent",
+    change: "update",
+    headers: {
+      transferMode: {
+        name: "x-ms-transfer-mode",
+        description:
+          "`chunked`, without a body, to start an upload in chunks; the answer's `Location` header is the address of the chunks and `x-ms-chunk-size` their size.",
+      },
+      fileName: {
+        name: "x-ms-file-name",
+        description:
+          "The file's name, as the chunks of an upload send it; names that are not ASCII go in the `x-ms-file-name` query parameter.",
+      },
+      contentRange: {
+        name: "Content-Range",
+        description: "The bytes a chunk holds, such as `bytes 0-4194303/25870370`.",
+      },
+    },
+    parameters: [
+      {
+        name: "x-ms-file-name",
+        in: "query",
+        description: "The file's name.",
+        schema: { type: "string" },
+      },
+      {
+        name: "sessiontoken",
+        in: "query",
+        description: "For a chunk, the `sessiontoken` of the `Location` that started the upload.",
+        schema: { type: "string" },
+      },
+    ],
+  },
+  "entitySet.listRelated": {
+    name: "listRelatedRows",
+    parameters: [...unmasked, labelLanguages],
+  },
+  "entitySet.countRelated": { name: "countRelatedRows" },
+  "entitySet.createRelated": {
+    name: "createRelatedRow",
+    change: "create",
+    headers: { ...solution, ...duplicateDetection },
+  },
+  "entitySet.getRelated": {
+    name: "getRelatedRow",
+    parameters: [...unmasked, labelLanguages],
+  },
+  "entitySet.updateRelated": {
+    name: "updateRelatedRow",
+    change: "update",
+    headers: { ...conditions, ...duplicateDetection },
+  },
+  "entitySet.replaceRelated": {
+    name: "replaceRelatedRow",
+    change: "update",
+    headers: { ...mergeLabels, ...solution },
+  },
+  "entitySet.deleteRelated": { name: "deleteRelatedRow", change: "delete" },
+  "entitySet.listReferences": { name: "listReferences" },
   "entitySet.associate": { name: "associateRows", change: "update" },
+  "entitySet.setReference": { name: "setReference", change: "update" },
   "entitySet.disassociate": { name: "disassociateRows", change: "update" },
-  "metadata.get": { name: "getMetadata" },
+  "entitySet.disassociateRelated": { name: "disassociateRelatedRow", change: "update" },
+
+  // Actions and functions the CSDL does not describe, such as a solution's.
+  // What an action changes is unknown, so it asks like an update.
   "action.call": { name: "callAction", change: "update" },
+  "entitySet.callAction": { name: "callTableAction", change: "update" },
+  "entitySet.callRowAction": { name: "callRowAction", change: "update" },
+  "function.call": { name: "callFunction" },
+  "entitySet.callFunction": { name: "callTableFunction" },
+  "entitySet.callRowFunction": { name: "callRowFunction" },
 
   // Actions and functions
   AddAppComponents: { name: "addAppComponents", change: "update" },
@@ -127,7 +375,8 @@ export const operations = {
   },
   BulkRetain: { name: "bulkRetain", change: "update" },
   CalculatePrice: { name: "calculatePrice", change: "update" },
-  CalculateRollupField: { name: "calculateRollupField" },
+  // Functions that write, though OData functions only read.
+  CalculateRollupField: { name: "calculateRollupField", change: "update" },
   CanBeReferenced: { name: "canBeReferenced", change: "read" },
   CanBeReferencing: { name: "canBeReferencing", change: "read" },
   "workflow.CancelAllCloudFlowRuns": { name: "cancelAllCloudFlowRuns", change: "update" },
@@ -139,7 +388,8 @@ export const operations = {
   CheckIncomingEmail: { name: "checkIncomingEmail" },
   CheckPromoteEmail: { name: "checkPromoteEmail" },
   "workqueue.ClearWorkQueue": { name: "clearWorkQueue", change: "delete" },
-  CloneAsPatch: { name: "cloneAsPatch", change: "create" },
+  // A patch locks its parent solution against changes and export.
+  CloneAsPatch: { name: "cloneAsPatch", change: "update" },
   CloneAsSolution: { name: "cloneAsSolution", change: "update" },
   "mobileofflineprofile.CloneMobileOfflineProfile": {
     name: "cloneMobileOfflineProfile",
@@ -296,7 +546,10 @@ export const operations = {
   ImportSolutions: { name: "importSolutions", change: "update" },
   ImportTranslation: { name: "importTranslation", change: "update" },
   ImportTranslationAsync: { name: "importTranslationAsync", change: "update" },
-  IncrementKnowledgeArticleViewCount: { name: "incrementKnowledgeArticleViewCount" },
+  IncrementKnowledgeArticleViewCount: {
+    name: "incrementKnowledgeArticleViewCount",
+    change: "update",
+  },
   InferEntityDefinition: { name: "inferEntityDefinition", change: "read" },
   InitializeAnnotationBlocksDownload: {
     name: "initializeAnnotationBlocksDownload",
@@ -381,7 +634,7 @@ export const operations = {
   RegisterFlowMachine: { name: "registerFlowMachine", change: "create" },
   "queueitem.ReleaseToQueue": { name: "releaseToQueue", change: "update" },
   RemoveActiveCustomization: { name: "removeActiveCustomization", change: "delete" },
-  RemoveActiveCustomizations: { name: "removeActiveCustomizations" },
+  RemoveActiveCustomizations: { name: "removeActiveCustomizations", change: "delete" },
   RemoveAppComponents: { name: "removeAppComponents", change: "delete" },
   RemoveCertificateCredential: { name: "removeCertificateCredential", change: "delete" },
   "flowgroup.RemoveFlowFromFlowGroup": { name: "removeFlowFromFlowGroup", change: "delete" },
@@ -393,7 +646,7 @@ export const operations = {
   "systemuser.RemoveUserFromRecordTeam": { name: "removeUserFromRecordTeam", change: "delete" },
   "role.ReplacePrivilegesRole": { name: "replacePrivilegesRole", change: "update" },
   Reschedule: { name: "reschedule", change: "update" },
-  ResetInheritedAccess: { name: "resetInheritedAccess" },
+  ResetInheritedAccess: { name: "resetInheritedAccess", change: "update" },
   ResetUserFilters: { name: "resetUserFilters", change: "update" },
   "flowmachine.RestartHostedMachine": { name: "restartHostedMachine", change: "update" },
   Restore: { name: "restore", change: "update" },
@@ -714,3 +967,33 @@ export const operations = {
   ValidateUnpublished: { name: "validateUnpublished", change: "read" },
   WhoAmI: { name: "whoAmI" },
 } as const;
+
+type Rule = {
+  name: string;
+  change?: string;
+  headers?: Record<string, { name: string; description: string }>;
+  parameters?: readonly object[];
+};
+
+// Every method can act for another user and take OData's preferences; reads
+// can skip caches, and changes can skip business logic and tag their plug-ins.
+export const operations = Object.fromEntries(
+  Object.entries(offered).map(([id, value]): [string, Rule] => {
+    const rule: Rule = value;
+    const changes = rule.change !== undefined && rule.change !== "read";
+
+    return [
+      id,
+      {
+        ...rule,
+        headers: {
+          ...prefer,
+          ...(changes ? bypass : consistency),
+          ...rule.headers,
+          ...impersonation,
+        },
+        parameters: [...(rule.parameters ?? []), ...(changes ? [tag] : [])],
+      },
+    ];
+  }),
+);

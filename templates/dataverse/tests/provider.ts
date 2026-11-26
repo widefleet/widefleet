@@ -217,7 +217,33 @@ export const provider = () => {
 
       // The service document lists entity sets; unbound actions are not among them.
       if (path === `${api}/` && request.method === "GET")
-        return Response.json({ value: [{ name: "accounts", kind: "EntitySet", url: "accounts" }] });
+        return Response.json({
+          value: [
+            { name: "accounts", kind: "EntitySet", url: "accounts" },
+            { name: "EntityDefinitions", kind: "EntitySet", url: "EntityDefinitions" },
+          ],
+        });
+
+      if (
+        decodeURIComponent(path) ===
+          `${api}/EntityDefinitions(LogicalName='new_scrap')/Attributes` &&
+        request.method === "POST"
+      )
+        return new Response(null, { status: 204 });
+
+      if (
+        decodeURIComponent(path).startsWith(
+          `${api}/EntityDefinitions(LogicalName='account')/Attributes(LogicalName='industrycode')`,
+        ) &&
+        request.method === "GET"
+      )
+        return Response.json({ LogicalName: "industrycode" });
+
+      if (
+        decodeURIComponent(path).startsWith(`${api}/msdyn_GetSummary(`) &&
+        request.method === "GET"
+      )
+        return Response.json({ Summary: "Short" });
 
       if (path === `${api}/accounts` && request.method === "GET")
         return Response.json(
@@ -230,7 +256,56 @@ export const provider = () => {
         );
 
       if (path === `${api}/accounts` && request.method === "POST")
-        return Response.json({ accountid: "account-new", name: "New" }, { status: 201 });
+        return Response.json(
+          { accountid: "account-new", name: "New" },
+          { status: 201, headers: { "OData-EntityId": `${api}/accounts(account-new)` } },
+        );
+
+      // A batch with a change set and a read.
+      if (path === `${api}/$batch` && request.method === "POST")
+        return new Response(
+          [
+            "--batchresponse_1",
+            "Content-Type: multipart/mixed; boundary=changesetresponse_1",
+            "",
+            "--changesetresponse_1",
+            "Content-Type: application/http",
+            "Content-Transfer-Encoding: binary",
+            "Content-ID: 1",
+            "",
+            "HTTP/1.1 204 No Content",
+            `OData-EntityId: ${api}/accounts(a-1)`,
+            "",
+            "",
+            "--changesetresponse_1--",
+            "--batchresponse_1",
+            "Content-Type: application/http",
+            "Content-Transfer-Encoding: binary",
+            "",
+            "HTTP/1.1 200 OK",
+            "Content-Type: application/json; odata.metadata=minimal",
+            "",
+            '{"value":[]}',
+            "--batchresponse_1--",
+            "",
+          ].join("\r\n"),
+          { headers: { "content-type": "multipart/mixed; boundary=batchresponse_1" } },
+        );
+
+      if (
+        path === `${api}/accounts(00000000-0000-0000-0000-000000000001)` &&
+        request.method === "GET"
+      )
+        return new Response(null, { status: 304 });
+
+      if (
+        path === `${api}/accounts(00000000-0000-0000-0000-000000000001)/new_report` &&
+        request.method === "PATCH"
+      )
+        return new Response(null, { status: 204 });
+
+      if (url.pathname === "/api/search/v2.0/query" && request.method === "POST")
+        return Response.json({ response: "{}" });
 
       if (
         path === `${api}/accounts(00000000-0000-0000-0000-000000000001)` &&

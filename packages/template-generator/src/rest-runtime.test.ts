@@ -73,6 +73,10 @@ describe("REST requests", () => {
       ).url,
     ).toBe("https://graph.example.test/v1.0/drives/d/search(q='x')?cells=a%09b");
 
+    // An empty value would leave out its segment, as `.` and `..` would move it.
+    for (const driveId of ["", ".", ".."])
+      expect(() => restRequest(base, "search", list, { driveId, q: "x" })).toThrow(InvalidRequest);
+
     expect(restRequest(base, "search", list, { driveId: "d", q: "it's" }).url).toBe(
       "https://graph.example.test/v1.0/drives/d/search(q='it''s')",
     );
@@ -106,6 +110,60 @@ describe("REST requests", () => {
     expect(() =>
       restRequest(base, "delta", delta, { nextLink: `${base}drives/d/items/root/children` }),
     ).toThrow(InvalidRequest);
+  });
+
+  it("leaves out optional segments without a value and sends exploded maps as parameters", () => {
+    const cast: RestOperation = {
+      httpMethod: "GET",
+      path: "/{entitySet}/{type}",
+      pathParameters: { entitySet: "entitySet", type: "type" },
+      optionalPathParameters: ["type"],
+      explodedParameters: ["aliases"],
+      queryParameters: { aliases: ["aliases", null, false], tag: ["tag", null, false] },
+      headerParameters: {},
+      body: null,
+      bodyRequired: false,
+      response: "json",
+      pageable: true,
+    };
+
+    expect(restRequest(base, "list", cast, { entitySet: "rows" }).url).toBe(`${base}rows`);
+    expect(restRequest(base, "list", cast, { entitySet: "rows", type: "Ns.Derived" }).url).toBe(
+      `${base}rows/Ns.Derived`,
+    );
+
+    // Pages of a list with or without its optional segment, but no deeper.
+    for (const link of [`${base}rows?$skiptoken=1`, `${base}rows/Ns.Derived?$skiptoken=1`])
+      expect(restRequest(base, "list", cast, { nextLink: link }).url).toBe(link);
+    expect(() =>
+      restRequest(base, "list", cast, { nextLink: `${base}rows/Ns.Derived/more` }),
+    ).toThrow(InvalidRequest);
+
+    expect(
+      restRequest(base, "list", cast, { entitySet: "rows", aliases: { "@a": "'x'", "@b": 2 } }).url,
+    ).toBe(`${base}rows?%40a=%27x%27&%40b=2`);
+    expect(() =>
+      restRequest(base, "list", cast, { entitySet: "rows", aliases: { "@a": ["x"] } }),
+    ).toThrow("list's aliases takes values");
+    // Only a map input sends its fields; another parameter takes no object.
+    expect(() =>
+      restRequest(base, "list", cast, { entitySet: "rows", tag: { page: "2" } }),
+    ).toThrow("list's tag takes a value or a list");
+  });
+
+  it("sends a file body as its bytes with its media type", async () => {
+    const file: RestOperation = { ...upload, body: "file" };
+
+    const request = restRequest(base, "upload", file, {
+      itemId: "1",
+      body: { mimeType: "application/pdf", base64: "JVBERi0=" },
+    });
+
+    expect(request.init.headers).toEqual({ "content-type": "application/pdf" });
+    expect(await new Response(request.init.body).text()).toBe("%PDF-");
+    expect(() => restRequest(base, "upload", file, { itemId: "1", body: "text" })).toThrow(
+      "upload takes the body as a file with its mimeType",
+    );
   });
 
   it("sends header inputs as headers, on later pages too", () => {

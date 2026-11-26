@@ -240,6 +240,8 @@ export type OpenapiOperation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[];
+  /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
+  explodedParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -247,7 +249,7 @@ export type OpenapiOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "form" | "multipart" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
   bodyRequired: boolean;
@@ -265,6 +267,20 @@ const inputName = (name: string) =>
   /^[A-Za-z_$][\w$]*$/.test(name)
     ? name
     : name.replace(/[^\w$]+(\w)?/g, (_, next?: string) => next?.toUpperCase() ?? "");
+
+// A query parameter in the exploded form style whose value is a map of values,
+// each sent as its own parameter.
+const explodedMap = (
+  value: { style?: string | undefined; explode?: boolean | undefined },
+  target: Schema | undefined,
+) =>
+  (value.style ?? "form") === "form" &&
+  value.explode !== false &&
+  target?.type === "object" &&
+  !target.properties &&
+  z
+    .object({ type: z.enum(["string", "number", "integer", "boolean"]) })
+    .safeParse(target.additionalProperties).success;
 
 const queryParameter = (
   name: string,
@@ -1007,7 +1023,19 @@ export const generateOpenapi = (
       }),
     );
 
-    const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : "text";
+    // Content that is bytes, such as a file, is uploaded as a file; other
+    // content as text.
+    const content = body?.content ? Object.entries(body.content)[0] : undefined;
+
+    const file =
+      !jsonBody &&
+      !form &&
+      content !== undefined &&
+      !content[0].startsWith("text/") &&
+      content[1].schema?.type === "string" &&
+      content[1].schema.format === "binary";
+
+    const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : file ? "file" : "text";
 
     // The rules may require a body the description leaves optional, but not add one.
     if (rule.requiredBody && !body) throw new Error(`${id}'s requiredBody rule needs a body`);
@@ -1081,6 +1109,20 @@ export const generateOpenapi = (
     );
 
     if (optionalPath.length) call.optionalPathParameters = optionalPath;
+
+    const explodedInputs = parameters.flatMap((value) =>
+      value.in === "query" &&
+      explodedMap(
+        value,
+        value.schema?.$ref
+          ? schemas[value.schema.$ref.replace("#/components/schemas/", "")]
+          : value.schema,
+      )
+        ? [aliasInput(value.name)]
+        : [],
+    );
+
+    if (explodedInputs.length) call.explodedParameters = explodedInputs;
     runtime[rule.name] = call;
 
     const inputOf = (value: z.infer<typeof parameter>) =>
@@ -1125,10 +1167,15 @@ export const generateOpenapi = (
           `${id} has the path parameter ${value.name} with a list or object, which is not supported`,
         );
 
-      // Queries carry values and lists of them; the runtime sends no objects.
+      // Queries carry values and lists of them, and in the exploded form style
+      // a map of values, each sent as its own parameter; the runtime sends no
+      // other objects.
+      const exploded = explodedMap(value, target);
+
       if (
         value.in === "query" &&
         !isAlias(value.name) &&
+        !exploded &&
         (target?.type === "object" || target?.properties)
       )
         throw new Error(
@@ -1158,6 +1205,12 @@ export const generateOpenapi = (
       if (rule.body) return schemaUnion(rule.body);
 
       if (jsonBody) return jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue";
+
+      if (bodyKind === "file") {
+        usesUpload = true;
+
+        return "UploadContent";
+      }
 
       if (!form) return "string";
       uploads = form.kind === "multipart";
@@ -1289,6 +1342,8 @@ export type Operation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[];
+  /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
+  explodedParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -1296,7 +1351,7 @@ export type Operation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "form" | "multipart" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
   bodyRequired: boolean;

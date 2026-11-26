@@ -3,7 +3,14 @@
 // this way. CSDL names no paths; OData's conventions give them:
 //
 // - every entity set is read, created, changed and deleted at `/{entitySet}`
-//   and `/{entitySet}({id})`, and rows are linked through `$ref`,
+//   and `/{entitySet}({id})`, optionally cast to a derived type, one column
+//   is read at `/{entitySet}({id})/{property}`, and its content below
+//   `$value`,
+// - related rows are read, created, replaced and deleted through a navigation
+//   property, and rows are linked through `$ref`,
+// - actions and functions the CSDL does not describe, such as those of a
+//   solution installed later, are called by name at the service root, on a
+//   collection or on a row,
 // - an action imported into the service root is a POST to `/{name}` with its
 //   parameters as the JSON body,
 // - a function imported into the service root is a GET to `/{name}(...)`,
@@ -313,8 +320,19 @@ export const csdlDescription = (
     name: "id",
     in: "path",
     required: true,
-    description: "The row's ID.",
-    schema: { type: "string", format: "uuid" },
+    description: "The row's ID, or an alternate key, such as `LogicalName='account'`.",
+    schema: { type: "string" },
+  };
+
+  // A cast reads rows as a derived type, with the properties only it has, such
+  // as the options of a choice column's `PicklistAttributeMetadata`.
+  const cast = {
+    name: "type",
+    in: "path",
+    required: false,
+    description:
+      "A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.",
+    schema: { type: "string" },
   };
 
   // OData joins a list of a query option with commas.
@@ -347,42 +365,79 @@ export const csdlDescription = (
   const row = { type: "object", additionalProperties: true };
   const rowContent = { content: { "application/json": { schema: row } } };
   const noContent = { "204": { description: "Done." } };
+  const answer = { "200": { description: "The result.", ...rowContent }, ...noContent };
 
-  paths["/{entitySet}"] = {
+  // OData's query options for a collection of rows.
+  const listOptions = [
+    select,
+    queryOption("$filter", "A filter expression, such as `statecode eq 0`."),
+    queryOption("$orderby", "The columns to sort by, each followed by `asc` or `desc`.", {
+      type: "array",
+      items: { type: "string" },
+    }),
+    queryOption("$top", "The most rows to return.", { type: "integer" }),
+    expand,
+    queryOption(
+      "$apply",
+      "Aggregation and grouping, such as `groupby((statecode),aggregate($count as count))`.",
+    ),
+    queryOption("$count", "Whether the answer includes the number of matching rows.", {
+      type: "boolean",
+    }),
+    {
+      name: "parameterAliases",
+      in: "query",
+      style: "form",
+      explode: true,
+      description:
+        'The values of parameter aliases the query options use, such as `@p1` in `$filter`, as OData literals, such as `{ "@p1": "\'Contoso\'" }`.',
+      schema: { type: "object", additionalProperties: { type: "string" } },
+    },
+  ];
+
+  const rows = {
+    "200": {
+      description: "The matching rows.",
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            properties: {
+              value: { type: "array", items: row },
+              "@odata.count": { type: "integer" },
+              "@odata.nextLink": { type: "string" },
+              "@odata.deltaLink": { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  // The service document names the entity sets.
+  paths["/"] = {
     get: {
-      operationId: "entitySet.list",
-      summary: "List the rows of a table that match a query.",
-      parameters: [
-        entitySet,
-        select,
-        queryOption("$filter", "A filter expression, such as `statecode eq 0`."),
-        queryOption("$orderby", "The columns to sort by, each followed by `asc` or `desc`.", {
-          type: "array",
-          items: { type: "string" },
-        }),
-        queryOption("$top", "The most rows to return.", { type: "integer" }),
-        expand,
-        queryOption(
-          "$apply",
-          "Aggregation and grouping, such as `groupby((statecode),aggregate($count as count))`.",
-        ),
-        queryOption("$count", "Whether the answer includes the number of matching rows.", {
-          type: "boolean",
-        }),
-        queryOption("fetchXml", "A FetchXML query instead of the OData query options."),
-      ],
-      "x-ms-pageable": { nextLinkName: "@odata.nextLink" },
+      operationId: "service.get",
+      summary: "List the service's entity sets, singletons and function imports.",
       responses: {
         "200": {
-          description: "The matching rows.",
+          description: "The service document.",
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
-                  value: { type: "array", items: row },
-                  "@odata.count": { type: "integer" },
-                  "@odata.nextLink": { type: "string" },
+                  value: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                        kind: { type: "string" },
+                        url: { type: "string" },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -390,22 +445,60 @@ export const csdlDescription = (
         },
       },
     },
+  };
+
+  // `$count` answers a number as text.
+  const count = {
+    "200": {
+      description: "The number of rows.",
+      content: { "text/plain": { schema: { type: "integer" } } },
+    },
+  };
+
+  paths["/{entitySet}/$count"] = {
+    get: {
+      operationId: "entitySet.count",
+      summary: "Count the rows of a table.",
+      parameters: [entitySet],
+      responses: count,
+    },
+  };
+
+  paths["/{entitySet}/{type}"] = {
+    get: {
+      operationId: "entitySet.list",
+      summary: "List the rows of a table that match a query.",
+      parameters: [
+        entitySet,
+        cast,
+        ...listOptions,
+        queryOption("fetchXml", "A FetchXML query instead of the OData query options."),
+      ],
+      "x-ms-pageable": { nextLinkName: "@odata.nextLink" },
+      responses: rows,
+    },
+  };
+
+  paths["/{entitySet}"] = {
     post: {
       operationId: "entitySet.create",
       summary: "Create a row. Lookups are set with `<navigation property>@odata.bind`.",
-      parameters: [entitySet, select],
+      parameters: [entitySet, select, expand],
       requestBody: { required: true, ...rowContent },
       responses: { "201": { description: "The created row.", ...rowContent }, ...noContent },
     },
   };
 
-  paths["/{entitySet}({id})"] = {
+  paths["/{entitySet}({id})/{type}"] = {
     get: {
       operationId: "entitySet.get",
       summary: "Get a row.",
-      parameters: [entitySet, id, select, expand],
+      parameters: [entitySet, id, cast, select, expand],
       responses: { "200": { description: "The row.", ...rowContent } },
     },
+  };
+
+  paths["/{entitySet}({id})"] = {
     patch: {
       operationId: "entitySet.update",
       summary: "Change a row's columns, or create the row with this ID when it does not exist.",
@@ -413,11 +506,87 @@ export const csdlDescription = (
       requestBody: { required: true, ...rowContent },
       responses: { "200": { description: "The changed row.", ...rowContent }, ...noContent },
     },
+    put: {
+      operationId: "entitySet.replace",
+      summary:
+        "Replace a row with the body, such as a table's definition, which cannot be changed in part.",
+      parameters: [entitySet, id],
+      requestBody: { required: true, ...rowContent },
+      responses: noContent,
+    },
     delete: {
       operationId: "entitySet.delete",
       summary: "Delete a row.",
       parameters: [entitySet, id],
       responses: noContent,
+    },
+  };
+
+  const property = {
+    name: "property",
+    in: "path",
+    required: true,
+    description: "The column, by logical name, such as `name` or a file column.",
+    schema: { type: "string" },
+  };
+
+  paths["/{entitySet}({id})/{property}"] = {
+    get: {
+      operationId: "entitySet.getProperty",
+      summary: "Get one column of a row, as `value`.",
+      parameters: [entitySet, id, property],
+      responses: {
+        "200": {
+          description: "The column's value.",
+          content: {
+            "application/json": { schema: { type: "object", properties: { value: {} } } },
+          },
+        },
+        ...noContent,
+      },
+    },
+    put: {
+      operationId: "entitySet.setProperty",
+      summary: "Set one column of a row.",
+      parameters: [entitySet, id, property],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { type: "object", required: ["value"], properties: { value: {} } },
+          },
+        },
+      },
+      responses: noContent,
+    },
+    patch: {
+      operationId: "entitySet.uploadProperty",
+      summary: "Upload the content of a file or image column, at once or in chunks.",
+      parameters: [entitySet, id, property],
+      requestBody: {
+        content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
+      },
+      responses: { "200": { description: "Accepted." }, ...noContent },
+    },
+    delete: {
+      operationId: "entitySet.deleteProperty",
+      summary: "Clear one column of a row, or delete the file of a file or image column.",
+      parameters: [entitySet, id, property],
+      responses: noContent,
+    },
+  };
+
+  paths["/{entitySet}({id})/{property}/$value"] = {
+    get: {
+      operationId: "entitySet.getPropertyValue",
+      summary: "Get the content of a file or image column, or a column's raw value.",
+      parameters: [entitySet, id, property],
+      responses: {
+        "200": {
+          description: "The content.",
+          content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
+        },
+      },
     },
   };
 
@@ -430,29 +599,140 @@ export const csdlDescription = (
     schema: { type: "string" },
   };
 
-  paths["/{entitySet}({id})/{navigationProperty}/$ref"] = {
-    post: {
-      operationId: "entitySet.associate",
-      summary: "Relate a row to another row through a navigation property.",
+  // The rows a row relates to, such as an account's contacts, or a table's
+  // columns as `EntityDefinitions(LogicalName='account')/Attributes`.
+  paths["/{entitySet}({id})/{navigationProperty}/{type}"] = {
+    get: {
+      operationId: "entitySet.listRelated",
+      summary: "List the rows a row relates to through a navigation property.",
+      parameters: [entitySet, id, navigationProperty, cast, ...listOptions],
+      "x-ms-pageable": { nextLinkName: "@odata.nextLink" },
+      responses: rows,
+    },
+  };
+
+  paths["/{entitySet}({id})/{navigationProperty}/$count"] = {
+    get: {
+      operationId: "entitySet.countRelated",
+      summary: "Count the rows a row relates to through a navigation property.",
       parameters: [entitySet, id, navigationProperty],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["@odata.id"],
-              properties: {
-                "@odata.id": {
-                  type: "string",
-                  description:
-                    "The other row's address, such as `contacts(<id>)`, relative to the service or absolute.",
+      responses: count,
+    },
+  };
+
+  paths["/{entitySet}({id})/{navigationProperty}"] = {
+    post: {
+      operationId: "entitySet.createRelated",
+      summary:
+        "Create a row related to a row through a collection-valued navigation property, such as a column of a table.",
+      parameters: [entitySet, id, navigationProperty],
+      requestBody: { required: true, ...rowContent },
+      responses: { "201": { description: "The created row.", ...rowContent }, ...noContent },
+    },
+  };
+
+  const relatedId = {
+    name: "relatedId",
+    in: "path",
+    required: true,
+    description: "The related row's ID, or an alternate key, such as `LogicalName='name'`.",
+    schema: { type: "string" },
+  };
+
+  // One of them, such as a column of a table as
+  // `EntityDefinitions(LogicalName='account')/Attributes(LogicalName='name')`.
+  paths["/{entitySet}({id})/{navigationProperty}({relatedId})/{type}"] = {
+    get: {
+      operationId: "entitySet.getRelated",
+      summary: "Get a row a row relates to through a navigation property.",
+      parameters: [entitySet, id, navigationProperty, relatedId, cast, select, expand],
+      responses: { "200": { description: "The row.", ...rowContent } },
+    },
+  };
+
+  paths["/{entitySet}({id})/{navigationProperty}({relatedId})"] = {
+    patch: {
+      operationId: "entitySet.updateRelated",
+      summary: "Change the columns of a row a row relates to through a navigation property.",
+      parameters: [entitySet, id, navigationProperty, relatedId],
+      requestBody: { required: true, ...rowContent },
+      responses: { "200": { description: "The changed row.", ...rowContent }, ...noContent },
+    },
+    put: {
+      operationId: "entitySet.replaceRelated",
+      summary:
+        "Replace a row a row relates to with the body, such as a column's definition, which cannot be changed in part.",
+      parameters: [entitySet, id, navigationProperty, relatedId],
+      requestBody: { required: true, ...rowContent },
+      responses: noContent,
+    },
+    delete: {
+      operationId: "entitySet.deleteRelated",
+      summary: "Delete a row a row relates to, such as a column of a table.",
+      parameters: [entitySet, id, navigationProperty, relatedId],
+      responses: noContent,
+    },
+  };
+
+  // Addresses of other rows, relative to the service or absolute.
+  const address = {
+    required: true,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["@odata.id"],
+          properties: {
+            "@odata.id": {
+              type: "string",
+              description:
+                "The other row's address, such as `contacts(<id>)`, relative to the service or absolute.",
+            },
+          },
+        },
+      },
+    },
+  };
+
+  paths["/{entitySet}({id})/{navigationProperty}/$ref"] = {
+    get: {
+      operationId: "entitySet.listReferences",
+      summary: "List the addresses of the rows a row relates to through a navigation property.",
+      parameters: [entitySet, id, navigationProperty],
+      "x-ms-pageable": { nextLinkName: "@odata.nextLink" },
+      responses: {
+        "200": {
+          description: "The addresses, as `@odata.id`.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  value: {
+                    type: "array",
+                    items: { type: "object", properties: { "@odata.id": { type: "string" } } },
+                  },
+                  "@odata.id": { type: "string" },
+                  "@odata.nextLink": { type: "string" },
                 },
               },
             },
           },
         },
       },
+    },
+    post: {
+      operationId: "entitySet.associate",
+      summary: "Relate a row to another row through a navigation property.",
+      parameters: [entitySet, id, navigationProperty],
+      requestBody: address,
+      responses: noContent,
+    },
+    put: {
+      operationId: "entitySet.setReference",
+      summary: "Set the row a single-valued navigation property, such as a lookup, refers to.",
+      parameters: [entitySet, id, navigationProperty],
+      requestBody: address,
       responses: noContent,
     },
     delete: {
@@ -471,25 +751,92 @@ export const csdlDescription = (
     },
   };
 
-  // An action the service root offers by name, such as one a solution adds;
-  // its address has the shape of an entity set's.
-  paths["/{action}"] = {
-    post: {
-      operationId: "action.call",
-      summary: "Call an action at the service root by its name, with its parameters as the body.",
-      parameters: [
-        {
-          name: "action",
-          in: "path",
-          required: true,
-          description: "The action's name, such as `msdyn_GetKAObjectFromTemplate`.",
-          schema: { type: "string" },
-        },
-      ],
-      requestBody: { content: { "application/json": { schema: row } } },
-      responses: { "200": { description: "The action's result.", ...rowContent }, ...noContent },
+  paths["/{entitySet}({id})/{navigationProperty}({relatedId})/$ref"] = {
+    delete: {
+      operationId: "entitySet.disassociateRelated",
+      summary: "Remove the relationship between a row and one row of a collection it relates to.",
+      parameters: [entitySet, id, navigationProperty, relatedId],
+      responses: noContent,
     },
   };
+
+  // Actions and functions the CSDL does not describe, such as those a solution
+  // installed later adds. A bound one is named with its namespace.
+  const action = (where: string) => ({
+    name: "action",
+    in: "path",
+    required: true,
+    description: `The action's name${where}.`,
+    schema: { type: "string" },
+  });
+
+  const called = (where: string) => ({
+    name: "function",
+    in: "path",
+    required: true,
+    description: `The function's call${where}, with its parameters as aliases, such as \`msdyn_GetSummary(RecordId=@id)\`, or \`()\` after the name without parameters.`,
+    schema: { type: "string" },
+  });
+
+  const aliases = {
+    name: "parameterAliases",
+    in: "query",
+    style: "form",
+    explode: true,
+    description:
+      'The values of the call\'s parameter aliases as OData literals, such as `{ "@id": "\'<id>\'" }`, or JSON for lists and objects.',
+    schema: { type: "object", additionalProperties: { type: "string" } },
+  };
+
+  const actionCall = (operationId: string, summary: string, parameters: JsonObject[]) => ({
+    post: {
+      operationId,
+      summary,
+      parameters,
+      requestBody: { content: { "application/json": { schema: row } } },
+      responses: answer,
+    },
+  });
+
+  const functionCall = (operationId: string, summary: string, parameters: JsonObject[]) => ({
+    get: { operationId, summary, parameters: [...parameters, aliases], responses: answer },
+  });
+
+  paths["/{action}"] = actionCall(
+    "action.call",
+    "Call an action at the service root by its name, with its parameters as the body.",
+    [action(", such as `msdyn_GetKAObjectFromTemplate`")],
+  );
+
+  paths["/{function}"] = functionCall("function.call", "Call a function at the service root.", [
+    called(""),
+  ]);
+
+  const boundName = ", with its namespace, such as `Microsoft.Dynamics.CRM.new_Approve`";
+
+  paths["/{entitySet}/{action}"] = actionCall(
+    "entitySet.callAction",
+    "Call an action bound to a table, with its parameters as the body.",
+    [entitySet, action(boundName)],
+  );
+
+  paths["/{entitySet}/{function}"] = functionCall(
+    "entitySet.callFunction",
+    "Call a function bound to a table.",
+    [entitySet, called(boundName)],
+  );
+
+  paths["/{entitySet}({id})/{action}"] = actionCall(
+    "entitySet.callRowAction",
+    "Call an action bound to a row, with its parameters as the body.",
+    [entitySet, id, action(boundName)],
+  );
+
+  paths["/{entitySet}({id})/{function}"] = functionCall(
+    "entitySet.callRowFunction",
+    "Call a function bound to a row.",
+    [entitySet, id, called(boundName)],
+  );
 
   paths["/$metadata"] = {
     get: {

@@ -109,6 +109,13 @@ type Binding = Pick<
   | "listEnvironments"
   | "listRows"
   | "createRow"
+  | "createRelatedRow"
+  | "getRelatedRow"
+  | "callFunction"
+  | "getRow"
+  | "uploadColumnContent"
+  | "batch"
+  | "searchV2Query"
   | "deleteRow"
   | "whoAmI"
   | "retrieveTotalRecordCount"
@@ -201,6 +208,41 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
         }),
       );
 
+    // A new account that takes over existing tasks.
+    if (path === "/rpc/create-binding")
+      return Response.json(
+        await app.createRow({
+          environment: sales,
+          entitySet: "accounts",
+          body: {
+            name: "New",
+            "Account_Tasks@odata.bind": ["/tasks(00000000-0000-0000-0000-000000000002)"],
+          },
+        }),
+      );
+
+    // A function that writes, called by name.
+    if (path === "/rpc/increment")
+      return Response.json(
+        await app.callFunction({
+          environment: sales,
+          function:
+            "IncrementKnowledgeArticleViewCount(Source=@s,ViewDate=2026-11-26,Location=1,Count=1)",
+          parameterAliases: { "@s": '{"@odata.id":"knowledgearticles(1)"}' },
+        }),
+      );
+
+    if (path === "/rpc/related")
+      return Response.json(
+        await app.createRelatedRow({
+          environment: sales,
+          entitySet: url.searchParams.get("set") ?? "EntityDefinitions",
+          id: url.searchParams.get("id") ?? "LogicalName='new_scrap'",
+          navigationProperty: url.searchParams.get("navigation") ?? "Attributes",
+          body: { SchemaName: "new_Reason" },
+        }),
+      );
+
     if (path === "/rpc/delete")
       return Response.json(
         await app.deleteRow({
@@ -215,6 +257,70 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
     if (path === "/rpc/count")
       return Response.json(
         await app.retrieveTotalRecordCount({ environment: sales, EntityNames: ["account"] }),
+      );
+
+    // A table's column, read as its derived type when the test names one.
+    if (path === "/rpc/column") {
+      const column: Parameters<Binding["getRelatedRow"]>[0] = {
+        environment: sales,
+        entitySet: "EntityDefinitions",
+        id: "LogicalName='account'",
+        navigationProperty: "Attributes",
+        relatedId: "LogicalName='industrycode'",
+      };
+
+      const type = url.searchParams.get("type");
+      const expand = url.searchParams.get("expand");
+
+      if (type !== null) column.type = type;
+
+      if (expand !== null) column.$expand = expand;
+
+      return Response.json(await app.getRelatedRow(column));
+    }
+
+    if (path === "/rpc/batch")
+      return Response.json(
+        // SAFETY: the tests post batch inputs; batch checks them before anything is sent.
+        await app.batch(
+          JSON.parse(url.searchParams.get("input") ?? "{}") as Parameters<Binding["batch"]>[0],
+        ),
+      );
+
+    if (path === "/rpc/unchanged")
+      return Response.json(
+        await app.getRow({
+          environment: sales,
+          entitySet: "accounts",
+          id: "00000000-0000-0000-0000-000000000001",
+          ifNoneMatch: 'W/"1"',
+        }),
+      );
+
+    if (path === "/rpc/upload")
+      return Response.json(
+        await app.uploadColumnContent({
+          environment: sales,
+          entitySet: "accounts",
+          id: "00000000-0000-0000-0000-000000000001",
+          property: "new_report",
+          "x-ms-file-name": "Prüfbericht.pdf",
+          body: { mimeType: "application/pdf", base64: "JVBERi0=" },
+        }),
+      );
+
+    if (path === "/rpc/search")
+      return Response.json(
+        await app.searchV2Query({ environment: sales, body: { search: "Contoso" } }),
+      );
+
+    if (path === "/rpc/function")
+      return Response.json(
+        await app.callFunction({
+          environment: sales,
+          function: "msdyn_GetSummary(RecordId=@id)",
+          parameterAliases: { "@id": "'it''s'" },
+        }),
       );
 
     if (path === "/rpc/metadata")
