@@ -70,6 +70,7 @@
           <Tooltip.Root>
             <Tooltip.Trigger>
               {#snippet child({ props })}
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex (The disabled switch cannot receive focus, so its tooltip needs a keyboard target.) -->
                 <span
                   {...props}
                   tabindex="0"
