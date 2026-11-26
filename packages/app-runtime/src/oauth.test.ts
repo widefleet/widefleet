@@ -5,7 +5,6 @@ import { z } from "zod";
 import { managedOAuth, openAccessToken, type OAuthIdentity } from "./oauth.ts";
 import { managedOAuthConfiguration } from "./oauth-protocol.ts";
 import { testKeyring } from "../fixtures/keyring.ts";
-import { decryptText, sealedKeyVersion } from "./secrets.ts";
 
 const identity: OAuthIdentity = {
   appId: "2a600000-0000-4000-8000-000000000001",
@@ -265,53 +264,6 @@ describe("managed OAuth broker", () => {
     // The largest values still fit the limits of the requests that carry them.
     expect(granted.accessToken.length).toBeLessThanOrEqual(30000);
     expect(granted.refreshToken.length).toBeLessThanOrEqual(12000);
-  });
-
-  it("seals a refresh grant again when the provider keeps its refresh token", async () => {
-    const { broker, exchange } = await authorize();
-    const granted = tokens.parse(await broker.request(identity, exchange));
-
-    // The same grant sealed before the runtime keyring, with the raw bytes of the active version.
-    const plaintext = new TextEncoder().encode(
-      await decryptText(environment, "managed-oauth/refresh/v1", granted.refreshToken, {
-        activeOnly: true,
-      }),
-    );
-
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-
-    const sealed = new Uint8Array(
-      await crypto.subtle.encrypt(
-        {
-          name: "AES-GCM",
-          iv,
-          additionalData: new TextEncoder().encode("managed-oauth/refresh/v1"),
-        },
-        await crypto.subtle.importKey("raw", new Uint8Array(32).fill(0xab), "AES-GCM", false, [
-          "encrypt",
-        ]),
-        plaintext,
-      ),
-    );
-
-    tokenResponse = () =>
-      Response.json({ access_token: "provider-access", scope: gmail.join(" "), expires_in: 3600 });
-
-    const refreshed = tokens.parse(
-      await broker.request(identity, {
-        action: "refresh",
-        client: "google",
-        refreshToken: btoa(String.fromCharCode(...iv, ...sealed)),
-      }),
-    );
-
-    expect(sealedKeyVersion(refreshed.refreshToken)).toBe("test");
-    await broker.request(identity, {
-      action: "refresh",
-      client: "google",
-      refreshToken: refreshed.refreshToken,
-    });
-    expect(requests.at(-1)?.body.get("refresh_token")).toBe("provider-refresh-1");
   });
 
   it("retires access placeholders and refresh grants once another key version is active", async () => {

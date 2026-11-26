@@ -339,8 +339,6 @@ export const managedOAuth = (environment: Environment) => ({
     const redirectURI = `${config.origin}${callbackPath(request.client)}`;
     const oauth = flow(config, client);
 
-    // A provider may refresh without a new refresh token. The earlier one is
-    // sealed again, so a client always holds values under the active key version.
     const present = async (tokens: OAuth2Tokens | null, previousRefreshToken?: string) => {
       if (!tokens?.accessToken) throw new Error("OAuth provider returned no usable token");
       // A token may carry more scopes than the client allows. Some providers,
@@ -363,17 +361,15 @@ export const managedOAuth = (environment: Environment) => ({
         ),
       );
 
-      const refreshToken = tokens.refreshToken ?? previousRefreshToken;
-
       return {
         accessToken: `${accessTokenPrefix}${accessToken}`,
-        refreshToken: refreshToken
+        refreshToken: tokens.refreshToken
           ? await seal(
               environment,
               "refresh",
-              JSON.stringify(refreshGrant.parse({ ...owner, token: refreshToken })),
+              JSON.stringify(refreshGrant.parse({ ...owner, token: tokens.refreshToken })),
             )
-          : undefined,
+          : previousRefreshToken,
         idToken: tokens.idToken,
         accessTokenExpiresAt: tokens.accessTokenExpiresAt,
         refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
@@ -449,7 +445,7 @@ export const managedOAuth = (environment: Environment) => ({
 
       if (!refresh) throw new Error("This OAuth provider does not refresh access tokens");
 
-      return present(await quietly(() => refresh(grant.token)), grant.token);
+      return present(await quietly(() => refresh(grant.token)), request.refreshToken);
     }
 
     if (isAccessTokenPlaceholder(request.token)) {
