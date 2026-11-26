@@ -84,7 +84,9 @@ widefleet network deny https://api.example.com
 
 Commands use this project's configured name; `--app NAME` selects another existing app. Changes wait for activation unless `--no-wait` is supplied. Backend and browser lists start empty. Same-origin browser requests and resource bindings remain usable. Manage network permissions through the platform CLI or UI. Grants persist across code rollbacks, and previews have their own permissions.
 
-A browser grant allows connections and resource loading, including scripts/styles, from that origin. The platform enforces CSP on app responses: same-origin/inline scripts and styles are allowed; frames, objects and Web Workers are blocked. Top-level navigation to external pages remains possible. Reload open tabs to receive policy changes. Backend redirects are checked at every hop. Body-preserving redirects can replay fully sent uploads up to 1 MiB; original uploads are streamed without that limit.
+A browser grant allows connections and resource loading, including scripts/styles, from that origin. The platform enforces CSP on app responses: same-origin/inline scripts and styles are allowed; same-origin worker scripts require an administrator to enable browser workers in the organization’s Security settings. Frames and objects are blocked. Top-level navigation to external pages remains possible. Reload open tabs to receive policy changes. Backend redirects are checked at every hop. Body-preserving redirects can replay fully sent uploads up to 1 MiB; original uploads are streamed without that limit.
+
+An app-controlled service worker can serve a document from the browser. Such a document can have a different CSP from the one Widefleet applies to network responses, so browser grants cannot enforce a destination allowlist for that document. Backend grants still apply to backend requests.
 
 ## Node.js compatibility
 
