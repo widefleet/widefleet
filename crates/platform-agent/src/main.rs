@@ -81,7 +81,13 @@ where
             .and_then(|result| Ok(serde_json::from_value::<RekeyPage>(result)?))
         {
             Ok(next) => next,
-            Err(error) => return format!("Runtime storage could not be sealed again: {error}"),
+            // Job messages are limited, and the error can carry the runtime's response.
+            Err(error) => {
+                return format!("Runtime storage could not be sealed again: {error}")
+                    .chars()
+                    .take(4000)
+                    .collect();
+            }
         };
         total.current += next.counts.current;
         total.rewritten += next.counts.rewritten;

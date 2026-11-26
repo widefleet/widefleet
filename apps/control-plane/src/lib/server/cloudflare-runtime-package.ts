@@ -57,9 +57,13 @@ export const readCloudflareRuntimeVersion = async (
     .object({ runtimeVersion: contract.runtimeVersion })
     .parse(JSON.parse(await readCloudflareRuntime(bindings))).runtimeVersion;
 
-/** The version of the runtime keyring's active key in the runtime Worker that answers. */
+/**
+ * The version of the runtime keyring's active key in the runtime Worker that
+ * answers, or an empty string from a Worker version that does not report one.
+ */
 export const readCloudflareRuntimeKeyVersion = async (
   bindings: Pick<CloudflareBindings, "APP_RUNTIME">,
 ) =>
-  z.object({ keyVersion: z.string() }).parse(JSON.parse(await readCloudflareRuntime(bindings)))
-    .keyVersion;
+  z
+    .object({ keyVersion: z.string().optional() })
+    .parse(JSON.parse(await readCloudflareRuntime(bindings))).keyVersion ?? "";
