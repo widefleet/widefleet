@@ -3,7 +3,7 @@
 // `widefleet deploy`, under the caller's authorization. An install never
 // replaces a deployed app: it creates the app, or continues an earlier install
 // whose app never received a deployment. The values of the secrets the
-// template requires are saved with that first deployment.
+// template requires are saved when that first deployment is published.
 import * as contract from "@platform/contracts";
 import { decodeBase64 } from "@platform/contracts/builds";
 import { Result } from "better-result";
@@ -229,8 +229,8 @@ export const createTemplateInstalls = (
       ];
 
       // Publishing checks again, under the app's lock, that the app was not
-      // deployed while the template was building. The template's secrets are
-      // saved in the same step, so they never reach another deployment.
+      // deployed while the template was building, and saves the template's
+      // secrets in the same step.
       const published = await uploads.publish(
         principal,
         installed.id,

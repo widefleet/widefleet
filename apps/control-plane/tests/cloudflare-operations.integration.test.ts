@@ -2,13 +2,15 @@ import { organization } from "../src/lib/server/auth-schema.ts";
 import { checkServiceConsumers } from "../src/lib/server/app-services.ts";
 import { Result } from "better-result";
 import { transact } from "../src/lib/server/transactions.ts";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
 import { recordInstallationRuntime, seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { registerCloudflareOperation } from "../src/lib/server/cloudflare-operations.ts";
-import { deploymentCommand } from "../src/lib/server/deployment-execution.ts";
+import * as contract from "@platform/contracts";
+import { deploymentCommand, type HostedExecution } from "../src/lib/server/deployment-execution.ts";
+import { createUploadService } from "../src/lib/server/uploads.ts";
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import {
   apps,
@@ -218,29 +220,18 @@ describe("Cloudflare operation history", () => {
     expect(deployment?.artifactId).toBe(second.artifact.id);
   });
 
-  it("saves a template's secrets only with the first deployment Cloudflare accepts for it", async () => {
-    const secrets = { API_KEY: "synthetic-ciphertext" };
-
-    const install = async (appId?: string) => {
-      const entry = await seedDeployment(environment.database.db, {
-        ...(appId && { appId }),
-        requiredSecrets: ["API_KEY"],
-      });
+  it("accepts a template install only as the app's first deployment", async () => {
+    const install = async () => {
+      const entry = await seedDeployment(environment.database.db);
 
       return {
         ...entry,
-        command: deploymentCommand.parse({ ...entry.command, firstDeployment: true, secrets }),
+        command: deploymentCommand.parse({ ...entry.command, firstDeployment: true }),
       };
     };
 
-    const app = async (appId: string) => {
-      const [record] = await environment.database.db.select().from(apps).where(eq(apps.id, appId));
-
-      return record;
-    };
-
     // Another deployment of the draft app was prepared during the install and is
-    // accepted first: the install is rejected and saves nothing.
+    // accepted first: the install is rejected and records nothing.
     const raced = await install();
     const other = await seedDeployment(environment.database.db, { appId: raced.appId });
     (await registerCloudflareOperation(environment.database.db, other.command)).unwrap();
@@ -248,7 +239,6 @@ describe("Cloudflare operation history", () => {
     const rejected = await registerCloudflareOperation(environment.database.db, raced.command);
 
     expect(rejected.isErr() && rejected.error.message).toBe("The app already has a deployment");
-    expect(await app(raced.appId)).toMatchObject({ secrets: {}, secretRevision: 0 });
     expect(
       await environment.database.db
         .select()
@@ -256,8 +246,7 @@ describe("Cloudflare operation history", () => {
         .where(eq(deployments.id, raced.command.id)),
     ).toEqual([]);
 
-    // Accepted first, the install saves its secrets once, across request and
-    // Workflow races, and the history keeps the command without their values.
+    // Accepted first, the install is recorded once across request and Workflow races.
     const accepted = await install();
 
     const attempts = await Promise.all(
@@ -266,14 +255,76 @@ describe("Cloudflare operation history", () => {
       ),
     );
 
-    for (const attempt of attempts) expect(attempt.unwrap().command).not.toHaveProperty("secrets");
-    expect(await app(accepted.appId)).toMatchObject({ secrets, secretRevision: 1 });
+    for (const attempt of attempts) expect(attempt.unwrap().id).toBe(accepted.command.id);
 
-    // Later deployments of the app use its secrets like any other deployment.
+    // Later deployments of the app are accepted like any other deployment.
     const later = await seedDeployment(environment.database.db, { appId: accepted.appId });
     expect((await registerCloudflareOperation(environment.database.db, later.command)).isOk()).toBe(
       true,
     );
+  });
+
+  it("saves a template's secrets when publishing and sends Cloudflare no secret values", async () => {
+    const principal = {
+      id: environment.ownerId,
+      name: "Owner",
+      email: "owner@example.test",
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const entry = await seedDeployment(environment.database.db);
+    await environment.database.db
+      .update(apps)
+      .set({ ownerId: principal.id })
+      .where(eq(apps.id, entry.appId));
+
+    const deploy = vi.fn<HostedExecution["deploy"]>(async (deployment) => Result.ok(deployment));
+
+    const uploads = createUploadService(
+      environment.database.db,
+      storage,
+      environment.configuration,
+      { deploy },
+    );
+
+    const session = (await uploads.start(principal, entry.appId, {})).unwrap();
+    const secrets = { API_KEY: "synthetic-ciphertext" };
+
+    (
+      await uploads.publish(
+        principal,
+        entry.appId,
+        contract.workerMetadata.parse({
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          bindings: [],
+          assets: { upload_session: session.id, binding: "ASSETS" },
+          required_secrets: ["API_KEY"],
+        }),
+        null,
+        [
+          {
+            name: "worker.js",
+            type: "esm",
+            bytes: new TextEncoder().encode('export default { fetch: () => new Response("") };\n'),
+          },
+        ],
+        crypto.randomUUID(),
+        { firstDeployment: true, secrets },
+      )
+    ).unwrap();
+
+    const [record] = await environment.database.db
+      .select()
+      .from(apps)
+      .where(eq(apps.id, entry.appId));
+
+    expect(record).toMatchObject({ secrets, secretRevision: 1 });
+    expect(deploy).toHaveBeenCalledOnce();
+    expect(deploy.mock.calls[0]?.[4]).toEqual({ firstDeployment: true });
   });
 
   it("reports the required secrets of the deployment Cloudflare accepted last", async () => {
