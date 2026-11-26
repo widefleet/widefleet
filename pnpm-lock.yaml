@@ -481,6 +481,9 @@ importers:
 
   packages/contracts:
     dependencies:
+      jose:
+        specifier: 6.2.10
+        version: 6.2.10
       zod:
         specifier: 4.6.5
         version: 4.6.5

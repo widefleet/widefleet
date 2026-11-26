@@ -1,3 +1,4 @@
+import { base64url } from "jose";
 import { z } from "zod";
 
 // The control plane and the runtime keep their keys in the same format: a
@@ -16,31 +17,11 @@ const keySize = 32;
 
 export const keySetFormat = `a JWK Set {"keys":[{"kty":"oct","kid":"ID","k":"KEY"}]}, active key first, where ID uses 1 to 32 letters, digits, - or _ and KEY is ${keySize} random bytes in unpadded base64url`;
 
-/** Encodes bytes as unpadded base64url. */
-export const encodeKeyMaterial = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
-
-/** Decodes unpadded base64url, or returns `null` for malformed input. */
-export const decodeKeyMaterial = (k: string) => {
-  try {
-    return Uint8Array.from(atob(k.replaceAll("-", "+").replaceAll("_", "/")), (character) =>
-      character.charCodeAt(0),
-    );
-  } catch {
-    return null;
-  }
-};
-
 /** Whether `k` is canonical unpadded base64url of exactly 32 bytes. */
-const isKeyMaterial = (k: string) => {
-  const bytes = /^[A-Za-z0-9_-]{43}$/.test(k) ? decodeKeyMaterial(k) : null;
-
+const isKeyMaterial = (k: string) =>
+  /^[A-Za-z0-9_-]{43}$/.test(k) &&
   // Re-encoding rejects unused trailing bits, so each key has one spelling.
-  return bytes?.length === keySize && encodeKeyMaterial(bytes) === k;
-};
+  base64url.encode(base64url.decode(k)) === k;
 
 const keySet = z.object({ keys: z.array(z.unknown()) });
 
@@ -89,9 +70,6 @@ export const parseKeyring = (text: string, source: string): Keyring => {
   return [active, ...others];
 };
 
-const hex = (bytes: Uint8Array) =>
-  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-
 /** Formats a new keyring with one random key version. */
 export const generateKeyring = () =>
   `${JSON.stringify(
@@ -99,8 +77,10 @@ export const generateKeyring = () =>
       keys: [
         {
           kty: "oct",
-          kid: hex(crypto.getRandomValues(new Uint8Array(4))),
-          k: encodeKeyMaterial(crypto.getRandomValues(new Uint8Array(keySize))),
+          kid: Array.from(crypto.getRandomValues(new Uint8Array(4)), (byte) =>
+            byte.toString(16).padStart(2, "0"),
+          ).join(""),
+          k: base64url.encode(crypto.getRandomValues(new Uint8Array(keySize))),
         },
       ],
     },

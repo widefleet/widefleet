@@ -2,8 +2,6 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, path::Path};
 use platform_core::{Error, Result, model::RuntimeRelease};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 // Persist independently of access credentials. Concurrent bootstrap/agent starts
 // must agree on one keyring; replacing it would make published snapshots unreadable.
@@ -20,15 +18,17 @@ pub async fn secrets_keys(store: &dyn ObjectStore, organization_id: &str) -> Res
         Err(error) => return Err(failure(error)),
     };
     if missing {
-        let random = |count: usize| {
-            (0..count)
-                .map(|_| Uuid::new_v4().to_string())
-                .collect::<String>()
-        };
-        let key = Sha256::digest(random(3).as_bytes());
-        let id = platform_core::sha256(random(1).as_bytes());
+        let mut key = [0u8; 32];
+        let mut id = [0u8; 4];
+        getrandom::fill(&mut key)
+            .and_then(|()| getrandom::fill(&mut id))
+            .map_err(|error| Error::invalid(format!("Runtime key generation failed: {error}")))?;
         let value = json!({
-            "keys": [{ "kty": "oct", "kid": &id[..8], "k": URL_SAFE_NO_PAD.encode(key) }]
+            "keys": [{
+                "kty": "oct",
+                "kid": format!("{:08x}", u32::from_be_bytes(id)),
+                "k": URL_SAFE_NO_PAD.encode(key)
+            }]
         })
         .to_string();
         match store

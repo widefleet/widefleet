@@ -83,30 +83,26 @@ const resealed = async (environment: Environment, path: string, body: string) =>
 type Outcome = "current" | "rewritten" | "unreadable" | "conflicts" | "deleted";
 
 const rewrite = async (environment: Environment, path: string): Promise<Outcome> => {
-  // One more read after a conflict finds the value that was written meanwhile.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const object = await environment.WIDEFLEET_PACKAGES.get(path);
+  const object = await environment.WIDEFLEET_PACKAGES.get(path);
 
-    // An object deleted meanwhile stays deleted.
-    if (!object) return "deleted";
-    let next;
+  // An object deleted meanwhile stays deleted.
+  if (!object) return "deleted";
+  let next;
 
-    try {
-      next = await resealed(environment, path, await object.text());
-    } catch {
-      return "unreadable";
-    }
-
-    if (next === null) return "current";
-
-    const written = await environment.WIDEFLEET_PACKAGES.put(path, encoder.encode(next), {
-      onlyIf: { etagMatches: object.etag },
-    });
-
-    if (written) return "rewritten";
+  try {
+    next = await resealed(environment, path, await object.text());
+  } catch {
+    return "unreadable";
   }
 
-  return "conflicts";
+  if (next === null) return "current";
+
+  // A value written meanwhile is kept and counted; running the rewrite again reads it.
+  const written = await environment.WIDEFLEET_PACKAGES.put(path, encoder.encode(next), {
+    onlyIf: { etagMatches: object.etag },
+  });
+
+  return written ? "rewritten" : "conflicts";
 };
 
 export const rekeyRuntimeStorage = async (request: Request, environment: Environment) => {

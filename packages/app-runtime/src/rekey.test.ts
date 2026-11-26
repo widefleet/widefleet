@@ -273,7 +273,7 @@ describe("runtime storage rewrite", () => {
       ciphertext: await encryptText(rotated, snapshot(1), '{"A":"new"}'),
     });
 
-    expect(await pass(packages)).toMatchObject({ current: 1, rewritten: 0, conflicts: 0 });
+    expect(await pass(packages)).toMatchObject({ current: 0, rewritten: 0, conflicts: 1 });
     expect(
       await decryptText(
         rotated,
