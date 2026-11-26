@@ -61,7 +61,7 @@ export const applyNetworkChange = async (
   transaction: Transaction,
   principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
-  input: z.infer<typeof contract.networkChange>,
+  input: z.infer<typeof contract.networkUpdate>,
   enqueue = true,
 ) => {
   const access = await validateNetworkChange(transaction, principal, appId);
@@ -69,17 +69,20 @@ export const applyNetworkChange = async (
   if (access.isErr()) return access;
   const app = access.value;
   const policy = contract.networkPolicy.parse(app.networkPolicy);
-  const current = policy[input.target];
-  const selected = new Set(current);
+  let changed = false;
 
-  for (const origin of input.origins)
-    if (input.action === "allow") selected.add(origin);
-    else selected.delete(origin);
+  // A retry keeps the lists exactly as stored, so it never undoes a concurrent change.
+  if (input.action !== "retry") {
+    const current = policy[input.target];
+    const selected = new Set(current);
 
-  policy[input.target] = [...selected].sort();
+    for (const origin of input.origins)
+      if (input.action === "allow") selected.add(origin);
+      else selected.delete(origin);
 
-  const changed =
-    current.length !== selected.size || current.some((origin) => !selected.has(origin));
+    policy[input.target] = [...selected].sort();
+    changed = current.length !== selected.size || current.some((origin) => !selected.has(origin));
+  }
 
   if (!changed && !app.networkError) return Result.ok(present(app));
 
@@ -170,7 +173,7 @@ export const createNetworkService = (database: Database, execution?: HostedExecu
   change: async (
     principal: Pick<Principal, "id" | "admin" | "application">,
     appId: string,
-    input: z.infer<typeof contract.networkChange>,
+    input: z.infer<typeof contract.networkUpdate>,
   ) => {
     const changed = await (execution
       ? execution.network(principal, appId, input)

@@ -621,6 +621,13 @@ test(`lets owners allow and remove network origins beside the app's connections`
     // An origin with a path is rejected beside the field before anything is sent.
     await page.getByRole("button", { name: "Add origin" }).click();
     const field = page.getByLabel("Origin to allow");
+    const opener = page.getByRole("button", { name: "Add origin" });
+    await expect(field).toBeFocused();
+    // Escape closes the form and returns focus to the button that opened it.
+    await field.press("Escape");
+    await expect(field).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await opener.press("Enter");
     await expect(field).toBeFocused();
     await field.fill("https://partner.example.test/orders");
     await field.press("Enter");
@@ -668,44 +675,81 @@ test(`lets owners allow and remove network origins beside the app's connections`
       .getByRole("button", { name: "Remove https://api.example.test from the backend" })
       .click();
     await expect(requested.getByText("api.example.test")).toBeVisible();
+
+    // A change made after leaving and reopening the tab waits for the earlier one.
+    const sections = page.getByRole("navigation", { name: "App sections" });
+    await sections.getByRole("link", { name: /^Deployments/ }).click();
+    await sections.getByRole("link", { name: "Connections", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Allow https://erp.example.test for the backend" })
+      .click();
+    await expect(allowed.getByText("erp.example.test")).toBeVisible();
+    // Give an unordered save the chance to reach the network before checking it did not.
+    await page.waitForTimeout(500);
+    expect(held).toHaveLength(1);
     await release();
-    await expect.poll(async () => (await policy()).policy.backend).toEqual([]);
+    await release();
+    await expect
+      .poll(async () => (await policy()).policy.backend)
+      .toEqual(["https://erp.example.test"]);
 
     // A rejected change restores the list and explains why in a toast.
     await environment.database.db.update(apps).set({ state: "deleting" }).where(eq(apps.id, appId));
     await page
       .getByRole("button", { name: "Remove https://partner.example.test from the browser" })
       .click();
-    await expect(allowed).toHaveCount(0);
+    await expect(allowed.getByText("partner.example.test")).toHaveCount(0);
     await release();
     await expect(page.getByText("Could not remove https://partner.example.test.")).toBeVisible();
     await expect(allowed.getByText("partner.example.test")).toBeVisible();
     await environment.database.db.update(apps).set({ state: "active" }).where(eq(apps.id, appId));
 
-    // A failed activation offers to apply the same permissions again.
+    // The page picks up a failed activation without a reload. Retry applies the server's lists
+    // again, so an origin removed elsewhere in the meantime stays removed.
     await environment.database.db
       .update(apps)
       .set({ networkError: "Synthetic activation failure" })
       .where(eq(apps.id, appId));
-    await page.reload();
+    await expect(page.getByText("Synthetic activation failure", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+    await environment.database.db
+      .update(apps)
+      .set({ networkPolicy: { backend: [], browser: ["https://partner.example.test"] } })
+      .where(eq(apps.id, appId));
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await release();
+    await expect.poll(policy).toEqual({
+      policy: { backend: [], browser: ["https://partner.example.test"] },
+      error: null,
+    });
+    await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0, {
+      timeout: 10_000,
+    });
+
+    // A failed removal of the last origin can be retried as well.
+    await environment.database.db
+      .update(apps)
+      .set({
+        networkPolicy: { backend: [], browser: [] },
+        networkError: "Synthetic activation failure",
+      })
+      .where(eq(apps.id, appId));
+    await expect(allowed).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByText("Synthetic activation failure", { exact: false })).toBeVisible();
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await release();
-    await expect.poll(async () => (await policy()).error).toBeNull();
-    await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
+    await expect.poll(policy).toEqual({ policy: { backend: [], browser: [] }, error: null });
 
     // Collaborators see the permissions without the controls to change them.
     const collaboratorPage = await collaboratorContext.newPage();
     await collaboratorPage.goto(`/widefleet/apps/${appId}/connections`);
-    await expect(
-      collaboratorPage
-        .getByRole("list", { name: "Allowed origins" })
-        .getByText("partner.example.test"),
-    ).toBeVisible();
+    await expect(collaboratorPage.getByRole("list", { name: "Allowed origins" })).toHaveCount(0);
     await expect(collaboratorPage.getByRole("button", { name: /^(Allow|Remove)/ })).toHaveCount(0);
     await expect(
-      collaboratorPage.getByText("Only the app’s owner or an administrator can change these."),
-    ).toBeVisible();
+      collaboratorPage.getByRole("list", { name: "Requested origins" }).getByRole("listitem"),
+    ).toHaveCount(3);
+    await expect(collaboratorPage.getByRole("button", { name: "Add origin" })).toHaveCount(0);
     await collaboratorPage.screenshot({
       path: testInfo.outputPath(`network-collaborator-1280-light.png`),
       fullPage: true,

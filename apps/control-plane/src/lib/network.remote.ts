@@ -18,3 +18,9 @@ export const changeAppNetwork = command(
     await getAppNetwork({ appId, organizationId }).refresh();
   },
 );
+
+export const retryAppNetwork = command(appTarget, async ({ appId, organizationId }) => {
+  const { runtime, principal } = await commandContext({ organizationId });
+  queryValue(await runtime.network.change(principal, appId, { action: "retry" }));
+  await getAppNetwork({ appId, organizationId }).refresh();
+});

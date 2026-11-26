@@ -251,6 +251,54 @@ describe("Mandatory application context", () => {
     expect(directory.candidates).toEqual([]);
   });
 
+  it("retries a failed network activation with the stored lists unchanged", async () => {
+    const network = createNetworkService(environment.database.db);
+
+    const created = (
+      await service.create(first.principal, {
+        slug: "egress",
+        displayName: "Egress",
+        parentId: null,
+      })
+    ).unwrap();
+
+    const allowed = (
+      await network.change(first.principal, created.id, {
+        target: "backend",
+        action: "allow",
+        origins: ["https://api.example.test", "https://erp.example.test"],
+      })
+    ).unwrap();
+
+    // Another administrator removed an origin after the activation failed.
+    await environment.database.db
+      .update(apps)
+      .set({
+        networkPolicy: { backend: ["https://erp.example.test"], browser: [] },
+        networkError: "Synthetic activation failure",
+      })
+      .where(eq(apps.id, created.id));
+    const before = await environment.database.db.select().from(jobs);
+
+    const retried = (
+      await network.change(first.principal, created.id, { action: "retry" })
+    ).unwrap();
+
+    expect(retried.policy).toEqual({ backend: ["https://erp.example.test"], browser: [] });
+    expect(retried.revision).toBe(allowed.revision);
+    expect(retried.error).toBeNull();
+    expect(await environment.database.db.select().from(jobs)).toHaveLength(before.length + 1);
+
+    // Without a failure, a retry changes nothing and starts no work.
+    const repeated = (
+      await network.change(first.principal, created.id, { action: "retry" })
+    ).unwrap();
+
+    expect(repeated).toEqual(retried);
+    expect(await environment.database.db.select().from(jobs)).toHaveLength(before.length + 1);
+    expect((await network.view(first.principal, created.id)).unwrap().canManage).toBe(true);
+  });
+
   it("keeps named previews in the same flat namespace and rejects occupied hostnames", async () => {
     const input = { slug: "notes", displayName: "Notes", parentId: null };
     const parent = (await service.create(first.principal, input)).unwrap();

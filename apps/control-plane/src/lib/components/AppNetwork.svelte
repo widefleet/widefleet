@@ -1,4 +1,11 @@
+<script lang="ts" module>
+  // Changes to one app's lists reach the server in click order, also when its card is left and
+  // opened again before earlier changes finish. The last choice is the one kept.
+  const saves = new Map<string, Promise<void>>();
+</script>
+
 <script lang="ts">
+  import { tick } from "svelte";
   import { networkChange, networkOrigin } from "@platform/contracts";
   import type { z } from "zod";
   import { toast } from "@platform/ui/sonner";
@@ -9,7 +16,7 @@
   import Network from "@lucide/svelte/icons/network";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
-  import { changeAppNetwork, getAppNetwork } from "#lib/network.remote";
+  import { changeAppNetwork, getAppNetwork, retryAppNetwork } from "#lib/network.remote";
   import { failureMessage } from "#lib/sso-setup.svelte";
   import { getWorkspaceContext } from "#lib/workspace-context";
   import CapabilityStatus from "./CapabilityStatus.svelte";
@@ -97,23 +104,44 @@
     };
   };
 
-  // Changes reach the server in click order, so the last choice is the one kept.
-  let saves = Promise.resolve();
+  const enqueue = (
+    organizationId: string,
+    save: () => Promise<void>,
+    failure: string,
+    restore?: () => void,
+  ) => {
+    const key = `${organizationId} ${appId}`;
 
-  const change = (input: z.infer<typeof networkChange>, failure: string, restore?: () => void) => {
-    // A queued change still belongs to the workspace and app it was made in.
-    const { organizationId } = workspace;
-    const target = getAppNetwork({ organizationId, appId });
-    const override = target.withOverride((current) => apply(current, input));
-
-    saves = saves.then(async () => {
+    const queued = (saves.get(key) ?? Promise.resolve()).then(async () => {
       try {
-        await changeAppNetwork({ organizationId, appId, ...input }).updates(override);
+        await save();
       } catch (cause) {
         restore?.();
         toast.error(failure, { description: failureMessage(cause, "Try again.") });
       }
     });
+
+    saves.set(key, queued);
+    // Forget an app's queue once it has drained.
+    void queued.then(() => {
+      if (saves.get(key) === queued) saves.delete(key);
+    });
+  };
+
+  const change = (input: z.infer<typeof networkChange>, failure: string, restore?: () => void) => {
+    // A queued change still belongs to the workspace and app it was made in.
+    const { organizationId } = workspace;
+
+    const override = getAppNetwork({ organizationId, appId }).withOverride((current) =>
+      apply(current, input),
+    );
+
+    enqueue(
+      organizationId,
+      () => changeAppNetwork({ organizationId, appId, ...input }).updates(override),
+      failure,
+      restore,
+    );
   };
 
   const allow = (target: Target, origin: string) =>
@@ -122,20 +150,29 @@
   const remove = (target: Target, origin: string) =>
     change({ target, action: "deny", origins: [origin] }, `Could not remove ${origin}.`);
 
-  // Repeating an applied change starts the activation again.
+  // The server applies its current lists again, so a change made elsewhere is never undone.
   const retry = () => {
-    const target = targets.find((list) => network.policy[list].length);
+    const { organizationId } = workspace;
 
-    if (target)
-      change(
-        { target, action: "allow", origins: network.policy[target] },
-        "Could not apply the network permissions again.",
-      );
+    enqueue(
+      organizationId,
+      () => retryAppNetwork({ organizationId, appId }),
+      "Could not apply the network permissions again.",
+    );
   };
 
   let adding = $state(false);
 
   let field = $state<HTMLInputElement | null>(null);
+
+  let opener = $state<HTMLElement | null>(null);
+
+  // Closing the form returns focus to the control that opens it.
+  const close = async () => {
+    adding = false;
+    await tick();
+    opener?.focus();
+  };
 
   // Opening the form moves focus to the origin field.
   $effect(() => {
@@ -149,7 +186,7 @@
   let draftError = $state("");
 
   const cancel = () => {
-    adding = false;
+    void close();
     draft = "";
     draftError = "";
   };
@@ -169,7 +206,7 @@
 
     draft = "";
     draftError = "";
-    adding = false;
+    void close();
     change({ target, action: "allow", origins: [origin] }, `Could not allow ${origin}.`, () => {
       // Keep what was typed when the server rejects it, unless something new was typed since.
       if (!draft) {
@@ -199,7 +236,7 @@
   </div>
 
   {#if requested.length}
-    <ul class="divide-y border-b px-4" aria-label="Requested origins">
+    <ul class="divide-y px-4" aria-label="Requested origins">
       {#each requested as entry (`${entry.target} ${entry.origin}`)}
         <li class="flex min-h-12 items-center gap-3 py-2">
           {@render row(entry, "Requested by the app")}
@@ -215,7 +252,7 @@
   {/if}
 
   {#if allowed.length}
-    <ul class="divide-y px-4" aria-label="Allowed origins">
+    <ul class={["divide-y px-4", requested.length && "border-t"]} aria-label="Allowed origins">
       {#each allowed as entry (`${entry.target} ${entry.origin}`)}
         <li class="flex min-h-12 items-center gap-3 py-2">
           {@render row(
@@ -235,9 +272,9 @@
   {:else if !requested.length}
     <div class="px-4 py-6">
       <p class="text-sm">No external origins</p>
-      <p class="text-muted-foreground mt-2 text-xs leading-5">
-        Requests to other websites and APIs are blocked.
-      </p>
+      {#if network.state === "active"}<p class="text-muted-foreground mt-2 text-xs leading-5">
+          Requests to other websites and APIs are blocked.
+        </p>{/if}
     </div>
   {/if}
 
@@ -284,14 +321,11 @@
           size="sm"
           variant="ghost"
           class="text-muted-foreground w-full justify-start"
+          bind:ref={opener}
           onclick={() => (adding = true)}><Plus />Add origin</Button
         >
       </div>
     {/if}
-  {:else}
-    <p class="text-muted-foreground border-t px-4 py-3 text-[11px]">
-      Only the app’s owner or an administrator can change these.
-    </p>
   {/if}
 
   {#if network.state !== "active"}
@@ -300,7 +334,7 @@
       <p class="text-muted-foreground min-w-0 flex-1 text-[11px] leading-4">
         {stateHints[network.state]}{#if network.error}{" "}{network.error}{/if}
       </p>
-      {#if network.state === "failed" && view.canManage && allowed.length}<Button
+      {#if network.state === "failed" && view.canManage}<Button
           size="xs"
           variant="outline"
           onclick={retry}>Retry</Button
