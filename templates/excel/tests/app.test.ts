@@ -99,7 +99,14 @@ describe("Excel personal account app", () => {
     expect(response.status, text).toBe(200);
     const destination = z.string().parse(/<a href="([^"]+)">/.exec(text)?.[1]);
 
-    return destination.replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)));
+    const address = destination.replace(/&#(\d+);/g, (_, code: string) =>
+      String.fromCharCode(Number(code)),
+    );
+
+    // People with several Microsoft accounts choose the one to connect.
+    expect(new URL(address).searchParams.get("prompt")).toBe("select_account");
+
+    return address;
   };
 
   const connect = async (client: ReturnType<typeof browser>, user: string) => {

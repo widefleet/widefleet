@@ -91,6 +91,8 @@ export const authentication = (
         // Better Auth would add Microsoft Graph's User.Read, a second resource.
         disableDefaultScope: true,
         scope: [...scopes],
+        // People often have several Microsoft accounts; they choose the one to connect.
+        prompt: "select_account",
         disableSignUp: true,
         disableProfilePhoto: true,
         mapProfileToUser: (profile) => ({ providerEmail: profile.email }),

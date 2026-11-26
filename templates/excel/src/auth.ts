@@ -77,6 +77,8 @@ export const authentication = (
         tenantId: "common",
         // Better Auth adds openid, profile, email, offline_access and User.Read.
         scope: [...scopes],
+        // People often have several Microsoft accounts; they choose the one to connect.
+        prompt: "select_account",
         disableSignUp: true,
         disableProfilePhoto: true,
         mapProfileToUser: (profile) => ({ providerEmail: profile.email }),
