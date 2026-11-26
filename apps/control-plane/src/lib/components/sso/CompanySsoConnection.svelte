@@ -144,7 +144,7 @@
 
   const remove = () =>
     removal.save(() =>
-      settingsInput.parse({ ...view.settings, sso: null, directory: null, embeddingOrigins: [] }),
+      settingsInput.parse({ ...view.settings, allowBrowserWorkers: undefined, sso: null, directory: null, embeddingOrigins: [] }),
     );
 </script>
 

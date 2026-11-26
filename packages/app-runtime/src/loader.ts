@@ -133,6 +133,7 @@ const dispatchApp = async (
     organizationId: string;
     caller: z.infer<typeof appCaller>;
     frameAncestors: string[];
+    allowBrowserWorkers: boolean;
   } | null,
 ) => {
   const url = new URL(request.url);
@@ -238,6 +239,7 @@ const dispatchApp = async (
         linkManifest(app, asset),
         app.network.policy.browser,
         authenticated?.frameAncestors,
+        authenticated?.allowBrowserWorkers,
       );
   }
 
@@ -265,6 +267,7 @@ const dispatchApp = async (
     linkManifest(app, response),
     app.network.policy.browser,
     authenticated?.frameAncestors,
+    authenticated?.allowBrowserWorkers,
   );
 };
 
@@ -412,12 +415,13 @@ export default {
 
     return createAuthHandler(
       environment,
-      (authenticated, appId, organizationId, caller, frameAncestors) =>
+      (authenticated, appId, organizationId, caller, frameAncestors, allowBrowserWorkers) =>
         dispatchApp(authenticated, environment, context, {
           appId,
           organizationId,
           caller,
           frameAncestors,
+          allowBrowserWorkers,
         }),
       appUserAnalytics(environment),
     ).fetch(request);

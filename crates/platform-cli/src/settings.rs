@@ -44,6 +44,11 @@ enum Command {
         #[arg(long)]
         acknowledge_restart: bool,
     },
+    /// Allow hosted apps to register same-origin browser workers.
+    BrowserWorkers {
+        #[arg(action = clap::ArgAction::Set)]
+        enabled: bool,
+    },
     /// Set browser settings read-only while API and CLI changes remain available.
     ExternalManagement {
         #[arg(action = clap::ArgAction::Set)]
@@ -189,8 +194,11 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
             .await?;
             super::print_json(&view)
         }
-        Command::ExternalManagement { enabled } | Command::DomainSso { enabled } => {
+        Command::BrowserWorkers { enabled }
+        | Command::ExternalManagement { enabled }
+        | Command::DomainSso { enabled } => {
             let path = match options.command {
+                Command::BrowserWorkers { .. } => "/settings/browser-workers",
                 Command::DomainSso { .. } => "/settings/domain-sso",
                 _ => "/settings/external-management",
             };
