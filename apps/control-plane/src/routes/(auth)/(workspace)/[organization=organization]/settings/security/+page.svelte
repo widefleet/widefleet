@@ -4,6 +4,7 @@
   import { failureMessage } from "#lib/sso-setup.svelte";
   import { Button } from "@platform/ui/button";
   import { Switch } from "@platform/ui/switch";
+  import * as Tooltip from "@platform/ui/tooltip";
   import * as Dialog from "@platform/ui/dialog";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
@@ -64,24 +65,47 @@
           Let apps run background tasks and work offline.
         </p>
       </div>
-      <Switch
-        id="browser-workers"
-        bind:ref={trigger}
-        bind:checked={
-          () => enabled || confirmOpen,
-          (next) => {
-            if (next) confirmOpen = true;
-            else void toggle(false);
+      {#if readonly}
+        <Tooltip.Provider>
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              {#snippet child({ props })}
+                <span
+                  {...props}
+                  tabindex="0"
+                  role="group"
+                  aria-label="Browser workers, externally managed"
+                  class="inline-flex rounded-full"
+                >
+                  <Switch
+                    id="browser-workers"
+                    checked={enabled}
+                    disabled
+                    class="pointer-events-none"
+                  />
+                </span>
+              {/snippet}
+            </Tooltip.Trigger>
+            <Tooltip.Content role="tooltip" sideOffset={6}
+              >Managed through the API or CLI.</Tooltip.Content
+            >
+          </Tooltip.Root>
+        </Tooltip.Provider>
+      {:else}
+        <Switch
+          id="browser-workers"
+          bind:ref={trigger}
+          bind:checked={
+            () => enabled || confirmOpen,
+            (next) => {
+              if (next) confirmOpen = true;
+              else void toggle(false);
+            }
           }
-        }
-        disabled={busy || readonly}
-      />
+          disabled={busy}
+        />
+      {/if}
     </div>
-    {#if readonly}
-      <p class="text-muted-foreground mt-2 text-sm">
-        This setting is managed through the API or CLI.
-      </p>
-    {/if}
   </section>
 </div>
 

@@ -194,6 +194,34 @@ test("confirms browser worker access before changing organization security", asy
   }
 });
 
+test("explains a locked browser worker switch on hover and keyboard focus", async ({ browser }) => {
+  const { alpha, context } = await organizationSession(browser);
+
+  try {
+    const page = await context.newPage();
+    await page.goto(`/${alpha}/settings/administration`);
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: "Manage settings externally" }).click();
+    await expect(page.getByRole("button", { name: "Enable browser editing" })).toBeVisible();
+    await page.goto(`/${alpha}/settings/security`);
+    await page.waitForLoadState("networkidle");
+    const locked = page.getByRole("group", { name: "Browser workers, externally managed" });
+    const tooltip = page.getByRole("tooltip");
+    await expect(locked.getByRole("switch")).toBeDisabled();
+    await expect(tooltip).toBeHidden();
+    await locked.hover();
+    await expect(tooltip).toHaveText("Managed through the API or CLI.");
+    await page.mouse.move(0, 0);
+    await expect(tooltip).toBeHidden();
+    await locked.focus();
+    await expect(tooltip).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(tooltip).toBeHidden();
+  } finally {
+    await context.close();
+  }
+});
+
 test("opens organization settings without installation reporting privileges", async ({
   browser,
 }) => {
