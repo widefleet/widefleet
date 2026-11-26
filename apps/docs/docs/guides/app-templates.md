@@ -1,59 +1,169 @@
 ---
 title: Use an app template
-description: Find a ready-made app and set it up with your agent or the CLI.
-lastModified: 2026-11-16
+description: Install a ready-made app, connect accounts and use it from agents and other apps.
+lastModified: 2026-11-26
 ---
 
-App templates give you source code and instructions for a working app. Deploy a
-template into your organization, then use and customize it like any other app.
+App templates are ready-made apps for the tools your team already uses, such as
+Gmail, GitHub, Linear or Outlook. Install one into your organization, connect your
+account and use it from your agents and apps.
 
-Sign in to the organization where you want the app. Your agent needs the
-[Widefleet CLI](/getting-started/installation) and access to that organization.
-Check the template's instructions for any credentials or permissions it requires.
+Sign in to the organization where you want the app. Installing needs permission to
+create apps in it.
 
-## Start from the catalog
+## Install from the catalog
 
 1. Open **App catalog → Templates** in the control plane.
-2. Choose a template and read its description and instructions.
-3. Copy the prompt under **Set up with your agent** and paste it into your agent.
+2. Choose a template and read its setup steps.
+3. Enter any required secrets, such as an OAuth client ID, and select **Install**.
 
-The prompt selects your installation and organization. Your agent reads the same
-instructions through the CLI, checks for an existing app to reuse, and helps you
-deploy and configure the app.
+The template page lists the external services the app connects to. Installing
+allows them and deploys the app. Choose **Open** to go to the installed app.
 
-If copying is unavailable, select the prompt text and copy it manually.
+To let your agent do the setup, copy the prompt under **Set up with your agent**
+and paste it into your agent. It installs the template with the CLI, reuses a
+suitable existing app and guides you through the remaining steps.
 
-## Find templates from the CLI
-
-An agent already working with Widefleet can discover templates directly:
+## Install from the CLI
 
 ```sh
-widefleet catalog templates list
 widefleet catalog templates list --search mail
 widefleet catalog templates show gmail
+widefleet catalog templates install gmail \
+  --secret-file GOOGLE_CLIENT_ID=./client-id \
+  --secret-file GOOGLE_CLIENT_SECRET=./client-secret
 ```
 
-The commands return JSON. A template includes its source URL and the Markdown
-instructions from its `template.md` file. Follow those instructions to copy,
-deploy and configure the app. Keep the copied source for future changes. See
-[saving and recovering source code](/guides/source-code) to continue working
-from another session or machine.
+`show` returns the template's setup steps and the secrets it requires in
+`requiredSecrets`. `install` saves each secret from its file, deploys the app and
+prints the app as JSON. Use `--name` to install a template a second time under
+another name. If your login cannot change network permissions, the CLI prints the
+`widefleet network allow` command an administrator runs to finish the setup.
 
 Use `--organization ID` when you work across organizations. See
 [organization selection](/reference/cli-configuration#select-an-organization).
 
-## Complete setup and use the app
+## Connect your account
 
-Follow the template's setup steps and verify the result with its usage example.
-For an app that connects personal accounts, complete account sign-in in your
-browser. Provide credentials through the app's **Secrets** tab or the CLI's
-protected-file input.
+Open the app's URL and connect your account with the service. Each person
+connects their own account, so the app acts with that person's permissions.
+Disconnect on the same page at any time.
 
-If the app provides an API, follow its instructions to use it from another app.
-See [Connect apps](/guides/app-services) for connection setup and permissions.
+When the service asks for more permissions than an account granted, the app asks
+the person to connect again.
 
-For apps already published by your organization, use **Published apps** in the
-catalog or `widefleet catalog list` to find their launch URLs.
+## Use from agents and apps
+
+Agents in [MCP clients](/guides/mcp) find the app's methods through Widefleet and
+call them for the signed-in person. Ask for what you need, such as "Show my
+unread emails from today".
+
+To use the app from your own app, connect it from the calling app's directory:
+
+```sh
+widefleet connect gmail --as GMAIL
+```
+
+Call the binding while handling a signed-in person's request. Widefleet forwards
+their identity, and the template uses their connected account. Each method follows
+the service's API. Methods of GraphQL and Google APIs take the fields to return,
+and the result contains exactly those fields:
+
+```ts
+const page = await env.GMAIL.messagesList(
+  { q: "is:unread newer_than:1d", maxResults: 10 },
+  { messages: { id: true, threadId: true }, nextPageToken: true },
+);
+
+if (page.status === "connected") {
+  for (const message of page.data.messages ?? []) console.log(message.id);
+}
+```
+
+A selection names a field with `true`, or with a nested selection for an object.
+In GraphQL APIs, `$args` passes a field's arguments, such as
+`{ comments: { $args: { first: 5 }, nodes: { body: true } } }`, and `$on` selects
+fields per type. Fields the service has no value for are `undefined`.
+
+**App APIs** in the control plane documents every method, its input and the
+service's description. See [Connect apps](/guides/app-services) for connection
+permissions.
+
+### Results
+
+Every method returns a `status`:
+
+| Status                                         | Meaning                                                              |
+| ---------------------------------------------- | -------------------------------------------------------------------- |
+| `connected`                                    | `data` holds the result.                                             |
+| `connection_required`, `reconnect_required`    | The person connects or reconnects their account at `connectUrl`.     |
+| `permission_required`                          | The account granted fewer permissions than the app needs; reconnect. |
+| `setup_required`                               | The app is missing the secrets listed in the result.                 |
+| `authentication_required`                      | The call has no signed-in person.                                    |
+| `rate_limited`                                 | Retry after `retryAfter`, as the service sent it.                    |
+| `refresh_failed`                               | The service was unavailable while renewing access; retry later.      |
+| `too_large`                                    | The response exceeds 8 MiB; select fewer fields or items.            |
+| `declined`                                     | The person declined the change; nothing ran.                         |
+| an error of the service, such as `gmail_error` | The service's own error message and details.                         |
+
+Inputs and selections are checked against the service's schema before anything
+is sent.
+
+## Approve changes
+
+Reading never asks. Methods that change data ask the person first, according to
+their approval level on the app's page:
+
+- **Ask before every change**
+- **Ask before changing, deleting or sending** (default): creating new items,
+  such as a draft or a label, runs at once.
+- **Never ask**
+
+A method that asks returns `input_required`. MCP clients show the question to the
+person. A calling app shows it itself and answers with `withInput`, as described
+in [Ask the user before continuing](/guides/app-services#ask-the-user-before-continuing).
+
+## Customize a template
+
+Open **View source** on the template page and copy the template's directory into
+your project. Keep `pnpm-workspace.yaml` and `patches/` with the source.
+
+To change an installed template app, set `name` in `wrangler.jsonc` to the app's
+name and deploy. The app keeps its secrets and connected accounts:
+
+```sh
+pnpm install
+pnpm test
+widefleet deploy
+```
+
+To deploy the source as a new app, create it and save the secrets the template
+requires first, such as for Gmail:
+
+```sh
+widefleet create my-gmail --name "My Gmail"
+widefleet secret put GOOGLE_CLIENT_ID --file ./client-id
+widefleet secret put GOOGLE_CLIENT_SECRET --file ./client-secret
+widefleet deploy
+```
+
+Set the same name in `wrangler.jsonc`. See [saving and recovering source code](/guides/source-code)
+to continue from another session or machine.
+
+Template methods are generated from the service's published API description. To
+pick up the service's latest API, run the generator from a checkout of the
+[Widefleet repository](https://github.com/widefleet/widefleet) with your app's
+directory:
+
+```sh
+pnpm --filter @platform/template-generator generate /path/to/your/app
+```
+
+`scripts/operations.ts` lists the offered operations and whether each one
+creates, updates, deletes or sends. The generator rewrites `src/api.ts`,
+`src/schema.ts` and the shared runtime files, so keep your own code in other
+files. When the service adds an operation that changes data, add it to
+`scripts/operations.ts`. Review the diff before deploying.
 
 ## Create an app for another use case
 

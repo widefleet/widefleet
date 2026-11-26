@@ -245,7 +245,7 @@ describe("Teams personal account app", () => {
         url: "https://graph.microsoft.com/v1.0/chats",
         body: JSON.stringify({
           chatType: "oneOnOne",
-          // A name's apostrophe is doubled and the rest encoded, as template.md shows.
+          // A name's apostrophe is doubled and the rest encoded.
           members: [
             member("https://graph.microsoft.com/v1.0/users('101')"),
             member("https://graph.microsoft.com/v1.0/users('o''brien%231%40example.test')"),

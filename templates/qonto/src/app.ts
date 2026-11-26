@@ -11,6 +11,35 @@ import type { Environment, Properties } from "./context.ts";
  * according to their approval level, and Qonto asks for its own approval on the
  * user's paired phone where it requires one, such as a payment to a beneficiary
  * the organization has not trusted.
+ *
+ * @remarks
+ * Inputs and results keep Qonto's field names. Lists take `page` and `per_page`
+ * and answer with a `meta` object whose `next_page` names the next page. A SEPA
+ * transfer first checks the payee with `verifyPayee`; a transfer above the
+ * organization's payment policy returns `payment_policy_approval_required`, so
+ * send it with `createTransferRequest` for an approver instead.
+ *
+ * A payment Qonto protects returns the question `approveInQonto`: the person
+ * approves it in the Qonto app within 15 minutes and confirms, and the call
+ * completes the payment. A refusal returns `rejected_in_qonto`.
+ *
+ * Files such as IBAN certificates and transfer proofs return with their
+ * `contentType`; uploads such as `uploadAttachment` take `{ mimeType, base64
+ * }`. `revokeAccess` ends the app's access in Qonto and removes the connection.
+ *
+ * @example
+ * ```ts
+ * const transactions = await env.QONTO.listTransactions({
+ *   iban: "FR7616798000010000004321396",
+ *   "status[]": ["completed"],
+ *   per_page: 50,
+ * });
+ * if (transactions.status === "connected") {
+ *   for (const transaction of transactions.data.transactions ?? []) {
+ *     console.log(transaction.settled_at, transaction.label, transaction.amount);
+ *   }
+ * }
+ * ```
  */
 export default class Qonto extends QontoApi {
   /** Check account setup and linking. Connect the Qonto account on this app's page. */

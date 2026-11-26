@@ -1,4 +1,4 @@
-// Compiled by `pnpm typecheck`: the results a consuming app sees, as template.md shows them.
+// Compiled by `pnpm typecheck`: the results a consuming app sees.
 import type Qonto from "../src/app.ts";
 
 declare const qonto: Qonto;
