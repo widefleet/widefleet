@@ -18,6 +18,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   app,
   artifact,
+  networkPolicy,
   serviceDocumentation,
   workerMetadata,
   type userConnectionInvocation,
@@ -31,6 +32,7 @@ import {
 } from "../../src/lib/server/auth-schema.ts";
 import {
   agents,
+  appGrants,
   apps,
   artifacts,
   deployments,
@@ -467,6 +469,236 @@ test(`lets members connect any API in their organization`, async ({ browser }, t
     await Promise.all(contexts.map((context) => context.close()));
     await environment.database.db.delete(apps).where(inArray(apps.id, createdAppIds));
     await environment.database.db.delete(user).where(eq(user.id, creator.id));
+  }
+});
+
+test(`lets owners allow and remove network origins beside the app's connections`, async ({
+  browser,
+}, testInfo) => {
+  const collaborator = environment.users.createUser({
+    name: "Network collaborator",
+    email: `network-collaborator@example.test`,
+  });
+
+  await environment.users.saveUser(collaborator);
+  await environment.linkMicrosoftUser(collaborator.id);
+
+  const contexts = await Promise.all(
+    [environment.ownerId, collaborator.id].map(async (userId) => {
+      const context = await browser.newContext({
+        baseURL: environment.configuration.PLATFORM_URL,
+        extraHTTPHeaders: { "x-forwarded-proto": "http" },
+      });
+
+      const login = await environment.users.login({ userId });
+      await context.addCookies(
+        login.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax" as const,
+          secure: false,
+        })),
+      );
+
+      return context;
+    }),
+  );
+
+  const [ownerContext, collaboratorContext] = contexts;
+
+  if (!ownerContext || !collaboratorContext) throw new Error("Missing test context");
+  const appId = crypto.randomUUID();
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+
+  const policy = async () => {
+    const [record] = await environment.database.db
+      .select({ policy: apps.networkPolicy, error: apps.networkError })
+      .from(apps)
+      .where(eq(apps.id, appId));
+
+    return { policy: networkPolicy.parse(record?.policy), error: record?.error ?? null };
+  };
+
+  try {
+    await environment.database.db.insert(apps).values({
+      id: appId,
+      slug: `network-card`,
+      displayName: `Order sync`,
+      organizationId: "widefleet",
+      ownerId: environment.ownerId,
+      hostname: `network-card.${environment.configuration.APP_DOMAIN}`,
+      networkPolicy: { backend: ["https://legacy.example.test"], browser: [] },
+    });
+    await environment.database.db.insert(appGrants).values({ appId, userId: collaborator.id });
+    await environment.database.db.insert(artifacts).values({
+      id: artifactId,
+      appId,
+      manifest: {},
+      modules: [],
+      metadata: workerMetadata.parse({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        assets: { upload_session: artifactId },
+        network: {
+          backend: ["https://api.example.test", "https://erp.example.test"],
+          browser: ["https://cdn.example.test"],
+        },
+      }),
+    });
+    await environment.database.db.insert(deployments).values({
+      id: deploymentId,
+      appId,
+      artifactId,
+      status: "succeeded",
+      requestId: crypto.randomUUID(),
+    });
+    await environment.database.db
+      .update(apps)
+      .set({
+        activeDeploymentId: deploymentId,
+        state: "active",
+        appliedNetworkRevision: 0,
+        appliedCapabilityRevision: 0,
+      })
+      .where(eq(apps.id, appId));
+
+    const page = await ownerContext.newPage();
+    // Hold each change at the network to see what the page shows before the server answers.
+    const held: (() => void)[] = [];
+
+    const release = async () => {
+      await expect.poll(() => held.length).toBe(1);
+      held.shift()?.();
+    };
+
+    await page.route("**/_app/remote/**", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+
+      await new Promise<void>((resolve) => held.push(resolve));
+
+      return route.continue();
+    });
+    await page.goto(`/widefleet/apps/${appId}/connections`);
+    const requested = page.getByRole("list", { name: "Requested origins" });
+    const allowed = page.getByRole("list", { name: "Allowed origins" });
+    await expect(requested.getByRole("listitem")).toHaveCount(3);
+    await expect(allowed.getByRole("listitem")).toHaveText([
+      /https:\/\/legacy\.example\.test\s*Backend · Not requested by the latest deployment/,
+    ]);
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+
+      for (const colorScheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme });
+        await page.screenshot({
+          path: testInfo.outputPath(`network-${width}-${colorScheme}.png`),
+          fullPage: true,
+        });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      }
+    }
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.emulateMedia({ colorScheme: "light" });
+
+    // Allowing a requested origin moves it at once; the server keeps it.
+    await page
+      .getByRole("button", { name: "Allow https://api.example.test for the backend" })
+      .click();
+    await expect(allowed.getByText("https://api.example.test")).toBeVisible();
+    await expect(requested.getByText("https://api.example.test")).toHaveCount(0);
+    await release();
+    await expect.poll(policy).toEqual({
+      policy: { backend: ["https://api.example.test", "https://legacy.example.test"], browser: [] },
+      error: null,
+    });
+    await expect(allowed.getByText("https://api.example.test")).toBeVisible();
+
+    // An origin with a path is rejected beside the field before anything is sent.
+    const field = page.getByLabel("Allow an origin");
+    await field.fill("https://partner.example.test/orders");
+    await field.press("Enter");
+    await expect(page.getByText("Use an exact HTTPS origin", { exact: false })).toBeVisible();
+    await expect(field).toHaveValue("https://partner.example.test/orders");
+    expect(held).toHaveLength(0);
+
+    await field.fill("https://partner.example.test");
+    await page.getByLabel("Where the app reaches the origin").selectOption("browser");
+    await page.getByRole("button", { name: "Allow", exact: true }).click();
+    await expect(field).toHaveValue("");
+    await expect(allowed.getByText("https://partner.example.test")).toBeVisible();
+    await release();
+    await expect
+      .poll(async () => (await policy()).policy.browser)
+      .toEqual(["https://partner.example.test"]);
+
+    // Removing an origin the deployment no longer declares drops it from both lists.
+    await page
+      .getByRole("button", { name: "Remove https://legacy.example.test from the backend" })
+      .click();
+    await expect(page.getByText("https://legacy.example.test")).toHaveCount(0);
+    await release();
+    await expect
+      .poll(async () => (await policy()).policy.backend)
+      .toEqual(["https://api.example.test"]);
+
+    // Removing a declared origin returns it to the requested list.
+    await page
+      .getByRole("button", { name: "Remove https://api.example.test from the backend" })
+      .click();
+    await expect(requested.getByText("https://api.example.test")).toBeVisible();
+    await release();
+    await expect.poll(async () => (await policy()).policy.backend).toEqual([]);
+
+    // A rejected change restores the list and explains why in a toast.
+    await environment.database.db.update(apps).set({ state: "deleting" }).where(eq(apps.id, appId));
+    await page
+      .getByRole("button", { name: "Remove https://partner.example.test from the browser" })
+      .click();
+    await expect(allowed).toHaveCount(0);
+    await release();
+    await expect(page.getByText("Could not remove https://partner.example.test.")).toBeVisible();
+    await expect(allowed.getByText("https://partner.example.test")).toBeVisible();
+    await environment.database.db.update(apps).set({ state: "active" }).where(eq(apps.id, appId));
+
+    // A failed activation offers to apply the same permissions again.
+    await environment.database.db
+      .update(apps)
+      .set({ networkError: "Synthetic activation failure" })
+      .where(eq(apps.id, appId));
+    await page.reload();
+    await expect(page.getByText("Synthetic activation failure", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await release();
+    await expect.poll(async () => (await policy()).error).toBeNull();
+    await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
+
+    // Collaborators see the permissions without the controls to change them.
+    const collaboratorPage = await collaboratorContext.newPage();
+    await collaboratorPage.goto(`/widefleet/apps/${appId}/connections`);
+    await expect(
+      collaboratorPage
+        .getByRole("list", { name: "Allowed origins" })
+        .getByText("https://partner.example.test"),
+    ).toBeVisible();
+    await expect(collaboratorPage.getByRole("button", { name: /^(Allow|Remove)/ })).toHaveCount(0);
+    await expect(
+      collaboratorPage.getByText(
+        "Only the app’s owner or an administrator can change network permissions.",
+      ),
+    ).toBeVisible();
+    await collaboratorPage.screenshot({
+      path: testInfo.outputPath(`network-collaborator-1280-light.png`),
+      fullPage: true,
+    });
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+    await environment.database.db.delete(apps).where(eq(apps.id, appId));
+    await environment.database.db.delete(user).where(eq(user.id, collaborator.id));
   }
 });
 

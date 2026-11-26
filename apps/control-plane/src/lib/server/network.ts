@@ -25,6 +25,12 @@ const present = (app: typeof apps.$inferSelect) =>
           : "pending",
   });
 
+// Collaborators see an app's network permissions; only its owner or an administrator changes them.
+const mayChange = (
+  principal: Pick<Principal, "id" | "application">,
+  app: typeof apps.$inferSelect,
+) => principal.application.admin || app.ownerId === principal.id;
+
 export const validateNetworkChange = async (
   transaction: Transaction,
   principal: Pick<Principal, "id" | "admin" | "application">,
@@ -35,7 +41,7 @@ export const validateNetworkChange = async (
   if (access.isErr()) return access;
   const app = access.value;
 
-  if (!principal.application.admin && app.ownerId !== principal.id)
+  if (!mayChange(principal, app))
     return Result.err(
       new InvalidOperation({
         code: "FORBIDDEN",
@@ -136,17 +142,33 @@ export const withDeclaration = (
       })
     : state;
 
+const view = (
+  database: Database,
+  principal: Pick<Principal, "id" | "admin" | "application">,
+  appId: string,
+) =>
+  transact(database, async (transaction) => {
+    const app = await managedApp(transaction, principal, appId);
+
+    if (app.isErr()) return app;
+
+    return Result.ok({
+      network: withDeclaration(present(app.value), await declaredNetwork(transaction, appId)),
+      canManage: app.value.state !== "deleting" && mayChange(principal, app.value),
+    });
+  });
+
 export const createNetworkService = (database: Database, execution?: HostedExecution) => ({
-  read: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
-    transact(database, async (transaction) => {
-      const app = await managedApp(transaction, principal, appId);
+  read: async (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) => {
+    const viewed = await view(database, principal, appId);
 
-      if (app.isErr()) return app;
+    if (viewed.isErr()) return viewed;
 
-      return Result.ok(
-        withDeclaration(present(app.value), await declaredNetwork(transaction, appId)),
-      );
-    }),
+    return Result.ok(viewed.value.network);
+  },
+  // The management page also needs to know whether to offer changes.
+  view: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
+    view(database, principal, appId),
   change: async (
     principal: Pick<Principal, "id" | "admin" | "application">,
     appId: string,
