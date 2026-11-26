@@ -152,7 +152,7 @@ it.each([false, true])(
   },
 );
 
-it("keeps the native provider and app claims together when settings saves overlap", async () => {
+it("rejects an overlapping settings save and keeps the running save's provider and app claims together", async () => {
   const environment = await createTestEnvironment();
   const gate = new EventEmitter();
   const firstCommitted = once(gate, "committed");
@@ -185,20 +185,24 @@ it("keeps the native provider and app claims together when settings saves overla
     const firstInput = editableSettings(await environment.settings.inspect());
 
     if (!firstInput.sso) throw new Error("Missing fixture provider");
-    firstInput.sso.appIdentityType = "entra";
+    firstInput.sso.appIdentityType = "oidc";
     firstInput.sso.oidcConfig.mapping.name = "first_name";
     firstInput.sso.oidcConfig.mapping.extraFields.groups = "first_groups";
     const secondInput = structuredClone(firstInput);
 
     if (!secondInput.sso) throw new Error("Missing fixture provider");
-    secondInput.sso.appIdentityType = "oidc";
+    secondInput.sso.appIdentityType = "entra";
     secondInput.sso.oidcConfig.mapping.name = "second_name";
     secondInput.sso.oidcConfig.mapping.extraFields.groups = "second_groups";
     const first = environment.settings.initialize(firstInput, "widefleet", credential);
 
+    // SSO saves of one organization run one at a time, so the second save fails while the
+    // first one waits between the native provider and the remaining settings write.
     try {
       await Promise.race([firstCommitted, first]);
-      await environment.settings.initialize(secondInput, "widefleet", credential);
+      await expect(
+        environment.settings.initialize(secondInput, "widefleet", credential),
+      ).rejects.toThrow("Another SSO change is still in progress. Try again shortly.");
     } finally {
       gate.emit("resume");
       await first;
@@ -208,12 +212,12 @@ it("keeps the native provider and app claims together when settings saves overla
     expect(saved.settings).not.toHaveProperty("appIdentity");
     expect(saved.sso).toMatchObject({
       appIdentityType: "oidc",
-      oidcConfig: { mapping: { name: "second_name", extraFields: { groups: "second_groups" } } },
+      oidcConfig: { mapping: { name: "first_name", extraFields: { groups: "first_groups" } } },
     });
     expect(environment.authControl.read().configuration?.provider).toMatchObject({
       type: "oidc",
-      nameClaim: "second_name",
-      groupsClaim: "second_groups",
+      nameClaim: "first_name",
+      groupsClaim: "first_groups",
     });
   } finally {
     gate.emit("resume");
