@@ -162,9 +162,7 @@ export const createNetworkService = (database: Database, execution?: HostedExecu
   read: async (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) => {
     const viewed = await view(database, principal, appId);
 
-    if (viewed.isErr()) return viewed;
-
-    return Result.ok(viewed.value.network);
+    return viewed.isErr() ? Result.err(viewed.error) : Result.ok(viewed.value.network);
   },
   // The management page also needs to know whether to offer changes.
   view: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
