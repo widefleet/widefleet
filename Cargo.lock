@@ -1918,6 +1918,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 name = "platform-agent"
 version = "0.7.22"
 dependencies = [
+ "base64 0.23.1",
  "bollard",
  "clap",
  "futures-util",
@@ -1926,6 +1927,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tracing",

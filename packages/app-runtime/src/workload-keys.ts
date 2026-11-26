@@ -35,7 +35,7 @@ const signingKey = z.strictObject({
 
 const keyRing = z.strictObject({ keys: z.array(signingKey).min(2).max(3) });
 
-type Environment = Pick<ParentEnvironment, "WIDEFLEET_SECRETS_KEY"> & {
+type Environment = Pick<ParentEnvironment, "WIDEFLEET_SECRETS_KEYS"> & {
   WIDEFLEET_PACKAGES: {
     get(path: string): Promise<{ etag: string; text(): Promise<string> } | null>;
     put(

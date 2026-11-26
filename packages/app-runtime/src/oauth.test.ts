@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
+import { base64url } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { managedOAuth, openAccessToken, type OAuthIdentity } from "./oauth.ts";
 import { managedOAuthConfiguration } from "./oauth-protocol.ts";
+import { testKeyring } from "../fixtures/keyring.ts";
+import { decryptText, sealedKeyVersion } from "./secrets.ts";
 
 const identity: OAuthIdentity = {
   appId: "2a600000-0000-4000-8000-000000000001",
@@ -28,7 +31,7 @@ const googleAliases = [
 ] as const;
 
 const environment = {
-  WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
+  WIDEFLEET_SECRETS_KEYS: testKeyring(),
   WIDEFLEET_OAUTH: JSON.stringify({
     origin: "https://oauth.example.test",
     clients: {
@@ -259,6 +262,87 @@ describe("managed OAuth broker", () => {
     );
 
     expect(refreshed.accessToken).toMatch(/^wft1\./);
+    // The largest values still fit the limits of the requests that carry them.
+    expect(granted.accessToken.length).toBeLessThanOrEqual(30000);
+    expect(granted.refreshToken.length).toBeLessThanOrEqual(12000);
+  });
+
+  it("seals a refresh grant again when the provider keeps its refresh token", async () => {
+    const { broker, exchange } = await authorize();
+    const granted = tokens.parse(await broker.request(identity, exchange));
+
+    // The same grant sealed before the runtime keyring, with the raw bytes of the active version.
+    const plaintext = new TextEncoder().encode(
+      await decryptText(environment, "managed-oauth/refresh/v1", granted.refreshToken, {
+        activeOnly: true,
+      }),
+    );
+
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+
+    const sealed = new Uint8Array(
+      await crypto.subtle.encrypt(
+        {
+          name: "AES-GCM",
+          iv,
+          additionalData: new TextEncoder().encode("managed-oauth/refresh/v1"),
+        },
+        await crypto.subtle.importKey("raw", new Uint8Array(32).fill(0xab), "AES-GCM", false, [
+          "encrypt",
+        ]),
+        plaintext,
+      ),
+    );
+
+    tokenResponse = () =>
+      Response.json({ access_token: "provider-access", scope: gmail.join(" "), expires_in: 3600 });
+
+    const refreshed = tokens.parse(
+      await broker.request(identity, {
+        action: "refresh",
+        client: "google",
+        refreshToken: btoa(String.fromCharCode(...iv, ...sealed)),
+      }),
+    );
+
+    expect(sealedKeyVersion(refreshed.refreshToken)).toBe("test");
+    await broker.request(identity, {
+      action: "refresh",
+      client: "google",
+      refreshToken: refreshed.refreshToken,
+    });
+    expect(requests.at(-1)?.body.get("refresh_token")).toBe("provider-refresh-1");
+  });
+
+  it("retires access placeholders and refresh grants once another key version is active", async () => {
+    const { broker, exchange } = await authorize();
+    const granted = tokens.parse(await broker.request(identity, exchange));
+
+    const rotated = {
+      ...environment,
+      WIDEFLEET_SECRETS_KEYS: JSON.stringify({
+        keys: [
+          { kty: "oct", kid: "next", k: base64url.encode(new Uint8Array(32).fill(0xcd)) },
+          { kty: "oct", kid: "test", k: base64url.encode(new Uint8Array(32).fill(0xab)) },
+        ],
+      }),
+    };
+
+    await expect(
+      managedOAuth(rotated).request(identity, {
+        action: "refresh",
+        client: "google",
+        refreshToken: granted.refreshToken,
+      }),
+    ).rejects.toThrow();
+    expect(
+      await openAccessToken(
+        rotated,
+        identity.appId,
+        granted.accessToken,
+        new URL("https://gmail.googleapis.com/"),
+      ),
+    ).toBeNull();
   });
 
   it("rejects cross-app, cross-organization, cross-user and cross-client grants before calling providers", async () => {
@@ -386,7 +470,7 @@ describe("managed OAuth broker", () => {
   });
 
   it("keeps unconfigured runtimes disabled and rejects credentials selected by a caller", async () => {
-    const disabled = managedOAuth({ WIDEFLEET_SECRETS_KEY: environment.WIDEFLEET_SECRETS_KEY });
+    const disabled = managedOAuth({ WIDEFLEET_SECRETS_KEYS: environment.WIDEFLEET_SECRETS_KEYS });
 
     expect(
       await disabled.request(identity, { action: "configuration", client: "google" }),
@@ -483,7 +567,7 @@ describe("managed OAuth with a Client ID Metadata Document", () => {
   const documentUrl = "https://oauth.example.test/oauth/client-metadata.json";
 
   const metadataEnvironment = {
-    WIDEFLEET_SECRETS_KEY: environment.WIDEFLEET_SECRETS_KEY,
+    WIDEFLEET_SECRETS_KEYS: environment.WIDEFLEET_SECRETS_KEYS,
     WIDEFLEET_OAUTH: JSON.stringify({
       origin: "https://oauth.example.test",
       clients: {

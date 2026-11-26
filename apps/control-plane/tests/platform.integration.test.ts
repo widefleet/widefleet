@@ -7,6 +7,7 @@ import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRuntimeReleaseService } from "../src/lib/server/runtime-releases.ts";
+import { createRuntimeRekey } from "../src/lib/server/runtime-rekey.ts";
 import { createDirectory } from "../src/lib/server/directory.ts";
 import {
   CreateBucketCommand,
@@ -117,6 +118,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         reportedOperations.push(event);
       }),
       releases: createRuntimeReleaseService(environment.database.db, storage),
+      rekey: createRuntimeRekey(),
       uploads: createUploadService(environment.database.db, storage, configuration),
       templates: createTemplateInstalls(
         configuration,

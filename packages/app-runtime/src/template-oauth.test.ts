@@ -5,6 +5,7 @@ import { publishedApp } from "@platform/contracts";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { oauthProvider } from "../fixtures/oauth-provider.ts";
+import { testKeyring } from "../fixtures/keyring.ts";
 
 const appId = "00000000-0000-4000-8000-000000000001";
 
@@ -143,7 +144,7 @@ for (const [template, kind, prefix] of [
                   type: "json",
                   value: "synthetic-control-token-for-local-tests",
                 },
-                WIDEFLEET_SECRETS_KEY: { type: "json", value: "ab".repeat(32) },
+                WIDEFLEET_SECRETS_KEYS: { type: "json", value: testKeyring() },
                 WIDEFLEET_OAUTH: {
                   type: "json",
                   value: managed

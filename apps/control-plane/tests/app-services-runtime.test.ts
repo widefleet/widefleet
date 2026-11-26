@@ -18,6 +18,7 @@ import {
   appSecretPreparation,
   appAccessSnapshot,
   serviceDocumentation,
+  runtimeRekeyPage,
 } from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { verifyMcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
@@ -26,6 +27,7 @@ import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { z } from "zod";
 import type { TestHarness } from "wrangler";
 import { executionProfiles, executionRecorder } from "./cloudflare/execution-limits.fixture.ts";
+import { runtimeKeyring } from "./runtime-keyring.fixture.ts";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -87,7 +89,7 @@ export default class Source extends WorkerEntrypoint {
   ask() { return this.env.TARGET.ask('offer-42'); }
   async answer() { const question=await this.env.TARGET.ask('offer-42'); return this.env.TARGET.withInput({inputResponses:{confirm:{action:'accept',content:{note:'ok'}}},requestState:question.requestState}).ask('offer-42'); }
   async misdirect() { const question=await this.env.TARGET.ask('offer-42'); return this.env.TARGET.withInput({inputResponses:{confirm:{action:'accept',content:{note:'ok'}}},requestState:question.requestState}).ask('offer-43'); }
-  root() { return this.env.WIDEFLEET_SECRETS_KEY ?? null; }
+  root() { return this.env.WIDEFLEET_SECRETS_KEYS ?? null; }
   async keys() { const keys=this.env.WIDEFLEET_KEYS; const sealed=await keys.encrypt('tokens','provider-access'); const signature=await keys.sign('cookies','session'); return {prefix:sealed.slice(0,3), opened:new TextDecoder().decode(await keys.decrypt('tokens',sealed)), verified:await keys.verify('cookies','session',signature), forged:await keys.verify('cookies','other',signature), foreign:await this.env.TARGET.open(sealed)}; }
   async identity() { return {own: await this.env.WIDEFLEET_IDENTITY.getToken('data-api', {appId: '${targetId}', organizationId: 'forged'}), target: await this.env.TARGET.identity(), key: this.env.WIDEFLEET_CONTROL_TOKEN ?? null}; }
 }`;
@@ -191,7 +193,9 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
             };
           }
         | { count: number }
-        | { token: string },
+        | { token: string }
+        | { key: string; value: string }
+        | { cursor?: string },
       headers: Record<string, string> = {},
     ) =>
       (harness ? harness.fetch : fetch)(
@@ -319,6 +323,8 @@ export default { async fetch(request, env, ctx) {
     }
     if(url.pathname === '/availability') { const {availability}=await request.json(); await env.AUTH_CONFIG.put('organizations/widefleet/http-availability',availability==='unavailable' ? 'invalid' : JSON.stringify({blocked:availability==='blocked'})); return Response.json(true); }
     if(url.pathname === '/secrets') return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal/.well-known/widefleet/app-secrets',request));
+    if(url.pathname === '/rekey') return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal/.well-known/widefleet/rekey',request));
+    if(url.pathname === '/put-stored') { const {key,value}=await request.json(); await env.WIDEFLEET_PACKAGES.put(key,value); return Response.json(true); }
     if(url.pathname === '/ready') return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://${identitySourceId}.apps.example.test/.well-known/widefleet/ready'));
     if(url.pathname === '/signal') { const input=await request.json(); await env.STATE.put(input.key,'yes'); return Response.json(true); }
     if(url.pathname === '/started') return Response.json(await env.STATE.get('started'));
@@ -359,7 +365,7 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_EXECUTION_LIMITS: JSON.stringify(executionProfiles),
             WIDEFLEET_HTTP_AVAILABILITY: "kv",
             WIDEFLEET_CONTROL_TOKEN: token,
-            WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
+            WIDEFLEET_SECRETS_KEYS: runtimeKeyring(),
             WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
             WIDEFLEET_MCP_ORIGIN: "https://mcp.apps.example.test",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
@@ -1513,9 +1519,11 @@ export default { async fetch(request, env, ctx) {
         .array(
           z.strictObject({
             key: z.string(),
+            // Sealed with the runtime keyring: a compact JWE with direct encryption.
             value: z.strictObject({
-              version: z.literal(1),
-              wrapped: z.string().regex(/^[A-Za-z0-9_-]{54}$/),
+              ciphertext: z
+                .string()
+                .regex(/^[A-Za-z0-9_-]+\.\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/),
             }),
           }),
         )
@@ -1584,6 +1592,59 @@ export default { async fetch(request, env, ctx) {
         secret: "synthetic-restored",
       });
       expect(await (await request("/stored")).text()).not.toContain("fingerprint");
+    });
+    it("rewrites stored values sealed before the runtime keyring under its active key version", async () => {
+      // A snapshot sealed with the raw bytes of the active version, as earlier runtimes stored it.
+      const path = `app-secrets/${targetId}/90.json`;
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+
+      const sealed = new Uint8Array(
+        await crypto.subtle.encrypt(
+          { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(path) },
+          await crypto.subtle.importKey("raw", new Uint8Array(32).fill(0xab), "AES-GCM", false, [
+            "encrypt",
+          ]),
+          new TextEncoder().encode(JSON.stringify({ TOKEN: "synthetic-earlier" })),
+        ),
+      );
+
+      expect(
+        (
+          await request("/put-stored", {
+            key: path,
+            value: JSON.stringify({ ciphertext: btoa(String.fromCharCode(...iv, ...sealed)) }),
+          })
+        ).status,
+      ).toBe(200);
+
+      const pass = async () => {
+        const total = { rewritten: 0, unreadable: 0, conflicts: 0 };
+        let cursor: string | null = null;
+
+        do {
+          const response = await request("/rekey", cursor ? { cursor } : {});
+
+          expect(response.status, await response.clone().text()).toBe(200);
+          const page = z.object({ result: runtimeRekeyPage }).parse(await response.json()).result;
+
+          total.rewritten += page.rewritten;
+          total.unreadable += page.unreadable;
+          total.conflicts += page.conflicts;
+          cursor = page.cursor;
+        } while (cursor);
+
+        return total;
+      };
+
+      expect(await pass()).toEqual({ rewritten: 1, unreadable: 0, conflicts: 0 });
+      expect(await pass()).toEqual({ rewritten: 0, unreadable: 0, conflicts: 0 });
+
+      const stored = z.array(z.string()).parse(await (await request("/stored")).json());
+
+      for (const value of stored)
+        expect(z.object({ ciphertext: z.string() }).parse(JSON.parse(value)).ciphertext).toContain(
+          ".",
+        );
     });
     it("blocks cached service invocations while the organization is suspended or unreadable", async () => {
       expect((await request("/read")).status).toBe(200);

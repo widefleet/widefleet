@@ -534,12 +534,12 @@ pub async fn prepare(
     let project = directory.join("runtime");
     tokio::fs::create_dir_all(&project).await?;
     write_modules(&project, &packages.runtime.modules).await?;
-    let secrets_key =
-        platform_agent::runtime::secrets_key(store.as_ref(), &job.organization_id).await?;
+    let secrets_keys =
+        platform_agent::runtime::secrets_keys(store.as_ref(), &job.organization_id).await?;
     let mut config = platform_agent::runtime::configuration(
         &packages.runtime,
         &token,
-        &secrets_key,
+        &secrets_keys,
         configuration.app_domain.as_deref(),
         configuration.app_https_port,
     )?;

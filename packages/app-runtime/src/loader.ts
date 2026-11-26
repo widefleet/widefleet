@@ -5,6 +5,7 @@ import { mcpRequest } from "./mcp.ts";
 import { mcpLoginRequest } from "./mcp-login.ts";
 
 import { prepareAppSecrets } from "./app-secrets.ts";
+import { rekeyRuntimeStorage } from "./rekey.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
 import { managedOAuth } from "./oauth.ts";
 
@@ -312,6 +313,9 @@ const manageRuntime = async (
 
   if (url.pathname === "/.well-known/widefleet/app-secrets")
     return prepareAppSecrets(request, environment);
+
+  if (url.pathname === "/.well-known/widefleet/rekey")
+    return rekeyRuntimeStorage(request, environment);
 
   if (url.pathname === "/.well-known/widefleet/workflows") {
     if (request.method !== "POST") return new Response(null, { status: 403 });

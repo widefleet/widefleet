@@ -12,6 +12,7 @@ import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { expect, it } from "vitest";
 import { z } from "zod";
 import { runtimeIdentity } from "./runtime-identity.ts";
+import { runtimeKeyring } from "./runtime-keyring.fixture.ts";
 
 const root = new URL("../../../", import.meta.url);
 
@@ -105,7 +106,7 @@ export default class Consumer extends WorkerEntrypoint {
     if (new URL(request.url).pathname === '/configuration') return Response.json({
       provider: await this.env.WIDEFLEET_OAUTH.request({action:'configuration',client:'github'}),
       controlToken: this.env.WIDEFLEET_CONTROL_TOKEN ?? null,
-      encryptionKey: this.env.WIDEFLEET_SECRETS_KEY ?? null,
+      encryptionKey: this.env.WIDEFLEET_SECRETS_KEYS ?? null,
     });
     return Response.json(await this.env.GITHUB.viewer({}, { login: true }));
   }
@@ -139,7 +140,7 @@ export default class Consumer extends WorkerEntrypoint {
             WIDEFLEET_CONTROL_TOKEN: { type: "json", value: controlToken },
             // The native listener's token-authenticated management, as the agent configures it.
             WIDEFLEET_MANAGEMENT_HTTP: { type: "json", value: "true" },
-            WIDEFLEET_SECRETS_KEY: { type: "json", value: "ab".repeat(32) },
+            WIDEFLEET_SECRETS_KEYS: { type: "json", value: runtimeKeyring() },
             WIDEFLEET_HTTP_AVAILABILITY: { type: "json", value: "kv" },
             WIDEFLEET_CONFIGURATION: { type: "json", value: '{"crons":{},"queues":{}}' },
             WIDEFLEET_OAUTH: {

@@ -33,6 +33,77 @@ enum Command {
         #[arg(long)]
         no_wait: bool,
     },
+    /// Seal stored runtime values again under the active version of the runtime keyring.
+    Rekey,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct RekeyCounts {
+    current: u64,
+    rewritten: u64,
+    unreadable: u64,
+    conflicts: u64,
+}
+
+#[derive(Deserialize)]
+struct RekeyPage {
+    #[serde(flatten)]
+    counts: RekeyCounts,
+    cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+struct RekeyResult {
+    passes: Vec<RekeyCounts>,
+    complete: bool,
+}
+
+// Each pass opens every stored value. Passes repeat until one rewrites nothing:
+// that pass proves every value opens under the active version, so earlier
+// versions can be removed from the keyring.
+async fn rekey(api: &Api, credentials: &crate::auth::Credentials) -> Result<()> {
+    let mut passes: Vec<RekeyCounts> = Vec::new();
+    for _ in 0..3 {
+        let mut pass = RekeyCounts::default();
+        let mut cursor: Option<String> = None;
+        loop {
+            let token = crate::auth::access_token(api, credentials).await?;
+            let body = match &cursor {
+                Some(cursor) => value!({ "cursor": cursor }),
+                None => value!({}),
+            };
+            let page: RekeyPage = json(
+                api.authenticated(Method::POST, "/runtime/rekey", &token)
+                    .json(&body)
+                    .send()
+                    .await?,
+            )
+            .await?;
+            pass.current += page.counts.current;
+            pass.rewritten += page.counts.rewritten;
+            pass.unreadable += page.counts.unreadable;
+            pass.conflicts += page.counts.conflicts;
+            cursor = page.cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let settled = pass.rewritten == 0;
+        passes.push(pass);
+        if settled {
+            break;
+        }
+    }
+    let complete = passes.last().is_some_and(|last| {
+        last.rewritten == 0 && last.unreadable == 0 && last.conflicts == 0
+    });
+    super::print_json(&RekeyResult { passes, complete })?;
+    if !complete {
+        return Err(Error::invalid(
+            "Stored runtime values remain under earlier key versions or are unreadable. Keep earlier key versions and run widefleet runtime rekey again".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize, Serialize)]
@@ -166,6 +237,7 @@ pub async fn run(
 ) -> Result<()> {
     let (mut current, no_wait) = match options.command {
         Command::Status => return super::print_json(&status(api, token).await?),
+        Command::Rekey => return rekey(api, credentials).await,
         Command::Update { version, no_wait } => {
             let release = download(&version).await?;
             let token = crate::auth::access_token(api, credentials).await?;

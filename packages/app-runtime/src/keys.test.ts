@@ -1,5 +1,7 @@
+import { base64url, decodeProtectedHeader } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { testKeyring } from "../fixtures/keyring.ts";
 
 // Each runtime isolate caches derived keys. A fresh module stands for a new isolate.
 const isolate = async () => {
@@ -13,6 +15,7 @@ const first = "2a600000-0000-4000-8000-000000000001";
 const second = "2a600000-0000-4000-8000-000000000002";
 
 const stored = z.union([
+  z.object({ ciphertext: z.string() }),
   z.object({ version: z.number(), wrapped: z.string() }),
   z.looseObject({ appId: z.string() }),
   z.looseObject({ deleted: z.literal(true) }),
@@ -55,10 +58,10 @@ const bucket = () => {
   return store;
 };
 
-const environment = (packages = bucket(), key = "ab".repeat(32)) => ({
+const environment = (packages = bucket(), key = testKeyring()) => ({
   packages,
   // SAFETY: The tests use only the bucket methods the key store calls.
-  environment: { WIDEFLEET_PACKAGES: packages as never, WIDEFLEET_SECRETS_KEY: key },
+  environment: { WIDEFLEET_PACKAGES: packages as never, WIDEFLEET_SECRETS_KEYS: key },
 });
 
 describe("app keys", () => {
@@ -76,12 +79,63 @@ describe("app keys", () => {
     expect([...packages.objects.keys()].filter((key) => key.startsWith("app-keys/"))).toEqual([
       `app-keys/${first}/tokens.json`,
     ]);
-    // A wrapped 32-byte key is 40 bytes, 54 base64url characters.
-    expect(
-      z
-        .strictObject({ version: z.literal(1), wrapped: z.string().regex(/^[A-Za-z0-9_-]{54}$/) })
-        .safeParse(JSON.parse(packages.objects.get(`app-keys/${first}/tokens.json`) ?? "")).success,
-    ).toBe(true);
+
+    // The key is sealed with the runtime keyring and bound to its path.
+    const record = z
+      .strictObject({ ciphertext: z.string() })
+      .parse(JSON.parse(packages.objects.get(`app-keys/${first}/tokens.json`) ?? ""));
+
+    expect(decodeProtectedHeader(record.ciphertext)).toEqual({
+      alg: "dir",
+      enc: "A256GCM",
+      kid: "test",
+      ctx: `app-keys/${first}/tokens.json`,
+    });
+  });
+
+  it("uses the same key bytes from a record stored before the runtime keyring", async () => {
+    const material = crypto.getRandomValues(new Uint8Array(32));
+    const path = `app-keys/${first}/legacy.json`;
+
+    // The earlier record: AES-KW under HKDF(raw key, app ID), with the bytes of testKeyring().
+    const wrapping = await crypto.subtle.deriveKey(
+      {
+        name: "HKDF",
+        hash: "SHA-256",
+        salt: new Uint8Array(),
+        info: new TextEncoder().encode(`widefleet app key wrapping v1\n${first}`),
+      },
+      await crypto.subtle.importKey("raw", new Uint8Array(32).fill(0xab), "HKDF", false, [
+        "deriveKey",
+      ]),
+      { name: "AES-KW", length: 256 },
+      false,
+      ["wrapKey"],
+    );
+
+    const wrapped = await crypto.subtle.wrapKey(
+      "raw",
+      await crypto.subtle.importKey("raw", material, { name: "HMAC", hash: "SHA-256" }, true, [
+        "sign",
+      ]),
+      wrapping,
+      "AES-KW",
+    );
+
+    const { packages, environment: env } = environment();
+    const owner = { appId: first, hostname: "first.example.test" };
+
+    packages.objects.set(
+      path,
+      JSON.stringify({ version: 1, wrapped: base64url.encode(new Uint8Array(wrapped)) }),
+    );
+    const earlier = await (await isolate())(env, owner).sign("legacy", "session-token");
+
+    // The same bytes sealed with the runtime keyring sign the same way.
+    const { sealAppKey } = await import("./keys.ts");
+    packages.objects.set(path, await sealAppKey(env, path, material));
+
+    expect(await (await isolate())(env, owner).sign("legacy", "session-token")).toBe(earlier);
   });
 
   it("binds ciphertext to the app, the key name and the additional data", async () => {
@@ -179,7 +233,7 @@ describe("app keys", () => {
     );
 
     await expect(
-      (await isolate())(environment(shared, "cd".repeat(32)).environment, {
+      (await isolate())(environment(shared, testKeyring(0xcd)).environment, {
         appId: first,
         hostname: "first.example.test",
       }).decrypt("installation", ciphertext),

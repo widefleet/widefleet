@@ -647,6 +647,27 @@ export const runtimeStatus = z.strictObject({
 
 export const runtimeUpdate = z.strictObject({ version: runtimeVersion });
 
+/** One page of rewriting runtime storage under the active key version. */
+export const runtimeRekeyInput = z.strictObject({
+  /** Where the previous page ended; omitted to start a pass. */
+  cursor: z.string().min(1).max(2048).optional(),
+});
+
+const objectCount = z.number().int().nonnegative();
+
+export const runtimeRekeyPage = z.strictObject({
+  /** Objects already sealed under the active key version. */
+  current: objectCount,
+  /** Objects this page sealed again under the active key version. */
+  rewritten: objectCount,
+  /** Objects no key version of the runtime keyring opens. */
+  unreadable: objectCount,
+  /** Objects that changed again while this page rewrote them. */
+  conflicts: objectCount,
+  /** Where the next page starts, or `null` once the pass is complete. */
+  cursor: z.string().min(1).max(2048).nullable(),
+});
+
 export const publishedApp = artifact.extend({
   origin: z.url().optional(),
   // Installed apps show this name.

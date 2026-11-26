@@ -3,6 +3,7 @@ import { Miniflare, Response as MiniflareResponse } from "miniflare";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { managedOAuth, openAccessToken, type OAuthIdentity } from "./oauth.ts";
+import { testKeyring } from "../fixtures/keyring.ts";
 
 // A real authorization server with Client ID Metadata Document support, run in
 // workerd. It fetches the broker's document over its outbound connection.
@@ -120,7 +121,7 @@ beforeAll(async () => {
     );
 
   environment = {
-    WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
+    WIDEFLEET_SECRETS_KEYS: testKeyring(),
     WIDEFLEET_OAUTH: JSON.stringify({
       origin: "https://oauth.example.test",
       clients: {

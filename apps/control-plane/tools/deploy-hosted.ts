@@ -9,6 +9,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { bootstrapConfiguration, runtimeRelease } from "@platform/contracts";
 import { getPlatformProxy } from "wrangler";
 import { z } from "zod";
+import { parseKeyring } from "@platform/app-runtime/keyring";
 import { managedOAuthConfiguration } from "@platform/app-runtime/oauth";
 import { createProductAnalytics } from "../src/lib/server/analytics.ts";
 import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-config.ts";
@@ -82,7 +83,7 @@ const secrets = z
     // Validated with the rest of the configuration below, before any change.
     PLATFORM_ENCRYPTION_KEYS: z.string().min(1),
     WIDEFLEET_CONTROL_TOKEN: z.string().min(32),
-    WIDEFLEET_SECRETS_KEY: z.string().regex(/^[a-f0-9]{64}$/),
+    WIDEFLEET_SECRETS_KEYS: z.string().min(1),
     APP_COOKIE_SECRET: z.string().min(32),
     PLATFORM_BOOTSTRAP: z
       .string()
@@ -90,6 +91,9 @@ const secrets = z
       .transform((value) => value || undefined),
   })
   .parse(process.env);
+
+// Validated with the rest of the configuration, before any change.
+parseKeyring(secrets.WIDEFLEET_SECRETS_KEYS, "WIDEFLEET_SECRETS_KEYS");
 
 // A trusted installation may supply additional Wrangler configuration.
 const runtimeOverrides = z
@@ -283,7 +287,10 @@ try {
     "runtime-secrets.json",
     JSON.stringify({
       WIDEFLEET_CONTROL_TOKEN: secrets.WIDEFLEET_CONTROL_TOKEN,
-      WIDEFLEET_SECRETS_KEY: secrets.WIDEFLEET_SECRETS_KEY,
+      WIDEFLEET_SECRETS_KEYS: secrets.WIDEFLEET_SECRETS_KEYS,
+      // Temporary: the Worker keeps secret bindings across deployments, so the
+      // single key that preceded the keyring is cleared explicitly.
+      WIDEFLEET_SECRETS_KEY: "",
       // Empty explicitly disables the provider configuration on a subsequent deployment.
       WIDEFLEET_OAUTH: managedOAuth ? JSON.stringify(managedOAuth) : "",
     }),

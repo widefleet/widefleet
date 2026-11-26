@@ -1,4 +1,5 @@
 import { createUserConnections, type UserConnectionRequest } from "./user-connections.ts";
+import { createRuntimeRekey, type RuntimeRekeyRequest } from "./runtime-rekey.ts";
 import { createAppIdentityLinks, createAppUserIdentity } from "./app-user-identity.ts";
 import { createAppSource } from "./app-source.ts";
 import type { SourceBackend } from "./source-backend.ts";
@@ -53,6 +54,7 @@ export const createRuntime = ({
   execution,
   hostedLogs,
   userConnectionRequest,
+  runtimeRekeyRequest,
   organizationAccess: extensionOrganizationAccess,
   sendEmail,
   authRateLimit,
@@ -85,6 +87,7 @@ export const createRuntime = ({
   authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
   userConnectionRequest?: UserConnectionRequest;
+  runtimeRekeyRequest?: RuntimeRekeyRequest;
   discoveryTransport?: "node" | "cloudflare";
   builder?: AppBuilder;
   bundledRuntime?: BundledRuntime;
@@ -210,6 +213,7 @@ export const createRuntime = ({
     connections: createConnectionService(database.db, storage, execution),
     appSecrets,
     releases: createRuntimeReleaseService(database.db, storage, execution),
+    rekey: createRuntimeRekey(runtimeRekeyRequest),
     uploads,
     templates: createTemplateInstalls(configuration, apps, uploads, network, appSecrets, builder),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
