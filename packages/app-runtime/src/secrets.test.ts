@@ -1,4 +1,4 @@
-import { CompactEncrypt, base64url, decodeProtectedHeader } from "jose";
+import { base64url, compactDecrypt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
 import { testKeyring } from "../fixtures/keyring.ts";
 import { sealedBeforeKeyring } from "../fixtures/legacy.ts";
@@ -34,37 +34,53 @@ describe("runtime sealing", () => {
     ).rejects.toThrow("The sealed value belongs to another context");
   });
 
-  it("derives a separate key for each purpose", async () => {
+  it("opens a value only for the purpose it was sealed for", async () => {
     const environment = { WIDEFLEET_SECRETS_KEYS: testKeyring() };
     const sealed = await encryptText(environment, "oauth-state", "scope", "value");
 
     await expect(decryptText(environment, "oauth-access", "scope", sealed)).rejects.toThrow(
       "The sealed value names an unknown key version or purpose",
     );
+  });
 
-    // Renaming the purpose in the header still fails, because the key differs.
-    const [, , iv, ciphertext, tag] = sealed.split(".");
+  it("derives an independent key for each purpose", async () => {
+    const environment = { WIDEFLEET_SECRETS_KEYS: testKeyring() };
+    const root = new Uint8Array(32).fill(0xab);
 
-    const renamed = [
-      base64url.encode(
-        JSON.stringify({ alg: "dir", enc: "A256GCM", kid: "test:oauth-access", ctx: "scope" }),
-      ),
-      "",
-      iv,
-      ciphertext,
-      tag,
-    ].join(".");
+    const purposes = [
+      "app-secrets",
+      "app-keys",
+      "workload-keys",
+      "oauth-access",
+      "oauth-refresh",
+      "oauth-state",
+    ] as const;
 
-    await expect(decryptText(environment, "oauth-access", "scope", renamed)).rejects.toThrow();
+    // The expected key, derived here independently of the runtime's implementation.
+    const expectedKey = async (purpose: string) =>
+      new Uint8Array(
+        await crypto.subtle.deriveBits(
+          {
+            name: "HKDF",
+            hash: "SHA-256",
+            salt: new Uint8Array(32),
+            info: encoder.encode(`widefleet runtime ${purpose} v1`),
+          },
+          await crypto.subtle.importKey("raw", root, "HKDF", false, ["deriveBits"]),
+          256,
+        ),
+      );
 
-    // The root key itself opens nothing.
-    const root = await new CompactEncrypt(encoder.encode("value"))
-      .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: "test", ctx: "scope" })
-      .encrypt(new Uint8Array(32).fill(0xab));
+    for (const purpose of purposes) {
+      const sealed = await encryptText(environment, purpose, "scope", "value");
+      const { plaintext } = await compactDecrypt(sealed, await expectedKey(purpose));
 
-    await expect(decryptText(environment, "oauth-state", "scope", root)).rejects.toThrow(
-      "The sealed value names an unknown key version or purpose",
-    );
+      expect(new TextDecoder().decode(plaintext)).toBe("value");
+
+      for (const other of purposes.filter((candidate) => candidate !== purpose))
+        await expect(compactDecrypt(sealed, await expectedKey(other))).rejects.toThrow();
+      await expect(compactDecrypt(sealed, root)).rejects.toThrow();
+    }
   });
 
   it("opens stored values under an earlier key version and bearer values only under the active one", async () => {
