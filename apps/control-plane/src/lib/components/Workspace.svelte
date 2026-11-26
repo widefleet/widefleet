@@ -125,6 +125,11 @@
                   ]
                 : []),
               {
+                href: "/settings/security",
+                label: "Security",
+                current: (current: string) => current.startsWith("/settings/security"),
+              },
+              {
                 href: "/settings/administration",
                 label: "Administration",
                 current: (current: string) => current.startsWith("/settings/administration"),
