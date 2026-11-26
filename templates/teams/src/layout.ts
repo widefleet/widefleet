@@ -121,7 +121,7 @@ export const oauthConnectionPage = (connection: {
 
   const connected = (name: string) => `<section><h2>Account</h2>
 <div class="card row"><div class="status"><span class="dot" aria-hidden="true"></span><div><strong>${escapeHtml(name)}</strong><p class="muted small">Connected ${account}</p></div></div>
-<div class="actions"><form method="post" action="/connect"><button class="outline">Reconnect</button></form><form method="post" action="/disconnect"><button class="ghost">Disconnect</button></form></div></div>
+<div class="actions">${connection.missing.length ? "" : '<form method="post" action="/connect"><button class="outline">Reconnect</button></form>'}<form method="post" action="/disconnect"><button class="ghost">Disconnect</button></form></div></div>
 <p class="muted small note">Disconnecting deletes the saved tokens from this app. To revoke access, also remove it in your ${account} settings.</p></section>
 ${connection.approvals ?? ""}`;
 
@@ -132,7 +132,8 @@ ${connection.approvals ?? ""}`;
     connection.service,
     `${heading(connection.service, connection.description)}
 ${connection.failed ? '<p class="alert" role="alert">The connection could not be completed. Try again. To switch accounts, disconnect the current account first.</p>' : ""}
-${connection.missing.length ? setup : connection.connected ? connected(connection.connected) : disconnected}
+${connection.missing.length ? setup : ""}
+${connection.connected ? connected(connection.connected) : connection.missing.length ? "" : disconnected}
 ${signedIn(connection.user)}`,
   );
 };
