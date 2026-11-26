@@ -10,7 +10,7 @@ Check `widefleet config show` before requesting connection details. Use company-
 
 ## Network access
 
-External destinations require platform grants. Inspect `widefleet network` before assuming an API is reachable. An authorized owner/admin can use `widefleet network allow https://api.example.com`; add `--browser` only for browser access. Use the normal login with combined scopes, including `network:manage` when changing grants. Do not generate policy files or copy UUIDs/revisions for this flow. Network state is separate from Wrangler configuration and survives code rollback. CSP blocks frames, objects and Web Workers; do not bypass platform controls in app code.
+External destinations require platform grants. Inspect `widefleet network` before assuming an API is reachable. An authorized owner/admin can use `widefleet network allow https://api.example.com`; add `--browser` only for browser access. Use the normal login with combined scopes, including `network:manage` when changing grants. Do not generate policy files or copy UUIDs/revisions for this flow. Network state is separate from Wrangler configuration and survives code rollback. CSP allows same-origin worker scripts and blocks frames and objects; do not bypass platform controls in app code.
 
 ## Error reporting
 

@@ -17,7 +17,7 @@ export const browserPolicy = (
     `font-src ${allowed} data:`,
     `media-src ${allowed} blob:`,
     `form-action ${allowed}`,
-    "worker-src 'none'",
+    "worker-src 'self'",
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
