@@ -288,9 +288,6 @@ try {
     JSON.stringify({
       WIDEFLEET_CONTROL_TOKEN: secrets.WIDEFLEET_CONTROL_TOKEN,
       WIDEFLEET_SECRETS_KEYS: secrets.WIDEFLEET_SECRETS_KEYS,
-      // Temporary: the Worker keeps secret bindings across deployments, so the
-      // single key that preceded the keyring is cleared explicitly.
-      WIDEFLEET_SECRETS_KEY: "",
       // Empty explicitly disables the provider configuration on a subsequent deployment.
       WIDEFLEET_OAUTH: managedOAuth ? JSON.stringify(managedOAuth) : "",
     }),

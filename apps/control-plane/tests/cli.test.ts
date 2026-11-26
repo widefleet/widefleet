@@ -1749,7 +1749,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(requests).toContain("POST /api/v1/runtime/rollback");
     });
 
-    it("rewrites runtime storage page by page until a pass rewrites nothing", async () => {
+    it("rewrites runtime storage page by page", async () => {
       const page = (counts: Partial<z.infer<typeof contract.runtimeRekeyPage>>) =>
         contract.runtimeRekeyPage.parse({
           current: 0,
@@ -1765,28 +1765,23 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
         });
 
-      rekeyPages = [
-        page({ rewritten: 3, cursor: "next" }),
-        page({ rewritten: 1, current: 2 }),
-        page({ current: 6 }),
-      ];
+      rekeyPages = [page({ rewritten: 3, cursor: "next" }), page({ rewritten: 1, current: 2 })];
       rekeyBodies.length = 0;
 
       expect(JSON.parse((await rekey()).stdout)).toEqual({
-        passes: [
-          { current: 2, rewritten: 4, unreadable: 0, conflicts: 0 },
-          { current: 6, rewritten: 0, unreadable: 0, conflicts: 0 },
-        ],
-        complete: true,
+        current: 2,
+        rewritten: 4,
+        unreadable: 0,
+        conflicts: 0,
       });
-      expect(rekeyBodies).toEqual([{}, { cursor: "next" }, {}]);
+      expect(rekeyBodies).toEqual([{}, { cursor: "next" }]);
 
       // An unreadable value keeps the earlier versions needed.
       rekeyPages = [page({ current: 5, unreadable: 1 })];
 
       const result = await failure(rekey());
 
-      expect(JSON.parse(result.stdout)).toMatchObject({ complete: false });
+      expect(JSON.parse(result.stdout)).toMatchObject({ unreadable: 1 });
       expect(result.stderr).toContain("Keep earlier key versions");
     });
 

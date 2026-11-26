@@ -52,55 +52,39 @@ struct RekeyPage {
     cursor: Option<String>,
 }
 
-#[derive(Serialize)]
-struct RekeyResult {
-    passes: Vec<RekeyCounts>,
-    complete: bool,
-}
-
-// Each pass opens every stored value. Passes repeat until one rewrites nothing:
-// that pass proves every value opens under the active version, so earlier
-// versions can be removed from the keyring.
+// One pass opens every stored value and seals each one found under an earlier
+// version again under the active one. A pass without unreadable values or
+// conflicts leaves every value under the active version, so earlier versions
+// can be removed from the keyring.
 async fn rekey(api: &Api, credentials: &crate::auth::Credentials) -> Result<()> {
-    let mut passes: Vec<RekeyCounts> = Vec::new();
-    for _ in 0..3 {
-        let mut pass = RekeyCounts::default();
-        let mut cursor: Option<String> = None;
-        loop {
-            let token = crate::auth::access_token(api, credentials).await?;
-            let body = match &cursor {
-                Some(cursor) => value!({ "cursor": cursor }),
-                None => value!({}),
-            };
-            let page: RekeyPage = json(
-                api.authenticated(Method::POST, "/runtime/rekey", &token)
-                    .json(&body)
-                    .send()
-                    .await?,
-            )
-            .await?;
-            pass.current += page.counts.current;
-            pass.rewritten += page.counts.rewritten;
-            pass.unreadable += page.counts.unreadable;
-            pass.conflicts += page.counts.conflicts;
-            cursor = page.cursor;
-            if cursor.is_none() {
-                break;
-            }
-        }
-        let settled = pass.rewritten == 0;
-        passes.push(pass);
-        if settled {
+    let mut counts = RekeyCounts::default();
+    let mut cursor: Option<String> = None;
+    loop {
+        let token = crate::auth::access_token(api, credentials).await?;
+        let body = match &cursor {
+            Some(cursor) => value!({ "cursor": cursor }),
+            None => value!({}),
+        };
+        let page: RekeyPage = json(
+            api.authenticated(Method::POST, "/runtime/rekey", &token)
+                .json(&body)
+                .send()
+                .await?,
+        )
+        .await?;
+        counts.current += page.counts.current;
+        counts.rewritten += page.counts.rewritten;
+        counts.unreadable += page.counts.unreadable;
+        counts.conflicts += page.counts.conflicts;
+        cursor = page.cursor;
+        if cursor.is_none() {
             break;
         }
     }
-    let complete = passes
-        .last()
-        .is_some_and(|last| last.rewritten == 0 && last.unreadable == 0 && last.conflicts == 0);
-    super::print_json(&RekeyResult { passes, complete })?;
-    if !complete {
+    super::print_json(&counts)?;
+    if counts.unreadable > 0 || counts.conflicts > 0 {
         return Err(Error::invalid(
-            "Stored runtime values remain under earlier key versions or are unreadable. Keep earlier key versions and run widefleet runtime rekey again".into(),
+            "Stored runtime values are unreadable or changed during the rewrite. Keep earlier key versions and run widefleet runtime rekey again".into(),
         ));
     }
     Ok(())
