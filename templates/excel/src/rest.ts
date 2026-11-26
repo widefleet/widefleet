@@ -20,7 +20,7 @@ export type RestOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "form" | "multipart" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string> | undefined;
   bodyRequired: boolean;
@@ -93,15 +93,20 @@ const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // one segment, and a function such as `delta()` may carry arguments, as Graph's
 // `delta(token='...')` links do. A function's argument may have another name in
 // its links, as Graph writes `search(query='...')` for `search(q='...')`. The
-// address may be percent-encoded.
-const pathPattern = (path: string) => {
+// address may be percent-encoded. An optional segment, such as an OData type
+// cast, may be missing.
+const pathPattern = (path: string, optional: readonly string[]) => {
   const pattern = path
+    .replace(/\/\{([^}]+)\}(?=\/|$)/g, (segment, name: string) =>
+      optional.includes(name) ? "\0" : segment,
+    )
     .replace(/^\//, "")
     .split(/(\{[^}]+\})/)
     .map((part) =>
       /^\{[^}]+\}$/.test(part) ? "[^/]+" : literal(part).replace(/\\\(\w+=/g, "\\(\\w+="),
     )
     .join("")
+    .replaceAll("\0", "(?:/[^/]+)?")
     .replace(/\\\(\\\)$/, "(?:\\([^/]*\\))?");
 
   const matcher = new RegExp(`^${pattern}$`);
@@ -193,6 +198,16 @@ export const restRequest = (
     init.body = form;
   }
 
+  // A file is sent as its bytes, with its media type.
+  if (operation.body === "file" && body !== undefined) {
+    const file = upload.safeParse(body);
+
+    if (!file.success)
+      throw new InvalidRequest(`${method} takes the body as a file with its mimeType`);
+    init.body = file.data;
+    headers["content-type"] = file.data.type;
+  }
+
   if (operation.body === "text" && body !== undefined) {
     const text = z.string().safeParse(body);
     const contentType = z.string().optional().safeParse(own(values, "contentType"));
@@ -228,26 +243,33 @@ export const restRequest = (
 
     const page = /^[^?#]*/.exec(relative)?.[0] ?? "";
 
-    if (!next.success || !pathPattern(operation.path).test(page))
+    if (
+      !next.success ||
+      !pathPattern(operation.path, operation.optionalPathParameters ?? []).test(page)
+    )
       throw new InvalidRequest(`${method}'s nextLink must be a page address the API returned`);
 
     return { url: next.data, init };
   }
 
-  // An OData function's optional parameter without a value is left out of the
-  // call, as in `f(a={a},b='{b}')` without `b`.
+  const absent = (name: string) => {
+    const key = own(operation.pathParameters, name);
+
+    return (
+      operation.optionalPathParameters?.includes(name) === true &&
+      key !== undefined &&
+      own(values, key) === undefined
+    );
+  };
+
+  // An optional segment without a value is left out, as an OData type cast,
+  // and so is an OData function's optional parameter, as in `f(a={a},b='{b}')`
+  // without `b`.
   const called = operation.path
+    .replace(/\/\{([^}]+)\}(?=\/|$)/g, (segment, name: string) => (absent(name) ? "" : segment))
     .replace(
       /([(,])(\w+)=[^,()]*\{(\w+)\}[^,()]*(?=[,)])/g,
-      (piece, before: string, _, name: string) => {
-        const key = own(operation.pathParameters, name);
-
-        return operation.optionalPathParameters?.includes(name) &&
-          key !== undefined &&
-          own(values, key) === undefined
-          ? before
-          : piece;
-      },
+      (piece, before: string, _, name: string) => (absent(name) ? before : piece),
     )
     .replace(/\(,+/g, "(")
     .replace(/,+\)/g, ")")
@@ -261,8 +283,10 @@ export const restRequest = (
     if (!value.success) throw new InvalidRequest(`${method} needs ${key ?? name}`);
     const text = String(value.data);
 
-    // `.` and `..` would move the request to another path.
-    if (text === "." || text === "..") throw new InvalidRequest(`${method}'s ${key} is not an ID`);
+    // `.` and `..` would move the request to another path, and an empty value
+    // would leave out its segment.
+    if (text === "" || text === "." || text === "..")
+      throw new InvalidRequest(`${method}'s ${key} is not an ID`);
 
     return `${quote}${encodeURIComponent(quote ? text.replaceAll("'", "''") : text)}`;
   });
@@ -279,6 +303,21 @@ export const restRequest = (
     // An OData parameter alias, such as `@Target`, carries any value as JSON.
     if (name.startsWith("@")) {
       url.searchParams.set(name, JSON.stringify(value));
+      continue;
+    }
+
+    // An object that repeats sends each of its fields as a parameter, as
+    // OpenAPI's exploded form style does, such as OData's parameter aliases.
+    const fields = separator === null ? z.record(z.string(), definedJson).safeParse(value) : null;
+
+    if (fields?.success) {
+      for (const [field, item] of Object.entries(fields.data)) {
+        const parsed = scalar.safeParse(item);
+
+        if (!parsed.success) throw new InvalidRequest(`${method}'s ${key} takes values`);
+        url.searchParams.append(field, String(parsed.data));
+      }
+
       continue;
     }
 

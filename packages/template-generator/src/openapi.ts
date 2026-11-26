@@ -247,7 +247,7 @@ export type OpenapiOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "form" | "multipart" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
   bodyRequired: boolean;
@@ -1007,7 +1007,19 @@ export const generateOpenapi = (
       }),
     );
 
-    const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : "text";
+    // Content that is bytes, such as a file, is uploaded as a file; other
+    // content as text.
+    const content = body?.content ? Object.entries(body.content)[0] : undefined;
+
+    const file =
+      !jsonBody &&
+      !form &&
+      content !== undefined &&
+      !content[0].startsWith("text/") &&
+      content[1].schema?.type === "string" &&
+      content[1].schema.format === "binary";
+
+    const bodyKind = !body ? null : jsonBody ? "json" : form ? form.kind : file ? "file" : "text";
 
     // The rules may require a body the description leaves optional, but not add one.
     if (rule.requiredBody && !body) throw new Error(`${id}'s requiredBody rule needs a body`);
@@ -1125,10 +1137,22 @@ export const generateOpenapi = (
           `${id} has the path parameter ${value.name} with a list or object, which is not supported`,
         );
 
-      // Queries carry values and lists of them; the runtime sends no objects.
+      // Queries carry values and lists of them, and in the exploded form style
+      // a map of values, each sent as its own parameter; the runtime sends no
+      // other objects.
+      const exploded =
+        (value.style ?? "form") === "form" &&
+        value.explode !== false &&
+        target?.type === "object" &&
+        !target.properties &&
+        z
+          .object({ type: z.enum(["string", "number", "integer", "boolean"]) })
+          .safeParse(target.additionalProperties).success;
+
       if (
         value.in === "query" &&
         !isAlias(value.name) &&
+        !exploded &&
         (target?.type === "object" || target?.properties)
       )
         throw new Error(
@@ -1158,6 +1182,12 @@ export const generateOpenapi = (
       if (rule.body) return schemaUnion(rule.body);
 
       if (jsonBody) return jsonBody.schema ? typeOf(jsonBody.schema, "    ") : "JsonValue";
+
+      if (bodyKind === "file") {
+        usesUpload = true;
+
+        return "UploadContent";
+      }
 
       if (!form) return "string";
       uploads = form.kind === "multipart";
@@ -1296,7 +1326,7 @@ export type Operation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "form" | "multipart" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
   bodyRequired: boolean;

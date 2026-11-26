@@ -4,7 +4,7 @@
 //   pnpm --filter @platform/template-generator generate dataverse
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { Environment as TemplateEnvironment } from "./context.ts";
-import type { BinaryContent } from "./content.ts";
+import type { BinaryContent, UploadContent } from "./content.ts";
 import type { DataverseResult } from "./results.ts";
 import { type DataverseProperties, run } from "./run.ts";
 import type { JsonObject, JsonValue } from "./selection.ts";
@@ -4370,6 +4370,82 @@ export type XrmDateTimeGrouping =
  */
 export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, DataverseProperties> {
   /**
+   * List the service's entity sets, singletons and function imports.
+   */
+  async getServiceDocument(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<
+    DataverseResult<{
+      value?: {
+        name?: string;
+        kind?: string;
+        url?: string;
+      }[];
+    }>
+  > {
+    return run(this.env, this.ctx.props, "getServiceDocument", input);
+  }
+
+  /**
+   * Get the service's CSDL: every table, column, relationship, action and function of this environment.
+   */
+  async getMetadata(input: {
+    /**
+     * `true` to include annotations, such as descriptions of tables.
+     */
+    annotations?: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<DataverseResult<BinaryContent>> {
+    return run(this.env, this.ctx.props, "getMetadata", input);
+  }
+
+  /**
    * List the rows of a table that match a query.
    */
   async listRows(
@@ -4379,6 +4455,10 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
            * The entity set of the table, its plural name, such as `accounts`.
            */
           entitySet: string;
+          /**
+           * A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+           */
+          type?: string;
           /**
            * The columns to return, by logical name. Lookup columns are named `_<name>_value`.
            */
@@ -4412,9 +4492,37 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
            */
           fetchXml?: string;
           /**
-           * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values or `odata.maxpagesize=50`.
+           * The ID of a system view to run, from `savedqueries`.
+           */
+          savedQuery?: string;
+          /**
+           * The ID of a view the person saved, from `userqueries`.
+           */
+          userQuery?: string;
+          /**
+           * `true` to read masked columns unmasked, which needs the column's privilege.
+           */
+          UnMaskedData?: boolean;
+          /**
+           * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
            */
           prefer?: string;
+          /**
+           * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+           */
+          consistency?: string;
+          /**
+           * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+           */
+          sessionToken?: string;
+          /**
+           * The Microsoft Entra object ID of a user to act for.
+           */
+          callerObjectId?: string;
+          /**
+           * The `systemuserid` of a user to act for.
+           */
+          mscrmCallerId?: string;
           /**
            * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
            */
@@ -4426,9 +4534,25 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
            */
           nextLink: string;
           /**
-           * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values or `odata.maxpagesize=50`.
+           * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
            */
           prefer?: string;
+          /**
+           * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+           */
+          consistency?: string;
+          /**
+           * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+           */
+          sessionToken?: string;
+          /**
+           * The Microsoft Entra object ID of a user to act for.
+           */
+          callerObjectId?: string;
+          /**
+           * The `systemuserid` of a user to act for.
+           */
+          mscrmCallerId?: string;
           /**
            * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
            */
@@ -4447,6 +4571,42 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
+   * Count the rows of a table.
+   */
+  async countRows(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<DataverseResult<BinaryContent>> {
+    return run(this.env, this.ctx.props, "countRows", input);
+  }
+
+  /**
    * Get a row.
    */
   async getRow(input: {
@@ -4455,9 +4615,13 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+     */
+    type?: string;
     /**
      * The columns to return, by logical name. Lookup columns are named `_<name>_value`.
      */
@@ -4467,9 +4631,37 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     $expand?: string;
     /**
-     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values or `odata.maxpagesize=50`.
+     * `true` to read masked columns unmasked, which needs the column's privilege.
+     */
+    UnMaskedData?: boolean;
+    /**
+     * The `partitionid` of an elastic table's row.
+     */
+    partitionId?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
     prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The row's `@odata.etag` to answer `not_modified` when the row has not changed since.
+     */
+    ifNoneMatch?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4497,9 +4689,45 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     $select?: string[];
     /**
-     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values or `odata.maxpagesize=50`.
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
     prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The unique name of the unmanaged solution to add a new table, column, relationship or other solution component to.
+     */
+    solutionUniqueName?: string;
+    /**
+     * `false` to check the row against the environment's duplicate detection rules and refuse a duplicate.
+     */
+    suppressDuplicateDetection?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4529,7 +4757,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     /**
@@ -4537,9 +4765,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     $select?: string[];
     /**
-     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values or `odata.maxpagesize=50`.
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
      */
     prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
     /**
      * `*` to change only an existing row, or the row's `@odata.etag` to change only that version.
      */
@@ -4548,6 +4796,22 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * `*` to only create a row that does not exist.
      */
     ifNoneMatch?: string;
+    /**
+     * The unique name of the unmanaged solution to add a new table, column, relationship or other solution component to.
+     */
+    solutionUniqueName?: string;
+    /**
+     * `false` to check the row against the environment's duplicate detection rules and refuse a duplicate.
+     */
+    suppressDuplicateDetection?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4567,6 +4831,74 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
+   * Replace a row with the body, such as a table's definition, which cannot be changed in part.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async replaceRow(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * `true` to keep the labels of languages the body leaves out, which replacing a definition otherwise removes.
+     */
+    mergeLabels?: string;
+    /**
+     * The unique name of the unmanaged solution to add a new table, column, relationship or other solution component to.
+     */
+    solutionUniqueName?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body: {
+      [key: string]: JsonValue;
+    };
+  }): Promise<DataverseResult<null>> {
+    return run(this.env, this.ctx.props, "replaceRow", input);
+  }
+
+  /**
    * Delete a row.
    *
    * Asks the user first unless their approval level is `none`.
@@ -4577,15 +4909,967 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * The `partitionid` of an elastic table's row.
+     */
+    partitionId?: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
   }): Promise<DataverseResult<null>> {
     return run(this.env, this.ctx.props, "deleteRow", input);
+  }
+
+  /**
+   * Get one column of a row, as `value`.
+   */
+  async getColumn(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The column, by logical name, such as `name` or a file column.
+     */
+    property: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<
+    DataverseResult<{
+      value?: JsonValue;
+    } | null>
+  > {
+    return run(this.env, this.ctx.props, "getColumn", input);
+  }
+
+  /**
+   * Set one column of a row.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async setColumn(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The column, by logical name, such as `name` or a file column.
+     */
+    property: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body: {
+      value: JsonValue;
+    };
+  }): Promise<DataverseResult<null>> {
+    return run(this.env, this.ctx.props, "setColumn", input);
+  }
+
+  /**
+   * Clear one column of a row, or delete the file of a file or image column.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async deleteColumn(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The column, by logical name, such as `name` or a file column.
+     */
+    property: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<DataverseResult<null>> {
+    return run(this.env, this.ctx.props, "deleteColumn", input);
+  }
+
+  /**
+   * Get the content of a file or image column, or a column's raw value.
+   */
+  async getColumnContent(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The column, by logical name, such as `name` or a file column.
+     */
+    property: string;
+    /**
+     * `full` for an image column's full-size image instead of its thumbnail.
+     */
+    size?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * Bytes of the content to read, such as `bytes=0-4194303`, for large files.
+     */
+    range?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<DataverseResult<BinaryContent>> {
+    return run(this.env, this.ctx.props, "getColumnContent", input);
+  }
+
+  /**
+   * Upload the content of a file or image column, at once or in chunks.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async uploadColumnContent(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The column, by logical name, such as `name` or a file column.
+     */
+    property: string;
+    /**
+     * The file's name.
+     */
+    "x-ms-file-name"?: string;
+    /**
+     * For a chunk, the `sessiontoken` of the `Location` that started the upload.
+     */
+    sessiontoken?: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * `chunked`, without a body, to start an upload in chunks; the answer's `Location` header is the address of the chunks and `x-ms-chunk-size` their size.
+     */
+    transferMode?: string;
+    /**
+     * The bytes a chunk holds, such as `bytes 0-4194303/25870370`.
+     */
+    contentRange?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body?: UploadContent;
+  }): Promise<DataverseResult<null>> {
+    return run(this.env, this.ctx.props, "uploadColumnContent", input);
+  }
+
+  /**
+   * List the rows a row relates to through a navigation property.
+   */
+  async listRelatedRows(
+    input:
+      | {
+          /**
+           * The entity set of the table, its plural name, such as `accounts`.
+           */
+          entitySet: string;
+          /**
+           * The row's ID, or an alternate key, such as `LogicalName='account'`.
+           */
+          id: string;
+          /**
+           * The navigation property that relates the rows, such as `contact_customer_accounts`.
+           */
+          navigationProperty: string;
+          /**
+           * A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+           */
+          type?: string;
+          /**
+           * The columns to return, by logical name. Lookup columns are named `_<name>_value`.
+           */
+          $select?: string[];
+          /**
+           * A filter expression, such as `statecode eq 0`.
+           */
+          $filter?: string;
+          /**
+           * The columns to sort by, each followed by `asc` or `desc`.
+           */
+          $orderby?: string[];
+          /**
+           * The most rows to return.
+           */
+          $top?: number;
+          /**
+           * Related rows to include, by navigation property, such as `primarycontactid($select=fullname)`.
+           */
+          $expand?: string;
+          /**
+           * Aggregation and grouping, such as `groupby((statecode),aggregate($count as count))`.
+           */
+          $apply?: string;
+          /**
+           * Whether the answer includes the number of matching rows.
+           */
+          $count?: boolean;
+          /**
+           * `true` to read masked columns unmasked, which needs the column's privilege.
+           */
+          UnMaskedData?: boolean;
+          /**
+           * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+           */
+          prefer?: string;
+          /**
+           * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+           */
+          consistency?: string;
+          /**
+           * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+           */
+          sessionToken?: string;
+          /**
+           * The Microsoft Entra object ID of a user to act for.
+           */
+          callerObjectId?: string;
+          /**
+           * The `systemuserid` of a user to act for.
+           */
+          mscrmCallerId?: string;
+          /**
+           * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+           */
+          environment: string;
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+          /**
+           * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+           */
+          prefer?: string;
+          /**
+           * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+           */
+          consistency?: string;
+          /**
+           * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+           */
+          sessionToken?: string;
+          /**
+           * The Microsoft Entra object ID of a user to act for.
+           */
+          callerObjectId?: string;
+          /**
+           * The `systemuserid` of a user to act for.
+           */
+          mscrmCallerId?: string;
+          /**
+           * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+           */
+          environment: string;
+        },
+  ): Promise<
+    DataverseResult<{
+      value?: {
+        [key: string]: JsonValue;
+      }[];
+      "@odata.count"?: number;
+      "@odata.nextLink"?: string;
+    }>
+  > {
+    return run(this.env, this.ctx.props, "listRelatedRows", input);
+  }
+
+  /**
+   * Count the rows a row relates to through a navigation property.
+   */
+  async countRelatedRows(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The navigation property that relates the rows, such as `contact_customer_accounts`.
+     */
+    navigationProperty: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<DataverseResult<BinaryContent>> {
+    return run(this.env, this.ctx.props, "countRelatedRows", input);
+  }
+
+  /**
+   * Create a row related to a row through a collection-valued navigation property, such as a column of a table.
+   *
+   * Asks the user first when their approval level is `all_changes`.
+   */
+  async createRelatedRow(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The navigation property that relates the rows, such as `contact_customer_accounts`.
+     */
+    navigationProperty: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The unique name of the unmanaged solution to add a new table, column, relationship or other solution component to.
+     */
+    solutionUniqueName?: string;
+    /**
+     * `false` to check the row against the environment's duplicate detection rules and refuse a duplicate.
+     */
+    suppressDuplicateDetection?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body: {
+      [key: string]: JsonValue;
+    };
+  }): Promise<
+    DataverseResult<{
+      [key: string]: JsonValue;
+    } | null>
+  > {
+    return run(this.env, this.ctx.props, "createRelatedRow", input);
+  }
+
+  /**
+   * Get a row a row relates to through a navigation property.
+   */
+  async getRelatedRow(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The navigation property that relates the rows, such as `contact_customer_accounts`.
+     */
+    navigationProperty: string;
+    /**
+     * The related row's ID, or an alternate key, such as `LogicalName='name'`.
+     */
+    relatedId: string;
+    /**
+     * A derived type to read as, by its qualified name, such as `Microsoft.Dynamics.CRM.PicklistAttributeMetadata`.
+     */
+    type?: string;
+    /**
+     * The columns to return, by logical name. Lookup columns are named `_<name>_value`.
+     */
+    $select?: string[];
+    /**
+     * Related rows to include, by navigation property, such as `primarycontactid($select=fullname)`.
+     */
+    $expand?: string;
+    /**
+     * `true` to read masked columns unmasked, which needs the column's privilege.
+     */
+    UnMaskedData?: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<
+    DataverseResult<{
+      [key: string]: JsonValue;
+    }>
+  > {
+    return run(this.env, this.ctx.props, "getRelatedRow", input);
+  }
+
+  /**
+   * Change the columns of a row a row relates to through a navigation property.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async updateRelatedRow(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The navigation property that relates the rows, such as `contact_customer_accounts`.
+     */
+    navigationProperty: string;
+    /**
+     * The related row's ID, or an alternate key, such as `LogicalName='name'`.
+     */
+    relatedId: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * `*` to change only an existing row, or the row's `@odata.etag` to change only that version.
+     */
+    ifMatch?: string;
+    /**
+     * `*` to only create a row that does not exist.
+     */
+    ifNoneMatch?: string;
+    /**
+     * `false` to check the row against the environment's duplicate detection rules and refuse a duplicate.
+     */
+    suppressDuplicateDetection?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body: {
+      [key: string]: JsonValue;
+    };
+  }): Promise<
+    DataverseResult<{
+      [key: string]: JsonValue;
+    } | null>
+  > {
+    return run(this.env, this.ctx.props, "updateRelatedRow", input);
+  }
+
+  /**
+   * Replace a row a row relates to with the body, such as a column's definition, which cannot be changed in part.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async replaceRelatedRow(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The navigation property that relates the rows, such as `contact_customer_accounts`.
+     */
+    navigationProperty: string;
+    /**
+     * The related row's ID, or an alternate key, such as `LogicalName='name'`.
+     */
+    relatedId: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * `true` to keep the labels of languages the body leaves out, which replacing a definition otherwise removes.
+     */
+    mergeLabels?: string;
+    /**
+     * The unique name of the unmanaged solution to add a new table, column, relationship or other solution component to.
+     */
+    solutionUniqueName?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body: {
+      [key: string]: JsonValue;
+    };
+  }): Promise<DataverseResult<null>> {
+    return run(this.env, this.ctx.props, "replaceRelatedRow", input);
+  }
+
+  /**
+   * Delete a row a row relates to, such as a column of a table.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async deleteRelatedRow(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The navigation property that relates the rows, such as `contact_customer_accounts`.
+     */
+    navigationProperty: string;
+    /**
+     * The related row's ID, or an alternate key, such as `LogicalName='name'`.
+     */
+    relatedId: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<DataverseResult<null>> {
+    return run(this.env, this.ctx.props, "deleteRelatedRow", input);
+  }
+
+  /**
+   * List the addresses of the rows a row relates to through a navigation property.
+   */
+  async listReferences(
+    input:
+      | {
+          /**
+           * The entity set of the table, its plural name, such as `accounts`.
+           */
+          entitySet: string;
+          /**
+           * The row's ID, or an alternate key, such as `LogicalName='account'`.
+           */
+          id: string;
+          /**
+           * The navigation property that relates the rows, such as `contact_customer_accounts`.
+           */
+          navigationProperty: string;
+          /**
+           * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+           */
+          prefer?: string;
+          /**
+           * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+           */
+          consistency?: string;
+          /**
+           * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+           */
+          sessionToken?: string;
+          /**
+           * The Microsoft Entra object ID of a user to act for.
+           */
+          callerObjectId?: string;
+          /**
+           * The `systemuserid` of a user to act for.
+           */
+          mscrmCallerId?: string;
+          /**
+           * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+           */
+          environment: string;
+        }
+      | {
+          /**
+           * The `@odata.nextLink` of an earlier answer, or its `@odata.deltaLink`.
+           */
+          nextLink: string;
+          /**
+           * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+           */
+          prefer?: string;
+          /**
+           * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+           */
+          consistency?: string;
+          /**
+           * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+           */
+          sessionToken?: string;
+          /**
+           * The Microsoft Entra object ID of a user to act for.
+           */
+          callerObjectId?: string;
+          /**
+           * The `systemuserid` of a user to act for.
+           */
+          mscrmCallerId?: string;
+          /**
+           * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+           */
+          environment: string;
+        },
+  ): Promise<
+    DataverseResult<{
+      value?: {
+        "@odata.id"?: string;
+      }[];
+      "@odata.id"?: string;
+      "@odata.nextLink"?: string;
+    }>
+  > {
+    return run(this.env, this.ctx.props, "listReferences", input);
   }
 
   /**
@@ -4599,13 +5883,45 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     /**
      * The navigation property that relates the rows, such as `contact_customer_accounts`.
      */
     navigationProperty: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4624,6 +5940,73 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
+   * Set the row a single-valued navigation property, such as a lookup, refers to.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async setReference(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The navigation property that relates the rows, such as `contact_customer_accounts`.
+     */
+    navigationProperty: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body: {
+      /**
+       * The other row's address, such as `contacts(<id>)`, relative to the service or absolute.
+       */
+      "@odata.id"?: string;
+    };
+  }): Promise<DataverseResult<null>> {
+    return run(this.env, this.ctx.props, "setReference", input);
+  }
+
+  /**
    * Remove the relationship between a row and another row.
    *
    * Asks the user first unless their approval level is `none`.
@@ -4634,7 +6017,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     /**
@@ -4646,6 +6029,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     $id?: string;
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -4654,15 +6069,65 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
-   * Get the service's CSDL: every table, column, relationship, action and function of this environment.
+   * Remove the relationship between a row and one row of a collection it relates to.
+   *
+   * Asks the user first unless their approval level is `none`.
    */
-  async getMetadata(input: {
+  async disassociateRelatedRow(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The navigation property that relates the rows, such as `contact_customer_accounts`.
+     */
+    navigationProperty: string;
+    /**
+     * The related row's ID, or an alternate key, such as `LogicalName='name'`.
+     */
+    relatedId: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
-  }): Promise<DataverseResult<BinaryContent>> {
-    return run(this.env, this.ctx.props, "getMetadata", input);
+  }): Promise<DataverseResult<null>> {
+    return run(this.env, this.ctx.props, "disassociateRelatedRow", input);
   }
 
   /**
@@ -4675,6 +6140,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      * The action's name, such as `msdyn_GetKAObjectFromTemplate`.
      */
     action: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4694,9 +6191,323 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   /**
+   * Call an action bound to a table, with its parameters as the body.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async callTableAction(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The action's name, with its namespace, such as `Microsoft.Dynamics.CRM.new_Approve`.
+     */
+    action: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body?: {
+      [key: string]: JsonValue;
+    };
+  }): Promise<
+    DataverseResult<{
+      [key: string]: JsonValue;
+    } | null>
+  > {
+    return run(this.env, this.ctx.props, "callTableAction", input);
+  }
+
+  /**
+   * Call an action bound to a row, with its parameters as the body.
+   *
+   * Asks the user first unless their approval level is `none`.
+   */
+  async callRowAction(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The action's name, with its namespace, such as `Microsoft.Dynamics.CRM.new_Approve`.
+     */
+    action: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+    /**
+     * The request body.
+     */
+    body?: {
+      [key: string]: JsonValue;
+    };
+  }): Promise<
+    DataverseResult<{
+      [key: string]: JsonValue;
+    } | null>
+  > {
+    return run(this.env, this.ctx.props, "callRowAction", input);
+  }
+
+  /**
+   * Call a function at the service root.
+   */
+  async callFunction(input: {
+    /**
+     * The function's call, with its parameters as aliases, such as `msdyn_GetSummary(RecordId=@id)`, or `()` after the name without parameters.
+     */
+    function: string;
+    /**
+     * The values of the call's parameter aliases as OData literals, such as `{ "@id": "'<id>'" }`, or JSON for lists and objects.
+     */
+    parameterAliases?: {
+      [key: string]: string;
+    };
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<
+    DataverseResult<{
+      [key: string]: JsonValue;
+    } | null>
+  > {
+    return run(this.env, this.ctx.props, "callFunction", input);
+  }
+
+  /**
+   * Call a function bound to a table.
+   */
+  async callTableFunction(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The function's call, with its namespace, such as `Microsoft.Dynamics.CRM.new_Approve`, with its parameters as aliases, such as `msdyn_GetSummary(RecordId=@id)`, or `()` after the name without parameters.
+     */
+    function: string;
+    /**
+     * The values of the call's parameter aliases as OData literals, such as `{ "@id": "'<id>'" }`, or JSON for lists and objects.
+     */
+    parameterAliases?: {
+      [key: string]: string;
+    };
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<
+    DataverseResult<{
+      [key: string]: JsonValue;
+    } | null>
+  > {
+    return run(this.env, this.ctx.props, "callTableFunction", input);
+  }
+
+  /**
+   * Call a function bound to a row.
+   */
+  async callRowFunction(input: {
+    /**
+     * The entity set of the table, its plural name, such as `accounts`.
+     */
+    entitySet: string;
+    /**
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
+     */
+    id: string;
+    /**
+     * The function's call, with its namespace, such as `Microsoft.Dynamics.CRM.new_Approve`, with its parameters as aliases, such as `msdyn_GetSummary(RecordId=@id)`, or `()` after the name without parameters.
+     */
+    function: string;
+    /**
+     * The values of the call's parameter aliases as OData literals, such as `{ "@id": "'<id>'" }`, or JSON for lists and objects.
+     */
+    parameterAliases?: {
+      [key: string]: string;
+    };
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
+     * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
+     */
+    environment: string;
+  }): Promise<
+    DataverseResult<{
+      [key: string]: JsonValue;
+    } | null>
+  > {
+    return run(this.env, this.ctx.props, "callRowFunction", input);
+  }
+
+  /**
    * Asks the user first unless their approval level is `none`.
    */
   async addAppComponents(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4716,6 +6527,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async addCertificateCredential(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4737,6 +6580,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addChannelAccessProfilePrivileges(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -4755,6 +6630,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async addComponentsToSolutionAsync(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4775,6 +6682,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async addComponentToSolutionAsync(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4799,9 +6738,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addMembersTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4821,9 +6792,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addPrincipalToQueue(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4843,9 +6846,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addPrivilegesRole(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4865,9 +6900,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addRecurrence(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4887,9 +6954,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addRequiredDesktopFlowComponentsToSolutions(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4903,9 +7002,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addRequiredUIElementCollectionComponentsToSolutions(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4923,6 +7054,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async addSolutionComponent(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4947,9 +7110,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addToQueue(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4971,9 +7166,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addUserToRecordTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -4994,9 +7221,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async addWorkQueueItemProcessingHistoryEntry(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5013,6 +7272,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async aIClassify(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5028,6 +7307,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async aIExtract(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5047,6 +7346,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async aIModelPublish(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5069,6 +7400,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async aIReply(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5083,6 +7434,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async aISentiment(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5099,6 +7470,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async aISummarize(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5113,6 +7504,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async aISummarizeRecord(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5132,6 +7543,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async aITranslate(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5147,6 +7578,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async analyzeSentiment(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5168,6 +7619,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async appendRelatedParty(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5187,6 +7670,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async applyRecordCreationAndUpdateRule(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5204,6 +7719,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async autoMapEntity(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5223,6 +7770,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async backgroundSendEmail(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5237,6 +7816,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async batchGetFlowMachineStatus(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5256,6 +7855,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async beginMachineImageProvisioning(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5278,6 +7909,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async book(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5296,6 +7959,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async bulkDelete(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5324,6 +8019,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async bulkDetectDuplicates(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5349,6 +8076,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async bulkRemoveActiveCustomizationsAsync(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5366,6 +8125,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async bulkRetain(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5389,6 +8180,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async calculatePrice(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5407,6 +8230,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     Target: Crmbaseentity;
     FieldName: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5415,6 +8258,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async canBeReferenced(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5430,6 +8293,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async canBeReferencing(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5449,9 +8332,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async cancelAllCloudFlowRuns(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5465,9 +8380,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async cancelDesktopFlowRun(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5477,6 +8424,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async canManyToMany(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5496,6 +8463,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async cardCreateClone(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5512,6 +8511,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async cardGetFullJson(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5526,6 +8545,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async categorizeText(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5551,6 +8590,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     Bcc: string;
     ExtraProperties?: Email;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5562,6 +8621,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     MessageId: string;
     Subject?: string;
     DirectionCode?: number;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5575,9 +8654,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async clearWorkQueue(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5590,6 +8701,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async cloneAsPatch(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5611,6 +8754,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async cloneAsSolution(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5631,9 +8806,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async cloneMobileOfflineProfile(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5646,6 +8853,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async commitAnnotationBlocksUpload(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5667,6 +8906,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async commitAttachmentBlocksUpload(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5686,6 +8957,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async commitFileBlocksUpload(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5708,6 +9011,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async commitToGit(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5726,6 +9061,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async compoundUpdateDuplicateDetectionRule(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5746,9 +9113,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async computeSlaWorkQueueItem(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5762,9 +9161,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async confirmConsentCode(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5783,6 +9214,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async connectToGit(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5815,9 +9278,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async convertOwnerTeamToAccessTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5827,6 +9322,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async copilotquerytextcontext(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5851,6 +9366,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async copilottextdatastatus(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5863,9 +9398,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async copySystemForm(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5884,6 +9451,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async createAndSendNewEmail(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5910,6 +9509,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createAsyncJobToRevokeInheritedAccess(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5927,6 +9558,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async createCustomerRelationships(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5948,6 +9611,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createException(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -5968,9 +9663,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createFlowCredentialApplication(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -5993,6 +9720,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async createFlowMachineNetwork(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6017,9 +9776,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createFlowSecretServerConnection(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6042,6 +9833,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async createHostedFlowMachineGroup(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6070,6 +9893,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createInstance(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6088,6 +9943,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async createKnowledgeArticleTranslation(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6108,6 +9995,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async createKnowledgeArticleVersion(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6132,6 +10051,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6149,6 +10100,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async createNPSUserRating(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6172,6 +10155,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createPolymorphicLookupAttribute(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6192,9 +10207,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createRoleWithPrivilegeCheckerRun(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6214,6 +10261,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async createRpaBox(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6236,6 +10315,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createVirtualConnectorTable(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6254,9 +10365,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async createWorkflowFromTemplate(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6275,6 +10418,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async deactivateEntityKey(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6295,6 +10470,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deleteAndPromote(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6312,6 +10519,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async deleteAndPromoteAsync(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6331,6 +10570,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deleteAuditData(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6348,6 +10619,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async deleteAutomatedPlugin(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6367,6 +10670,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deleteFile(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6385,9 +10720,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deleteFlowMachineGroup(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6400,6 +10767,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async deleteInstantPlugin(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6423,6 +10822,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6440,6 +10871,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async deleteOpenInstances(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6460,6 +10923,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async deleteOptionValue(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6483,6 +10978,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deleteRecordChangeHistory(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6501,9 +11028,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deliverImmediatePromoteEmail(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6536,6 +11095,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deliverIncomingEmail(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6566,9 +11157,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deliverPromoteEmail(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6599,6 +11222,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async deprovisionLanguage(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6618,9 +11273,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async dequeue(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6637,6 +11324,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async detectLanguage(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6658,6 +11365,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async disconnectFromGit(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6672,6 +11411,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async discoverFabricAISkills(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6689,6 +11448,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async discoverFabricWorkspaces(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6703,6 +11482,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async downloadBlock(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6721,9 +11520,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async downloadReportDefinition(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6733,6 +11552,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async downloadSolutionExportData(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6752,6 +11591,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async emptyRecycleBin(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6763,6 +11634,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async enableEligibleRecycleBinEntities(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6776,9 +11679,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async enqueueWorkQueueItem(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6803,6 +11738,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     PagingCookie?: string;
     PartitionId?: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6814,6 +11769,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async executeFxExpression(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6837,9 +11824,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async executeWorkflow(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6859,6 +11878,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async executeWorkIQTask(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6884,11 +11935,31 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async expandCalendar(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     Start: string;
     End: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6899,6 +11970,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async exportFieldTranslation(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6908,9 +11999,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async exportMappingsImportMap(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6927,6 +12038,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async exportRetainedData(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -6942,6 +12073,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async exportSolution(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -6975,6 +12126,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async exportSolutionAsync(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7004,6 +12187,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async exportSolutionFromGit(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7025,6 +12228,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async exportSolutionFromGitAsync(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7042,6 +12277,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async exportTranslation(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7056,6 +12311,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async extractKeyPhrases(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7073,6 +12348,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async extractTextEntities(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7092,6 +12387,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async fetchXmlToQueryExpression(input: {
     FetchXml: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7106,6 +12421,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     PostalCode: string;
     Country: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7114,6 +12449,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async formPredict(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7134,6 +12489,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async fullTextSearchKnowledgeArticle(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7161,6 +12536,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async generateAutomatedPlugin(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7184,6 +12591,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async generateInstantPlugin(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7209,6 +12648,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async generatePowerFxFormula(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7233,6 +12704,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async generateSharedLink(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7252,6 +12755,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async generateSocialProfile(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7268,6 +12803,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async getAllTimeZonesWithDisplayName(input: {
     LocaleId: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7281,6 +12836,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getAuditStorageDetails(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7289,6 +12864,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getAutoNumberSeed(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7305,6 +12900,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getCertificateCredential(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7328,6 +12943,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     ComponentId: string;
     ComponentName: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7337,9 +12972,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getConsentLink(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7356,12 +13011,32 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getDistinctValuesImportFile(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     columnNumber: number;
     pageNumber: number;
     recordsPerPage: number;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7372,6 +13047,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getEntitiesEligibleForRecycleBin(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7380,6 +13075,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getEntityLinkChatConfig(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7395,6 +13110,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getFeatureControlStringSettingsForNamespaceWithUserContext(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7422,6 +13157,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     FileAttributeName: string;
     DataSource?: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7434,6 +13189,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     FileAttributeName: string;
     FileName: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7443,9 +13218,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getHeaderColumnsImportFile(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7456,6 +13251,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getHostedRpaCapacity(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7464,6 +13279,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getJobStatus(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7482,6 +13317,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getLinkedChats(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7499,6 +13354,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async getNextAutoNumberValue(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7521,6 +13408,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     connectionReferenceIds?: string;
     triggerIds?: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7530,9 +13437,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getNextRunsForFlowTrigger(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7545,6 +13472,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async getOrCreateSharedWorkspace(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7561,6 +13520,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getPBIReportRefreshStatus(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7579,6 +13558,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     ComponentId: string;
     ComponentName: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7587,6 +13586,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getPreferredSolution(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7597,9 +13616,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getPublicKey(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7610,9 +13649,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getReportHistoryLimit(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7623,9 +13682,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getRunMap(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7645,6 +13724,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async getSearchInformation(input: {
     Fetchxml: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7656,6 +13755,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     LocalizedStandardName: string;
     LocaleId: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7664,6 +13783,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getTrackingTokenEmail(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7680,6 +13819,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getValidManyToMany(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7689,6 +13848,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async getValidReferencedEntities(input: {
     ReferencingEntityName?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7700,6 +13879,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async getValidReferencingEntities(input: {
     ReferencedEntityName?: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7708,6 +13907,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async getWorkIQTaskStatus(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7728,6 +13947,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async grantAccess(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7747,6 +13998,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async grantAccessUsingSharedLink(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7764,6 +14047,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async grantDelegatedAccess(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7784,6 +14099,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async immediateBook(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7806,6 +14153,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async importCardTypeSchema(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7824,6 +14203,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async importFieldTranslation(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7841,6 +14252,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async importMappingsImportMap(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7861,9 +14304,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async importRecordsImport(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7876,6 +14351,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async importSolution(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -7911,6 +14418,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async importSolutionAsync(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7945,6 +14484,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async importSolutions(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7969,6 +14540,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async importTranslation(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -7987,6 +14590,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async importTranslationAsync(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8008,6 +14643,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     Location: number;
     Count: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8016,6 +14671,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async inferEntityDefinition(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8042,6 +14717,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async initializeAnnotationBlocksDownload(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8060,6 +14755,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async initializeAnnotationBlocksUpload(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8074,6 +14801,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async initializeAttachmentBlocksDownload(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8093,6 +14840,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async initializeAttachmentBlocksUpload(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8107,6 +14886,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async initializeFileBlocksDownload(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8127,6 +14926,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async initializeFileBlocksUpload(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8150,6 +14981,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     TargetFieldType: TargetFieldType;
     RetrieveConsumableRecord?: boolean;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8162,9 +15013,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async initializeModernFlowFromAsyncWorkflow(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8177,6 +15060,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async initializeTemporaryFileBlocksUpload(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8196,6 +15111,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async insertOptionValue(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8225,6 +15172,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async insertStatusValue(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8251,6 +15230,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async installSampleData(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8263,9 +15274,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async instantiateFilters(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8281,6 +15324,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async instantiateTemplate(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8303,6 +15366,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async isCDS3Ready(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8314,6 +15397,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     ComponentId: string;
     ComponentType: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8322,6 +15425,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async isDataEncryptionActive(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8332,6 +15455,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async isPaiEnabled(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8340,6 +15483,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async isPmEnabled(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8353,6 +15516,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     NewState: string;
     NewStatus: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8364,6 +15547,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async joinLinkedChat(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8385,9 +15600,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async leaveGroup(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8398,9 +15645,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async listChildDesktopFlows(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8411,9 +15678,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async listConnectionReferences(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8424,9 +15711,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async listCredentialDependencies(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8437,9 +15744,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async listFlowsInFlowGroup(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8456,6 +15783,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     TimeZoneCode: number;
     UtcTime: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8467,6 +15814,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async mcpCreateTable(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8489,6 +15868,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async mcpExecuteWorkIQTask(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8515,6 +15926,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async mcpGetGlobalOptionSet(input: {
     optionSetName: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8523,6 +15954,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async mcpGetWorkIQTaskStatus(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8542,6 +15993,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async mcpUpdateGlobalOptionSet(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8564,6 +16047,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async mcpUpdateTable(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8584,6 +16099,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async merge(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8606,6 +16153,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async modifyAccess(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8625,6 +16204,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async notifyEnvironmentVariableSecretChange(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8643,6 +16254,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async orderOption(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8666,9 +16309,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async parseImport(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8681,6 +16356,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async pBIAutoRefreshDataset(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8701,9 +16408,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async pickFromQueue(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8724,6 +16463,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async powerAutomateProxy(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8743,6 +16514,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async preferredSolutionUsedBy(input: {
     SolutionId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8751,6 +16542,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async preValidateGitComponents(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8771,6 +16582,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async provisionDelegation(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8788,6 +16631,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async provisionLanguage(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8807,6 +16682,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async provisionLanguageAsync(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8825,6 +16732,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async publishAllXml(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8836,6 +16775,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async publishAllXmlAsync(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8849,9 +16820,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async publishDuplicateRule(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8865,9 +16868,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async publishTheme(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8880,6 +16915,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async publishXml(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8898,6 +16965,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async pullChangesFromGit(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8918,6 +17017,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async pullChangesFromGitAsync(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8936,6 +17067,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async purgeRetainedContent(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8956,6 +17119,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async queryDvUnstructuredData(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8970,6 +17153,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async queryExpressionToFetchXml(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -8990,6 +17193,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     End: string;
     TimeCodes: TimeCode[];
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -8998,6 +17221,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async questionAnalytics(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9022,6 +17265,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async reactivateEntityKey(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9040,6 +17315,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async reassignObjectsOwner(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9061,9 +17368,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async reassignObjectsSystemUser(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9084,9 +17423,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async recalculate(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9096,6 +17467,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async recognizeText(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9117,6 +17508,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async refreshChangesFromGit(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9136,6 +17559,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async refreshRpaLicensingCapacity(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9147,6 +17602,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first when their approval level is `all_changes`.
    */
   async registerFlowMachine(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9174,9 +17661,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async releaseToQueue(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9189,6 +17708,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async removeActiveCustomization(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9208,6 +17759,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     SolutionComponentName: string;
     ComponentId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9219,6 +17790,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async removeAppComponents(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9238,6 +17841,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async removeCertificateCredential(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9259,9 +17894,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async removeFlowFromFlowGroup(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9281,9 +17948,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async removeFromQueue(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9297,9 +17996,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async removeMembersTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9319,6 +18050,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async removeParent(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9337,9 +18100,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async removePrivilegeRole(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9358,6 +18153,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async removeSolutionComponent(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9379,9 +18206,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async removeUserFromRecordTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9402,9 +18261,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async replacePrivilegesRole(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9424,6 +18315,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async reschedule(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9441,6 +18364,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async resetInheritedAccess(input: {
     FetchXml: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9452,6 +18395,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async resetUserFilters(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9471,9 +18446,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async restartHostedMachine(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9486,6 +18493,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async restore(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9505,6 +18544,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async retain(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9522,6 +18593,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveAadUserPrivileges(input: {
     DirectoryObjectId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9531,6 +18622,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAadUserRoles(input: {
     DirectoryObjectId: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9547,6 +18658,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     DirectoryObjectId: string;
     PrivilegeIds: string[];
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9558,6 +18689,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     DirectoryObjectId: string;
     PrivilegeNames: string[];
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9567,9 +18718,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAbsoluteAndSiteCollectionUrlForSharepointdocumentlocation(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9585,9 +18756,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAbsoluteAndSiteCollectionUrlForSharepointsite(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9606,6 +18797,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     LogicalName: string;
     PrincipalId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9615,6 +18826,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveActivePath(input: {
     ProcessInstanceId: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9629,9 +18860,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAllChildUsersSystemUser(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9646,6 +18897,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAllCompositeDataSources(input: {
     ParentSchemaName: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9662,6 +18933,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     EntityFilters: EntityFilters;
     RetrieveAsIfPublished: boolean;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9670,6 +18961,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveAnalyticsStoreDetails(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9680,6 +18991,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAppComponents(input: {
     AppModuleId: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9694,6 +19025,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveApplicationRibbon(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9702,6 +19053,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveAppsWithDelegatedAccessPermissions(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9725,6 +19096,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     AttributeLogicalName: string;
     PagingInfo?: PagingInfo;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9734,9 +19125,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAuditDetails(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9747,6 +19158,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAuditPartitionList(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9756,6 +19187,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveAvailableLanguages(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9764,6 +19215,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveBoolFeatureControlSetting(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9781,9 +19252,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveBusinessHierarchyBusinessUnit(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9798,9 +19289,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveByTopIncidentSubjectKbArticle(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9816,6 +19327,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveCascadeAssignAsyncJobId(input: {
     ParentEntityId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9825,6 +19356,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveCascadeDeleteAsyncJobId(input: {
     ParentEntityIds: string[];
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9836,6 +19387,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveChannelAccessProfilePrivileges(input: {
     ChannelAccessProfileId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9846,6 +19417,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveCompositeDataSource(input: {
     ParentSchemaName: string;
     ChildSchemaName: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9859,6 +19450,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveConnectorActions(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9879,6 +19490,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveConnectorSettings(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9893,6 +19524,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveCurrentOrganization(input: {
     AccessType: EndpointAccessType;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9901,6 +19552,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveDataEncryptionKey(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9912,6 +19583,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveDependenciesForDelete(input: {
     ObjectId: string;
     ComponentType: number;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9926,6 +19617,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveDependenciesForUninstall(input: {
     SolutionUniqueName: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9942,6 +19653,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     ObjectId: string;
     ComponentType: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9955,6 +19686,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveDeploymentLicenseType(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -9963,6 +19714,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveDeprovisionedLanguages(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9975,6 +19746,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     BusinessEntity: Crmbaseentity;
     MatchingEntityName: string;
     PagingInfo?: PagingInfo;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -9993,6 +19784,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     MetadataId: string;
     RetrieveAsIfPublished: boolean;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10004,6 +19815,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     EntityName: string;
     RibbonLocationFilter: RibbonLocationFilters;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10013,6 +19844,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveEnvironmentVariables(input: {
     SchemaNames?: string[];
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10026,6 +19877,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveEnvironmentVariableSecretValue(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10043,6 +19914,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveEnvironmentVariableValue(input: {
     DefinitionSchemaName: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10053,6 +19944,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveExchangeAppointments(input: {
     StartDate: string;
     EndDate: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10068,6 +19979,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveExchangeRate(input: {
     TransactionCurrencyId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10076,6 +20007,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveFeatureControlSetting(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10093,6 +20044,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveFeatureControlSettings(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10109,6 +20080,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveFeatureControlSettingsByNamespace(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10124,6 +20115,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveFeatureControlStringSettings(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10132,6 +20143,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveFeatureControlStringSettingsForNamespace(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10151,6 +20182,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     FormType: number;
     User: Systemuser;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10164,6 +20215,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveFinanceAndOperationsIntegrationDetails(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10172,6 +20243,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveFlowUpdates(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10193,6 +20284,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveFormattedImportJobResults(input: {
     ImportJobId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10201,6 +20312,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveInstalledLanguagePacks(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10212,6 +20343,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveInstalledLanguagePackVersion(input: {
     Language: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10221,6 +20372,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveLicenseInfo(input: {
     AccessMode: number;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10234,6 +20405,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     AttributeName: string;
     IncludeUnpublished: boolean;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10244,6 +20435,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveMailboxTrackingFolders(input: {
     MailboxId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10253,6 +20464,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveMaskedAttributesForEntity(input: {
     EntityLogicalName: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10268,6 +20499,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     AppModuleId?: string;
     RetrieveAllSettings?: boolean;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10278,6 +20529,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveMissingComponents(input: {
     CustomizationFile: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10287,6 +20558,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveMissingDependencies(input: {
     SolutionUniqueName: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10303,6 +20594,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     SolutionUniqueName: string;
     SkipManagedDependencies: boolean;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10312,6 +20623,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveOrganizationInfo(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10320,6 +20651,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveOrganizationResources(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10331,6 +20682,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveParsedDataImportFile(input: {
     ImportFileId: string;
     PagingInfo?: PagingInfo;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10350,6 +20721,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     SortDirection?: boolean;
     Keyword?: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10362,6 +20753,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrievePowerAppsConnections(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10376,6 +20787,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePowerAppsConnectorApis(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10389,10 +20820,30 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalAccessForOrganization(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     Target: Crmbaseentity;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10403,10 +20854,30 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalAccessForSystemuser(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     Target: Crmbaseentity;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10417,10 +20888,30 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalAccessForTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     Target: Crmbaseentity;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10431,11 +20922,31 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalAccessInfoForSystemuser(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     ObjectId: string;
     EntityName: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10446,11 +20957,31 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalAccessInfoForTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     ObjectId: string;
     EntityName: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10461,9 +20992,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalAttributePrivilegesForSystemuser(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10479,9 +21030,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalAttributePrivilegesForTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10492,9 +21063,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalSyncAttributeMappingsForSystemuser(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10510,9 +21101,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrievePrincipalSyncAttributeMappingsForTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10522,6 +21133,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrievePrivilegeSet(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10538,6 +21169,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     EntityId: string;
     EntityLogicalName: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10552,6 +21203,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveProvisionedLanguagePackVersion(input: {
     Language: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10560,6 +21231,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveProvisionedLanguages(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10571,6 +21262,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveRecordChangeHistory(input: {
     Target: Crmbaseentity;
     PagingInfo?: PagingInfo;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10591,6 +21302,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     SortDirection?: boolean;
     Keyword?: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10606,6 +21337,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     ObjectId: string;
     ComponentType: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10620,6 +21371,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveRolePrivilegesRole(input: {
     RoleId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10631,6 +21402,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     AppUniqueName?: string;
     SettingName: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10640,6 +21431,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveSharedLinks(input: {
     Target: Crmbaseentity;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10655,6 +21466,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveSharedPrincipalsAndAccess(input: {
     Target: Crmbaseentity;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10664,9 +21495,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveTeamPrivileges(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10680,6 +21531,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     Target?: Crmbaseentity;
     RollupType?: number;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10688,6 +21559,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveTimestamp(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10699,6 +21590,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async retrieveTotalRecordCount(input: {
     EntityNames: string[];
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -10708,9 +21619,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAiplugin(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10721,9 +21652,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAipluginconversationstarter(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10739,9 +21690,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAipluginconversationstartermapping(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10757,9 +21728,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAipluginoperation(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10770,9 +21761,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAipluginoperationparameter(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10783,9 +21794,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAipluginoperationresponsetemplate(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10801,9 +21832,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAiplugintitle(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10814,9 +21865,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAppconfig(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10827,9 +21898,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAppconfiginstance(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10840,9 +21931,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForAppmodule(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10853,9 +21964,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForComputeruseagent(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10866,9 +21997,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForCustomcontroldefaultconfig(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10879,9 +22030,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForDesktopflowbinary(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10892,9 +22063,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForMobileofflineprofile(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10905,9 +22096,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForMobileofflineprofileitem(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10918,9 +22129,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForNavigationsetting(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10931,9 +22162,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForSavedquery(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10944,9 +22195,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForSavedqueryvisualization(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10957,9 +22228,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForSitemap(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10970,9 +22261,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForSystemform(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10983,9 +22294,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForWebresource(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -10996,9 +22327,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedForWorkflow(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11008,6 +22359,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForAiplugin(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11021,6 +22392,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForAipluginconversationstarter(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11040,6 +22431,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForAipluginconversationstartermapping(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11058,6 +22469,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForAipluginoperation(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11070,6 +22501,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForAipluginoperationparameter(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11089,6 +22540,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForAipluginoperationresponsetemplate(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11107,6 +22578,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForAiplugintitle(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11119,6 +22610,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForAppconfig(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11133,6 +22644,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForAppconfiginstance(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11145,6 +22676,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForAppmodule(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11159,6 +22710,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForComputeruseagent(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11171,6 +22742,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForCustomcontroldefaultconfig(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11190,6 +22781,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForDesktopflowbinary(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11202,6 +22813,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForMobileofflineprofile(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11221,6 +22852,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForMobileofflineprofileitem(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11239,6 +22890,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForNavigationsetting(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11252,6 +22923,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForSavedquery(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11264,6 +22955,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForSavedqueryvisualization(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11283,6 +22994,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForSitemap(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11295,6 +23026,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForSystemform(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11309,6 +23060,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUnpublishedMultipleForWebresource(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11321,6 +23092,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveUnpublishedMultipleForWorkflow(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11335,10 +23126,30 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUserApplicationLicenseAccess(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     ApplicationId: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11349,9 +23160,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUserLicenseInfo(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11362,11 +23193,31 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUserPrivilegeByPrivilegeId(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     PrivilegeId: string;
     ExcludeTeamBasic?: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11377,11 +23228,31 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUserPrivilegeByPrivilegeName(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     PrivilegeName: string;
     ExcludeTeamBasic?: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11392,9 +23263,29 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUserPrivileges(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11405,10 +23296,30 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUserQueues(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     IncludePublic: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11423,11 +23334,31 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUserSetOfPrivilegesByIds(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     PrivilegeIds: string[];
     ExcludeTeamBasic?: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11438,11 +23369,31 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUserSetOfPrivilegesByNames(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     PrivilegeNames: string[];
     ExcludeTeamBasic?: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11453,11 +23404,31 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async retrieveUsersPrivilegesThroughTeams(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
     ExcludeOrgDisabledPrivileges: boolean;
     IncludeSetupUserFiltering: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11467,6 +23438,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async retrieveVersion(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11479,6 +23470,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async revokeAccess(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11499,6 +23522,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async revokeSharedLink(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11517,6 +23572,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async rollbackRetain(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11537,6 +23624,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     Query?: QueryBase;
     RollupType: RollupType;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11553,9 +23660,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async rotateGroupKey(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11568,6 +23707,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async routeTo(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11587,6 +23758,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async runDataProcessingModule(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11611,9 +23814,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async runDesktopFlow(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11639,9 +23874,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async saveAsDesktopFlow(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11661,9 +23928,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async saveAsDesktopFlowModule(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11682,6 +23981,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async saveSettingValue(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11702,6 +24033,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async search(input: {
     AppointmentRequest?: AppointmentRequest;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11710,6 +24061,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async searchautocomplete(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11734,6 +24105,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     Subject: Subject;
     UseInflection: boolean;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11749,6 +24140,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     SearchText: string;
     Subject: Subject;
     UseInflection: boolean;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11766,6 +24177,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
     Subject: Subject;
     UseInflection: boolean;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11778,6 +24209,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async searchquery(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11804,6 +24255,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async searchstatistics(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11813,6 +24284,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async searchstatus(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11821,6 +24312,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async searchsuggest(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11846,6 +24357,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async sendAppNotification(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11873,6 +24416,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async sendBulkMail(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11895,9 +24470,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async sendEmail(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11917,6 +24524,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async sendEmailFromTemplate(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11938,6 +24577,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async sendFax(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11956,6 +24627,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async sendTemplate(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -11979,6 +24682,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async setAutoNumberSeed(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -11999,9 +24734,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async setBusinessSystemUser(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12023,6 +24790,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async setDataEncryptionKey(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12041,6 +24840,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async setFeatureStatus(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12063,6 +24894,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async setLocLabels(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12083,9 +24946,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async setParentSystemUser(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12106,9 +25001,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async setParentTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12129,6 +25056,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async setPreferredSolution(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12146,6 +25105,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async setProcess(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12166,6 +25157,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async setReportRelated(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12188,6 +25211,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async setupAiConnection(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12207,6 +25262,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async snapshotDatasource(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12224,6 +25311,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async stageAndUpgrade(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12254,6 +25373,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async stageAndUpgradeAsync(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12283,6 +25434,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async stageSolution(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12301,6 +25484,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async substituteForAttribute(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12322,6 +25537,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async substituteForComponent(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12337,6 +25584,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async summarizeRecord(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12359,6 +25626,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async syncBulkOperation(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12377,6 +25676,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async syncCopresenceState(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12398,9 +25729,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async syncGroupMembersToTeam(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12413,6 +25776,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async transformImport(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12432,9 +25827,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async triggerServiceEndpointCheck(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12448,6 +25875,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async uninstallSampleData(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12459,6 +25918,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async uninstallSolution(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12478,6 +25969,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async uninstallSolutionAsync(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12495,6 +26018,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async unpublishDuplicateRule(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12514,9 +26069,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async updateAccountCredentials(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12535,6 +26122,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async updateAutomatedPlugin(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12561,6 +26180,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async updateFeatureConfig(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12580,9 +26231,41 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async updateFlowMachineNetwork(input: {
     /**
-     * The row's ID.
+     * The row's ID, or an alternate key, such as `LogicalName='account'`.
      */
     id: string;
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12603,6 +26286,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async updateInstantPlugin(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12633,6 +26348,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12650,6 +26397,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async updateOptionValue(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12680,6 +26459,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async updateRibbonClientMetadata(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12691,6 +26502,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async updateSolutionComponent(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12712,6 +26555,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async updateStateValue(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12738,6 +26613,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    */
   async uploadBlock(input: {
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12757,6 +26664,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async upsertCompositeDataSource(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12783,6 +26722,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
    * Asks the user first unless their approval level is `none`.
    */
   async upsertEnvironmentVariable(input: {
+    /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12813,6 +26784,38 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
      */
     entitySet: string;
     /**
+     * A value plug-ins read as the `tag` shared variable.
+     */
+    tag?: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `CustomSync`, `CustomAsync` or `CustomSync,CustomAsync` to skip custom synchronous or asynchronous logic.
+     */
+    bypassBusinessLogicExecution?: string;
+    /**
+     * The IDs of plug-in steps to skip, separated by commas.
+     */
+    bypassBusinessLogicExecutionStepIds?: string;
+    /**
+     * `true` to skip custom synchronous plug-ins.
+     */
+    bypassCustomPluginExecution?: string;
+    /**
+     * `true` to not trigger Power Automate flows.
+     */
+    suppressCallbackRegistrationExpanderJob?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12828,6 +26831,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async validate(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12842,6 +26865,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async validateAIConfiguration(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12860,6 +26903,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async validateApp(input: {
     AppModuleId: string;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12869,6 +26932,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async validateFetchXmlExpression(input: {
     FetchXml: string;
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12880,6 +26963,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   async validateRecurrenceRule(input: {
     Target: Recurrencerule;
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12888,6 +26991,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async validateRetentionConfig(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
@@ -12907,6 +27030,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async validateSavedQuery(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12923,6 +27066,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
 
   async validateUnpublished(input: {
     /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
+    /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */
     environment: string;
@@ -12937,6 +27100,26 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   }
 
   async whoAmI(input: {
+    /**
+     * Preferences, such as `return=representation` to answer the row, `odata.include-annotations="*"` for formatted values, `odata.maxpagesize=50`, `odata.track-changes` for a `@odata.deltaLink` or `respond-async`.
+     */
+    prefer?: string;
+    /**
+     * `Strong` to read the latest definitions, labels and permissions instead of cached ones, such as right after changing a table.
+     */
+    consistency?: string;
+    /**
+     * An elastic table's `x-ms-session-token` from an earlier change, to read what that change wrote.
+     */
+    sessionToken?: string;
+    /**
+     * The Microsoft Entra object ID of a user to act for.
+     */
+    callerObjectId?: string;
+    /**
+     * The `systemuserid` of a user to act for.
+     */
+    mscrmCallerId?: string;
     /**
      * The environment's host, such as `contoso.api.crm4.dynamics.com`, as `listEnvironments` returns it.
      */

@@ -31,7 +31,17 @@ export type Answered<R> = R & { resultType?: undefined };
 export type DataverseResult<T> =
   | ApprovalQuestion
   | Answered<
-      | { status: "connected"; data: T }
+      | {
+          status: "connected";
+          data: T;
+          /**
+           * Headers of Dataverse's answer that carry results, when it sent them,
+           * such as `OData-EntityId` with a created row's address or a chunked
+           * upload's `Location`.
+           */
+          headers?: Record<string, string>;
+        }
+      | { status: "not_modified" }
       | { status: "dataverse_error"; error: DataverseError }
       | { status: "declined" }
       | { status: "too_large"; maximumBytes: number }

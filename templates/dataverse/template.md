@@ -36,8 +36,12 @@ widefleet connect dataverse --as DATAVERSE
 
 Every method takes the environment's host as `environment`; `listEnvironments` lists
 them. Rows of every table are read and changed with `listRows`, `getRow`,
-`createRow`, `updateRow` and `deleteRow`. Each action and function of the Web API is a method,
-such as `whoAmI`, `addPrivilegesRole` and `publishXml`; `callAction` calls actions a
-solution adds. See [using a template
+`createRow`, `updateRow` and `deleteRow`, single columns and files with `getColumn`,
+`setColumn` and `uploadColumnContent`, and the rows they relate to, such as a table's
+columns, with `listRelatedRows`, `createRelatedRow` and `replaceRelatedRow`. `batch`
+runs many requests at once, change sets as one transaction. Each action and function
+of the Web API is a method, such as `whoAmI`, `addPrivilegesRole` and `publishXml`;
+`callAction` and `callFunction` call those a solution adds. Methods take the Web API's
+query options and headers, such as `$filter`, `prefer` or `solutionUniqueName`. See [using a template
 app](https://widefleet.com/docs/guides/app-templates#use-from-agents-and-apps) for
 calls, approvals and results.

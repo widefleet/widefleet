@@ -195,6 +195,26 @@ describe("Dataverse personal account app", () => {
       `${sales}/WhoAmI()`,
       `${sales}/RetrieveTotalRecordCount(EntityNames=@EntityNames)?@EntityNames=["account"]`,
     ]);
+
+    // A cast is a segment of its own; without one the segment is left out.
+    for (const query of [
+      "",
+      "?type=Microsoft.Dynamics.CRM.PicklistAttributeMetadata&expand=OptionSet",
+    ])
+      expect(await (await alice.request(`/rpc/column${query}`)).json()).toEqual({
+        status: "connected",
+        data: { LogicalName: "industrycode" },
+      });
+    expect(await (await alice.request("/rpc/function")).json()).toEqual({
+      status: "connected",
+      data: { Summary: "Short" },
+    });
+    expect(upstream.calls.slice(-3).map((call) => decodeURIComponent(call.url))).toEqual([
+      `${sales}/EntityDefinitions(LogicalName='account')/Attributes(LogicalName='industrycode')`,
+      `${sales}/EntityDefinitions(LogicalName='account')/Attributes(LogicalName='industrycode')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$expand=OptionSet`,
+      // Parameter aliases are sent as the OData literals the caller wrote.
+      `${sales}/msdyn_GetSummary(RecordId=@id)?@id='it''s'`,
+    ]);
     expect(await (await alice.request("/rpc/metadata")).json()).toEqual({
       status: "connected",
       data: { contentType: "application/xml", text: "<edmx:Edmx/>" },
@@ -235,6 +255,25 @@ describe("Dataverse personal account app", () => {
     // An action at the address of a table is never created as a row.
     expect((await alice.request("/rpc/create?set=BulkDelete")).status).toBe(500);
     expect(upstream.calls.at(-1)).toMatchObject({ method: "GET", url: `${sales}/` });
+
+    // A column is created through its table's navigation property; a bound
+    // action at that address is not.
+    upstream.calls.length = 0;
+    expect(await (await alice.request("/rpc/related")).json()).toEqual({
+      status: "connected",
+      data: null,
+    });
+    expect(upstream.calls.map(({ method, url }) => `${method} ${decodeURIComponent(url)}`)).toEqual(
+      [`GET ${sales}/`, `POST ${sales}/EntityDefinitions(LogicalName='new_scrap')/Attributes`],
+    );
+
+    for (const query of [
+      "navigation=Microsoft.Dynamics.CRM.AddPrivilegesRole",
+      `id=${encodeURIComponent("x)/Microsoft.Dynamics.CRM.BulkDelete(")}`,
+      "set=BulkDelete",
+    ])
+      expect((await alice.request(`/rpc/related?${query}`)).status).toBe(500);
+    expect(upstream.calls.filter(({ method }) => method === "POST")).toHaveLength(1);
     upstream.calls.length = 0;
 
     alice.identity.answer = "decline";
@@ -247,6 +286,115 @@ describe("Dataverse personal account app", () => {
     expect(upstream.calls.at(-1)).toMatchObject({
       method: "DELETE",
       url: `${sales}/accounts(00000000-0000-0000-0000-000000000001)`,
+    });
+  });
+
+  it("runs batches as one change, uploads files and returns Dataverse's answer headers", async () => {
+    const alice = browser("alice");
+    await ready(alice, "101");
+
+    const batch = (input: { environment: string; requests: unknown[] }) =>
+      alice.request(`/rpc/batch?input=${encodeURIComponent(JSON.stringify(input))}`);
+
+    const created = {
+      environment: "sales.api.crm4.dynamics.com",
+      requests: [
+        {
+          changeSet: [
+            { method: "POST", url: "accounts", body: { name: "A" }, contentId: "1" },
+            { method: "POST", url: "$1/contact_customer_accounts", body: { lastname: "B" } },
+          ],
+        },
+        { method: "GET", url: "accounts?$select=name" },
+      ],
+    };
+
+    // Creating runs at once by default; the answers come in order.
+    expect(await (await batch(created)).json()).toEqual({
+      status: "connected",
+      data: {
+        responses: [
+          {
+            contentId: "1",
+            status: 204,
+            headers: { "OData-EntityId": `${sales}/accounts(a-1)` },
+            body: null,
+          },
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json; odata.metadata=minimal" },
+            body: { value: [] },
+          },
+        ],
+      },
+    });
+    const sent = upstream.calls.at(-1);
+
+    expect(sent).toMatchObject({ method: "POST", url: `${sales}/$batch` });
+    expect(sent?.type).toMatch(/^multipart\/mixed; boundary=batch_/);
+
+    for (const line of [
+      `POST ${sales}/accounts HTTP/1.1`,
+      "Content-ID: 1",
+      // Dataverse needs a Content-ID on every request of a change set.
+      "Content-ID: 2",
+      "POST $1/contact_customer_accounts HTTP/1.1",
+      `GET ${sales}/accounts?$select=name HTTP/1.1`,
+    ])
+      expect(sent?.body).toContain(line);
+
+    // A batch asks once for its strongest change: an action or a deletion asks.
+    upstream.calls.length = 0;
+
+    for (const request of [
+      { method: "DELETE", url: "accounts(00000000-0000-0000-0000-000000000001)" },
+      { method: "POST", url: "WinOpportunity", body: { Status: 3 } },
+      { method: "POST", url: "accounts(a-1)/Microsoft.Dynamics.CRM.new_Approve" },
+      { method: "POST", url: "accounts%2FMicrosoft.Dynamics.CRM.new_Approve" },
+    ])
+      expect(
+        await (await batch({ ...created, requests: [{ changeSet: [request] }] })).json(),
+      ).toMatchObject({ resultType: "input_required" });
+    expect(upstream.calls.filter(({ url }) => url.endsWith("$batch"))).toHaveLength(0);
+
+    // No request can add lines, leave the service or refer to a row no request creates.
+    for (const request of [
+      { method: "GET", url: "accounts", headers: { Prefer: "x\r\nDELETE accounts(1)" } },
+      { method: "GET", url: "accounts", headers: { Authorization: "Bearer other" } },
+      { method: "GET", url: "https://evil.example.test/" },
+      { method: "GET", url: "../../other" },
+      { method: "POST", url: "$9/contact_customer_accounts" },
+    ])
+      expect((await batch({ ...created, requests: [request] })).status).toBe(500);
+
+    // A created row's address and a file upload's bytes.
+    expect(await (await alice.request("/rpc/create")).json()).toMatchObject({
+      headers: { "OData-EntityId": `${sales}/accounts(account-new)` },
+    });
+    // An upload replaces the file, so it asks first.
+    expect(await (await alice.request("/rpc/upload")).json()).toMatchObject({
+      resultType: "input_required",
+    });
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/upload")).json()).toEqual({
+      status: "connected",
+      data: null,
+    });
+    expect(upstream.calls.at(-1)).toMatchObject({
+      method: "PATCH",
+      url: `${sales}/accounts(00000000-0000-0000-0000-000000000001)/new_report?x-ms-file-name=Pr%C3%BCfbericht.pdf`,
+      body: "%PDF-",
+      type: "application/pdf",
+    });
+    expect(await (await alice.request("/rpc/unchanged")).json()).toEqual({
+      status: "not_modified",
+    });
+    expect(await (await alice.request("/rpc/search")).json()).toMatchObject({
+      status: "connected",
+    });
+    expect(upstream.calls.at(-1)).toMatchObject({
+      method: "POST",
+      url: `${environments.sales}/api/search/v2.0/query`,
     });
   });
 
