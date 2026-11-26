@@ -167,6 +167,7 @@ test("confirms browser worker access before changing organization security", asy
   browser,
 }) => {
   const { alpha, context } = await organizationSession(browser);
+
   try {
     const page = await context.newPage();
     await page.goto(`/${alpha}/settings/security`);

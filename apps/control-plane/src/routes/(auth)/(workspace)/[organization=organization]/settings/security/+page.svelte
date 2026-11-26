@@ -24,6 +24,7 @@
   let message = $state("");
 
   let confirmOpen = $state(false);
+
   let trigger = $state<HTMLElement | null>(null);
 
   let busy = $state(false);
