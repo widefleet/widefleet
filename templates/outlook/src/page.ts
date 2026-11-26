@@ -27,8 +27,7 @@ export const connectionPage = (
 
   const connected = (name: string) => `<section><h2>Account</h2>
 <div class="card row"><div class="status"><span class="dot" aria-hidden="true"></span><div><strong>${escapeHtml(name)}</strong><p class="muted small">Connected Microsoft account</p></div></div>
-<div class="actions">${missing.length ? "" : '<form method="post" action="/connect"><button class="outline">Reconnect</button></form>'}<form method="post" action="/disconnect"><button class="ghost">Disconnect</button></form></div></div>
-<p class="muted small note">Disconnecting deletes the saved tokens from this app. To revoke access, also remove it in your Microsoft account settings.</p></section>
+<div class="actions">${missing.length ? "" : '<form method="post" action="/connect"><button class="outline">Reconnect</button></form>'}<form method="post" action="/disconnect"><button class="ghost">Disconnect</button></form></div></div></section>
 ${approvalForm(level)}`;
 
   const disconnected = `<section><div class="card stack"><p>Connect your Microsoft account so apps and agents can use Outlook for you.</p>
