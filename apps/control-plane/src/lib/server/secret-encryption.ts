@@ -5,6 +5,7 @@ import {
   type Keyring,
   type KeyVersion,
 } from "@platform/contracts/keyring";
+import { z } from "zod";
 import { InvalidOperation } from "./errors.ts";
 
 /**
@@ -73,9 +74,14 @@ const contextLabel = (context: SecretContext) =>
 
 const keyId = (version: KeyVersion, context: SecretContext) => `${version.id}:${context.kind}`;
 
+const storedKeyId = z.string();
+
+/** The `kid` a JWE ciphertext names, or `null` when it names none or is malformed. */
 const protectedKeyId = (ciphertext: string) => {
   try {
-    return decodeProtectedHeader(ciphertext).kid ?? null;
+    const kid = storedKeyId.safeParse(decodeProtectedHeader(ciphertext).kid);
+
+    return kid.success ? kid.data : null;
   } catch {
     return null;
   }
@@ -150,7 +156,7 @@ export const createSecretEncryption = ({ keyring }: { keyring: Keyring }) => {
     const { plaintext, protectedHeader } = await compactDecrypt(
       ciphertext,
       (protectedHeader) => {
-        const [id, kind, ...rest] = (protectedHeader.kid ?? "").split(":");
+        const [id, kind, ...rest] = storedKeyId.parse(protectedHeader.kid).split(":");
         const version = keyring.find((candidate) => candidate.id === id);
 
         if (!version || rest.length > 0)

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
-import { CompactEncrypt } from "jose";
+import { CompactEncrypt, decodeProtectedHeader } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readAppLogin } from "../src/lib/server/app-login-client.ts";
 import { storedAppSecrets } from "../src/lib/server/app-secrets.ts";
@@ -175,6 +175,57 @@ describe("re-encryption", () => {
         await directorySecret(),
       ),
     ).toBe("directory-secret");
+  });
+
+  it("moves values from before keys per kind that name the active version", async () => {
+    const database = environment.database.db;
+    const original = await directorySecret();
+
+    // Upgrading keeps the key: the stored value names the version that is still active.
+    await setDirectorySecret(
+      await new CompactEncrypt(new TextEncoder().encode("directory-secret"))
+        .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: current.kid })
+        .encrypt(Buffer.from(current.k, "base64url")),
+    );
+
+    try {
+      const encryption = rotated();
+
+      expect(await readSecretEncryption(database, encryption)).toMatchObject({
+        earlierFormat: 1,
+        failed: 0,
+      });
+      expect(await reencryptSecrets(database, encryption)).toMatchObject({
+        reencrypted: 1,
+        failed: 0,
+      });
+      expect(decodeProtectedHeader(await directorySecret()).kid).toBe(
+        "current:directory-client-secret",
+      );
+      expect(
+        await encryption.decrypt(
+          { kind: "directory-client-secret", organizationId: "widefleet" },
+          await directorySecret(),
+        ),
+      ).toBe("directory-secret");
+    } finally {
+      await setDirectorySecret(original);
+    }
+  });
+
+  it("counts a damaged header as unreadable without stopping the report", async () => {
+    const database = environment.database.db;
+    const original = await directorySecret();
+    const header = Buffer.from(JSON.stringify({ alg: "dir", enc: "A256GCM", kid: 7 }));
+
+    await setDirectorySecret(`${header.toString("base64url")}..iv.ciphertext.tag`);
+
+    try {
+      expect(await readSecretEncryption(database, rotated())).toMatchObject({ failed: 1 });
+      expect(await reencryptSecrets(database, rotated())).toMatchObject({ failed: 1 });
+    } finally {
+      await setDirectorySecret(original);
+    }
   });
 
   it("decrypts values that already name the active version instead of trusting the header", async () => {
