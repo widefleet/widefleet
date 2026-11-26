@@ -4,7 +4,7 @@ import {
   parseKeyring,
   type Keyring,
   type KeyVersion,
-} from "@platform/app-runtime/keyring";
+} from "@platform/contracts/keyring";
 import { InvalidOperation } from "./errors.ts";
 
 /**
@@ -32,7 +32,7 @@ export {
   parseKeyring,
   type Keyring,
   type KeyVersion,
-} from "@platform/app-runtime/keyring";
+} from "@platform/contracts/keyring";
 
 // Ciphertexts are JWE compact serializations (RFC 7516): direct encryption
 // with the key version's 32 bytes, A256GCM, and the version's ID as `kid`.

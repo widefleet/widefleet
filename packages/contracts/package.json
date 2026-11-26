@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./builds": "./src/builds.ts",
-    "./jsonc": "./src/jsonc.ts"
+    "./jsonc": "./src/jsonc.ts",
+    "./keyring": "./src/keyring.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

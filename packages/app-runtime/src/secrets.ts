@@ -1,7 +1,7 @@
 import { appSecretPreparation } from "@platform/contracts";
 import { CompactEncrypt, compactDecrypt, decodeProtectedHeader, importJWK } from "jose";
 import type { z } from "zod";
-import { parseKeyring, type Keyring, type KeyVersion } from "./keyring.ts";
+import { parseKeyring, type Keyring, type KeyVersion } from "@platform/contracts/keyring";
 import { isLegacySealed, openLegacy } from "./legacy-runtime-ciphertext.ts";
 import type { ParentEnvironment } from "./types.ts";
 

@@ -9,7 +9,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { bootstrapConfiguration, runtimeRelease } from "@platform/contracts";
 import { getPlatformProxy } from "wrangler";
 import { z } from "zod";
-import { parseKeyring } from "@platform/app-runtime/keyring";
+import { parseKeyring } from "@platform/contracts/keyring";
 import { managedOAuthConfiguration } from "@platform/app-runtime/oauth";
 import { createProductAnalytics } from "../src/lib/server/analytics.ts";
 import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-config.ts";

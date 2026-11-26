@@ -1,5 +1,5 @@
 import { base64url } from "jose";
-import type { Keyring } from "./keyring.ts";
+import type { Keyring } from "@platform/contracts/keyring";
 
 // Temporary. Values written before the runtime keyring used its active key
 // version as a raw key. `widefleet runtime rekey` rewrites stored values in the

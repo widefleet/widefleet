@@ -24,7 +24,6 @@
     "./network": "./src/network.ts",
     "./logs": "./src/cloudflare-logs.ts",
     "./execution-limits": "./src/execution-limits.ts",
-    "./keyring": "./src/keyring.ts",
     "./oauth": "./src/oauth-protocol.ts",
     "./workload": "./src/workload-protocol.ts",
     "./runtime-extension": "./src/runtime-extension.ts"

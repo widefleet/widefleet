@@ -1,4 +1,3 @@
-import { base64url } from "jose";
 import { z } from "zod";
 
 // The control plane and the runtime keep their keys in the same format: a
@@ -17,9 +16,19 @@ const keySize = 32;
 
 export const keySetFormat = `a JWK Set {"keys":[{"kty":"oct","kid":"ID","k":"KEY"}]}, active key first, where ID uses 1 to 32 letters, digits, - or _ and KEY is ${keySize} random bytes in unpadded base64url`;
 
-const decoded = (k: string) => {
+/** Encodes bytes as unpadded base64url. */
+export const encodeKeyMaterial = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+
+/** Decodes unpadded base64url, or returns `null` for malformed input. */
+export const decodeKeyMaterial = (k: string) => {
   try {
-    return base64url.decode(k);
+    return Uint8Array.from(atob(k.replaceAll("-", "+").replaceAll("_", "/")), (character) =>
+      character.charCodeAt(0),
+    );
   } catch {
     return null;
   }
@@ -27,10 +36,10 @@ const decoded = (k: string) => {
 
 /** Whether `k` is canonical unpadded base64url of exactly 32 bytes. */
 const isKeyMaterial = (k: string) => {
-  const bytes = /^[A-Za-z0-9_-]{43}$/.test(k) ? decoded(k) : null;
+  const bytes = /^[A-Za-z0-9_-]{43}$/.test(k) ? decodeKeyMaterial(k) : null;
 
   // Re-encoding rejects unused trailing bits, so each key has one spelling.
-  return bytes?.length === keySize && base64url.encode(bytes) === k;
+  return bytes?.length === keySize && encodeKeyMaterial(bytes) === k;
 };
 
 const keySet = z.object({ keys: z.array(z.unknown()) });
@@ -91,7 +100,7 @@ export const generateKeyring = () =>
         {
           kty: "oct",
           kid: hex(crypto.getRandomValues(new Uint8Array(4))),
-          k: base64url.encode(crypto.getRandomValues(new Uint8Array(keySize))),
+          k: encodeKeyMaterial(crypto.getRandomValues(new Uint8Array(keySize))),
         },
       ],
     },
