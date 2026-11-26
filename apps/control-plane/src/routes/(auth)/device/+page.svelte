@@ -1,6 +1,6 @@
 <script lang="ts">
   import { authClient } from "#lib/auth-client";
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { page } from "$app/state";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
   import AuthLayout from "@platform/ui/auth-layout";
@@ -8,51 +8,79 @@
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import { Label } from "@platform/ui/label";
-  import { Checkbox } from "@platform/ui/checkbox";
+  import Check from "@lucide/svelte/icons/check";
   import Terminal from "@lucide/svelte/icons/terminal";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
 
+  // A link from the sign-in flow carries its code. Only people who open this page
+  // themselves type one in.
+  const linked = untrack(() => Boolean(data.code));
+
   let code = $state(untrack(() => data.code));
 
-  let authorization = $state<NonNullable<
+  let authorization = $state.raw<NonNullable<
     Awaited<ReturnType<typeof authClient.device>>["data"]
   > | null>(null);
 
-  let confirmed = $state(false);
+  let checking = $state(linked);
 
   let busy = $state(false);
 
   let message = $state("");
 
-  let done = $state(false);
+  let outcome = $state<"approved" | "denied" | null>(null);
 
-  const verify = async (event: SubmitEvent) => {
-    event.preventDefault();
+  // Protocol scopes describe the session itself, not what it may do.
+  const sessionScopes = new Set(["openid", "profile", "offline_access"]);
 
-    if (busy) return;
+  const permissions = new Map([
+    ["platform:read", "See apps, deployments and settings"],
+    ["platform:write", "Create, change and publish apps and change settings your role allows"],
+    ["network:manage", "Manage the network access of apps"],
+  ]);
+
+  const granted = $derived(
+    String(authorization?.scope ?? "")
+      .split(" ")
+      .filter((scope) => scope && !sessionScopes.has(scope))
+      .map((scope) => permissions.get(scope) ?? scope),
+  );
+
+  const check = async () => {
     busy = true;
     message = "";
 
     try {
       const result = await authClient.device({ query: { user_code: code } });
 
-      if (result.error) message = "This code is invalid, expired or already used.";
-      else {
-        authorization = result.data;
-        confirmed = false;
-      }
+      if (result.error)
+        message = linked
+          ? "This sign-in request is invalid, expired or already used. Start the sign-in again."
+          : "This code is invalid, expired or already used.";
+      else authorization = result.data;
     } catch {
-      message = "Could not check this request. Check your connection and try again.";
+      message = "Could not check this request. Check your connection and reload this page.";
     } finally {
       busy = false;
+      checking = false;
     }
   };
 
+  onMount(() => {
+    if (linked) void check();
+  });
+
+  const verify = async (event: SubmitEvent) => {
+    event.preventDefault();
+
+    if (!busy) await check();
+  };
+
   const decide = async (allow: boolean) => {
-    if (busy || (allow && !confirmed)) return;
+    if (busy) return;
     busy = true;
     message = "";
 
@@ -66,13 +94,8 @@
       if (result.error)
         message =
           result.error.error_description ||
-          "Could not complete this request. Please request a new code.";
-      else {
-        done = true;
-        message = allow
-          ? "CLI connected. You can close this window."
-          : "Request denied. You can close this window.";
-      }
+          "Could not complete this request. Start the sign-in again.";
+      else outcome = allow ? "approved" : "denied";
     } catch {
       message = "This request is temporarily unavailable. Check your connection and try again.";
     } finally {
@@ -81,57 +104,77 @@
   };
 </script>
 
-<svelte:head><title>Connect CLI · Widefleet</title></svelte:head>
-<AuthLayout wide={Boolean(authorization)}>
-  <div class="bg-primary/5 text-primary mb-5 grid size-10 place-items-center rounded-xl">
-    <Terminal class="size-5" />
-  </div>
-  <p class="text-muted-foreground mb-2 text-xs">Signed in as {data.name}</p>
-  <h1 class="text-2xl font-semibold tracking-tight">Connect CLI</h1>
-  {#if done}<div class="mt-6 space-y-5">
-      <Feedback kind="success">{message}</Feedback><Button href="/" variant="outline"
-        >Back to overview<ArrowRight /></Button
-      >
+<svelte:head><title>{linked ? "Confirm sign-in" : "Connect CLI"} · Widefleet</title></svelte:head>
+<AuthLayout>
+  {#if !linked}<div
+      class="bg-primary/5 text-primary mb-5 grid size-10 place-items-center rounded-xl"
+    >
+      <Terminal class="size-5" />
+    </div>{/if}
+  {#if outcome}
+    <div role="status">
+      <h1 class="text-2xl font-semibold tracking-tight">
+        {outcome === "approved" ? "Signed in" : "Sign-in denied"}
+      </h1>
+      <p class="text-muted-foreground mt-3 text-sm leading-6">
+        {outcome === "approved"
+          ? "You can close this window."
+          : "Nothing was connected. You can close this window."}
+      </p>
     </div>
   {:else if authorization}
+    <p class="text-muted-foreground mb-2 text-xs">Signed in as {data.name}</p>
+    <h1 class="text-2xl font-semibold tracking-tight">Confirm sign-in</h1>
     <p class="text-muted-foreground mt-3 text-sm leading-6">
-      Check that this code matches the code in your terminal.
-    </p>
-    <p
-      class="bg-muted/50 my-6 rounded-xl border py-5 text-center font-mono text-3xl font-medium tracking-[0.2em]"
-    >
-      {code}
-    </p>
-    <dl class="grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-3 text-xs leading-5">
-      <dt class="text-muted-foreground">Application</dt>
-      <dd class="wrap-anywhere">{authorization.client_id}</dd>
-      <dt class="text-muted-foreground">Permissions</dt>
-      <dd class="wrap-anywhere">{authorization.scope}</dd>
-      <dt class="text-muted-foreground">Organizations</dt>
-      <dd class="wrap-anywhere">{data.organization ?? "Your Widefleet memberships"}</dd>
-      <dt class="text-muted-foreground">API</dt>
-      <dd class="wrap-anywhere">
-        {Array.isArray(authorization.resource)
-          ? authorization.resource.join(", ")
-          : authorization.resource}
-      </dd>
-    </dl>
-    <div class="mt-6 flex items-start gap-3 border-t pt-5">
-      <Checkbox id="device-confirm" bind:checked={confirmed} class="mt-1" /><Label
-        for="device-confirm"
-        class="text-sm leading-6">I started this request on my device and verified the code.</Label
+      This sign-in gets access to <span class="text-foreground font-medium"
+        >{data.organization ?? "your Widefleet organizations"}</span
       >
-    </div>
-    <p class="text-muted-foreground mt-3 text-xs leading-6">
-      Only approve requests you started yourself. Do not enter codes from someone else's messages.
+      as {data.name}. It can:
     </p>
-    <div class="mt-6 flex flex-wrap gap-3">
-      <Button onclick={() => decide(true)} disabled={busy || !confirmed}
-        >{busy ? "Processing request …" : "Authorize CLI"}<ArrowRight /></Button
+    <ul class="mt-4 space-y-2 text-sm leading-6">
+      {#each granted as permission (permission)}
+        <li class="flex items-start gap-2.5">
+          <Check class="text-muted-foreground mt-1 size-4 shrink-0" />{permission}
+        </li>
+      {/each}
+    </ul>
+    <div class="mt-7 flex flex-wrap gap-3">
+      <Button
+        onclick={() => decide(true)}
+        disabled={busy}
+        class="bg-foreground text-background hover:bg-foreground/90">Confirm<ArrowRight /></Button
       ><Button variant="outline" onclick={() => decide(false)} disabled={busy}>Deny</Button>
     </div>
+    <p class="text-muted-foreground mt-4 text-xs leading-5">
+      Only confirm if you just started this sign-in or asked for it.
+    </p>
     {#if message}<div class="mt-5"><Feedback kind="error">{message}</Feedback></div>{/if}
+    <details class="mt-6 border-t pt-4">
+      <summary class="text-muted-foreground cursor-pointer text-xs">Details</summary>
+      <dl class="mt-3 grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs leading-5">
+        <dt class="text-muted-foreground">Request code</dt>
+        <dd class="font-mono">{code}</dd>
+        <dt class="text-muted-foreground">Application</dt>
+        <dd class="wrap-anywhere">{authorization.client_id}</dd>
+        <dt class="text-muted-foreground">Scopes</dt>
+        <dd class="wrap-anywhere">{authorization.scope}</dd>
+        <dt class="text-muted-foreground">API</dt>
+        <dd class="wrap-anywhere">
+          {Array.isArray(authorization.resource)
+            ? authorization.resource.join(", ")
+            : authorization.resource}
+        </dd>
+      </dl>
+    </details>
+  {:else if linked}
+    <h1 class="text-2xl font-semibold tracking-tight">Confirm sign-in</h1>
+    {#if checking}<p class="text-muted-foreground mt-3 text-sm leading-6">
+        Loading the request …
+      </p>{/if}
+    {#if message}<div class="mt-6"><Feedback kind="error">{message}</Feedback></div>{/if}
   {:else}
+    <p class="text-muted-foreground mb-2 text-xs">Signed in as {data.name}</p>
+    <h1 class="text-2xl font-semibold tracking-tight">Connect CLI</h1>
     <p class="text-muted-foreground mt-3 text-sm leading-6">
       Enter the code your CLI displays in the terminal.
     </p>
@@ -153,19 +196,17 @@
       >
     </form>
     {#if message}<div class="mt-5"><Feedback kind="error">{message}</Feedback></div>{/if}
-    {#if !data.code}
-      <details open class="mt-6 border-t pt-4">
-        <summary class="text-sm font-medium">Don't have a device code?</summary>
-        <p class="text-muted-foreground mt-3 mb-3 text-xs leading-6">
-          Start sign-in using the installed Widefleet CLI in your terminal. It will display the code
-          for this page.
-        </p>
-        <CopyValue
-          value={`widefleet --url '${page.url.origin}' login`}
-          label="Copy sign-in command"
-        />
-      </details>
-    {/if}
+    <details open class="mt-6 border-t pt-4">
+      <summary class="text-sm font-medium">Don't have a device code?</summary>
+      <p class="text-muted-foreground mt-3 mb-3 text-xs leading-6">
+        Start sign-in using the installed Widefleet CLI in your terminal. It will display the code
+        for this page.
+      </p>
+      <CopyValue
+        value={`widefleet --url '${page.url.origin}' login`}
+        label="Copy sign-in command"
+      />
+    </details>
     <a href="/" class="text-muted-foreground hover:text-foreground mt-6 inline-block text-xs"
       >Back to overview</a
     >

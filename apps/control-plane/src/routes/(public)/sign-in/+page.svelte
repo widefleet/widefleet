@@ -38,7 +38,8 @@
   onMount(() => {
     lastUsed = authClient.getLastUsedLoginMethod();
 
-    if (data.continueAs && !recentlyStarted()) {
+    // Without an email form, a device request's address continues to company sign-in.
+    if ((data.continueAs || (data.autoStart && !data.emailSignIn)) && !recentlyStarted()) {
       try {
         sessionStorage.setItem(automaticStart, String(Date.now()));
       } catch {
@@ -60,7 +61,9 @@
         callbackURL: data.next,
       };
 
-      if (data.continueAs) input.loginHint = data.continueAs;
+      const hint = data.continueAs ?? (data.autoStart ? data.email : null);
+
+      if (hint) input.loginHint = hint;
 
       const result = await authClient.signIn.sso(input);
 
@@ -84,7 +87,7 @@
       </h1>
       <p class="text-muted-foreground mt-2 text-sm leading-6">
         {data.next.startsWith("/device")
-          ? "Sign in to review the request from your terminal and connect your CLI."
+          ? "Sign in to continue."
           : "Choose how to continue to your workspace."}
       </p>
       {#if data.provider && (data.organizationSlug || !data.emailSignIn)}<Button
@@ -119,6 +122,7 @@
         organizationSlug={data.organizationSlug}
         codeDelivery={data.codeDelivery}
         publicSignup={data.publicSignup}
+        autoStart={data.autoStart}
         focused
         bind:sentTo
       />

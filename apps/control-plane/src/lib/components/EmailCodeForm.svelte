@@ -23,6 +23,7 @@
     publicSignup = false,
     verifyEmail = false,
     focused = false,
+    autoStart = false,
     sentTo = $bindable(null),
   }: {
     next: string;
@@ -33,6 +34,8 @@
     publicSignup?: boolean;
     verifyEmail?: boolean;
     focused?: boolean;
+    // Continues with the given address right away, as if the person had submitted it.
+    autoStart?: boolean;
     sentTo?: string | null;
   } = $props();
 
@@ -68,6 +71,8 @@
     const unmount = extensionContainer
       ? authClientExtension.mountEmailCodeForm?.(extensionContainer)
       : undefined;
+
+    if (autoStart && email) void emailSignIn();
 
     const timer = setInterval(() => {
       if (resendWait > 0) resendWait = Math.max(0, Math.ceil((resendAt - Date.now()) / 1000));
@@ -155,8 +160,8 @@
     }
   };
 
-  const emailSignIn = async (event: SubmitEvent) => {
-    event.preventDefault();
+  const emailSignIn = async (event?: SubmitEvent) => {
+    event?.preventDefault();
 
     if (busy || (sentTo !== null && otp.length !== 6)) return;
     busy = true;

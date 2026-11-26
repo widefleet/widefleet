@@ -1196,20 +1196,22 @@ test("asks search engines not to index control-plane pages and API responses", a
   }
 });
 
-test("redirects anonymous device requests to login and preserves the code and email", async ({
+test("redirects anonymous device requests to login and continues with their email", async ({
   page,
 }) => {
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+  // The verified company domain leads to its SSO; stop there instead of leaving the page.
+  await page.route("**/api/auth/sign-in/sso", (route) => route.fulfill({ json: {} }));
+  const started = page.waitForRequest("**/api/auth/sign-in/sso");
   await page.goto("/device?user_code=ABCD1234&email=device%40example.test");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
-  await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Continue with email", exact: true }),
-  ).toBeVisible();
   expect(new URL(page.url()).searchParams.get("next")).toBe(
     "/device?user_code=ABCD1234&email=device%40example.test",
   );
-  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("device@example.test");
+  expect((await started).postDataJSON()).toMatchObject({
+    email: "device@example.test",
+    callbackURL: "/device?user_code=ABCD1234&email=device%40example.test",
+  });
 });
 
 test("starts Entra login with a host-only HttpOnly state cookie", async ({ request }) => {
@@ -1597,16 +1599,15 @@ test("requires code confirmation in the browser, grants the CLI, then signs out"
     .parse(await response.json());
 
   await page.goto(`/device?user_code=${device.user_code}`);
-  await expect(page.getByLabel("Device code")).toHaveValue(device.user_code);
-  await page.getByRole("button", { name: "Check code" }).click();
-  const approve = page.getByRole("button", { name: "Authorize CLI" });
-  await expect(approve).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "Confirm sign-in" })).toBeVisible();
+  await expect(page.getByText("See apps, deployments and settings")).toBeVisible();
+  await page.getByText("Details", { exact: true }).click();
+  await expect(page.getByText(device.user_code, { exact: true })).toBeVisible();
   await expect(
     page.getByText(apiResource(environment.configuration), { exact: true }),
   ).toBeVisible();
-  await page.getByRole("checkbox").check();
-  await approve.click();
-  await expect(page.getByRole("status")).toContainText("CLI connected");
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Signed in" })).toBeVisible();
 
   const token = await request.post("/api/auth/oauth2/token", {
     headers: { origin: environment.configuration.PLATFORM_URL },
@@ -3115,9 +3116,7 @@ test("focuses code entry and returns to the same email without another send", as
     await route.fulfill({ status: 401, json: { message: "Invalid code" } });
   });
   await page.goto("/sign-in?next=%2Fdevice%3Fuser_code%3DSYNTHETIC");
-  await expect(
-    page.getByText("Sign in to review the request from your terminal", { exact: false }),
-  ).toBeVisible();
+  await expect(page.getByText("Sign in to continue.", { exact: true })).toBeVisible();
   await page.getByLabel("Email", { exact: true }).fill("Reader@EXAMPLE.TEST");
   await page.getByLabel("Email", { exact: true }).press("Enter");
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();

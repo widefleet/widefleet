@@ -4,20 +4,9 @@
   import { chooseCliPlatform, inspectCliLogin } from "#lib/cli-login.remote";
   import AuthLayout from "@platform/ui/auth-layout";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { Button } from "@platform/ui/button";
-  import { Input } from "@platform/ui/input";
-  import { Label } from "@platform/ui/label";
-  import Terminal from "@lucide/svelte/icons/terminal";
-  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
-
-  let email = $state("");
-
-  let busy = $state(false);
-
-  let selected = $state(false);
 
   let message = $state("");
 
@@ -26,23 +15,27 @@
       ? cause.body.message
       : "Could not continue sign-in. Check your connection and reload this page.";
 
+  // The company's own sign-in keeps the address the person already entered.
   const continueToDevice = (uri: string) => {
     const url = new URL(uri);
 
-    if (email) url.searchParams.set("email", email);
+    if (data.email) url.searchParams.set("email", data.email);
     window.location.assign(url.href);
   };
 
   onMount(() => {
-    selected = Boolean(data.platformUrl);
+    if (data.verificationUri) {
+      continueToDevice(data.verificationUri);
 
-    if (data.verificationUri) continueToDevice(data.verificationUri);
+      return;
+    }
+
     let stopped = false;
     let checking = false;
     const status = inspectCliLogin({ request: data.request, ticket: data.ticket });
 
     const timer = setInterval(async () => {
-      if (!selected || checking) return;
+      if (checking) return;
       checking = true;
 
       try {
@@ -58,64 +51,22 @@
       }
     }, 2000);
 
+    if (!data.platformUrl)
+      chooseCliPlatform({ request: data.request, ticket: data.ticket }).catch((cause: unknown) => {
+        if (!stopped) message = failure(cause);
+        clearInterval(timer);
+      });
+
     return () => {
       stopped = true;
       clearInterval(timer);
     };
   });
-
-  const proceed = async (event: SubmitEvent) => {
-    event.preventDefault();
-
-    if (busy) return;
-    busy = true;
-    message = "";
-
-    try {
-      const login = await chooseCliPlatform({ request: data.request, ticket: data.ticket, email });
-      selected = true;
-
-      if (login.verificationUri) continueToDevice(login.verificationUri);
-    } catch (cause) {
-      message = failure(cause);
-    } finally {
-      busy = false;
-    }
-  };
 </script>
 
-<svelte:head><title>Connect CLI · Widefleet</title></svelte:head>
+<svelte:head><title>Sign in · Widefleet</title></svelte:head>
 <AuthLayout>
-  <div class="bg-primary/5 text-primary mb-5 grid size-10 place-items-center rounded-xl">
-    <Terminal class="size-5" />
-  </div>
-  <h1 class="text-2xl font-semibold tracking-tight">Connect your CLI</h1>
-  {#if selected}
-    <p class="text-muted-foreground mt-3 text-sm leading-6">
-      Waiting for your CLI to prepare sign-in. Keep the login command running; this page will
-      continue automatically.
-    </p>
-  {:else}
-    <p class="text-muted-foreground mt-3 text-sm leading-6">
-      Enter your email to find your Widefleet installation. Continue only if you started this login
-      in your terminal or coding assistant.
-    </p>
-    <form onsubmit={proceed} class="mt-6 space-y-4">
-      <div class="space-y-2">
-        <Label for="cli-email">Email</Label>
-        <Input
-          id="cli-email"
-          type="email"
-          bind:value={email}
-          autocomplete="email"
-          required
-          disabled={busy}
-        />
-      </div>
-      <Button type="submit" disabled={busy} class="w-full"
-        >{busy ? "Finding sign-in …" : "Continue"}<ArrowRight /></Button
-      >
-    </form>
-  {/if}
-  {#if message}<div class="mt-5"><Feedback kind="error">{message}</Feedback></div>{/if}
+  <h1 class="text-2xl font-semibold tracking-tight">Sign in to Widefleet</h1>
+  {#if message}<div class="mt-5"><Feedback kind="error">{message}</Feedback></div>
+  {:else}<p class="text-muted-foreground mt-3 text-sm leading-6">One moment …</p>{/if}
 </AuthLayout>

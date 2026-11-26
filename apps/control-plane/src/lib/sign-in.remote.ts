@@ -5,6 +5,7 @@ import { remoteOperation } from "#server/remote-support";
 import { error } from "@sveltejs/kit";
 import { localDestination } from "#server/navigation";
 import { cloudPlatformUrl, companySignInUrl } from "#server/platform-discovery";
+import { selectCliPlatformByEmail } from "#server/cli-login";
 
 export const findSignInDestination = command(
   z.object({
@@ -32,6 +33,21 @@ export const findSignInDestination = command(
       }
 
       if (origin !== cloudPlatformUrl) {
+        const destination = new URL(localDestination(next), runtime.configuration.PLATFORM_URL);
+
+        // A CLI login continues at the company's installation, where the CLI requests its code.
+        if (destination.pathname === "/cli-login") {
+          const id = destination.searchParams.get("request") ?? "";
+          const ticket = destination.searchParams.get("ticket") ?? "";
+
+          await remoteOperation(() =>
+            selectCliPlatformByEmail(runtime.cliLogin, async () => origin, { id, ticket, email }),
+          );
+          destination.searchParams.set("email", email);
+
+          return { url: destination.pathname + destination.search, provider: null };
+        }
+
         return {
           url: await remoteOperation(async () => companySignInUrl(origin, email, next)),
           provider: null,

@@ -90,6 +90,17 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const continueAs = candidate && related.length ? candidate.email : null;
 
+  const next = localDestination(url.searchParams.get("next"));
+
+  const email = url.searchParams.get("email") ?? "";
+
+  // A sign-in link for a device request already names the person's address. Continue
+  // with it instead of asking again; a failed attempt returns with an error and waits.
+  const autoStart =
+    Boolean(email) &&
+    !url.searchParams.has("error") &&
+    new URL(next, url.origin).pathname === "/device";
+
   return {
     signedOut: !locals.session,
     continueAs,
@@ -108,8 +119,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     organizationSlug: slug,
     organizationName: target?.name ?? null,
     emailSignIn: runtime.emailSignIn && !companyOnly,
-    email: url.searchParams.get("email") ?? "",
+    email,
+    autoStart,
     codeDelivery: runtime.configuration.LOGIN_CODE_DELIVERY,
-    next: localDestination(url.searchParams.get("next")),
+    next,
   };
 };
