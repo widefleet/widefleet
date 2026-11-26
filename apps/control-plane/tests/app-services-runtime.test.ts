@@ -1576,6 +1576,8 @@ export default { async fetch(request, env, ctx) {
     // A control plane that lost its revision counter, for example after a database restore,
     // prepares a used revision again. Its values are current and replace the earlier ones.
     it("replaces the secrets of a revision that is prepared again", async () => {
+      await secrets(2, "synthetic-two");
+      await publish(targetId, target("v2"), "v2");
       await secrets(2, "synthetic-restored");
       expect(await (await request("/read")).json()).toEqual({
         version: "v2",
