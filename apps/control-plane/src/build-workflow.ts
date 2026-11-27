@@ -29,28 +29,30 @@ export const createBuildWorkflow = (createExtension: typeof createRuntimeExtensi
     ) {
       const { id } = buildWorkflowCommand.parse(event.payload);
       const bindings = this.env;
-      const ci = bindings.APP_CI;
-
-      if (!ci) throw new NonRetryableError("The app CI is not configured");
-      const configuration = readCloudflareConfiguration(bindings);
 
       const withDatabase = <T>(operation: (database: Database) => Promise<T>) =>
         withCloudflareDatabase(bindings, ({ db }) => operation(db));
 
-      // The source backend uses its binding only; the database belongs to this phase.
-      const source = await withDatabase(
-        async (database) =>
-          createExtension({
-            database,
-            configuration,
-            binding: (name, schema) => schema.parse(bindings[name]),
-          }).source,
-      );
-
-      if (!source)
-        throw new NonRetryableError("This installation does not provide Git repositories");
-
+      // Every failure, including that of the setup, finishes the recorded build.
       try {
+        const ci = bindings.APP_CI;
+
+        if (!ci) throw new NonRetryableError("The app CI is not configured");
+        const configuration = readCloudflareConfiguration(bindings);
+
+        // The source backend uses its binding only; the database belongs to this phase.
+        const source = await withDatabase(
+          async (database) =>
+            createExtension({
+              database,
+              configuration,
+              binding: (name, schema) => schema.parse(bindings[name]),
+            }).source,
+        );
+
+        if (!source)
+          throw new NonRetryableError("This installation does not provide Git repositories");
+
         await step.do("build", options, () =>
           executeBuild(id, {
             withDatabase,

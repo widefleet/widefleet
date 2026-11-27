@@ -113,16 +113,30 @@ export const createApi = (runtime: Runtime) => {
     }
   });
 
-  const authenticateWrite = async (request: Request) => {
-    const principal = unwrap(await runtime.identity.authenticate(request, "platform:write"));
+  // A build acts only on its app. Input fields can name an app as the path does,
+  // so the check reads the app of the decoded input.
+  const confine = (principal: { buildAppId?: string }, appId: string | undefined) => {
+    if (principal.buildAppId !== undefined && appId !== principal.buildAppId)
+      throw new ORPCError("FORBIDDEN", { message: "Builds act only on their app" });
+  };
+
+  const inputApp = z.object({ appId: z.string() });
+
+  const authenticateWrite = async (request: Request, appId: string | undefined) => {
+    const principal = unwrap(await runtime.identity.authenticate(request, "platform:write", true));
+    confine(principal, appId);
     principals.set(request, principal);
     runtime.reporting.active(principal.id);
 
     return principal;
   };
 
-  const read = base.use(async ({ context, next }) => {
-    const principal = unwrap(await runtime.identity.authenticate(context.request, "platform:read"));
+  const read = base.use(async ({ context, next }, input) => {
+    const principal = unwrap(
+      await runtime.identity.authenticate(context.request, "platform:read", true),
+    );
+
+    confine(principal, inputApp.safeParse(input).data?.appId);
     principals.set(context.request, principal);
 
     runtime.reporting.active(principal.id);
@@ -130,8 +144,11 @@ export const createApi = (runtime: Runtime) => {
     return next({ context: { principal } });
   });
 
-  const write = base.use(async ({ context, next }) => {
-    const principal = await authenticateWrite(context.request);
+  const write = base.use(async ({ context, next }, input) => {
+    const principal = await authenticateWrite(
+      context.request,
+      inputApp.safeParse(input).data?.appId,
+    );
 
     return next({ context: { principal } });
   });
@@ -954,7 +971,12 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) => {
         const { appId, ...build } = input;
 
-        return unwrap(await runtime.builds.start(context.principal, appId, build));
+        // The build acts with the starter's sign-in, which builds cannot pass on.
+        const signIn = unwrap(
+          await runtime.identity.authenticateUser(context.request, "platform:write"),
+        );
+
+        return unwrap(await runtime.builds.start(context.principal, signIn, appId, build));
       }),
     builds: read
       .route({ method: "GET", path: "/apps/{appId}/builds" })
@@ -1209,8 +1231,8 @@ export const createApi = (runtime: Runtime) => {
     );
 
     if (upload && request.method === "PUT") {
-      const principal = await authenticateWrite(request);
       const appId = contract.identifier.parse(upload[1]);
+      const principal = await authenticateWrite(request, appId);
 
       if (upload[2] === "worker") {
         const key = idempotencyKey(request);

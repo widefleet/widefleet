@@ -9,7 +9,10 @@ CREATE TABLE app_build (
   deployment_id uuid REFERENCES deployment(id) ON DELETE SET NULL,
   message text,
   log text NOT NULL DEFAULT '',
+  identity_organization_id text,
+  recovery boolean NOT NULL DEFAULT false,
   token_hash text,
+  token_expires_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   finished_at timestamp with time zone
 );

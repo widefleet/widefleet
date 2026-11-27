@@ -1,5 +1,5 @@
 import { companySignInLimit, companySsoAvailableSql, type SignIn } from "./sso-policy.ts";
-import { buildActor, isBuildToken } from "./build-tokens.ts";
+import { buildSignIn, isBuildToken } from "./build-tokens.ts";
 import { verifyAccessToken } from "./access-token.ts";
 import { Result, TaggedError, type InferOk } from "better-result";
 import { eq, sql } from "drizzle-orm";
@@ -31,6 +31,10 @@ export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
   message: string;
   organizationSlug?: string;
 }> {}
+
+/** A sign-in; that of a build names the app it is confined to. */
+const verifiedSignIn = (signIn: SignIn, buildAppId?: string): SignIn & { buildAppId?: string } =>
+  buildAppId ? { ...signIn, buildAppId } : signIn;
 
 export const createIdentityService = (
   auth: Authentication,
@@ -160,7 +164,12 @@ export const createIdentityService = (
       result.map(({ principal }) => principal),
     );
 
-  const verify = (request: Request, scope: "platform:read" | "platform:write" | "network:manage") =>
+  // Build tokens act only through callers that confine them to their app.
+  const verify = (
+    request: Request,
+    scope: "platform:read" | "platform:write" | "network:manage",
+    builds = false,
+  ) =>
     Result.gen(async function* () {
       const authorization = request.headers.get("authorization");
 
@@ -175,32 +184,33 @@ export const createIdentityService = (
         const bearer = authorization.slice(7);
 
         if (isBuildToken(bearer)) {
+          if (!builds)
+            return yield* new AuthenticationFailed({
+              code: "FORBIDDEN",
+              message: "Build tokens only deploy their app",
+            });
+
           if (scope === "network:manage")
             return yield* new AuthenticationFailed({
               code: "FORBIDDEN",
               message: "Builds cannot manage network access",
             });
 
-          const actor = yield* Result.await(
+          const build = yield* Result.await(
             Result.tryPromise({
-              try: () => buildActor(database, bearer),
+              try: () => buildSignIn(database, bearer),
               catch: (cause) =>
                 new DatabaseUnavailable({ message: "Could not verify the build", cause }),
             }),
           );
 
-          if (!actor || (allowUser && !(await allowUser(actor.id))))
+          if (!build || (allowUser && !(await allowUser(build.signIn.userId))))
             return yield* new AuthenticationFailed({
               code: "UNAUTHORIZED",
               message: "The build has finished",
             });
 
-          // The build's starter was signed in to its organization when it started.
-          return Result.ok({
-            userId: actor.id,
-            identityOrganizationId: actor.application.organizationId,
-            recovery: false,
-          } satisfies SignIn);
+          return Result.ok(verifiedSignIn(build.signIn, build.appId));
         }
 
         const verified = yield* Result.await(
@@ -238,11 +248,13 @@ export const createIdentityService = (
           });
 
         // Recovery cannot authorize tokens, so a token's authority is always a company or none.
-        return Result.ok({
-          userId: current.id,
-          identityOrganizationId: verified.authority.organizationId,
-          recovery: false,
-        } satisfies SignIn);
+        return Result.ok(
+          verifiedSignIn({
+            userId: current.id,
+            identityOrganizationId: verified.authority.organizationId,
+            recovery: false,
+          }),
+        );
       }
 
       if (
@@ -270,23 +282,29 @@ export const createIdentityService = (
         });
       }
 
-      return Result.ok(sessionSignIn(session.user, session.session));
+      return Result.ok(verifiedSignIn(sessionSignIn(session.user, session.session)));
     });
 
   // Requests name their organization with X-Widefleet-Organization. Without it, the
   // extension's default or the member's only organization applies.
+  // With `builds`, a build's principal names the app it may act on, which the caller enforces.
   const authenticate = (
     request: Request,
     scope: "platform:read" | "platform:write" | "network:manage",
+    builds = false,
   ) =>
     Result.gen(async function* () {
-      const verified = yield* Result.await(verify(request, scope));
+      const verified = yield* Result.await(verify(request, scope, builds));
 
       const principal = yield* Result.await(
         resolveUser(verified, request.headers.get("x-widefleet-organization")),
       );
 
-      return Result.ok(principal);
+      const confined: typeof principal & { buildAppId?: string } = verified.buildAppId
+        ? { ...principal, buildAppId: verified.buildAppId }
+        : principal;
+
+      return Result.ok(confined);
     });
 
   const listOrganizations = (signIn: SignIn) =>

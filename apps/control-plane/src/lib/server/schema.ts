@@ -291,8 +291,12 @@ export const appBuilds = pgTable(
     deploymentId: uuid("deployment_id").references(() => deployments.id, { onDelete: "set null" }),
     message: text(),
     log: text().notNull().default(""),
-    /** The SHA-256 of the token the running build deploys with. */
+    /** How the starter signed in: the organization whose company SSO or recovery authenticated it. */
+    identityOrganizationId: text("identity_organization_id"),
+    recovery: boolean().notNull().default(false),
+    /** The SHA-256 of the token the running build deploys with, until it expires. */
     tokenHash: text("token_hash"),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },

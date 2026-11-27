@@ -26,6 +26,8 @@ const buildDeadline = 30 * 60 * 1000;
 // Stops a container whose build call was lost.
 const inactivityTimeout = 15 * 60 * 1000;
 
+const resultLifetime = 24 * 60 * 60 * 1000;
+
 interface Env {
   BUILDS: DurableObjectNamespace<BuildSandbox>;
 }
@@ -74,7 +76,7 @@ const deployment = (method: string, path: string, appId: string) => {
       ["/api/v1/apps/source-target", `${app}/source/prepare`, `${app}/assets-upload-session`],
     ],
     ["PUT", [`${app}/assets/[^/]+/[^/]+`, `${app}/worker`]],
-    ["GET", [`${app}/deployments`, `${app}/deployments/[^/]+/events`]],
+    ["GET", [`${app}/deployments`, `${app}/deployments/[^/]+/events`, `${app}/network`]],
   ]);
 
   return (calls.get(method) ?? []).some((pattern) => new RegExp(`^${pattern}$`).test(path));
@@ -169,9 +171,9 @@ export class BuildSandbox extends DurableObject<Env> {
 
   async build(request: z.infer<typeof ciBuildRequest>) {
     // A repeated call returns the outcome of the build that already ran.
-    const recorded = ciBuildResult.safeParse(this.ctx.storage.kv.get("result"));
+    const recorded = this.result();
 
-    if (recorded.success) return recorded.data;
+    if (recorded) return recorded;
 
     if (this.#container.running) await this.#container.destroy();
 
@@ -213,59 +215,109 @@ export class BuildSandbox extends DurableObject<Env> {
       PLATFORM_ACCESS_TOKEN: "replaced-by-the-ci",
     };
 
-    // The checkout is on the app's branch, as `widefleet deploy` expects.
-    const steps = [
-      { argv: ["git", "clone", "--no-checkout", "--quiet", request.repository.url, source] },
-      { argv: ["git", "-C", source, "checkout", "--quiet", "-B", branch, commit] },
-      { argv: ["pnpm", "install", "--frozen-lockfile"], cwd: project },
-      { argv: ["widefleet", "deploy", request.appId], cwd: project },
-    ];
-
     let log = "";
 
     const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), buildDeadline);
+
+    // Stopping the container also ends processes that outlive their command.
+    const timer = setTimeout(() => {
+      deadline.abort();
+      void this.#container.destroy();
+    }, buildDeadline);
+
+    const run = async (argv: string[], cwd: string, logged = true) => {
+      if (logged) log += `$ ${argv.join(" ")}\n`;
+
+      const process = await this.#container.exec(argv, {
+        cwd,
+        env: environment,
+        stdout: "pipe",
+        stderr: "combined",
+        signal: deadline.signal,
+      });
+
+      const { stdout, exitCode } = await process.output();
+      const text = decoder.decode(stdout);
+
+      if (logged) log = `${log}${text}`.slice(-logLimit);
+
+      return { text, exitCode };
+    };
+
+    // A command ended by the deadline fails like any other.
+    const failed = (message: string) => ({
+      status: "failed" as const,
+      message: deadline.signal.aborted
+        ? `The build did not finish within ${buildDeadline / 60_000} minutes`
+        : message,
+      log,
+    });
 
     const result = await (async (): Promise<z.infer<typeof ciBuildResult>> => {
       try {
-        for (const step of steps) {
-          log += `$ ${step.argv.join(" ")}\n`;
+        // The checkout is on the app's branch, as `widefleet deploy` expects.
+        const checkout = [
+          ["git", "clone", "--no-checkout", "--quiet", request.repository.url, source],
+          ["git", "-C", source, "checkout", "--quiet", "-B", branch, commit],
+        ];
 
-          const process = await this.#container.exec(step.argv, {
-            cwd: step.cwd ?? "/build",
-            env: environment,
-            stdout: "pipe",
-            stderr: "combined",
-            signal: deadline.signal,
-          });
+        for (const argv of checkout)
+          if ((await run(argv, "/build")).exitCode !== 0)
+            return failed(`${argv.slice(0, 2).join(" ")} failed`);
 
-          const { stdout, exitCode } = await process.output();
-          log = `${log}${decoder.decode(stdout)}`.slice(-logLimit);
+        // As `widefleet deploy`, a project without package.json has nothing to install.
+        if ((await run(["test", "-f", "package.json"], project, false)).exitCode === 0) {
+          const install = await run(["pnpm", "install", "--frozen-lockfile"], project);
 
-          if (exitCode !== 0)
-            return {
-              status: "failed",
-              message: deadline.signal.aborted
-                ? `The build did not finish within ${buildDeadline / 60_000} minutes`
-                : `${step.argv.slice(0, 2).join(" ")} failed with exit code ${exitCode}`,
-              log,
-            };
+          if (install.exitCode !== 0)
+            return failed(`pnpm install failed with exit code ${install.exitCode}`);
         }
 
+        // `widefleet deploy` would commit changed files, but builds cannot push.
+        const changed = await run(["git", "-C", source, "status", "--porcelain"], "/build", false);
+
+        if (changed.exitCode !== 0 || changed.text.trim())
+          return failed(
+            `pnpm install changed files of the repository. Commit them or ignore them in Git:\n${changed.text}`,
+          );
+
+        const deploy = await run(["widefleet", "deploy", "--no-wait", request.appId], project);
+
+        if (deploy.exitCode !== 0)
+          return failed(`widefleet deploy failed with exit code ${deploy.exitCode}`);
+
         return { status: "succeeded", log };
+      } catch (error) {
+        return failed(
+          `The build stopped: ${error instanceof Error ? error.message : String(error)}`,
+        );
       } finally {
         clearTimeout(timer);
+
+        if (this.#container.running) await this.#container.destroy();
       }
     })();
 
     this.ctx.storage.kv.put("result", result);
-    await this.#container.destroy();
+    // The outcome is kept until the control plane releases it, at most for a day.
+    await this.ctx.storage.setAlarm(Date.now() + resultLifetime);
 
     return result;
   }
 
+  result() {
+    const recorded = ciBuildResult.safeParse(this.ctx.storage.kv.get("result"));
+
+    return recorded.success ? recorded.data : null;
+  }
+
+  override async alarm() {
+    await this.release();
+  }
+
   async release() {
     this.ctx.storage.kv.delete("result");
+    await this.ctx.storage.deleteAlarm();
 
     if (this.#container.running) await this.#container.destroy();
   }
@@ -277,6 +329,10 @@ export class AppCi extends WorkerEntrypoint<Env> {
     const request = ciBuildRequest.parse(input);
 
     return this.env.BUILDS.getByName(request.id).build(request);
+  }
+
+  result(id: string) {
+    return this.env.BUILDS.getByName(id).result();
   }
 
   release(id: string) {

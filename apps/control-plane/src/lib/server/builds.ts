@@ -13,6 +13,7 @@ import type { Database } from "./database.ts";
 import { deploymentActor } from "./deployment-execution.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
+import type { SignIn } from "./sso-policy.ts";
 import { appBuilds, apps, artifacts, deployments } from "./schema.ts";
 import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import { readOnly, transact } from "./transactions.ts";
@@ -20,12 +21,15 @@ import { readOnly, transact } from "./transactions.ts";
 /** The app CI, which keeps each build's outcome until it is released. */
 export interface AppCi {
   build: (request: z.infer<typeof ciBuildRequest>) => Promise<z.infer<typeof ciBuildResult>>;
+  /** The outcome of a build that already ran. */
+  result: (id: string) => Promise<z.infer<typeof ciBuildResult> | null>;
   release: (id: string) => Promise<void>;
 }
 
 /** The CI Worker's `AppCi` entrypoint, whose answers are checked like any other input. */
 export const bindingAppCi = (binding: AppCi): AppCi => ({
   build: async (request) => ciBuildResult.parse(await binding.build(ciBuildRequest.parse(request))),
+  result: async (id) => ciBuildResult.nullable().parse(await binding.result(id)),
   release: (id) => binding.release(id),
 });
 
@@ -53,7 +57,12 @@ export const createBuildService = (
   run?: (id: string) => Promise<void>,
 ) => ({
   available: Boolean(source && run),
-  start: (principal: Principal, appId: string, input: z.infer<typeof contract.appBuildInput>) =>
+  start: (
+    principal: Principal,
+    signIn: SignIn,
+    appId: string,
+    input: z.infer<typeof contract.appBuildInput>,
+  ) =>
     Result.gen(async function* () {
       if (!source || !run) return yield* unavailable();
 
@@ -73,7 +82,10 @@ export const createBuildService = (
               }),
             );
 
-          const commit = await sourceOperation(() => source.head(repository, branch));
+          // An app without saved source has no repository yet.
+          const commit =
+            (await sourceOperation(() => source.repository(repository))) &&
+            (await sourceOperation(() => source.head(repository, branch)));
 
           if (!commit)
             return Result.err(
@@ -112,6 +124,8 @@ export const createBuildService = (
               commit,
               branch,
               directory,
+              identityOrganizationId: signIn.identityOrganizationId,
+              recovery: signIn.recovery,
             })
             .returning();
 
@@ -195,7 +209,7 @@ export const executeBuild = async (
   const loaded = await withDatabase(async (database) => {
     const [record] = await database
       .update(appBuilds)
-      .set({ status: "running", tokenHash: token.hash })
+      .set({ status: "running", tokenHash: token.hash, tokenExpiresAt: token.expiresAt })
       .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])))
       .returning();
 
@@ -209,15 +223,21 @@ export const executeBuild = async (
     return { build: record, parentId: app?.parentId ?? null };
   });
 
-  // The build has finished, or its app was removed with it.
-  if (!loaded) return;
+  // The build has finished, or its app was removed with it. A previous run may
+  // have stopped before it released the CI.
+  if (!loaded) {
+    await ci.release(id);
+
+    return;
+  }
+
   const { build, parentId } = loaded;
 
   const finish = (values: Partial<typeof appBuilds.$inferInsert>) =>
     withDatabase((database) =>
       database
         .update(appBuilds)
-        .set({ ...values, tokenHash: null, finishedAt: new Date() })
+        .set({ ...values, tokenHash: null, tokenExpiresAt: null, finishedAt: new Date() })
         .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"]))),
     );
 
@@ -235,7 +255,9 @@ export const executeBuild = async (
   const previous = await published();
 
   if (previous) {
-    await finish({ status: "succeeded", deploymentId: previous.id });
+    const recorded = await ci.result(id);
+
+    await finish({ status: "succeeded", deploymentId: previous.id, log: recorded?.log ?? "" });
     await ci.release(id);
 
     return;
@@ -293,5 +315,11 @@ export const executeBuild = async (
 export const failBuild = (database: Database, id: string, message: string) =>
   database
     .update(appBuilds)
-    .set({ status: "failed", message, tokenHash: null, finishedAt: new Date() })
+    .set({
+      status: "failed",
+      message,
+      tokenHash: null,
+      tokenExpiresAt: null,
+      finishedAt: new Date(),
+    })
     .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])));

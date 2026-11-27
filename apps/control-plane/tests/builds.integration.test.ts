@@ -25,7 +25,10 @@ const commit = "c".repeat(40);
 const heads = new Map<string, string>();
 
 const source = {
-  repository: vi.fn(async (id: string) => ({ url: `https://git.example.test/${id}.git` })),
+  // Apps get a repository when their source is first saved.
+  repository: vi.fn(async (id: string) =>
+    heads.has(id) ? { url: `https://git.example.test/${id}.git` } : null,
+  ),
   create: vi.fn(async (id: string) => ({ url: `https://git.example.test/${id}.git` })),
   head: vi.fn(async (id: string) => heads.get(id) ?? null),
   hasCommit: vi.fn(async (id: string, candidate: string) => heads.get(id) === candidate),
@@ -47,6 +50,8 @@ const pageHash = hashAsset("/index.html", page);
 const ciRequests: z.infer<typeof ciBuildRequest>[] = [];
 
 const released: string[] = [];
+
+const outcomes = new Map<string, z.infer<typeof ciBuildResult>>();
 
 /** Requests as the CI sends them for the build: with its token and organization. */
 const asBuild = (request: z.infer<typeof ciBuildRequest>, path: string, init: RequestInit = {}) => {
@@ -120,11 +125,15 @@ const ci = (
 ): AppCi => ({
   build: async (request) => {
     ciRequests.push(request);
+    const outcome = await result(request);
+    outcomes.set(request.id, outcome);
 
-    return result(request);
+    return outcome;
   },
+  result: async (id) => outcomes.get(id) ?? null,
   release: async (id) => {
     released.push(id);
+    outcomes.delete(id);
   },
 });
 
@@ -182,9 +191,9 @@ beforeAll(async () => {
   // Builds authenticate with their token; everything else is the owner.
   const authenticate = runtime.identity.authenticate;
 
-  vi.spyOn(runtime.identity, "authenticate").mockImplementation(async (request, scope) =>
+  vi.spyOn(runtime.identity, "authenticate").mockImplementation(async (request, scope, builds) =>
     request.headers.get("authorization")?.startsWith("Bearer wfb_")
-      ? authenticate(request, scope)
+      ? authenticate(request, scope, builds)
       : Result.ok({
           ...environment.owner,
           role: "owner" as const,
@@ -192,6 +201,14 @@ beforeAll(async () => {
           creator: true,
           application: environment.application,
         }),
+  );
+
+  const authenticateUser = runtime.identity.authenticateUser;
+
+  vi.spyOn(runtime.identity, "authenticateUser").mockImplementation(async (request, scope) =>
+    request.headers.get("authorization")?.startsWith("Bearer wfb_")
+      ? authenticateUser(request, scope)
+      : Result.ok({ userId: environment.owner.id, identityOrganizationId: null, recovery: false }),
   );
 });
 
@@ -201,6 +218,7 @@ beforeEach(async () => {
   started.length = 0;
   ciRequests.length = 0;
   released.length = 0;
+  outcomes.clear();
 });
 
 afterAll(async () => environment?.close());
@@ -389,4 +407,70 @@ it("builds only apps whose branch has commits", async () => {
   expect(empty.status).toBe(409);
   expect(await empty.text()).toMatch(/has no commits/);
   expect(started).toEqual([]);
+});
+
+it("confines a build's token to its app", async () => {
+  const app = await createApp("confined-build");
+  const other = await createApp("other-app");
+  heads.set(app.id, commit);
+  heads.set(other.id, commit);
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  const statuses: Record<string, number> = {};
+
+  await run(
+    build.id,
+    ci(async (request) => {
+      const status = async (name: string, path: string, init?: RequestInit) => {
+        statuses[name] = (await asBuild(request, path, init)).status;
+      };
+
+      await status("own", `/apps/${app.id}/deployments`);
+      await status("other", `/apps/${other.id}/deployments`);
+      // Input fields can name an app as the path does.
+      await status("override", `/apps/${app.id}/deployments?appId=${other.id}`);
+      await status("target", "/apps/source-target", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ appId: other.id }),
+      });
+      await status("list", "/apps");
+      await status("build", `/apps/${app.id}/builds`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+
+      return { status: "failed", message: "Stopped", log: "" };
+    }),
+  );
+
+  expect(statuses).toEqual({
+    own: 200,
+    other: 403,
+    override: 403,
+    target: 403,
+    list: 403,
+    build: 403,
+  });
+});
+
+it("stops accepting a build's token when it expires", async () => {
+  const app = await createApp("expired-build");
+  heads.set(app.id, commit);
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  await run(
+    build.id,
+    ci(async (request) => {
+      await environment.database.db
+        .update(appBuilds)
+        .set({ tokenExpiresAt: new Date(Date.now() - 1000) })
+        .where(eq(appBuilds.id, request.id));
+
+      expect((await asBuild(request, `/apps/${app.id}/deployments`)).status).toBe(401);
+
+      return { status: "failed", message: "Stopped", log: "" };
+    }),
+  );
 });
