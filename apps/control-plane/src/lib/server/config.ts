@@ -16,6 +16,38 @@ const telemetryUrl = z.url().refine((value) => {
   );
 }, "Expected an HTTP(S) origin without credentials, path, query or fragment");
 
+// Better Auth's own format: comma-separated "<version>:<secret>" entries, with
+// whitespace around versions and secrets ignored as Better Auth ignores it.
+// Checked here as Better Auth checks it, so a deployment fails before it starts.
+const betterAuthSecrets = z
+  .string()
+  .transform((value) => value.split(","))
+  .pipe(
+    z.array(
+      z
+        .string()
+        .regex(/^\s*\d+\s*:/, "Start each entry with <version>:")
+        .transform((entry) => {
+          const separator = entry.indexOf(":");
+
+          return {
+            version: Number(entry.slice(0, separator)),
+            value: entry.slice(separator + 1).trim(),
+          };
+        })
+        .pipe(
+          z.object({
+            version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+            value: z.string().min(32),
+          }),
+        ),
+    ),
+  )
+  .refine(
+    (secrets) => new Set(secrets.map(({ version }) => version)).size === secrets.length,
+    "Use each version once",
+  );
+
 export const runtimeConfigurationSchema = z.object({
   ...socialSignInConfiguration.shape,
   ...analyticsEnvironmentSchema.shape,
@@ -59,33 +91,13 @@ export const runtimeConfigurationSchema = z.object({
   APP_DOMAIN: z.string().regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/),
   APP_HTTPS_PORT: z.coerce.number().int().min(1).max(65535).default(443),
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
-  // Better Auth's versioned secrets, current first, as comma-separated
-  // "<version>:<secret>" entries. Values written before versions still open
-  // with BETTER_AUTH_SECRET.
+  // Better Auth's versioned secrets, current first. Values written before
+  // versions still open with BETTER_AUTH_SECRET.
   BETTER_AUTH_SECRETS: z
     .string()
-    .transform((value) => value.split(",").map((entry) => entry.trim()))
-    .pipe(
-      z
-        .array(
-          z
-            .string()
-            .regex(
-              /^\d+:.{32,}$/,
-              "Use <version>:<secret> entries with secrets of 32 or more characters",
-            )
-            .transform((entry) => {
-              const separator = entry.indexOf(":");
-
-              return {
-                version: Number(entry.slice(0, separator)),
-                value: entry.slice(separator + 1),
-              };
-            }),
-        )
-        .min(1),
-    )
-    .optional(),
+    .optional()
+    .transform((value) => value?.trim() || undefined)
+    .pipe(betterAuthSecrets.optional()),
   GITHUB_TOKEN: z.string().trim().optional(),
   PLATFORM_STATE_DIRECTORY: z.string().min(1).default("/var/lib/widefleet"),
   PLATFORM_APP_RUNTIME_URL: telemetryUrl.default("http://runtime:8080"),

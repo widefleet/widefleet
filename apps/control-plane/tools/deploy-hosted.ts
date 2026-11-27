@@ -185,6 +185,8 @@ const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
 const sensitive = [
   ...Object.values(secrets),
+  // Each version alone, since the list also contains BETTER_AUTH_SECRET.
+  ...(configuration.BETTER_AUTH_SECRETS ?? []).map(({ value }) => value),
   ...Object.values(socialCredentials),
   ...Object.values(controlSecretOverrides),
   password,
