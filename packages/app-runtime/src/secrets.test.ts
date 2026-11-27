@@ -1,4 +1,4 @@
-import { base64url, compactDecrypt, decodeProtectedHeader } from "jose";
+import { compactDecrypt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
 import { testKeyring } from "../fixtures/keyring.ts";
 import { sealedBeforeKeyring } from "../fixtures/legacy.ts";
