@@ -14,7 +14,7 @@ import { z } from "zod";
 import { hashAsset } from "../../src/lib/server/asset-hash.ts";
 import { appSource, parentSource } from "./runtime.fixture.ts";
 import { executionProfiles } from "./execution-limits.fixture.ts";
-import { runtimeKeyring } from "../runtime-keyring.fixture.ts";
+import { keySet, keyVersion } from "../keyring.fixture.ts";
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in workerd", () => {
   let directory: string;
@@ -196,7 +196,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
           WIDEFLEET_LOGS: "cloudflare",
           PRIVATE_ROOT_SECRET: "parent-only-fixture",
           WIDEFLEET_CONTROL_TOKEN: controlToken,
-          WIDEFLEET_SECRETS_KEYS: runtimeKeyring(0x01),
+          WIDEFLEET_SECRETS_KEYS: keySet(
+            keyVersion("test", Buffer.alloc(32, 0x01).toString("base64url")),
+          ),
           WIDEFLEET_CONFIGURATION: JSON.stringify({
             crons: { "* * * * *": [hostname, previewHostname] },
             queues: {

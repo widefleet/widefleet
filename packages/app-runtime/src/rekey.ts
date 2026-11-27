@@ -14,7 +14,11 @@ import type { ParentEnvironment } from "./types.ts";
 
 const pageSize = 50;
 
-const locations = ["app-secrets/", "app-keys/", "workload/"] as const;
+// The RS256 ring. The earlier Ed25519 ring at `workload/signing-keys.json` is
+// no longer read and stays as it is.
+const ringPath = "workload/signing-keys-rs256.json";
+
+const locations = ["app-secrets/", "app-keys/", ringPath] as const;
 
 const position = z.strictObject({
   location: z
@@ -39,10 +43,6 @@ const decodePosition = (value: string) =>
 const snapshotPath = /^app-secrets\/[^/]+\/\d+\.json$/;
 
 const appKeyPath = /^app-keys\/([^/]+)\/[^/]+\.json$/;
-
-// The RS256 ring. The earlier Ed25519 ring at `workload/signing-keys.json` is
-// no longer read and stays as it is.
-const ringPath = "workload/signing-keys-rs256.json";
 
 // Snapshots written before fingerprints were removed still carry one; the rewrite drops it.
 const snapshot = z.object({ ciphertext: z.string() });
@@ -123,8 +123,6 @@ export const rekeyRuntimeStorage = async (request: Request, environment: Environ
   const counts = { current: 0, rewritten: 0, unreadable: 0, conflicts: 0 };
 
   for (const object of listed.objects) {
-    // Other workload objects, such as the earlier ring, are not read.
-    if (prefix === "workload/" && object.key !== ringPath) continue;
     const outcome = await rewrite(environment, object.key);
 
     if (outcome !== "deleted") counts[outcome] += 1;

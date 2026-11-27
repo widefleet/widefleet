@@ -1,7 +1,14 @@
 import { base64url } from "jose";
 
-/** A runtime keyring with one key version whose 32 bytes all equal `byte`. */
-export const testKeyring = (byte = 0xab, kid = "test") =>
+/**
+ * A runtime keyring, active version first. Each version is a key ID and the
+ * byte its 32 key bytes repeat; without versions it is `test` with 0xab.
+ */
+export const testKeyring = (...versions: [kid: string, byte: number][]) =>
   JSON.stringify({
-    keys: [{ kty: "oct", kid, k: base64url.encode(new Uint8Array(32).fill(byte)) }],
+    keys: (versions.length > 0 ? versions : [["test", 0xab] as const]).map(([kid, byte]) => ({
+      kty: "oct",
+      kid,
+      k: base64url.encode(new Uint8Array(32).fill(byte)),
+    })),
   });

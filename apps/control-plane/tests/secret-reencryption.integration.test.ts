@@ -12,9 +12,9 @@ import { readAppLogin } from "../src/lib/server/app-login-client.ts";
 import { storedAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { apps, organizationSettings } from "../src/lib/server/schema.ts";
+import { parseKeyring } from "@platform/contracts/keyring";
 import {
   createSecretEncryption,
-  parseKeyring,
   type SecretEncryption,
 } from "../src/lib/server/secret-encryption.ts";
 import {

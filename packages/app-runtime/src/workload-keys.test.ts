@@ -151,7 +151,7 @@ it("signs with the next key when another call created or rotated the ring a mome
 it("refuses issuance with the wrong encryption key without replacing the stored authority", async () => {
   const env = await environment();
   const original = await workloadKeys(env);
-  const wrongKey = { ...env, WIDEFLEET_SECRETS_KEYS: testKeyring(0xcd) };
+  const wrongKey = { ...env, WIDEFLEET_SECRETS_KEYS: testKeyring(["test", 0xcd]) };
   await expect(signWorkloadToken(wrongKey, issuer, identity, "data")).rejects.toThrow();
   expect((await workloadKeys(env)).jwks).toEqual(original.jwks);
 });

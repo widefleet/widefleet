@@ -26,13 +26,27 @@ export type SecretContext =
    */
   | { kind: "sso-provider-config"; field: "oidcConfig" | "samlConfig" };
 
-export {
-  generateKeyring,
-  includesKeyVersions,
-  parseKeyring,
-  type Keyring,
-  type KeyVersion,
-} from "@platform/contracts/keyring";
+/** Formats a new keyring with one random key version. */
+export const generateKeyring = () =>
+  `${JSON.stringify(
+    {
+      keys: [
+        {
+          kty: "oct",
+          kid: Buffer.from(crypto.getRandomValues(new Uint8Array(4))).toString("hex"),
+          k: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
+        },
+      ],
+    },
+    null,
+    2,
+  )}\n`;
+
+/** Returns whether `keyring` holds every version of `required` with the same key. */
+export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
+  required.every((version) =>
+    keyring.some((candidate) => candidate.id === version.id && candidate.jwk.k === version.jwk.k),
+  );
 
 // Ciphertexts are JWE compact serializations (RFC 7516): direct encryption
 // with the key version's 32 bytes, A256GCM, and the version's ID as `kid`.

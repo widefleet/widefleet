@@ -1,7 +1,8 @@
-import { base64url, decodeProtectedHeader } from "jose";
+import { decodeProtectedHeader } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { testKeyring } from "../fixtures/keyring.ts";
+import { appKeyBeforeKeyring } from "../fixtures/legacy.ts";
 
 // Each runtime isolate caches derived keys. A fresh module stands for a new isolate.
 const isolate = async () => {
@@ -97,38 +98,11 @@ describe("app keys", () => {
     const material = crypto.getRandomValues(new Uint8Array(32));
     const path = `app-keys/${first}/legacy.json`;
 
-    // The earlier record: AES-KW under HKDF(raw key, app ID), with the bytes of testKeyring().
-    const wrapping = await crypto.subtle.deriveKey(
-      {
-        name: "HKDF",
-        hash: "SHA-256",
-        salt: new Uint8Array(),
-        info: new TextEncoder().encode(`widefleet app key wrapping v1\n${first}`),
-      },
-      await crypto.subtle.importKey("raw", new Uint8Array(32).fill(0xab), "HKDF", false, [
-        "deriveKey",
-      ]),
-      { name: "AES-KW", length: 256 },
-      false,
-      ["wrapKey"],
-    );
-
-    const wrapped = await crypto.subtle.wrapKey(
-      "raw",
-      await crypto.subtle.importKey("raw", material, { name: "HMAC", hash: "SHA-256" }, true, [
-        "sign",
-      ]),
-      wrapping,
-      "AES-KW",
-    );
-
     const { packages, environment: env } = environment();
     const owner = { appId: first, hostname: "first.example.test" };
 
-    packages.objects.set(
-      path,
-      JSON.stringify({ version: 1, wrapped: base64url.encode(new Uint8Array(wrapped)) }),
-    );
+    // The earlier record, with the bytes of testKeyring().
+    packages.objects.set(path, await appKeyBeforeKeyring(0xab, first, material));
     const earlier = await (await isolate())(env, owner).sign("legacy", "session-token");
 
     // The same bytes sealed with the runtime keyring sign the same way.
@@ -233,7 +207,7 @@ describe("app keys", () => {
     );
 
     await expect(
-      (await isolate())(environment(shared, testKeyring(0xcd)).environment, {
+      (await isolate())(environment(shared, testKeyring(["test", 0xcd])).environment, {
         appId: first,
         hostname: "first.example.test",
       }).decrypt("installation", ciphertext),

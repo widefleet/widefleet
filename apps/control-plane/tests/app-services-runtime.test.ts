@@ -18,16 +18,17 @@ import {
   appSecretPreparation,
   appAccessSnapshot,
   serviceDocumentation,
-  runtimeRekeyPage,
+  runtimeRekeyInput,
 } from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { verifyMcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
 import { runtimeIdentity } from "./runtime-identity.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { z } from "zod";
+import { rekeyRuntime } from "../src/lib/server/runtime-rekey.ts";
 import type { TestHarness } from "wrangler";
 import { executionProfiles, executionRecorder } from "./cloudflare/execution-limits.fixture.ts";
-import { runtimeKeyring } from "./runtime-keyring.fixture.ts";
+import { keySet, keyVersion } from "./keyring.fixture.ts";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -195,7 +196,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         | { count: number }
         | { token: string }
         | { key: string; value: string }
-        | { cursor?: string },
+        | z.infer<typeof runtimeRekeyInput>,
       headers: Record<string, string> = {},
     ) =>
       (harness ? harness.fetch : fetch)(
@@ -365,7 +366,9 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_EXECUTION_LIMITS: JSON.stringify(executionProfiles),
             WIDEFLEET_HTTP_AVAILABILITY: "kv",
             WIDEFLEET_CONTROL_TOKEN: token,
-            WIDEFLEET_SECRETS_KEYS: runtimeKeyring(),
+            WIDEFLEET_SECRETS_KEYS: keySet(
+              keyVersion("test", Buffer.alloc(32, 0xab).toString("base64url")),
+            ),
             WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
             WIDEFLEET_MCP_ORIGIN: "https://mcp.apps.example.test",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
@@ -1617,27 +1620,11 @@ export default { async fetch(request, env, ctx) {
         ).status,
       ).toBe(200);
 
-      const pass = async () => {
-        const total = { rewritten: 0, unreadable: 0, conflicts: 0 };
-        let cursor: string | null = null;
+      const pass = () =>
+        rekeyRuntime((body) => request("/rekey", runtimeRekeyInput.parse(JSON.parse(body))));
 
-        do {
-          const response = await request("/rekey", cursor ? { cursor } : {});
-
-          expect(response.status, await response.clone().text()).toBe(200);
-          const page = z.object({ result: runtimeRekeyPage }).parse(await response.json()).result;
-
-          total.rewritten += page.rewritten;
-          total.unreadable += page.unreadable;
-          total.conflicts += page.conflicts;
-          cursor = page.cursor;
-        } while (cursor);
-
-        return total;
-      };
-
-      expect(await pass()).toEqual({ rewritten: 1, unreadable: 0, conflicts: 0 });
-      expect(await pass()).toEqual({ rewritten: 0, unreadable: 0, conflicts: 0 });
+      expect(await pass()).toMatchObject({ rewritten: 1, unreadable: 0, conflicts: 0 });
+      expect(await pass()).toMatchObject({ rewritten: 0, unreadable: 0, conflicts: 0 });
 
       const stored = z.array(z.string()).parse(await (await request("/stored")).json());
 

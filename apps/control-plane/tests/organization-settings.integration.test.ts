@@ -13,11 +13,8 @@ import {
   ssoProvider,
 } from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
-import {
-  createSecretEncryption,
-  generateKeyring,
-  parseKeyring,
-} from "../src/lib/server/secret-encryption.ts";
+import { parseKeyring } from "@platform/contracts/keyring";
+import { createSecretEncryption, generateKeyring } from "../src/lib/server/secret-encryption.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { cliClientId } from "../src/lib/server/auth-options.ts";
 import { readAppLogin, appLoginClientId } from "../src/lib/server/app-login-client.ts";

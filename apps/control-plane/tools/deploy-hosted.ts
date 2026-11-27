@@ -16,8 +16,7 @@ import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-conf
 import { socialSignInConfiguration } from "../src/lib/server/social-sign-in.ts";
 import { createCloudflareProvisioner } from "../src/lib/server/cloudflare-provisioning.ts";
 import {
-  readCloudflareRuntimeKeyVersion,
-  readCloudflareRuntimeVersion,
+  readCloudflareRuntimeStatus,
   validateCloudflareRuntime,
 } from "../src/lib/server/cloudflare-runtime-package.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
@@ -36,7 +35,7 @@ import {
   initializeCloudflareInstallation,
   type InitializationPlatform,
 } from "./cloudflare-initialization.ts";
-import { deployHostedRuntime, waitForRuntimeVersion } from "./hosted-runtime.ts";
+import { deployHostedRuntime, waitForRuntime } from "./hosted-runtime.ts";
 
 const execute = promisify(execFile);
 
@@ -345,15 +344,12 @@ try {
         ...(confirmedBindingTag ? ["--tag", confirmedBindingTag] : []),
       ]);
 
-      await waitForRuntimeVersion(
-        async () => readCloudflareRuntimeVersion(await platform()),
-        release.version,
-      );
       // A new keyring can keep the release, so its active key marks the new version too.
-      await waitForRuntimeVersion(
-        async () => readCloudflareRuntimeKeyVersion(await platform()),
-        runtimeKey.id,
-      );
+      await waitForRuntime(async () => {
+        const runtime = await readCloudflareRuntimeStatus(await platform());
+
+        return runtime.runtimeVersion === release.version && runtime.keyVersion === runtimeKey.id;
+      });
     },
   );
 

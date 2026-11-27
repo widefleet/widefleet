@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { base64url } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { managedOAuth, openAccessToken, type OAuthIdentity } from "./oauth.ts";
@@ -272,12 +271,7 @@ describe("managed OAuth broker", () => {
 
     const rotated = {
       ...environment,
-      WIDEFLEET_SECRETS_KEYS: JSON.stringify({
-        keys: [
-          { kty: "oct", kid: "next", k: base64url.encode(new Uint8Array(32).fill(0xcd)) },
-          { kty: "oct", kid: "test", k: base64url.encode(new Uint8Array(32).fill(0xab)) },
-        ],
-      }),
+      WIDEFLEET_SECRETS_KEYS: testKeyring(["next", 0xcd], ["test", 0xab]),
     };
 
     await expect(

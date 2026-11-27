@@ -10,7 +10,7 @@ import type {
 } from "@cloudflare/workers-types";
 import { z } from "zod";
 import { runtimeConfigurationSchema } from "./config.ts";
-import { parseKeyring } from "./secret-encryption.ts";
+import { parseKeyring } from "@platform/contracts/keyring";
 import type { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
 import type { deploymentWorkflowCommand } from "./deployment-workflow-command.ts";
 import type { CloudflareAuthRateLimitBindings } from "./auth-rate-limit-cloudflare.ts";

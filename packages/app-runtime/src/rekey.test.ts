@@ -1,29 +1,20 @@
 import { runtimeRekeyPage } from "@platform/contracts";
-import { base64url, decodeProtectedHeader } from "jose";
+import { decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { openAppKey, parseAppKey } from "./keys.ts";
 import { rekeyRuntimeStorage } from "./rekey.ts";
 import { decryptText, encryptText } from "./secrets.ts";
-
-const encoder = new TextEncoder();
+import { testKeyring } from "../fixtures/keyring.ts";
+import { appKeyBeforeKeyring, sealedBeforeKeyring } from "../fixtures/legacy.ts";
 
 const decoder = new TextDecoder();
 
 const appId = "2a600000-0000-4000-8000-000000000001";
 
-const keyring = (...versions: [kid: string, byte: number][]) =>
-  JSON.stringify({
-    keys: versions.map(([kid, byte]) => ({
-      kty: "oct",
-      kid,
-      k: base64url.encode(new Uint8Array(32).fill(byte)),
-    })),
-  });
+const earlier = { WIDEFLEET_SECRETS_KEYS: testKeyring(["one", 1]) };
 
-const earlier = { WIDEFLEET_SECRETS_KEYS: keyring(["one", 1]) };
-
-const rotated = { WIDEFLEET_SECRETS_KEYS: keyring(["two", 2], ["one", 1]) };
+const rotated = { WIDEFLEET_SECRETS_KEYS: testKeyring(["two", 2], ["one", 1]) };
 
 /** An R2 bucket in memory with ETags and conditional writes. */
 const bucket = (
@@ -104,52 +95,6 @@ const pass = async (packages: Bucket, keys = rotated) => {
   return total;
 };
 
-/** base64(iv || AES-GCM) under the raw bytes, as values were sealed before the runtime keyring. */
-const sealedBeforeKeyring = async (byte: number, scope: string, text: string) => {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-
-  const sealed = new Uint8Array(
-    await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv, additionalData: encoder.encode(scope) },
-      await crypto.subtle.importKey("raw", new Uint8Array(32).fill(byte), "AES-GCM", false, [
-        "encrypt",
-      ]),
-      encoder.encode(text),
-    ),
-  );
-
-  return btoa(String.fromCharCode(...iv, ...sealed));
-};
-
-/** An app key record before the runtime keyring: AES-KW under HKDF(raw bytes, app ID). */
-const appKeyBeforeKeyring = async (byte: number, material: Uint8Array<ArrayBuffer>) => {
-  const wrapping = await crypto.subtle.deriveKey(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: new Uint8Array(),
-      info: encoder.encode(`widefleet app key wrapping v1\n${appId}`),
-    },
-    await crypto.subtle.importKey("raw", new Uint8Array(32).fill(byte), "HKDF", false, [
-      "deriveKey",
-    ]),
-    { name: "AES-KW", length: 256 },
-    false,
-    ["wrapKey"],
-  );
-
-  const wrapped = await crypto.subtle.wrapKey(
-    "raw",
-    await crypto.subtle.importKey("raw", material, { name: "HMAC", hash: "SHA-256" }, true, [
-      "sign",
-    ]),
-    wrapping,
-    "AES-KW",
-  );
-
-  return JSON.stringify({ version: 1, wrapped: base64url.encode(new Uint8Array(wrapped)) });
-};
-
 const snapshot = (index: number) => `app-secrets/${appId}/${index}.json`;
 
 const keyVersion = (value: string) => decodeProtectedHeader(value).kid;
@@ -181,7 +126,7 @@ describe("runtime storage rewrite", () => {
       snapshot(3),
       JSON.stringify({ ciphertext: await encryptText(rotated, snapshot(3), '{"A":"three"}') }),
     );
-    packages.write(appKey, await appKeyBeforeKeyring(2, material));
+    packages.write(appKey, await appKeyBeforeKeyring(2, appId, material));
     packages.write(ring, await encryptText(earlier, ring, '{"KEYRING":"ring"}'));
     packages.write(earlierRing, "an earlier ring that is no longer read");
 
@@ -223,19 +168,21 @@ describe("runtime storage rewrite", () => {
       unreadable: 0,
       conflicts: 0,
     });
-    expect(await pass(packages, { WIDEFLEET_SECRETS_KEYS: keyring(["two", 2]) })).toMatchObject({
-      current: 5,
-      rewritten: 0,
-      unreadable: 0,
-      conflicts: 0,
-    });
+    expect(await pass(packages, { WIDEFLEET_SECRETS_KEYS: testKeyring(["two", 2]) })).toMatchObject(
+      {
+        current: 5,
+        rewritten: 0,
+        unreadable: 0,
+        conflicts: 0,
+      },
+    );
   });
 
   it("counts values that no key version opens and leaves them unchanged", async () => {
     const packages = bucket();
 
     const unknown = await encryptText(
-      { WIDEFLEET_SECRETS_KEYS: keyring(["other", 9]) },
+      { WIDEFLEET_SECRETS_KEYS: testKeyring(["other", 9]) },
       snapshot(1),
       "{}",
     );

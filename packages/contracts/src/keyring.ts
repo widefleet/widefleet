@@ -69,27 +69,3 @@ export const parseKeyring = (text: string, source: string): Keyring => {
 
   return [active, ...others];
 };
-
-/** Formats a new keyring with one random key version. */
-export const generateKeyring = () =>
-  `${JSON.stringify(
-    {
-      keys: [
-        {
-          kty: "oct",
-          kid: Array.from(crypto.getRandomValues(new Uint8Array(4)), (byte) =>
-            byte.toString(16).padStart(2, "0"),
-          ).join(""),
-          k: base64url.encode(crypto.getRandomValues(new Uint8Array(keySize))),
-        },
-      ],
-    },
-    null,
-    2,
-  )}\n`;
-
-/** Returns whether `keyring` holds every version of `required` with the same key. */
-export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
-  required.every((version) =>
-    keyring.some((candidate) => candidate.id === version.id && candidate.jwk.k === version.jwk.k),
-  );

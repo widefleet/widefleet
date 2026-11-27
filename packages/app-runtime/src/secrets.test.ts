@@ -1,18 +1,10 @@
-import { base64url } from "jose";
 import { describe, expect, it } from "vitest";
 import { testKeyring } from "../fixtures/keyring.ts";
+import { sealedBeforeKeyring } from "../fixtures/legacy.ts";
 import { decryptText, encryptText, sealedKeyVersion } from "./secrets.ts";
 
-const encoder = new TextEncoder();
-
 const keyring = (...versions: [kid: string, byte: number][]) => ({
-  WIDEFLEET_SECRETS_KEYS: JSON.stringify({
-    keys: versions.map(([kid, byte]) => ({
-      kty: "oct",
-      kid,
-      k: base64url.encode(new Uint8Array(32).fill(byte)),
-    })),
-  }),
+  WIDEFLEET_SECRETS_KEYS: testKeyring(...versions),
 });
 
 describe("runtime sealing", () => {
@@ -42,19 +34,7 @@ describe("runtime sealing", () => {
   });
 
   it("opens a value sealed before the runtime keyring with the active key's bytes", async () => {
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-
-    const sealed = new Uint8Array(
-      await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv, additionalData: encoder.encode("scope") },
-        await crypto.subtle.importKey("raw", new Uint8Array(32).fill(0xab), "AES-GCM", false, [
-          "encrypt",
-        ]),
-        encoder.encode("value"),
-      ),
-    );
-
-    const earlier = btoa(String.fromCharCode(...iv, ...sealed));
+    const earlier = await sealedBeforeKeyring(0xab, "scope", "value");
     const environment = { WIDEFLEET_SECRETS_KEYS: testKeyring() };
 
     expect(sealedKeyVersion(earlier)).toBeNull();
