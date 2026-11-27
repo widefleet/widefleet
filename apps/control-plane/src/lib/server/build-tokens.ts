@@ -1,6 +1,7 @@
 // A running server build deploys with its own token, which the app CI adds to
 // the build's requests to the control plane. It acts for whoever started the
-// build, as they signed in, only on the build's app, and expires with the run.
+// build, as they signed in and with their scopes, only on the build's app, and
+// expires with the run.
 import { createHash } from "node:crypto";
 import { and, eq, gt } from "drizzle-orm";
 import type { Database } from "./database.ts";
@@ -31,6 +32,7 @@ export const buildSignIn = async (database: Database, token: string) => {
       actor: appBuilds.actor,
       identityOrganizationId: appBuilds.identityOrganizationId,
       recovery: appBuilds.recovery,
+      reads: appBuilds.reads,
     })
     .from(appBuilds)
     .where(
@@ -49,5 +51,5 @@ export const buildSignIn = async (database: Database, token: string) => {
     recovery: record.recovery,
   };
 
-  return { signIn, appId: record.appId };
+  return { signIn, appId: record.appId, reads: record.reads };
 };

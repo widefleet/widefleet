@@ -210,6 +210,12 @@ export const createIdentityService = (
               message: "The build has finished",
             });
 
+          if (scope === "platform:read" && !build.reads)
+            return yield* new AuthenticationFailed({
+              code: "FORBIDDEN",
+              message: "The build's starter cannot read with the credential that started it",
+            });
+
           return Result.ok(verifiedSignIn(build.signIn, build.appId));
         }
 

@@ -52,17 +52,12 @@ const denied = (request: Request) =>
  * The repository requests of a clone, a fetch and the up-to-date check of the
  * source push of `widefleet deploy`. Builds cannot write to the repository.
  */
-const repositoryScope = (method: string, path: string, query: string) => {
-  const call = `${method} ${path}${query}`;
-
-  if (call === "GET /info/refs?service=git-upload-pack" || call === "POST /git-upload-pack")
-    return "read";
-
-  // Git servers authorize even the ref list of the push service as a write.
-  if (call === "GET /info/refs?service=git-receive-pack") return "write";
-
-  return null;
-};
+const repositoryRead = (method: string, path: string, query: string) =>
+  [
+    "GET /info/refs?service=git-upload-pack",
+    "POST /git-upload-pack",
+    "GET /info/refs?service=git-receive-pack",
+  ].includes(`${method} ${path}${query}`);
 
 /** The control plane requests of `widefleet deploy APP` for the build's app. */
 const deployment = (method: string, path: string, appId: string) => {
@@ -92,16 +87,13 @@ export class Outbound extends WorkerEntrypoint<Env, OutboundProps> {
     const repository = new URL(this.ctx.props.repository);
 
     if (url.origin === repository.origin && url.pathname.startsWith(repository.pathname)) {
-      const scope = repositoryScope(
-        request.method,
-        url.pathname.slice(repository.pathname.length),
-        url.search,
-      );
-
-      if (!scope) return denied(request);
+      if (
+        !repositoryRead(request.method, url.pathname.slice(repository.pathname.length), url.search)
+      )
+        return denied(request);
 
       const headers = new Headers(request.headers);
-      headers.set("authorization", await this.#repositoryAuthorization(scope));
+      headers.set("authorization", await this.#repositoryAuthorization());
 
       return fetch(new Request(request, { headers }), { redirect: "manual" });
     }
@@ -123,13 +115,14 @@ export class Outbound extends WorkerEntrypoint<Env, OutboundProps> {
 
   /**
    * Repository tokens are short-lived, so each request gets one from the
-   * control plane, with the access of whoever started the build.
+   * control plane. As with `widefleet deploy`, it is the starter's write
+   * credential; the Git requests above only read.
    */
-  async #repositoryAuthorization(scope: "read" | "write") {
+  async #repositoryAuthorization() {
     const { appId, platform, repository } = this.ctx.props;
 
     const response = await fetch(
-      `${platform.origin}/api/v1/apps/${appId}/source/${scope}-credential`,
+      `${platform.origin}/api/v1/apps/${appId}/source/write-credential`,
       {
         method: "POST",
         headers: {
@@ -171,25 +164,36 @@ export class BuildSandbox extends DurableObject<Env> {
 
   build(request: z.infer<typeof ciBuildRequest>) {
     // A repeated call returns the outcome of the build that already ran, or
-    // waits for the one that is running.
-    const recorded = this.result();
+    // joins the one that is running.
+    if (this.#current) return this.#join(request);
+
+    const recorded = this.#recorded();
 
     if (recorded) return recorded;
 
-    this.#current ??= this.#build(request).finally(() => {
+    this.#current = this.#build(request).finally(() => {
       this.#current = undefined;
     });
 
     return this.#current;
   }
 
-  async #build(request: z.infer<typeof ciBuildRequest>) {
-    if (this.#container.running) await this.#container.destroy();
+  /** The outcome of a build that ran, waiting for one that is running. */
+  result(request: z.infer<typeof ciBuildRequest>) {
+    return this.#current ? this.#join(request) : this.#recorded();
+  }
 
-    const image = this.#container.images["build"];
+  /** Each call issues a new token, which a running build continues with. */
+  async #join(request: z.infer<typeof ciBuildRequest>) {
+    const current = this.#current;
 
-    if (!image) throw new Error("The build image is not configured");
+    if (this.#container.running) await this.#intercept(request);
 
+    return current ?? this.#recorded();
+  }
+
+  // Registering a target again replaces its handler without dropping connections.
+  async #intercept(request: z.infer<typeof ciBuildRequest>) {
     const outbound = this.#exports.Outbound({
       props: {
         appId: request.appId,
@@ -202,6 +206,23 @@ export class BuildSandbox extends DurableObject<Env> {
         },
       },
     });
+
+    await this.#container.interceptOutboundHttps("*", outbound);
+    await this.#container.interceptAllOutboundHttp(outbound);
+  }
+
+  #recorded() {
+    const recorded = ciBuildResult.safeParse(this.ctx.storage.kv.get("result"));
+
+    return recorded.success ? recorded.data : null;
+  }
+
+  async #build(request: z.infer<typeof ciBuildRequest>) {
+    if (this.#container.running) await this.#container.destroy();
+
+    const image = this.#container.images["build"];
+
+    if (!image) throw new Error("The build image is not configured");
 
     const { commit, branch, directory } = request.source;
     const project = directory === "." ? source : `${source}/${directory}`;
@@ -264,8 +285,7 @@ export class BuildSandbox extends DurableObject<Env> {
     const result = await (async (): Promise<z.infer<typeof ciBuildResult>> => {
       try {
         // HTTPS intercepts are registered before start(), so the CA exists when it runs.
-        await this.#container.interceptOutboundHttps("*", outbound);
-        await this.#container.interceptAllOutboundHttp(outbound);
+        await this.#intercept(request);
         this.#container.start({ image, instance: "standard-2", enableInternet: false });
         await this.#container.setInactivityTimeout(inactivityTimeout);
 
@@ -319,12 +339,6 @@ export class BuildSandbox extends DurableObject<Env> {
     return result;
   }
 
-  result() {
-    const recorded = ciBuildResult.safeParse(this.ctx.storage.kv.get("result"));
-
-    return recorded.success ? recorded.data : null;
-  }
-
   // A failed alarm is retried, so it must not delete itself.
   override async alarm() {
     if (this.#container.running) await this.#container.destroy();
@@ -348,8 +362,10 @@ export class AppCi extends WorkerEntrypoint<Env> {
     return this.env.BUILDS.getByName(request.id).build(request);
   }
 
-  result(id: string) {
-    return this.env.BUILDS.getByName(id).result();
+  result(input: z.input<typeof ciBuildRequest>) {
+    const request = ciBuildRequest.parse(input);
+
+    return this.env.BUILDS.getByName(request.id).result(request);
   }
 
   release(id: string) {

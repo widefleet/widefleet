@@ -860,7 +860,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.source.credential(context.principal, input.appId, "read")),
       ),
-    sourceWriteCredential: write
+    sourceWriteCredential: deployWrite
       .route({ method: "POST", path: "/apps/{appId}/source/write-credential" })
       .input(contract.appPath)
       .output(contract.sourceCredential)
@@ -973,12 +973,18 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) => {
         const { appId, ...build } = input;
 
-        // The build acts with the starter's sign-in, which builds cannot pass on.
+        // The build acts with the starter's sign-in and scopes, which builds cannot pass on.
         const signIn = unwrap(
           await runtime.identity.authenticateUser(context.request, "platform:write"),
         );
 
-        return unwrap(await runtime.builds.start(context.principal, signIn, appId, build));
+        const reads = (
+          await runtime.identity.authenticateUser(context.request, "platform:read")
+        ).isOk();
+
+        return unwrap(
+          await runtime.builds.start(context.principal, { ...signIn, reads }, appId, build),
+        );
       }),
     builds: read
       .route({ method: "GET", path: "/apps/{appId}/builds" })

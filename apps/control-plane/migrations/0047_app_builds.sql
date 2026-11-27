@@ -11,6 +11,7 @@ CREATE TABLE app_build (
   log text NOT NULL DEFAULT '',
   identity_organization_id text,
   recovery boolean NOT NULL DEFAULT false,
+  reads boolean NOT NULL DEFAULT false,
   token_hash text,
   token_expires_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),

@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { createApi } from "../src/lib/server/api.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { executeBuild, type AppCi } from "../src/lib/server/builds.ts";
+import { AuthenticationFailed } from "../src/lib/server/identity.ts";
 import { createRuntime, type Runtime } from "../src/lib/server/runtime-services.ts";
 import { appBuilds, apps, artifacts, deployments } from "../src/lib/server/schema.ts";
 import type { SourceBackend } from "../src/lib/server/source-backend.ts";
@@ -43,6 +44,11 @@ const source = {
 
 const started: string[] = [];
 
+const ended = new Set<string>();
+
+// Whether the credential that starts builds lacks platform:read.
+let writeOnly = false;
+
 const page = new TextEncoder().encode("<h1>Built on the server</h1>\n");
 
 const pageHash = hashAsset("/index.html", page);
@@ -64,6 +70,16 @@ const asBuild = (request: z.infer<typeof ciBuildRequest>, path: string, init: Re
 
 /** The uploads of `widefleet deploy`, and the idempotency key the CI sets. */
 const deploy = async (request: z.infer<typeof ciBuildRequest>) => {
+  // The CI gets a repository credential for each Git request.
+  const credential = await asBuild(request, `/apps/${request.appId}/source/write-credential`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+
+  expect(credential.status).toBe(200);
+  expect(contract.sourceCredential.parse(await credential.json()).url).toBe(request.repository.url);
+
   const session = contract.uploadSession.parse(
     await (
       await asBuild(request, `/apps/${request.appId}/assets-upload-session`, {
@@ -130,7 +146,7 @@ const ci = (
 
     return outcome;
   },
-  result: async (id) => outcomes.get(id) ?? null,
+  result: async (request) => outcomes.get(request.id) ?? null,
   release: async (id) => {
     released.push(id);
     outcomes.delete(id);
@@ -184,8 +200,11 @@ beforeAll(async () => {
     reporting: environment.reporting,
     encryption: environment.encryption,
     source,
-    startBuild: async (id) => {
-      started.push(id);
+    builds: {
+      start: async (id) => {
+        started.push(id);
+      },
+      ended: async (id) => ended.has(id),
     },
   })();
   // Builds authenticate with their token; everything else is the owner.
@@ -208,7 +227,15 @@ beforeAll(async () => {
   vi.spyOn(runtime.identity, "authenticateUser").mockImplementation(async (request, scope) =>
     request.headers.get("authorization")?.startsWith("Bearer wfb_")
       ? authenticateUser(request, scope)
-      : Result.ok({ userId: environment.owner.id, identityOrganizationId: null, recovery: false }),
+      : writeOnly && scope === "platform:read"
+        ? Result.err(
+            new AuthenticationFailed({ code: "FORBIDDEN", message: "The token lacks the scope" }),
+          )
+        : Result.ok({
+            userId: environment.owner.id,
+            identityOrganizationId: null,
+            recovery: false,
+          }),
   );
 });
 
@@ -219,6 +246,8 @@ beforeEach(async () => {
   ciRequests.length = 0;
   released.length = 0;
   outcomes.clear();
+  ended.clear();
+  writeOnly = false;
 });
 
 afterAll(async () => environment?.close());
@@ -542,4 +571,46 @@ it("stores logs with NUL characters", async () => {
 it("retries a run that starts before its build is committed", async () => {
   await expect(run(crypto.randomUUID(), succeeded)).rejects.toThrow(/not recorded/);
   expect(ciRequests).toEqual([]);
+});
+
+it("gives a build only the scopes of the credential that started it", async () => {
+  const app = await createApp("write-only-build");
+  heads.set(app.id, commit);
+  writeOnly = true;
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  await run(
+    build.id,
+    ci(async (request) => {
+      expect((await asBuild(request, `/apps/${app.id}/network`)).status).toBe(403);
+      expect((await deploy(request)).status).toBe(200);
+
+      return { status: "succeeded", log: "" };
+    }),
+  );
+
+  expect(
+    contract.appBuildDetails.parse(await (await api(`/apps/${app.id}/builds/${build.id}`)).json())
+      .status,
+  ).toBe("succeeded");
+});
+
+it("reports a build whose workflow ended without finishing it as failed", async () => {
+  const app = await createApp("stopped-workflow");
+  heads.set(app.id, commit);
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  ended.add(build.id);
+
+  const details = contract.appBuildDetails.parse(
+    await (await api(`/apps/${app.id}/builds/${build.id}`)).json(),
+  );
+
+  expect(details).toMatchObject({
+    status: "failed",
+    message: "The build stopped before it finished",
+  });
+  expect(
+    contract.appBuild.array().parse(await (await api(`/apps/${app.id}/builds`)).json())[0]?.status,
+  ).toBe("failed");
 });

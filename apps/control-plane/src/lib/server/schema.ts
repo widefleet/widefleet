@@ -294,6 +294,8 @@ export const appBuilds = pgTable(
     /** How the starter signed in: the organization whose company SSO or recovery authenticated it. */
     identityOrganizationId: text("identity_organization_id"),
     recovery: boolean().notNull().default(false),
+    /** Whether the starter's credential has platform:read, which the build then has too. */
+    reads: boolean().notNull().default(false),
     /** The SHA-256 of the token the running build deploys with, until it expires. */
     tokenHash: text("token_hash"),
     tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),

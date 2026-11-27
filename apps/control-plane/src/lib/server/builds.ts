@@ -21,15 +21,18 @@ import { readOnly, transact } from "./transactions.ts";
 /** The app CI, which keeps each build's outcome until it is released. */
 export interface AppCi {
   build: (request: z.infer<typeof ciBuildRequest>) => Promise<z.infer<typeof ciBuildResult>>;
-  /** The outcome of a build that already ran. */
-  result: (id: string) => Promise<z.infer<typeof ciBuildResult> | null>;
+  /** The outcome of a build that ran, waiting for one that is running. */
+  result: (
+    request: z.infer<typeof ciBuildRequest>,
+  ) => Promise<z.infer<typeof ciBuildResult> | null>;
   release: (id: string) => Promise<void>;
 }
 
 /** The CI Worker's `AppCi` entrypoint, whose answers are checked like any other input. */
 export const bindingAppCi = (binding: AppCi): AppCi => ({
   build: async (request) => ciBuildResult.parse(await binding.build(ciBuildRequest.parse(request))),
-  result: async (id) => ciBuildResult.nullable().parse(await binding.result(id)),
+  result: async (request) =>
+    ciBuildResult.nullable().parse(await binding.result(ciBuildRequest.parse(request))),
   release: (id) => binding.release(id),
 });
 
@@ -54,127 +57,144 @@ const unavailable = () =>
 export const createBuildService = (
   database: Database,
   source?: SourceBackend,
-  run?: (id: string) => Promise<void>,
-) => ({
-  available: Boolean(source && run),
-  start: (
-    principal: Principal,
-    signIn: SignIn,
-    appId: string,
-    input: z.infer<typeof contract.appBuildInput>,
-  ) =>
-    Result.gen(async function* () {
-      if (!source || !run) return yield* unavailable();
+  workflows?: { start: (id: string) => Promise<void>; ended: (id: string) => Promise<boolean> },
+) => {
+  // A build whose workflow ended without finishing it reports that it failed.
+  const reconcile = async (record: typeof appBuilds.$inferSelect) => {
+    if (!workflows || (record.status !== "queued" && record.status !== "running")) return record;
 
-      const build = yield* Result.await(
-        transact(database, async (transaction) => {
-          const target = await sourceTarget(transaction, principal, appId);
+    const ended = await workflows.ended(record.id).catch(() => false);
 
-          if (target.isErr()) return target;
-          const { app, id: repository, branch } = target.value;
+    return ended
+      ? { ...record, status: "failed" as const, message: "The build stopped before it finished" }
+      : record;
+  };
 
-          if (app.parentId && !app.sourceBranch)
-            return Result.err(
-              new InvalidOperation({
-                code: "CONFLICT",
-                message:
-                  "This preview was created without a Git branch. Create a preview from a work branch to build it",
-              }),
-            );
-
-          // An app without saved source has no repository yet.
-          const commit =
-            (await sourceOperation(() => source.repository(repository))) &&
-            (await sourceOperation(() => source.head(repository, branch)));
-
-          if (!commit)
-            return Result.err(
-              new InvalidOperation({
-                code: "CONFLICT",
-                message: `The branch ${branch} has no commits. Save source with widefleet deploy first`,
-              }),
-            );
-
-          // A build uses the project directory of the active deployment unless told otherwise.
-          const [active] = app.activeDeploymentId
-            ? await transaction
-                .select({ metadata: artifacts.metadata })
-                .from(deployments)
-                .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
-                .where(eq(deployments.id, app.activeDeploymentId))
-            : [];
-
-          const directory =
-            input.directory ??
-            (active
-              ? contract.workerMetadata.parse(active.metadata).source?.directory
-              : undefined) ??
-            ".";
-
-          const [record] = await transaction
-            .insert(appBuilds)
-            .values({
-              id: crypto.randomUUID(),
-              appId,
-              actor: deploymentActor.parse({
-                id: principal.id,
-                admin: principal.admin,
-                application: principal.application,
-              }),
-              commit,
-              branch,
-              directory,
-              identityOrganizationId: signIn.identityOrganizationId,
-              recovery: signIn.recovery,
-            })
-            .returning();
-
-          if (!record) throw new Error("The build was not recorded");
-
-          // The build is recorded only with its workflow; one that starts before
-          // the commit waits for the record.
-          await run(record.id);
-
-          return Result.ok(record);
-        }),
-      );
-
-      return Result.ok(presentBuild(build));
-    }),
-  list: (principal: Principal, appId: string) =>
-    readOnly(database, (executor) =>
+  return {
+    available: Boolean(source && workflows),
+    start: (
+      principal: Principal,
+      /** How the starter signed in, and whether their credential may read. */
+      signIn: SignIn & { reads: boolean },
+      appId: string,
+      input: z.infer<typeof contract.appBuildInput>,
+    ) =>
       Result.gen(async function* () {
-        yield* Result.await(readableApp(executor, principal, appId));
+        if (!source || !workflows) return yield* unavailable();
 
-        const records = await executor
-          .select()
-          .from(appBuilds)
-          .where(eq(appBuilds.appId, appId))
-          .orderBy(desc(appBuilds.createdAt))
-          .limit(50);
+        const build = yield* Result.await(
+          transact(database, async (transaction) => {
+            const target = await sourceTarget(transaction, principal, appId);
 
-        return Result.ok(records.map(presentBuild));
-      }),
-    ),
-  read: (principal: Principal, appId: string, buildId: string) =>
-    readOnly(database, (executor) =>
-      Result.gen(async function* () {
-        yield* Result.await(readableApp(executor, principal, appId));
+            if (target.isErr()) return target;
+            const { app, id: repository, branch } = target.value;
 
-        const [record] = await executor
-          .select()
-          .from(appBuilds)
-          .where(and(eq(appBuilds.id, buildId), eq(appBuilds.appId, appId)));
+            if (app.parentId && !app.sourceBranch)
+              return Result.err(
+                new InvalidOperation({
+                  code: "CONFLICT",
+                  message:
+                    "This preview was created without a Git branch. Create a preview from a work branch to build it",
+                }),
+              );
 
-        if (!record)
-          return yield* new InvalidOperation({ code: "NOT_FOUND", message: "Build not found" });
+            // An app without saved source has no repository yet.
+            const commit =
+              (await sourceOperation(() => source.repository(repository))) &&
+              (await sourceOperation(() => source.head(repository, branch)));
 
-        return Result.ok(
-          contract.appBuildDetails.parse({ ...presentBuild(record), log: record.log }),
+            if (!commit)
+              return Result.err(
+                new InvalidOperation({
+                  code: "CONFLICT",
+                  message: `The branch ${branch} has no commits. Save source with widefleet deploy first`,
+                }),
+              );
+
+            // A build uses the project directory of the active deployment unless told otherwise.
+            const [active] = app.activeDeploymentId
+              ? await transaction
+                  .select({ metadata: artifacts.metadata })
+                  .from(deployments)
+                  .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+                  .where(eq(deployments.id, app.activeDeploymentId))
+              : [];
+
+            const directory =
+              input.directory ??
+              (active
+                ? contract.workerMetadata.parse(active.metadata).source?.directory
+                : undefined) ??
+              ".";
+
+            const [record] = await transaction
+              .insert(appBuilds)
+              .values({
+                id: crypto.randomUUID(),
+                appId,
+                actor: deploymentActor.parse({
+                  id: principal.id,
+                  admin: principal.admin,
+                  application: principal.application,
+                }),
+                commit,
+                branch,
+                directory,
+                identityOrganizationId: signIn.identityOrganizationId,
+                recovery: signIn.recovery,
+                reads: signIn.reads,
+              })
+              .returning();
+
+            if (!record) throw new Error("The build was not recorded");
+
+            // The build is recorded only with its workflow; one that starts before
+            // the commit waits for the record.
+            await workflows.start(record.id);
+
+            return Result.ok(record);
+          }),
         );
+
+        return Result.ok(presentBuild(build));
       }),
-    ),
-});
+    list: (principal: Principal, appId: string) =>
+      readOnly(database, (executor) =>
+        Result.gen(async function* () {
+          yield* Result.await(readableApp(executor, principal, appId));
+
+          const records = await executor
+            .select()
+            .from(appBuilds)
+            .where(eq(appBuilds.appId, appId))
+            .orderBy(desc(appBuilds.createdAt))
+            .limit(50);
+
+          return Result.ok((await Promise.all(records.map(reconcile))).map(presentBuild));
+        }),
+      ),
+    read: (principal: Principal, appId: string, buildId: string) =>
+      readOnly(database, (executor) =>
+        Result.gen(async function* () {
+          yield* Result.await(readableApp(executor, principal, appId));
+
+          const [record] = await executor
+            .select()
+            .from(appBuilds)
+            .where(and(eq(appBuilds.id, buildId), eq(appBuilds.appId, appId)));
+
+          if (!record)
+            return yield* new InvalidOperation({ code: "NOT_FOUND", message: "Build not found" });
+
+          const current = await reconcile(record);
+
+          return Result.ok(
+            contract.appBuildDetails.parse({ ...presentBuild(current), log: current.log }),
+          );
+        }),
+      ),
+  };
+};
 
 export type BuildService = ReturnType<typeof createBuildService>;
 
@@ -282,11 +302,6 @@ export const executeBuild = async (
     await ci.release(id);
   };
 
-  // A run that stopped after publishing does not build again.
-  const previous = await published();
-
-  if (previous) return conclude(await ci.result(id), previous);
-
   const actor = deploymentActor.parse(build.actor);
 
   const repository = await sourceOperation(() => source.repository(parentId ?? build.appId));
@@ -298,7 +313,7 @@ export const executeBuild = async (
     return;
   }
 
-  const result = await ci.build({
+  const request = {
     id,
     appId: build.appId,
     platform: {
@@ -312,14 +327,32 @@ export const executeBuild = async (
       branch: build.branch,
       directory: build.directory,
     }),
-  });
+  };
+
+  // A run that stopped after publishing does not build again; it waits for
+  // the CI if the build is still finishing there.
+  const previous = await published();
+
+  if (previous) return conclude(await ci.result(request), previous);
+
+  const result = await ci.build(request);
 
   return conclude(result, await published());
 };
 
-/** Records a build whose runs all failed. */
-export const failBuild = (database: Database, id: string, message: string) =>
-  database
+/**
+ * Records a build whose runs all failed. A workflow can fail before the request
+ * that started it has committed the build, so a missing build is retried.
+ */
+export const failBuild = async (database: Database, id: string, message: string) => {
+  const [recorded] = await database
+    .select({ id: appBuilds.id })
+    .from(appBuilds)
+    .where(eq(appBuilds.id, id));
+
+  if (!recorded) throw new Error("The build is not recorded");
+
+  await database
     .update(appBuilds)
     .set({
       status: "failed",
@@ -329,3 +362,4 @@ export const failBuild = (database: Database, id: string, message: string) =>
       finishedAt: new Date(),
     })
     .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])));
+};
