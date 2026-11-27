@@ -17,7 +17,7 @@ import { registerCloudflareOperation } from "./cloudflare-operations.ts";
 import type { Database } from "./database.ts";
 import { deploymentCommand, type HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { validateNetworkChange } from "./network.ts";
+import { presentNetwork, validateNetworkChange } from "./network.ts";
 import { apps, artifacts, deployments } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
@@ -197,6 +197,10 @@ export const createCloudflareExecution = (
       );
 
       if (allowed.isErr()) return allowed;
+
+      // Only a failed activation has anything to retry; another retry starts no hosted work.
+      if (input.action === "retry" && !allowed.value.networkError)
+        return Result.ok(presentNetwork(allowed.value));
 
       const accepted = await admit({
         kind: "network",

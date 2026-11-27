@@ -10,7 +10,7 @@ import { apps, artifacts, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 
-const present = (app: typeof apps.$inferSelect) =>
+export const presentNetwork = (app: typeof apps.$inferSelect) =>
   contract.networkState.parse({
     revision: app.networkRevision,
     policy: app.networkPolicy,
@@ -84,7 +84,7 @@ export const applyNetworkChange = async (
     changed = current.length !== selected.size || current.some((origin) => !selected.has(origin));
   }
 
-  if (!changed && !app.networkError) return Result.ok(present(app));
+  if (!changed && !app.networkError) return Result.ok(presentNetwork(app));
 
   const [updated] = await transaction
     .update(apps)
@@ -108,7 +108,7 @@ export const applyNetworkChange = async (
       kind: "configure",
     });
 
-  return Result.ok(present(updated));
+  return Result.ok(presentNetwork(updated));
 };
 
 // The origins the app's latest deployment declares, as the current version.
@@ -156,7 +156,10 @@ const view = (
     if (app.isErr()) return app;
 
     return Result.ok({
-      network: withDeclaration(present(app.value), await declaredNetwork(transaction, appId)),
+      network: withDeclaration(
+        presentNetwork(app.value),
+        await declaredNetwork(transaction, appId),
+      ),
       canManage: app.value.state !== "deleting" && mayChange(principal, app.value),
     });
   });

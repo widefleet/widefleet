@@ -8,7 +8,7 @@ import {
   ListObjectsV2Command,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { expect, test, type APIResponse } from "@playwright/test";
+import { expect, test, type APIResponse, type Route } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
 import { EventEmitter, once } from "node:events";
@@ -611,6 +611,8 @@ test(`lets owners allow and remove network origins beside the app's connections`
       .click();
     await expect(allowed.getByText("api.example.test")).toBeVisible();
     await expect(requested.getByText("api.example.test")).toHaveCount(0);
+    // The changed list is not reported as enforced before the runtime confirms it.
+    await expect(page.getByText("Applying changes")).toBeVisible();
     await release();
     await expect.poll(policy).toEqual({
       policy: { backend: ["https://api.example.test", "https://legacy.example.test"], browser: [] },
@@ -740,6 +742,29 @@ test(`lets owners allow and remove network origins beside the app's connections`
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await release();
     await expect.poll(policy).toEqual({ policy: { backend: [], browser: [] }, error: null });
+
+    // A failed refresh keeps the last loaded lists and says so once in a toast.
+    const failNetworkReads = async (route: Route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ status: 503, body: "Unavailable" })
+        : route.continue();
+
+    await page.route("**/_app/remote/*/getAppNetwork*", failNetworkReads);
+    await page.getByRole("button", { name: "Refresh app" }).click();
+    const refreshFailure = page.getByText("Could not refresh the network permissions.");
+    await expect(refreshFailure).toBeVisible();
+    await expect(requested.getByRole("listitem")).toHaveCount(3);
+    await page.screenshot({
+      path: testInfo.outputPath(`network-refresh-failed-1280-light.png`),
+      fullPage: true,
+    });
+    // Further failed refreshes during the same outage add no toast.
+    await page.getByRole("button", { name: "Refresh app" }).click();
+    await expect(page.getByRole("button", { name: "Refresh app" })).toBeEnabled();
+    await expect(refreshFailure).toHaveCount(1);
+    await page.unroute("**/_app/remote/*/getAppNetwork*", failNetworkReads);
+    await page.getByRole("button", { name: "Refresh app" }).click();
+    await expect(requested.getByRole("listitem")).toHaveCount(3);
 
     // Collaborators see the permissions without the controls to change them.
     const collaboratorPage = await collaboratorContext.newPage();

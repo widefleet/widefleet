@@ -1344,6 +1344,46 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(await host(hostname)).toBeNull();
     });
 
+    it("starts no hosted work for a retry without a failed network activation", async () => {
+      const appId = crypto.randomUUID();
+      const id = crypto.randomUUID();
+      await environment.database.db.insert(apps).values({
+        id: appId,
+        slug: `fixture-${appId}`,
+        displayName: "Retry fixture",
+        organizationId: first.organizationId,
+        ownerId: "fixture-owner",
+        hostname: `fixture-${appId}.example.test`,
+        networkPolicy: { backend: ["https://example.com"], browser: [] },
+        networkRevision: 1,
+      });
+
+      const response = await worker.fetch("http://fixture/start", {
+        method: "POST",
+        body: JSON.stringify({
+          id,
+          appId,
+          kind: "network",
+          actor: { id: "fixture-owner", admin: false, application: environment.application },
+          input: { action: "retry" },
+          createdAt: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        revision: 1,
+        policy: { backend: ["https://example.com"], browser: [] },
+        error: null,
+      });
+      expect(
+        await environment.database.db
+          .select()
+          .from(cloudflareOperations)
+          .where(eq(cloudflareOperations.appId, appId)),
+      ).toEqual([]);
+    });
+
     it("rejects grants to undeployed app entrypoints without publishing them", async () => {
       const before = await host(first.hostname);
       const entry = await seedDeployment(environment.database.db, { appId: first.appId });

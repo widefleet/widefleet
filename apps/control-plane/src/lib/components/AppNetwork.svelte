@@ -40,6 +40,24 @@
 
   const network = $derived(view.network);
 
+  // A failed refresh keeps the last loaded lists. The page refreshes every few seconds, so the
+  // toast appears once per outage and again only after a refresh has succeeded in between.
+  let refreshFailureShown = false;
+
+  $effect(() => {
+    if (!request.error) {
+      refreshFailureShown = false;
+
+      return;
+    }
+
+    if (refreshFailureShown) return;
+    refreshFailureShown = true;
+    toast.error("Could not refresh the network permissions.", {
+      description: "The last loaded permissions are shown.",
+    });
+  });
+
   const targets = ["backend", "browser"] as const satisfies readonly Target[];
 
   const targetLabels = { backend: "Backend", browser: "Browser" } satisfies Record<Target, string>;
@@ -91,11 +109,15 @@
       return { backend: lacking("backend"), browser: lacking("browser") };
     };
 
+    const changed = after.size !== before.length || before.some((origin) => !after.has(origin));
+
     return {
       ...current,
       network: {
         ...current.network,
         policy,
+        // A changed list is not enforced until the runtime confirms it.
+        state: changed && current.network.state === "active" ? "pending" : current.network.state,
         ...(current.network.requested && {
           requested: missing(declared, (list) => policy[list]),
           undeclared: missing((list) => policy[list], declared),
