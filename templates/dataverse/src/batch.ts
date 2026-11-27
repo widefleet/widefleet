@@ -324,11 +324,14 @@ export const batch = async (
   });
 
   // Whether a new row goes to an entity set needs the environment's entity sets.
-  const needsSets = plan.some((part) =>
-    part.items.some(({ item, path }) => item.method !== "GET" && !path.startsWith("$")),
+  // The tables a change addresses, which the environment must list as entity sets.
+  const roots = plan.flatMap((part) =>
+    part.items.flatMap(({ item, path }) =>
+      item.method !== "GET" && !path.startsWith("$") ? [/^[^(/]*/.exec(path)?.[0] ?? ""] : [],
+    ),
   );
 
-  const sets = needsSets ? await entitySets(environment, connection, root.href) : null;
+  const sets = roots.length ? await entitySets(environment, connection, root.href, roots) : null;
 
   if (sets?.status === "failed") return sets.result;
 

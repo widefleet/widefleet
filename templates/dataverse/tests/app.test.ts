@@ -259,9 +259,11 @@ describe("Dataverse personal account app", () => {
     });
     expect(upstream.calls).toHaveLength(2);
 
-    // An action at the address of a table is never created as a row.
+    // An action at the address of a table is never created as a row; a name the
+    // kept entity sets lack is checked against the service document again.
     expect((await alice.request("/rpc/create?set=BulkDelete")).status).toBe(500);
     expect(upstream.calls.at(-1)).toMatchObject({ method: "GET", url: `${sales}/` });
+    expect(upstream.calls.filter(({ method }) => method === "GET")).toHaveLength(2);
 
     // A column is created through its table's navigation property; a bound
     // action at that address is not.
@@ -270,8 +272,9 @@ describe("Dataverse personal account app", () => {
       status: "connected",
       data: null,
     });
+    // The environment's entity sets are kept, so a table it listed is not read again.
     expect(upstream.calls.map(({ method, url }) => `${method} ${decodeURIComponent(url)}`)).toEqual(
-      [`GET ${sales}/`, `POST ${sales}/EntityDefinitions(LogicalName='new_scrap')/Attributes`],
+      [`POST ${sales}/EntityDefinitions(LogicalName='new_scrap')/Attributes`],
     );
 
     for (const query of [

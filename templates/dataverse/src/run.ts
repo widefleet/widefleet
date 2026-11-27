@@ -34,12 +34,29 @@ type Connection = ReturnType<typeof accountConnection>;
 export const serviceRoot = (url: string) =>
   new URL(new URL(base.replace("{environment}", "environment")).pathname, url);
 
+// Each environment's entity sets, kept for a while: the service document lists
+// hundreds of them and changes only when a table is added or removed.
+const cachedSets = new Map<string, { names: Set<string>; until: number }>();
+
+const cacheMilliseconds = 10 * 60 * 1000;
+
 /**
  * The names of the environment's entity sets, from its service document, or
- * the result to return when it cannot be read.
+ * the result to return when it cannot be read. The document is read again when
+ * one of `wanted` is missing, such as a table created since it was kept.
  */
-export const entitySets = async (environment: Environment, connection: Connection, url: string) => {
+export const entitySets = async (
+  environment: Environment,
+  connection: Connection,
+  url: string,
+  wanted: readonly string[],
+) => {
   const root = serviceRoot(url);
+  const cached = cachedSets.get(root.origin);
+
+  if (cached && cached.until > Date.now() && wanted.every((name) => cached.names.has(name)))
+    return { status: "read", names: cached.names } as const;
+
   const listed = await connection.send(root.href, { headers: { accept: "application/json" } });
 
   if (listed.status !== "connected") return { status: "failed", result: listed } as const;
@@ -58,12 +75,16 @@ export const entitySets = async (environment: Environment, connection: Connectio
       ),
     } as const;
 
-  const names = serviceDocument
-    .parse(read.body)
-    .value.filter((set) => (set.kind ?? "EntitySet") === "EntitySet")
-    .map((set) => set.name);
+  const names = new Set(
+    serviceDocument
+      .parse(read.body)
+      .value.filter((set) => (set.kind ?? "EntitySet") === "EntitySet")
+      .map((set) => set.name),
+  );
 
-  return { status: "read", names: new Set(names) } as const;
+  cachedSets.set(root.origin, { names, until: Date.now() + cacheMilliseconds });
+
+  return { status: "read", names } as const;
 };
 
 /**
@@ -216,11 +237,12 @@ export const runOperation = async <T>(
         "createRelatedRow's navigationProperty must be a navigation property, such as Attributes. Call actions with their own method or callAction.",
       );
 
-    const sets = await entitySets(environment, connection, request.url);
+    const entitySet = z.string().parse(input["entitySet"]);
+    const sets = await entitySets(environment, connection, request.url, [entitySet]);
 
     if (sets.status === "failed") return sets.result;
 
-    if (!sets.names.has(z.string().parse(input["entitySet"])))
+    if (!sets.names.has(entitySet))
       throw new InvalidRequest(
         `${method}'s entitySet must be an entity set of the environment, such as accounts. Call actions with their own method or callAction.`,
       );
