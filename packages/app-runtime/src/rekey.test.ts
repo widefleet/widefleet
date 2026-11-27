@@ -120,14 +120,18 @@ describe("runtime storage rewrite", () => {
     );
     packages.write(
       snapshot(2),
-      JSON.stringify({ ciphertext: await encryptText(earlier, snapshot(2), '{"A":"two"}') }),
+      JSON.stringify({
+        ciphertext: await encryptText(earlier, "app-secrets", snapshot(2), '{"A":"two"}'),
+      }),
     );
     packages.write(
       snapshot(3),
-      JSON.stringify({ ciphertext: await encryptText(rotated, snapshot(3), '{"A":"three"}') }),
+      JSON.stringify({
+        ciphertext: await encryptText(rotated, "app-secrets", snapshot(3), '{"A":"three"}'),
+      }),
     );
     packages.write(appKey, await appKeyBeforeKeyring(2, appId, material));
-    packages.write(ring, await encryptText(earlier, ring, '{"KEYRING":"ring"}'));
+    packages.write(ring, await encryptText(earlier, "workload-keys", ring, '{"KEYRING":"ring"}'));
     packages.write(earlierRing, "an earlier ring that is no longer read");
 
     expect(await pass(packages)).toMatchObject({
@@ -141,19 +145,24 @@ describe("runtime storage rewrite", () => {
 
     for (const index of [1, 2, 3])
       expect(keyVersion(ciphertext.parse(JSON.parse(stored(snapshot(index)))).ciphertext)).toBe(
-        "two",
+        "two:app-secrets",
       );
     expect(
       await decryptText(
         rotated,
+        "app-secrets",
         snapshot(1),
         ciphertext.parse(JSON.parse(stored(snapshot(1)))).ciphertext,
       ),
     ).toBe('{"A":"one"}');
     expect(stored(snapshot(1))).not.toContain("fingerprint");
-    expect(keyVersion(stored(ring))).toBe("two");
-    expect(await decryptText(rotated, ring, stored(ring))).toBe('{"KEYRING":"ring"}');
-    expect(keyVersion(ciphertext.parse(JSON.parse(stored(appKey))).ciphertext)).toBe("two");
+    expect(keyVersion(stored(ring))).toBe("two:workload-keys");
+    expect(await decryptText(rotated, "workload-keys", ring, stored(ring))).toBe(
+      '{"KEYRING":"ring"}',
+    );
+    expect(keyVersion(ciphertext.parse(JSON.parse(stored(appKey))).ciphertext)).toBe(
+      "two:app-keys",
+    );
 
     // The app key keeps its bytes, so its ciphertexts and signatures stay valid.
     expect(
@@ -183,6 +192,7 @@ describe("runtime storage rewrite", () => {
 
     const unknown = await encryptText(
       { WIDEFLEET_SECRETS_KEYS: testKeyring(["other", 9]) },
+      "app-secrets",
       snapshot(1),
       "{}",
     );
@@ -191,7 +201,7 @@ describe("runtime storage rewrite", () => {
     // A value moved to another object fails its context check.
     packages.write(
       snapshot(2),
-      JSON.stringify({ ciphertext: await encryptText(earlier, snapshot(3), "{}") }),
+      JSON.stringify({ ciphertext: await encryptText(earlier, "app-secrets", snapshot(3), "{}") }),
     );
     packages.write(`app-keys/${appId}/nested/name.json`, "{}");
 
@@ -213,17 +223,20 @@ describe("runtime storage rewrite", () => {
 
     packages.write(
       snapshot(1),
-      JSON.stringify({ ciphertext: await encryptText(earlier, snapshot(1), '{"A":"old"}') }),
+      JSON.stringify({
+        ciphertext: await encryptText(earlier, "app-secrets", snapshot(1), '{"A":"old"}'),
+      }),
     );
     // A snapshot prepared again under the active version replaces it meanwhile.
     concurrent = JSON.stringify({
-      ciphertext: await encryptText(rotated, snapshot(1), '{"A":"new"}'),
+      ciphertext: await encryptText(rotated, "app-secrets", snapshot(1), '{"A":"new"}'),
     });
 
     expect(await pass(packages)).toMatchObject({ current: 0, rewritten: 0, conflicts: 1 });
     expect(
       await decryptText(
         rotated,
+        "app-secrets",
         snapshot(1),
         ciphertext.parse(JSON.parse(packages.objects.get(snapshot(1))?.value ?? "")).ciphertext,
       ),
@@ -235,7 +248,7 @@ describe("runtime storage rewrite", () => {
 
     packages.write(
       snapshot(1),
-      JSON.stringify({ ciphertext: await encryptText(earlier, snapshot(1), "{}") }),
+      JSON.stringify({ ciphertext: await encryptText(earlier, "app-secrets", snapshot(1), "{}") }),
     );
 
     expect(await pass(packages)).toMatchObject({ current: 0, rewritten: 0, unreadable: 0 });
@@ -248,7 +261,9 @@ describe("runtime storage rewrite", () => {
     for (let index = 0; index < 120; index++)
       packages.write(
         snapshot(index),
-        JSON.stringify({ ciphertext: await encryptText(earlier, snapshot(index), "{}") }),
+        JSON.stringify({
+          ciphertext: await encryptText(earlier, "app-secrets", snapshot(index), "{}"),
+        }),
       );
 
     const total = await pass(packages);
