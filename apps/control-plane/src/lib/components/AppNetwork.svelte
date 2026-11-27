@@ -176,9 +176,15 @@
   const retry = () => {
     const { organizationId } = workspace;
 
+    // The failure clears at once; the server's answer replaces the pending state.
+    const override = getAppNetwork({ organizationId, appId }).withOverride((current) => ({
+      ...current,
+      network: { ...current.network, state: "pending", error: null },
+    }));
+
     enqueue(
       organizationId,
-      () => retryAppNetwork({ organizationId, appId }),
+      () => retryAppNetwork({ organizationId, appId }).updates(override),
       "Could not apply the network permissions again.",
     );
   };

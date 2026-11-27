@@ -720,6 +720,9 @@ test(`lets owners allow and remove network origins beside the app's connections`
       .set({ networkPolicy: { backend: [], browser: ["https://partner.example.test"] } })
       .where(eq(apps.id, appId));
     await page.getByRole("button", { name: "Retry", exact: true }).click();
+    // The failure clears at once, before the server answers.
+    await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("Applying changes")).toBeVisible();
     await release();
     await expect.poll(policy).toEqual({
       policy: { backend: [], browser: ["https://partner.example.test"] },
