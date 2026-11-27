@@ -144,6 +144,12 @@ const refreshFailure = (cause: unknown): CompanyRenewal => {
 
   if (failure.status === 403) return { status: "denied" };
 
+  // The provider rejected Widefleet's client credentials, for example after a
+  // client secret expired. Signing in again needs the same credentials, so keep the
+  // authorization until an administrator replaces them.
+  if (failure.error === "invalid_client" || failure.status === 401)
+    return { status: "unavailable" };
+
   // Keep the authorization through outages and rate limits. Any other provider
   // rejection or malformed token response fails again on retry; a new sign-in can
   // still succeed, so it must not leave the person stuck.

@@ -326,7 +326,15 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit(configuration, cookie)).status).toBe(401);
   });
 
-  it.each(["invalid_grant", "invalid_request", "invalid_client", "missing-refresh-token"])(
+  it("keeps the login while the provider rejects the client credentials", async () => {
+    idp.settings.refreshFailure = "invalid_client";
+    expireIdentity();
+    expect((await visit()).status).toBe(503);
+    idp.settings.refreshFailure = "";
+    expect((await visit()).status).toBe(200);
+  });
+
+  it.each(["invalid_grant", "invalid_request", "missing-refresh-token"])(
     "requires login after %s",
     async (failure) => {
       if (failure === "missing-refresh-token") {

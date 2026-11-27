@@ -89,6 +89,18 @@ describe("Company OAuth credentials for MCP", () => {
     },
   );
 
+  it("keeps the grant while the provider rejects the client credentials", async () => {
+    const { provider, code, verifier, nonce } = await start();
+    const credential = await provider.exchange(code, verifier, nonce);
+    idp.settings.refreshFailure = "invalid_client";
+
+    expect((await (await companyOAuth(configuration())).renew(credential)).status).toBe(
+      "unavailable",
+    );
+    idp.settings.refreshFailure = "";
+    expect((await (await companyOAuth(configuration())).renew(credential)).status).toBe("renewed");
+  });
+
   it("binds authorization to the initiating nonce", async () => {
     const { provider, code, verifier } = await start();
     await expect(provider.exchange(code, verifier, "wrong-nonce")).rejects.toThrow();
