@@ -97,7 +97,7 @@ describe("Auth proxy session lifecycle", () => {
     idp.settings.name = "Example User";
     idp.settings.groups = ["accounting"];
     idp.settings.graphFailure = "";
-    idp.settings.keys = "published";
+    idp.settings.keysAvailable = true;
     idp.settings.refreshReplaySeconds = 30;
     idp.refreshRequests.length = 0;
     cookie = await login();
@@ -289,13 +289,13 @@ describe("Auth proxy session lifecycle", () => {
     idp.settings.rotateRefreshTokens = true;
     idp.settings.refreshReplaySeconds = 0;
     expireIdentity();
-    idp.settings.keys = "unavailable";
+    idp.settings.keysAvailable = false;
     const unavailable = await visit();
 
     expect(unavailable.status).toBe(503);
     expect(cookies(unavailable)).toContain(".account_data=");
     expect(cookies(unavailable)).not.toContain(".session_data=");
-    idp.settings.keys = "published";
+    idp.settings.keysAvailable = true;
 
     // The browser keeps its session and stores the rotated provider credential.
     const rotated = [

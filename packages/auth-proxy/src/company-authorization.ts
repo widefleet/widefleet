@@ -37,12 +37,6 @@ class CompanySignInRequired extends Error {}
 
 class SigningKeysUnavailable extends Error {}
 
-// jose codes for a key set that could not be downloaded or read. Every other key
-// resolution failure, such as no key for the token, is a property of the token.
-const keySetOutages = new Set(["ERR_JWKS_TIMEOUT", "ERR_JOSE_GENERIC", "ERR_JWKS_INVALID"]);
-
-const joseFailure = z.object({ code: z.string() });
-
 const tokens = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().min(1).optional(),
@@ -97,18 +91,7 @@ const resolveSigningKey = async (provider: OAuthProvider, idToken: string) => {
   try {
     await config.jwks({ ...header, alg }, { protected: encodedHeader, payload, signature });
   } catch (cause) {
-    const failure = joseFailure.safeParse(cause);
-
-    // A download that fails before jose sees a response surfaces as a fetch error.
-    if (!failure.success || keySetOutages.has(failure.data.code))
-      throw new SigningKeysUnavailable(
-        `Company signing keys are unavailable (${failure.success ? failure.data.code : "network"})`,
-        { cause },
-      );
-
-    throw new CompanySignInRequired(
-      `The company ID token has no usable key (${failure.data.code})`,
-    );
+    throw new SigningKeysUnavailable("Company signing keys are unavailable", { cause });
   }
 };
 
@@ -159,19 +142,16 @@ const refreshFailure = (cause: unknown): CompanyRenewal => {
 
   if (failure.error === "invalid_grant") return { status: "sign-in-required" };
 
-  if (failure.error === "temporarily_unavailable") return { status: "unavailable" };
-
   if (failure.status === 403) return { status: "denied" };
 
-  // Keep the authorization through outages, timeouts and rate limits. Any other
-  // provider rejection or malformed token response fails again on retry; a new
-  // sign-in can still succeed, so it must not leave the person stuck.
+  // Keep the authorization through outages and rate limits. Any other provider
+  // rejection or malformed token response fails again on retry; a new sign-in can
+  // still succeed, so it must not leave the person stuck.
   if (
     cause instanceof z.ZodError ||
     (failure.status !== undefined &&
       failure.status >= 400 &&
       failure.status < 500 &&
-      failure.status !== 408 &&
       failure.status !== 429)
   )
     return { status: "sign-in-required" };
@@ -222,8 +202,7 @@ const exchange = (
 // renewal is due, persists the returned credential and maps the result to its
 // protocol. The previous authorization never gains time without a verified identity.
 export const renewCompanyAuthorization = async (
-  // Absent when provider discovery failed for this request.
-  provider: OAuthProvider | undefined,
+  provider: OAuthProvider,
   verified: () => CompanyAuthorization | undefined,
   previous: CompanyAuthorization,
   credential: {
@@ -241,7 +220,7 @@ export const renewCompanyAuthorization = async (
   )
     return { status: "sign-in-required" };
 
-  if (!provider?.refreshAccessToken) {
+  if (!provider.refreshAccessToken) {
     logFailure("discovery");
 
     return { status: "unavailable" };

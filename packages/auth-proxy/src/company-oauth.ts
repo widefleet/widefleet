@@ -46,20 +46,13 @@ export const companyOAuth = async (configuration: AuthConfiguration) => {
   });
 
   const context = await auth.$context;
-  // Better Auth skips a provider whose discovery failed. Renewal reports that as an
-  // outage; sign-in cannot start without it.
   const provider = context.socialProviders.find((candidate) => candidate.id === "company");
 
-  const signIn = () => {
-    if (!provider) throw new Error("Company sign-in is unavailable");
-
-    return provider;
-  };
-
+  if (!provider) throw new Error("Company sign-in is unavailable");
   const version = await sessionVersion(configuration);
 
   const identify = async (tokens: z.infer<typeof companyTokens>, nonce: string) => {
-    const current = await verifyCompanyIdentity(signIn(), () => verified, {
+    const current = await verifyCompanyIdentity(provider, () => verified, {
       ...tokens,
       expectedIdTokenNonce: nonce,
     });
@@ -78,7 +71,7 @@ export const companyOAuth = async (configuration: AuthConfiguration) => {
     version,
     identify,
     authorize: async (state: string, verifier: string, nonce: string, loginHint?: string) =>
-      signIn().createAuthorizationURL({
+      provider.createAuthorizationURL({
         state,
         codeVerifier: verifier,
         idTokenNonce: nonce,
@@ -88,7 +81,7 @@ export const companyOAuth = async (configuration: AuthConfiguration) => {
     exchange: async (code: string, verifier: string, nonce: string) =>
       identify(
         companyTokens.parse(
-          await signIn().validateAuthorizationCode({
+          await provider.validateAuthorizationCode({
             code,
             codeVerifier: verifier,
             redirectURI: configuration.redirectUrl,

@@ -63,13 +63,13 @@ describe("Company OAuth credentials for MCP", () => {
     idp.settings.rotateRefreshTokens = true;
     const { provider, code, verifier, nonce } = await start();
     const credential = await provider.exchange(code, verifier, nonce);
-    idp.settings.keys = "unavailable";
+    idp.settings.keysAvailable = false;
     const unavailable = await (await companyOAuth(configuration())).renew(credential);
 
     expect(unavailable.status).toBe("unavailable");
     expect(unavailable.credential?.authorization).toEqual(credential.authorization);
     expect(unavailable.credential?.refreshToken).not.toBe(credential.refreshToken);
-    idp.settings.keys = "published";
+    idp.settings.keysAvailable = true;
     idp.settings.groups = ["warehouse"];
 
     const renewed = await (
@@ -88,31 +88,6 @@ describe("Company OAuth credentials for MCP", () => {
       await expect(provider.exchange(code, verifier, nonce)).rejects.toThrow();
     },
   );
-
-  it.each([
-    {
-      cause: "a key set without the token's key",
-      status: "sign-in-required",
-      fail: { keys: "unknown" },
-    },
-    { cause: "an unverified email", status: "sign-in-required", fail: { failure: "email" } },
-    {
-      cause: "a temporarily unavailable token endpoint",
-      status: "unavailable",
-      fail: { refreshFailure: "temporarily_unavailable" },
-    },
-    {
-      cause: "a token endpoint timeout",
-      status: "unavailable",
-      fail: { refreshFailure: "timeout" },
-    },
-  ] as const)("renews after $cause with the result $status", async ({ fail, status }) => {
-    const { provider, code, verifier, nonce } = await start();
-    const credential = await provider.exchange(code, verifier, nonce);
-    Object.assign(idp.settings, fail);
-
-    expect((await (await companyOAuth(configuration())).renew(credential)).status).toBe(status);
-  });
 
   it("binds authorization to the initiating nonce", async () => {
     const { provider, code, verifier } = await start();

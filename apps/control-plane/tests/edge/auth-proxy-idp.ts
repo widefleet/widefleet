@@ -36,8 +36,7 @@ export const createIdentityProvider = async (
 
   const settings = {
     available: true,
-    // "unknown" publishes a key set without the key that signs tokens.
-    keys: z.enum(["published", "unavailable", "unknown"]).parse("published"),
+    keysAvailable: true,
     tokenSeconds: 3600,
     failure: "",
     entra: false,
@@ -61,14 +60,12 @@ export const createIdentityProvider = async (
   };
 
   const graphRequests: string[] = [];
-  const requests: string[] = [];
   const tokenOrigins: (string | undefined)[] = [];
   const refreshRequests: string[] = [];
 
   const server = createServer((request, response) => {
     const handle = async () => {
       const url = new URL(request.url ?? "/", origin);
-      requests.push(url.pathname);
 
       const issuer = settings.google
         ? "https://accounts.google.com"
@@ -99,13 +96,8 @@ export const createIdentityProvider = async (
           }),
         );
       } else if (url.pathname === "/jwks") {
-        if (settings.keys === "unavailable") response.writeHead(503).end();
-        else
-          response.end(
-            JSON.stringify({
-              keys: [settings.keys === "unknown" ? { ...publicKey, kid: "rotated" } : publicKey],
-            }),
-          );
+        if (settings.keysAvailable) response.end(JSON.stringify({ keys: [publicKey] }));
+        else response.writeHead(503).end();
       } else if (url.pathname === "/authorize") {
         const parameters = authorization.parse(Object.fromEntries(url.searchParams));
 
@@ -190,8 +182,6 @@ export const createIdentityProvider = async (
                   ["invalid_request", 400],
                   ["invalid_client", 401],
                   ["access_denied", 403],
-                  ["temporarily_unavailable", 400],
-                  ["timeout", 408],
                 ]).get(settings.refreshFailure) ?? 503,
               )
               .end(JSON.stringify({ error: settings.refreshFailure }));
@@ -349,7 +339,6 @@ export const createIdentityProvider = async (
     origin,
     settings,
     graphRequests,
-    requests,
     tokenOrigins,
     refreshRequests,
     stop: () =>
