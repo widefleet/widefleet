@@ -1,7 +1,8 @@
 import { createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { CompactEncrypt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
-import { parseKeyring } from "@platform/contracts/keyring";
+import { z } from "zod";
+import { createSealing, parseKeyring } from "@platform/contracts/keyring";
 import {
   ciphertextKeyVersion,
   configuredSecretEncryption,
@@ -143,13 +144,27 @@ describe("JWE ciphertexts", () => {
 
     expect(await encryption.decrypt(context, await sealed({}))).toBe("value");
 
-    const rejected = [
-      // A kid the keyring does not hold.
-      await sealed({ kid: `missing:${context.kind}` }),
+    const otherAlgorithms = [
       // A content encryption algorithm other than A256GCM.
       await sealed({ enc: "A128GCM" }, key.subarray(0, 16)),
       // A key management algorithm other than dir.
       await sealed({ alg: "A256KW" }),
+    ];
+
+    // The derived key would fail both anyway, so the allowlist must reject them first.
+    for (const value of otherAlgorithms)
+      await expect(
+        createSealing(fixture(), "control-plane").open(
+          context.kind,
+          z.string().parse(header["ctx"]),
+          value,
+        ),
+      ).rejects.toMatchObject({ code: "ERR_JOSE_ALG_NOT_ALLOWED" });
+
+    const rejected = [
+      // A kid the keyring does not hold.
+      await sealed({ kid: `missing:${context.kind}` }),
+      ...otherAlgorithms,
       // An altered authentication tag.
       [...parts.slice(0, 4), `${tag.at(0) === "A" ? "B" : "A"}${tag.slice(1)}`].join("."),
       "not-a-ciphertext",
