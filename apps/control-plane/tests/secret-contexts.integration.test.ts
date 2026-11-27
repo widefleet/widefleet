@@ -7,12 +7,9 @@ import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
 import { savePackage } from "../src/lib/server/package-storage.ts";
 import { agents, apps, jobs, organizationRuntimes } from "../src/lib/server/schema.ts";
-import { parseKeyring } from "@platform/contracts/keyring";
-import { createSecretEncryption, generateKeyring } from "../src/lib/server/secret-encryption.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
-import { checkSecretContexts } from "./secret-contexts.fixture.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -21,20 +18,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => environment?.close());
-
-it("rejects a read with a context other than the one the value was written with", async () => {
-  const encryption = checkSecretContexts(
-    createSecretEncryption({ keyring: parseKeyring(generateKeyring(), "test") }),
-  );
-
-  const written = { kind: "app-secret", organizationId: "one", appId: "app", name: "A" } as const;
-  const ciphertext = await encryption.encrypt(written, "value");
-
-  expect(await encryption.decrypt({ ...written }, ciphertext)).toBe("value");
-  await expect(encryption.decrypt({ ...written, name: "B" }, ciphertext)).rejects.toThrow(
-    "was read with",
-  );
-});
 
 it("reads an app's secrets in its deployment job with the context they were saved with", async () => {
   const database = environment.database.db;

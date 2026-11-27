@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
-import { CompactEncrypt } from "jose";
+import { CompactEncrypt, decodeProtectedHeader } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readAppLogin } from "../src/lib/server/app-login-client.ts";
 import { storedAppSecrets } from "../src/lib/server/app-secrets.ts";
@@ -25,7 +25,6 @@ import {
 import { readSsoConfiguration } from "../src/lib/server/sso-settings.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createTestEnvironment } from "./environment.ts";
-import { checkSecretContexts } from "./secret-contexts.fixture.ts";
 import { keySet, keyVersion, keysOf } from "./keyring.fixture.ts";
 
 const execute = promisify(execFile);
@@ -41,16 +40,20 @@ const oldest = keyVersion("oldest");
 const service = (keys: ReturnType<typeof keyVersion>[]) =>
   createSecretEncryption({ keyring: parseKeyring(keySet(...keys), "test") });
 
-/** Writes values under the oldest key version, with a context no reader checks. */
+/**
+ * Writes values as they were stored before keys per kind and context binding:
+ * the oldest version's bytes and its ID alone as `kid`.
+ */
 const older = (value: string) =>
-  service([oldest]).encrypt({ kind: "directory-client-secret", organizationId: "fixture" }, value);
+  new CompactEncrypt(new TextEncoder().encode(value))
+    .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: oldest.kid })
+    .encrypt(Buffer.from(oldest.k, "base64url"));
 
 /** The environment's key versions, which encrypted its fixture values. */
 const environmentKeys = () => keysOf(environment.environment.PLATFORM_ENCRYPTION_KEYS);
 
 /** The keyring after rotation: new active version, the environment's, then an older one. */
-const rotated = () =>
-  checkSecretContexts(service([current, ...environmentKeys(), previous, oldest]));
+const rotated = () => service([current, ...environmentKeys(), previous, oldest]);
 
 const directorySecret = async () =>
   (
@@ -125,7 +128,7 @@ describe("re-encryption", () => {
     const encryption = rotated();
     const before = await readSecretEncryption(database, encryption);
 
-    expect(before).toMatchObject({ activeKeyVersion: "current", failed: 0 });
+    expect(before).toMatchObject({ activeKeyVersion: "current", earlierFormat: 5, failed: 0 });
     expect(before.keyVersions).toMatchObject({ current: 0, previous: 3, oldest: 5 });
     expect(incomplete(before)).toBe(true);
 
@@ -134,7 +137,7 @@ describe("re-encryption", () => {
 
     expect(result).toMatchObject({ changed: 0, failed: 0 });
     expect(result.reencrypted).toBe(Object.values(before.keyVersions).reduce((a, b) => a + b, 0));
-    expect(after).toMatchObject({ failed: 0 });
+    expect(after).toMatchObject({ earlierFormat: 0, failed: 0 });
     expect(after.keyVersions).toMatchObject({
       current: result.reencrypted,
       previous: 0,
@@ -170,6 +173,42 @@ describe("re-encryption", () => {
         await directorySecret(),
       ),
     ).toBe("directory-secret");
+  });
+
+  it("moves values from before keys per kind that name the active version", async () => {
+    const database = environment.database.db;
+    const original = await directorySecret();
+
+    // Upgrading keeps the key: the stored value names the version that is still active.
+    await setDirectorySecret(
+      await new CompactEncrypt(new TextEncoder().encode("directory-secret"))
+        .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: current.kid })
+        .encrypt(Buffer.from(current.k, "base64url")),
+    );
+
+    try {
+      const encryption = rotated();
+      const before = await readSecretEncryption(database, encryption);
+
+      expect(before).toMatchObject({ earlierFormat: 1, failed: 0 });
+      expect(incomplete(before)).toBe(true);
+      expect(await reencryptSecrets(database, encryption)).toMatchObject({
+        reencrypted: 1,
+        failed: 0,
+      });
+      expect(incomplete(await readSecretEncryption(database, encryption))).toBe(false);
+      expect(decodeProtectedHeader(await directorySecret()).kid).toBe(
+        "current:directory-client-secret",
+      );
+      expect(
+        await encryption.decrypt(
+          { kind: "directory-client-secret", organizationId: "widefleet" },
+          await directorySecret(),
+        ),
+      ).toBe("directory-secret");
+    } finally {
+      await setDirectorySecret(original);
+    }
   });
 
   it("decrypts values that already name the active version instead of trusting the header", async () => {

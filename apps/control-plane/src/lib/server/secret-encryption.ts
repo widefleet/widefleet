@@ -1,9 +1,10 @@
-import { CompactEncrypt, compactDecrypt, decodeProtectedHeader, importJWK } from "jose";
+import { compactDecrypt, importJWK } from "jose";
 import {
+  createSealing,
   keySetFormat,
   parseKeyring,
+  sealedKeyId,
   type Keyring,
-  type KeyVersion,
 } from "@platform/contracts/keyring";
 import { InvalidOperation } from "./errors.ts";
 
@@ -48,17 +49,36 @@ export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
     keyring.some((candidate) => candidate.id === version.id && candidate.jwk.k === version.jwk.k),
   );
 
-// Ciphertexts are JWE compact serializations (RFC 7516): direct encryption
-// with the key version's 32 bytes, A256GCM, and the version's ID as `kid`.
-const header = { alg: "dir", enc: "A256GCM" } as const;
+// Ciphertexts are sealed with the shared keyring format: one key per kind of
+// value, and the value's context as `ctx`, so a value cannot be moved to
+// another kind, or to another row or organization its context names.
 
-/** The key version a JWE ciphertext names, or `null` when it names none or is malformed. */
-export const ciphertextKeyVersion = (ciphertext: string) => {
-  try {
-    return decodeProtectedHeader(ciphertext).kid ?? null;
-  } catch {
-    return null;
-  }
+const encoder = new TextEncoder();
+
+const decoder = new TextDecoder();
+
+/** The canonical form of a context: its fields in a fixed order. */
+const contextLabel = (context: SecretContext) =>
+  JSON.stringify(
+    context.kind === "app-secret"
+      ? [context.kind, context.organizationId, context.appId, context.name]
+      : context.kind === "sso-provider-config"
+        ? [context.kind, context.field]
+        : [context.kind, context.organizationId],
+  );
+
+/** The key version a ciphertext names, or `null` when it names none or is malformed. */
+export const ciphertextKeyVersion = (ciphertext: string) =>
+  sealedKeyId(ciphertext)?.split(":")[0] ?? null;
+
+/**
+ * Temporary: whether a ciphertext names only a key version, as values written
+ * before keys per kind do. `reencrypt` moves them; remove with their reader.
+ */
+export const isEarlierCiphertextFormat = (ciphertext: string) => {
+  const kid = sealedKeyId(ciphertext);
+
+  return kid !== null && !kid.includes(":");
 };
 
 /**
@@ -67,54 +87,41 @@ export const ciphertextKeyVersion = (ciphertext: string) => {
  * active key version of `keyring`.
  */
 export const createSecretEncryption = ({ keyring }: { keyring: Keyring }) => {
-  const keys = new Map<string, ReturnType<typeof importJWK>>();
+  const sealing = createSealing(keyring, "control-plane");
 
-  const key = (version: KeyVersion) => {
-    const existing = keys.get(version.id);
+  // Temporary: values written before keys per kind use the version's own bytes.
+  const openEarlier = async (ciphertext: string) =>
+    (
+      await compactDecrypt(
+        ciphertext,
+        (protectedHeader) => {
+          const version = keyring.find((candidate) => candidate.id === protectedHeader.kid);
 
-    if (existing) return existing;
-    const imported = importJWK(version.jwk);
-    keys.set(version.id, imported);
+          if (!version) throw new Error("The ciphertext names an unknown key version");
 
-    return imported;
-  };
-
-  const decryptJwe = async (ciphertext: string) => {
-    const { plaintext } = await compactDecrypt(
-      ciphertext,
-      (protectedHeader) => {
-        const version = keyring.find((candidate) => candidate.id === protectedHeader.kid);
-
-        if (!version) throw new Error("The ciphertext names an unknown key version");
-
-        return key(version);
-      },
-      {
-        keyManagementAlgorithms: [header.alg],
-        contentEncryptionAlgorithms: [header.enc],
-      },
-    );
-
-    return new TextDecoder().decode(plaintext);
-  };
+          return importJWK(version.jwk);
+        },
+        { keyManagementAlgorithms: ["dir"], contentEncryptionAlgorithms: ["A256GCM"] },
+      )
+    ).plaintext;
 
   return {
     /** The version that encrypts new values. */
     activeKeyVersion: keyring[0].id,
     /** Every version this installation can decrypt, active first. */
     keyVersions: keyring.map((version) => version.id),
-    // The context is not yet bound to the ciphertext. Callers already pass it,
-    // so binding it in a later format changes only this module.
-    encrypt: async (_context: SecretContext, value: string) => {
-      const [active] = keyring;
-
-      return new CompactEncrypt(new TextEncoder().encode(value))
-        .setProtectedHeader({ ...header, kid: active.id })
-        .encrypt(await key(active));
-    },
-    decrypt: async (_context: SecretContext, ciphertext: string) => {
+    /** Whether `ciphertext` uses the active version's key for the kind of `context`. */
+    isCurrent: (context: SecretContext, ciphertext: string) =>
+      sealing.isCurrent(context.kind, ciphertext),
+    encrypt: (context: SecretContext, value: string) =>
+      sealing.seal(context.kind, contextLabel(context), encoder.encode(value)),
+    decrypt: async (context: SecretContext, ciphertext: string) => {
       try {
-        return await decryptJwe(ciphertext);
+        return decoder.decode(
+          isEarlierCiphertextFormat(ciphertext)
+            ? await openEarlier(ciphertext)
+            : await sealing.open(context.kind, contextLabel(context), ciphertext),
+        );
       } catch {
         throw new InvalidOperation({
           code: "BAD_REQUEST",

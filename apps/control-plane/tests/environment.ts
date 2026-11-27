@@ -9,7 +9,6 @@ import { createOnboardingService } from "../src/lib/server/onboarding.ts";
 import { createDomainAccess } from "../src/lib/server/domain-access.ts";
 import { createInvitationService } from "../src/lib/server/members.ts";
 import { createAuthControl } from "./auth-control.ts";
-import { checkSecretContexts } from "./secret-contexts.fixture.ts";
 import { keySet, keyVersion } from "./keyring.fixture.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
@@ -177,7 +176,7 @@ export const createTestEnvironment = async (
   await initializeInstallation(database.db);
 
   const keys = await installationKeys(configuration);
-  const encryption = checkSecretContexts(keys.encryption);
+  const { encryption } = keys;
 
   const settings = createSettingsService(configuration, database.db, encryption, (organizationId) =>
     createAppSignIn(configuration, keys.cookie, organizationId),

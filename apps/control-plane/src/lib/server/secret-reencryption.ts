@@ -5,6 +5,7 @@ import type { Database } from "./database.ts";
 import { apps, organizationSettings } from "./schema.ts";
 import {
   ciphertextKeyVersion,
+  isEarlierCiphertextFormat,
   type SecretContext,
   type SecretEncryption,
 } from "./secret-encryption.ts";
@@ -191,13 +192,15 @@ const eachRow = async function* (database: Database) {
  * operator-chosen, so they are kept in a `Map`: no ID can collide with an
  * inherited object property.
  */
-type Counts = { keyVersions: Map<string, number>; failed: number };
+type Counts = { keyVersions: Map<string, number>; earlierFormat: number; failed: number };
 
 const tally = (counts: Counts, ciphertext: string) => {
   // A value without a readable `kid` cannot decrypt, so it counts only as failed.
   const version = ciphertextKeyVersion(ciphertext);
 
   if (version !== null) counts.keyVersions.set(version, (counts.keyVersions.get(version) ?? 0) + 1);
+
+  if (isEarlierCiphertextFormat(ciphertext)) counts.earlierFormat += 1;
 };
 
 /**
@@ -207,6 +210,7 @@ const tally = (counts: Counts, ciphertext: string) => {
 export const readSecretEncryption = async (database: Database, encryption: SecretEncryption) => {
   const counts: Counts = {
     keyVersions: new Map(encryption.keyVersions.map((id) => [id, 0])),
+    earlierFormat: 0,
     failed: 0,
   };
 
@@ -225,12 +229,15 @@ export const readSecretEncryption = async (database: Database, encryption: Secre
     activeKeyVersion: encryption.activeKeyVersion,
     // Own properties, even for IDs such as `__proto__`, so they reach the JSON output.
     keyVersions: Object.fromEntries(counts.keyVersions),
+    // Temporary: values from before keys per kind, which `reencrypt` moves.
+    earlierFormat: counts.earlierFormat,
     failed: counts.failed,
   };
 };
 
 /**
- * Re-encrypts every stored secret that is not under the active key version.
+ * Re-encrypts every stored secret that is not under the active key version's
+ * key for its kind.
  * Values that already name the active version are decrypted to verify them.
  * Each row is replaced only if it still holds what was read, so a concurrent
  * write wins and is reported as `changed`. Running it again continues with
@@ -253,7 +260,7 @@ export const reencryptSecrets = async (
       try {
         const plaintext = await encryption.decrypt(context, ciphertext);
 
-        if (ciphertextKeyVersion(ciphertext) !== encryption.activeKeyVersion)
+        if (!encryption.isCurrent(context, ciphertext))
           next.set(slot, await encryption.encrypt(context, plaintext));
       } catch {
         failed += 1;
@@ -275,6 +282,7 @@ export const reencryptSecrets = async (
 /** Whether stored secrets still use anything but the active version, or fail to decrypt. */
 export const incomplete = (status: Awaited<ReturnType<typeof readSecretEncryption>>) =>
   status.failed > 0 ||
+  status.earlierFormat > 0 ||
   Object.entries(status.keyVersions).some(
     ([id, values]) => id !== status.activeKeyVersion && values > 0,
   );

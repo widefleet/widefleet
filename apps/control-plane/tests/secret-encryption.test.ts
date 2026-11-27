@@ -1,8 +1,9 @@
-import { createDecipheriv, randomBytes } from "node:crypto";
+import { createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { CompactEncrypt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
 import { parseKeyring } from "@platform/contracts/keyring";
 import {
+  ciphertextKeyVersion,
   configuredSecretEncryption,
   createSecretEncryption,
   generateKeyring,
@@ -23,6 +24,10 @@ const unreadable = {
   message: "Stored credentials could not be decrypted. Restore the installation encryption key.",
 };
 
+/** The key of one kind of value, derived with node:crypto alone, outside our code path. */
+const derivedKey = (key: Buffer, kind: string) =>
+  Buffer.from(hkdfSync("sha256", key, Buffer.alloc(32), `widefleet control-plane ${kind} v1`, 32));
+
 /** Decrypts a `dir`/`A256GCM` JWE with node:crypto alone, outside our code path. */
 const decryptIndependently = (jwe: string, key: Buffer) => {
   const [header = "", encryptedKey, iv = "", ciphertext = "", tag = ""] = jwe.split(".");
@@ -40,23 +45,69 @@ const decryptIndependently = (jwe: string, key: Buffer) => {
 };
 
 describe("JWE ciphertexts", () => {
-  it("writes compact JWE with dir, A256GCM and the active version as kid", async () => {
+  it("writes compact JWE with the active version's key for the kind and the context", async () => {
     const encryption = createSecretEncryption({ keyring: fixture() });
     const ciphertext = await encryption.encrypt(context, "synthetic secret");
+    const key = Buffer.from(fixtureKey, "base64url");
 
     expect(decodeProtectedHeader(ciphertext)).toEqual({
       alg: "dir",
       enc: "A256GCM",
-      kid: "fixture",
+      kid: "fixture:directory-client-secret",
+      ctx: '["directory-client-secret","widefleet"]',
     });
     expect(await encryption.encrypt(context, "synthetic secret")).not.toBe(ciphertext);
-    expect(decryptIndependently(ciphertext, Buffer.from(fixtureKey, "base64url"))).toBe(
+    expect(decryptIndependently(ciphertext, derivedKey(key, "directory-client-secret"))).toBe(
       "synthetic secret",
     );
+    expect(() => decryptIndependently(ciphertext, key)).toThrow();
+    expect(() =>
+      decryptIndependently(ciphertext, derivedKey(key, "app-login-client-secret")),
+    ).toThrow();
   });
 
   it("decrypts a recorded JWE, which node:crypto also decrypts on its own", async () => {
     // Recorded with the synthetic fixture key; pins the stored format.
+    const stored =
+      "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwia2lkIjoiZml4dHVyZTpkaXJlY3RvcnktY2xpZW50LXNlY3JldCIsImN0eCI6IltcImRpcmVjdG9yeS1jbGllbnQtc2VjcmV0XCIsXCJ3aWRlZmxlZXRcIl0ifQ..8IFEEjSoYq4y8tL_.KgU7UcUzt8I4yp1XBw1YLA.iZ1cRxZe-2uhEdL75GapjA";
+
+    expect(
+      decryptIndependently(
+        stored,
+        derivedKey(Buffer.from(fixtureKey, "base64url"), "directory-client-secret"),
+      ),
+    ).toBe("synthetic secret");
+    expect(await createSecretEncryption({ keyring: fixture() }).decrypt(context, stored)).toBe(
+      "synthetic secret",
+    );
+  });
+
+  it("decrypts only for the kind and context a value was written for", async () => {
+    const encryption = createSecretEncryption({ keyring: fixture() });
+
+    const secret = {
+      kind: "app-secret",
+      organizationId: "widefleet",
+      appId: "2a600000-0000-4000-8000-000000000001",
+      name: "TOKEN",
+    } as const;
+
+    const ciphertext = await encryption.encrypt(secret, "value");
+
+    expect(await encryption.decrypt(secret, ciphertext)).toBe("value");
+
+    for (const other of [
+      { ...secret, name: "OTHER" },
+      { ...secret, appId: "2a600000-0000-4000-8000-000000000002" },
+      { ...secret, organizationId: "other" },
+      { kind: "directory-client-secret", organizationId: "widefleet" },
+    ] as const)
+      await expect(encryption.decrypt(other, ciphertext)).rejects.toMatchObject(unreadable);
+  });
+
+  // Temporary, until stored values are re-encrypted: the format before keys per kind.
+  it("decrypts a recorded JWE from before keys per kind", async () => {
+    // Recorded with the synthetic fixture key's bytes and no context.
     const stored =
       "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwia2lkIjoiZml4dHVyZSJ9..ucd4hnDSdgKovoQQ.qb4Hy4BREL_wLfXrmEjyLQ.a1rQlNW7OqwgEOn6s6Y9qw";
 
@@ -79,7 +130,7 @@ describe("JWE ciphertexts", () => {
 
     const current = await after.encrypt(context, "written after rotation");
 
-    expect(decodeProtectedHeader(current).kid).toBe("current");
+    expect(ciphertextKeyVersion(current)).toBe("current");
     expect(await after.decrypt(context, old)).toBe("written before rotation");
     expect(await after.decrypt(context, current)).toBe("written after rotation");
     await expect(before.decrypt(context, current)).rejects.toMatchObject(unreadable);
@@ -124,7 +175,7 @@ describe("configured keyrings", () => {
       PLATFORM_ENCRYPTION_KEYS: keySet(keyVersion("current")),
     }).encrypt(context, "value");
 
-    expect(decodeProtectedHeader(ciphertext).kid).toBe("current");
+    expect(ciphertextKeyVersion(ciphertext)).toBe("current");
   });
 });
 
