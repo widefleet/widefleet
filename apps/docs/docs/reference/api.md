@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-25
+lastModified: 2026-11-27
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -98,6 +98,7 @@ use case.
 - `id`, `name`, `description` and a source URL in `source`.
 - `secretHelp`, when provided, maps secret names to Markdown descriptions shown under their inputs during installation.
 - `markdown`, the body of the template's `template.md` file.
+- `appHost`, the app's host that `markdown` and `secretHelp` name: the installed app's, or the host an install under the template's ID gets.
 - `prompt`, a setup prompt containing the installation URL and selected organization.
 
 Templates are read from the [Widefleet repository](https://github.com/widefleet/widefleet/tree/main/templates).
@@ -115,6 +116,14 @@ secretHelp:
   GOOGLE_CLIENT_SECRET: >-
     Open your web application in [Google Cloud OAuth clients](https://console.cloud.google.com/auth/clients)
     and use its client secret.
+```
+
+Where a setup step needs the app's address, such as a provider's redirect URI,
+write `YOUR-APP-HOST` in `template.md` or `secretHelp`. Widefleet shows the app's
+host in its place, so people can register the address before they install:
+
+```markdown
+Add `https://YOUR-APP-HOST/auth/callback/google` as an authorized redirect URI.
 ```
 
 An unknown template ID returns `404`; an invalid ID returns `400`. A repository
