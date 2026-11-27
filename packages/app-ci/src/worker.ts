@@ -207,6 +207,12 @@ export class BuildSandbox extends DurableObject<Env> {
       },
     });
 
+    // "*" covers HTTPS on port 443 only; a control plane can use another port.
+    const platform = new URL(request.platform.url);
+
+    if (platform.protocol === "https:" && platform.port)
+      await this.#container.interceptOutboundHttps(platform.host, outbound);
+
     await this.#container.interceptOutboundHttps("*", outbound);
     await this.#container.interceptAllOutboundHttp(outbound);
   }

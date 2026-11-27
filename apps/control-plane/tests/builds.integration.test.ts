@@ -69,7 +69,10 @@ const asBuild = (request: z.infer<typeof ciBuildRequest>, path: string, init: Re
 };
 
 /** The uploads of `widefleet deploy`, and the idempotency key the CI sets. */
-const deploy = async (request: z.infer<typeof ciBuildRequest>) => {
+const deploy = async (
+  request: z.infer<typeof ciBuildRequest>,
+  source: z.infer<typeof contract.sourceRevision> = request.source,
+) => {
   // The CI gets a repository credential for each Git request.
   const credential = await asBuild(request, `/apps/${request.appId}/source/write-credential`, {
     method: "POST",
@@ -111,7 +114,7 @@ const deploy = async (request: z.infer<typeof ciBuildRequest>) => {
       compatibility_date: "2026-10-01",
       assets: { upload_session: session.id },
       bindings: [],
-      source: request.source,
+      source,
     }),
   );
   form.set(
@@ -613,4 +616,95 @@ it("reports a build whose workflow ended without finishing it as failed", async 
   expect(
     contract.appBuild.array().parse(await (await api(`/apps/${app.id}/builds`)).json())[0]?.status,
   ).toBe("failed");
+});
+
+it("keeps the token of a running build valid when its run is repeated", async () => {
+  const app = await createApp("joined-build");
+  heads.set(app.id, commit);
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  const statuses: number[] = [];
+
+  await run(
+    build.id,
+    ci(async (first) => {
+      // A repeated run issues a new token while the first run still makes requests.
+      await run(
+        build.id,
+        ci(async (second) => {
+          statuses.push((await asBuild(first, `/apps/${app.id}/network`)).status);
+          statuses.push((await asBuild(second, `/apps/${app.id}/network`)).status);
+
+          return { status: "failed", message: "Stopped", log: "" };
+        }),
+      );
+
+      // Both tokens end with the build.
+      statuses.push((await asBuild(first, `/apps/${app.id}/network`)).status);
+
+      return { status: "failed", message: "Stopped", log: "" };
+    }),
+  );
+
+  expect(statuses).toEqual([200, 200, 401]);
+});
+
+it("ends the token of a build whose workflow ended and keeps a finished outcome", async () => {
+  const app = await createApp("ended-workflow");
+  heads.set(app.id, commit);
+  const stopped = contract.appBuild.parse(await (await startBuild(app.id)).json());
+  const finished = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  await run(
+    stopped.id,
+    ci(async (request) => {
+      ended.add(stopped.id);
+      await api(`/apps/${app.id}/builds/${stopped.id}`);
+      expect((await asBuild(request, `/apps/${app.id}/network`)).status).toBe(401);
+
+      return { status: "failed", message: "Stopped", log: "" };
+    }),
+  );
+
+  await run(finished.id, succeeded);
+  ended.add(finished.id);
+
+  const [record] = await environment.database.db
+    .select()
+    .from(appBuilds)
+    .where(eq(appBuilds.id, stopped.id));
+
+  expect(record).toMatchObject({ status: "failed", tokenHash: null, previousTokenHash: null });
+  expect(
+    contract.appBuildDetails.parse(
+      await (await api(`/apps/${app.id}/builds/${finished.id}`)).json(),
+    ).status,
+  ).toBe("succeeded");
+});
+
+it("fails a build that published another commit", async () => {
+  const app = await createApp("other-commit");
+  heads.set(app.id, commit);
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+  // Another commit of the branch, stored after the build started.
+  const other = "d".repeat(40);
+  heads.set(app.id, other);
+
+  await run(
+    build.id,
+    ci(async (request) => {
+      expect((await deploy(request, { ...request.source, commit: other })).status).toBe(200);
+
+      return { status: "succeeded", log: "" };
+    }),
+  );
+
+  const [record] = await environment.database.db
+    .select()
+    .from(appBuilds)
+    .where(eq(appBuilds.id, build.id));
+
+  expect(record?.status).toBe("failed");
+  expect(record?.message).toBe(`The build published ${other} instead of ${commit}`);
+  expect(record?.deploymentId).not.toBeNull();
 });

@@ -4,7 +4,7 @@
 import * as contract from "@platform/contracts";
 import { ciBuildRequest, ciBuildResult } from "@platform/contracts/builds";
 import { Result } from "better-result";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { readableApp } from "./apps.ts";
 import { createBuildToken } from "./build-tokens.ts";
@@ -59,15 +59,31 @@ export const createBuildService = (
   source?: SourceBackend,
   workflows?: { start: (id: string) => Promise<void>; ended: (id: string) => Promise<boolean> },
 ) => {
-  // A build whose workflow ended without finishing it reports that it failed.
+  // A build whose workflow ended without finishing it has failed, and its token
+  // ends with it. A build that finished meanwhile keeps its outcome.
   const reconcile = async (record: typeof appBuilds.$inferSelect) => {
     if (!workflows || (record.status !== "queued" && record.status !== "running")) return record;
 
-    const ended = await workflows.ended(record.id).catch(() => false);
+    if (!(await workflows.ended(record.id).catch(() => false))) return record;
 
-    return ended
-      ? { ...record, status: "failed" as const, message: "The build stopped before it finished" }
-      : record;
+    const [failed] = await database
+      .update(appBuilds)
+      .set({
+        status: "failed",
+        message: "The build stopped before it finished",
+        tokenHash: null,
+        previousTokenHash: null,
+        tokenExpiresAt: null,
+        finishedAt: new Date(),
+      })
+      .where(and(eq(appBuilds.id, record.id), inArray(appBuilds.status, ["queued", "running"])))
+      .returning();
+
+    if (failed) return failed;
+
+    const [current] = await database.select().from(appBuilds).where(eq(appBuilds.id, record.id));
+
+    return current ?? record;
   };
 
   return {
@@ -227,7 +243,12 @@ export const executeBuild = async (
 
     const [record] = await database
       .update(appBuilds)
-      .set({ status: "running", tokenHash: token.hash, tokenExpiresAt: token.expiresAt })
+      .set({
+        status: "running",
+        previousTokenHash: sql`${appBuilds.tokenHash}`,
+        tokenHash: token.hash,
+        tokenExpiresAt: token.expiresAt,
+      })
       .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])))
       .returning();
 
@@ -262,6 +283,7 @@ export const executeBuild = async (
           message: text(values.message),
           log: text(values.log),
           tokenHash: null,
+          previousTokenHash: null,
           tokenExpiresAt: null,
           finishedAt: new Date(),
         })
@@ -271,33 +293,45 @@ export const executeBuild = async (
   const published = () =>
     withDatabase(async (database) => {
       const [deployment] = await database
-        .select({ id: deployments.id })
+        .select({ id: deployments.id, metadata: artifacts.metadata })
         .from(deployments)
+        .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
         .where(and(eq(deployments.appId, build.appId), eq(deployments.requestId, id)));
 
-      return deployment;
+      return deployment
+        ? {
+            id: deployment.id,
+            commit: contract.workerMetadata.parse(deployment.metadata).source?.commit,
+          }
+        : undefined;
     });
 
   // The outcome of a build that published follows its recorded result.
   const conclude = async (
     result: z.infer<typeof ciBuildResult> | null,
-    deployment: { id: string } | undefined,
+    deployment: Awaited<ReturnType<typeof published>>,
   ) => {
+    // The CI loses the log of a run if it restarts before recording it.
+    const log = result?.log ?? "The CI restarted during the build; its log was not kept.\n";
+    const deploymentId = deployment?.id ?? null;
+
     if (result?.status === "failed")
-      await finish({
-        status: "failed",
-        message: result.message,
-        log: result.log,
-        deploymentId: deployment?.id ?? null,
-      });
-    else if (deployment)
-      await finish({ status: "succeeded", deploymentId: deployment.id, log: result?.log ?? "" });
-    else
+      await finish({ status: "failed", message: result.message, log, deploymentId });
+    else if (!deployment)
       await finish({
         status: "failed",
         message: "widefleet deploy did not publish the build",
-        log: result?.log ?? "",
+        log,
       });
+    // Code in the build can name another commit than the one it was asked to build.
+    else if (deployment.commit !== build.commit)
+      await finish({
+        status: "failed",
+        message: `The build published ${deployment.commit ?? "no commit"} instead of ${build.commit}`,
+        log,
+        deploymentId,
+      });
+    else await finish({ status: "succeeded", deploymentId, log });
 
     await ci.release(id);
   };

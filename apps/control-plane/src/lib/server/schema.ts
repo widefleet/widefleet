@@ -296,8 +296,13 @@ export const appBuilds = pgTable(
     recovery: boolean().notNull().default(false),
     /** Whether the starter's credential has platform:read, which the build then has too. */
     reads: boolean().notNull().default(false),
-    /** The SHA-256 of the token the running build deploys with, until it expires. */
+    /**
+     * The SHA-256 of the token the running build deploys with, until it expires.
+     * A repeated run issues a new one; the previous one stays valid for requests
+     * of the run it joins.
+     */
     tokenHash: text("token_hash"),
+    previousTokenHash: text("previous_token_hash"),
     tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -305,6 +310,7 @@ export const appBuilds = pgTable(
   (table) => [
     index("app_build_app_idx").on(table.appId, table.createdAt),
     uniqueIndex("app_build_token_idx").on(table.tokenHash),
+    uniqueIndex("app_build_previous_token_idx").on(table.previousTokenHash),
   ],
 );
 

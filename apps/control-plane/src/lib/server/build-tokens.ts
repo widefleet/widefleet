@@ -3,7 +3,7 @@
 // build, as they signed in and with their scopes, only on the build's app, and
 // expires with the run.
 import { createHash } from "node:crypto";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, or } from "drizzle-orm";
 import type { Database } from "./database.ts";
 import { deploymentActor } from "./deployment-execution.ts";
 import { appBuilds } from "./schema.ts";
@@ -37,7 +37,7 @@ export const buildSignIn = async (database: Database, token: string) => {
     .from(appBuilds)
     .where(
       and(
-        eq(appBuilds.tokenHash, hash(token)),
+        or(eq(appBuilds.tokenHash, hash(token)), eq(appBuilds.previousTokenHash, hash(token))),
         eq(appBuilds.status, "running"),
         gt(appBuilds.tokenExpiresAt, new Date()),
       ),
