@@ -6,7 +6,8 @@ import { z } from "zod";
 import { sessionVersion, type AuthConfiguration } from "./configuration.ts";
 import { providerPicture, type PictureStore } from "./picture.ts";
 import { issuer, providerIdentity, proxyIdentity } from "./identity.ts";
-import { authorization, sessionRenewal } from "./renewal.ts";
+import { authorization } from "./company-authorization.ts";
+import { sessionRenewal } from "./renewal.ts";
 
 export const cookiePrefix = (configuration: AuthConfiguration) =>
   `platform_sso_${configuration.organizationId}`;

@@ -12,7 +12,7 @@ import {
 } from "./embedded.ts";
 import { issuer, proxyIdentity } from "./identity.ts";
 import { pictureStore, type PictureStorage } from "./picture.ts";
-import { authorization, failureSummary } from "./renewal.ts";
+import { authorization, failureSummary } from "./company-authorization.ts";
 
 // A person proved their identity to the organization: at sign-in, when an expired
 // session is renewed and when a host token starts an embedded session.

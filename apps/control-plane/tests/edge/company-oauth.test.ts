@@ -53,9 +53,31 @@ describe("Company OAuth credentials for MCP", () => {
     });
     expect(credential.refreshToken).toBeTruthy();
     idp.settings.groups = ["warehouse"];
-    const refreshed = await (await companyOAuth(configuration())).refresh(credential);
-    expect(refreshed.authorization.identity.groups).toEqual(["warehouse"]);
-    expect(refreshed.refreshToken).not.toBe(credential.refreshToken);
+    const renewal = await (await companyOAuth(configuration())).renew(credential);
+    expect(renewal.status).toBe("renewed");
+    expect(renewal.credential?.authorization.identity.groups).toEqual(["warehouse"]);
+    expect(renewal.credential?.refreshToken).not.toBe(credential.refreshToken);
+  });
+
+  it("keeps the rotated credential and the previous authorization while signing keys are unavailable", async () => {
+    idp.settings.rotateRefreshTokens = true;
+    const { provider, code, verifier, nonce } = await start();
+    const credential = await provider.exchange(code, verifier, nonce);
+    idp.settings.keysAvailable = false;
+    const unavailable = await (await companyOAuth(configuration())).renew(credential);
+
+    expect(unavailable.status).toBe("unavailable");
+    expect(unavailable.credential?.authorization).toEqual(credential.authorization);
+    expect(unavailable.credential?.refreshToken).not.toBe(credential.refreshToken);
+    idp.settings.keysAvailable = true;
+    idp.settings.groups = ["warehouse"];
+
+    const renewed = await (
+      await companyOAuth(configuration())
+    ).renew(unavailable.credential ?? credential);
+
+    expect(renewed.status).toBe("renewed");
+    expect(renewed.credential?.authorization.identity.groups).toEqual(["warehouse"]);
   });
 
   it.each(["signature", "audience", "issuer", "expired"])(
@@ -76,9 +98,9 @@ describe("Company OAuth credentials for MCP", () => {
     const { provider, code, verifier, nonce } = await start();
     const credential = await provider.exchange(code, verifier, nonce);
     idp.settings.subject = "other-person";
-    await expect(provider.refresh(credential)).rejects.toThrow();
+    expect((await provider.renew(credential)).status).toBe("sign-in-required");
     idp.settings.subject = "pairwise-subject";
     idp.settings.omitRefreshIdToken = true;
-    await expect(provider.refresh(credential)).rejects.toThrow();
+    expect((await provider.renew(credential)).status).toBe("sign-in-required");
   });
 });

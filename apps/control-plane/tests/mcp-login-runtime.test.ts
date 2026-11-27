@@ -547,10 +547,11 @@ describe("MCP OAuth in the data plane", () => {
       expect(refreshed.status, await refreshed.clone().text()).toBe(200);
       const renewed = z.object({ access_token: z.string() }).parse(await refreshed.json());
 
-      // Each issued token counts the person as an app user of the organization.
+      // Signing in counts the person as an app user of the organization. A token
+      // from the authorization they already proved is not another proof.
       await expect
         .poll(() => activity.map((event) => event.properties.trigger), { timeout: 8_000 })
-        .toEqual(["mcp_sign_in", "mcp_renewal"]);
+        .toEqual(["mcp_sign_in"]);
       expect(new Set(activity.map((event) => event.distinct_id)).size).toBe(1);
       expect(activity[0]?.distinct_id).toMatch(/^app-user:[a-f0-9]{64}$/);
       expect(activity[0]?.properties).toMatchObject({
@@ -887,6 +888,8 @@ describe("MCP OAuth in the data plane", () => {
     idp.settings.grantedScopes = `openid email profile ${googleGroupsScope}`;
     idp.settings.rotateRefreshTokens = true;
     idp.settings.refreshReplaySeconds = 0;
+    // An authorization shorter than one access token makes every refresh renew it.
+    idp.settings.tokenSeconds = 240;
 
     try {
       const auth = await authorize();
@@ -927,7 +930,7 @@ describe("MCP OAuth in the data plane", () => {
       expect(failed.status, await failed.clone().text()).toBe(503);
       expect(await failed.json()).toEqual({
         error: "temporarily_unavailable",
-        error_description: "Company sign-in could not be refreshed",
+        error_description: "Company sign-in is temporarily unavailable",
       });
       const consumed = idp.refreshRequests.at(-1);
       const after = stored.parse(JSON.parse(await storedGrant(grant.refresh_token)));
@@ -965,8 +968,51 @@ describe("MCP OAuth in the data plane", () => {
       directoryGroups = ["accounting@example.test"];
       idp.settings.rotateRefreshTokens = false;
       idp.settings.refreshReplaySeconds = 30;
+      idp.settings.tokenSeconds = 3600;
       idp.settings.grantedScopes = "";
       await publish();
+    }
+  });
+
+  it("issues tokens from a current authorization without contacting the provider", async () => {
+    const connection = await connect();
+    const requests = idp.refreshRequests.length;
+    let token = connection.refresh_token;
+
+    for (let refresh = 0; refresh < 3; refresh++) {
+      const response = await refreshWith(connection.client, token);
+      expect(response.status, await response.clone().text()).toBe(200);
+      token = z.object({ refresh_token: z.string() }).parse(await response.json()).refresh_token;
+    }
+
+    expect(idp.refreshRequests).toHaveLength(requests);
+  });
+
+  it("keeps the grant when the provider's signing keys are unavailable during renewal", async () => {
+    idp.settings.rotateRefreshTokens = true;
+    idp.settings.refreshReplaySeconds = 0;
+    idp.settings.tokenSeconds = 240;
+
+    try {
+      const connection = await connect();
+      idp.settings.keysAvailable = false;
+      const failed = await refreshWith(connection.client, connection.refresh_token);
+
+      expect(failed.status, await failed.clone().text()).toBe(503);
+      expect(await failed.json()).toMatchObject({ error: "temporarily_unavailable" });
+      idp.settings.keysAvailable = true;
+      // The retry uses the provider credential rotated by the failed attempt.
+      const retry = await refreshWith(connection.client, connection.refresh_token);
+      expect(retry.status, await retry.clone().text()).toBe(200);
+      // A renewal at the provider proves the identity again.
+      await expect
+        .poll(() => activity.at(-1)?.properties.trigger, { timeout: 8_000 })
+        .toBe("mcp_renewal");
+    } finally {
+      idp.settings.keysAvailable = true;
+      idp.settings.rotateRefreshTokens = false;
+      idp.settings.refreshReplaySeconds = 30;
+      idp.settings.tokenSeconds = 3600;
     }
   });
 

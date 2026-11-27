@@ -283,6 +283,31 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit()).status).toBe(200);
   });
 
+  it("preserves the login when the provider's signing keys are unavailable", async () => {
+    idp.settings.rotateRefreshTokens = true;
+    idp.settings.refreshReplaySeconds = 0;
+    expireIdentity();
+    idp.settings.keysAvailable = false;
+    const unavailable = await visit();
+
+    expect(unavailable.status).toBe(503);
+    expect(cookies(unavailable)).toContain(".account_data=");
+    expect(cookies(unavailable)).not.toContain(".session_data=");
+    idp.settings.keysAvailable = true;
+
+    // The browser keeps its session and stores the rotated provider credential.
+    const rotated = [
+      ...new Map(
+        `${cookie}; ${cookies(unavailable)}`
+          .split("; ")
+          .map((pair) => [pair.split("=")[0], pair] as const),
+      ).values(),
+    ].join("; ");
+
+    expect((await visit(configuration, rotated)).status).toBe(200);
+    expect((await visit(configuration, cookie)).status).toBe(401);
+  });
+
   it("delivers rotated credentials even when the app throws", async () => {
     appFailure = true;
     await expect(visit()).rejects.toThrow("Fixture app unavailable");
@@ -488,7 +513,7 @@ describe("Auth proxy session lifecycle", () => {
       const limited = await visit();
 
       expect(logged).toHaveBeenCalledWith(
-        "App session renewal failed",
+        "Company authorization renewal failed",
         expect.objectContaining({ stage: "identity", type: "APIError" }),
       );
       logged.mockRestore();

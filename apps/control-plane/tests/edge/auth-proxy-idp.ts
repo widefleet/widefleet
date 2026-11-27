@@ -36,6 +36,8 @@ export const createIdentityProvider = async (
 
   const settings = {
     available: true,
+    keysAvailable: true,
+    tokenSeconds: 3600,
     failure: "",
     entra: false,
     entraAuthority: "",
@@ -94,7 +96,8 @@ export const createIdentityProvider = async (
           }),
         );
       } else if (url.pathname === "/jwks") {
-        response.end(JSON.stringify({ keys: [publicKey] }));
+        if (settings.keysAvailable) response.end(JSON.stringify({ keys: [publicKey] }));
+        else response.writeHead(503).end();
       } else if (url.pathname === "/authorize") {
         const parameters = authorization.parse(Object.fromEntries(url.searchParams));
 
@@ -242,7 +245,9 @@ export const createIdentityProvider = async (
         if (settings.failure !== "missing-issued-at") claims.setIssuedAt();
 
         if (settings.failure !== "missing-expiry")
-          claims.setExpirationTime(settings.failure === "expired" ? "-1h" : "1h");
+          claims.setExpirationTime(
+            settings.failure === "expired" ? "-1h" : `${settings.tokenSeconds}s`,
+          );
 
         const token = await claims.sign(
           settings.failure === "signature" ? wrongKeys.privateKey : keys.privateKey,
@@ -262,7 +267,7 @@ export const createIdentityProvider = async (
             refreshing && settings.omitRefreshScopes
               ? undefined
               : settings.grantedScopes || undefined,
-          expires_in: 3600,
+          expires_in: settings.tokenSeconds,
           id_token:
             settings.failure === "missing-token" || (refreshing && settings.omitRefreshIdToken)
               ? undefined

@@ -1,9 +1,5 @@
 import { OAuthAuthorizationServer, OAuthError } from "@cloudflare/workers-oauth-provider";
-import {
-  companyCredential,
-  companyOAuth,
-  CompanyRefreshFailure,
-} from "@platform/auth-proxy/company-oauth";
+import { companyCredential, companyOAuth } from "@platform/auth-proxy/company-oauth";
 import { sessionVersion } from "@platform/auth-proxy/configuration";
 import { issuer } from "@platform/auth-proxy/identity";
 import { readAuthConfiguration } from "@platform/auth-proxy/worker";
@@ -100,7 +96,8 @@ export const readMcpCompanyConfiguration = async (
   return readMcpOrganization(environment, organizationId);
 };
 
-const failure = z.object({ error: z.string().optional() });
+// Every MCP access token is bounded by the company authorization it carries.
+const accessTokenTTL = 300;
 
 export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
   const location = readMcpConfiguration(environment);
@@ -118,7 +115,7 @@ export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
     scopesSupported: mcpScopes,
     clientRegistrationEndpoint: "/oauth/register",
     allowTokenExchangeGrant: false,
-    accessTokenTTL: 300,
+    accessTokenTTL,
     tokenExchangeCallback: async ({ props, grantType }) => {
       const grant = mcpGrant.parse(props);
 
@@ -133,55 +130,60 @@ export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
           description: "Company authorization is no longer valid",
         });
       let credential = grant.credential;
+      let renewed = false;
 
-      if (grantType === "refresh_token") {
-        if (
-          !credential.refreshToken ||
-          (credential.refreshExpiresAt !== undefined && credential.refreshExpiresAt <= Date.now())
-        )
+      // Renew at the provider only when the verified authorization can no longer
+      // cover a full access token. Clients that refresh early receive a token from
+      // the authorization they already have.
+      if (
+        grantType === "refresh_token" &&
+        credential.authorization.expiresAt - Date.now() < accessTokenTTL * 1000
+      ) {
+        const renewal = await (await companyOAuth(configuration)).renew(credential);
+
+        if (renewal.status === "unavailable")
+          throw new OAuthError("temporarily_unavailable", {
+            description: "Company sign-in is temporarily unavailable",
+            statusCode: 503,
+            retryProps: renewal.credential
+              ? { ...grant, credential: renewal.credential }
+              : undefined,
+          });
+
+        if (renewal.status !== "renewed")
           throw new OAuthError("invalid_grant", {
-            description: "Company authorization is no longer valid",
+            description:
+              renewal.status === "denied"
+                ? "Company access was denied"
+                : "Company authorization is no longer valid",
           });
-
-        try {
-          credential = await (await companyOAuth(configuration)).refresh(credential);
-        } catch (cause) {
-          const details = failure.safeParse(
-            cause instanceof CompanyRefreshFailure ? cause.cause : cause,
-          );
-
-          const terminal = details.success && details.data.error === "invalid_grant";
-
-          throw new OAuthError(terminal ? "invalid_grant" : "temporarily_unavailable", {
-            description: "Company sign-in could not be refreshed",
-            statusCode: terminal ? 400 : 503,
-            retryProps:
-              !terminal && cause instanceof CompanyRefreshFailure
-                ? { ...grant, credential: cause.credential }
-                : undefined,
-          });
-        }
+        credential = renewal.credential;
+        renewed = true;
       }
 
       const ttl = Math.min(
-        300,
+        accessTokenTTL,
         Math.floor((credential.authorization.expiresAt - Date.now()) / 1000),
       );
 
       // KV expiration has a 60-second minimum. Never extend the verified identity
-      // to satisfy it: the client must obtain a fresh company authorization.
+      // to satisfy it. Only a provider authorization that is already this short
+      // when verified reaches this point.
       if (ttl < 60)
         throw new OAuthError("invalid_grant", {
           description: "Company authorization is no longer valid",
         });
       const identity = credential.authorization.identity;
 
-      appUserAnalytics(environment)?.({
-        trigger: grantType === "refresh_token" ? "mcp_renewal" : "mcp_sign_in",
-        organizationId: grant.organizationId,
-        issuer: issuer(configuration.provider),
-        identity,
-      });
+      // Like app sessions, only a sign-in or a renewal at the provider proves the
+      // identity again; tokens from an existing authorization are not activity.
+      if (renewed || grantType !== "refresh_token")
+        appUserAnalytics(environment)?.({
+          trigger: renewed ? "mcp_renewal" : "mcp_sign_in",
+          organizationId: grant.organizationId,
+          issuer: issuer(configuration.provider),
+          identity,
+        });
 
       const result = {
         newProps: { ...grant, credential },
