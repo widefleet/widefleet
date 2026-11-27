@@ -210,6 +210,7 @@ export const getTemplate = query(
         templateId,
         runtime.templates.available,
         installed,
+        queryValue(await runtime.apps.newAppHostname(principal, templateId)),
       ),
     );
 

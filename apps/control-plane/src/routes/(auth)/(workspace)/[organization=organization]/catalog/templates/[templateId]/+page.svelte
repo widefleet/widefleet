@@ -12,6 +12,7 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import { getWorkspaceContext } from "#lib/workspace-context";
+  import { appSlug } from "@platform/contracts";
 
   const workspace = getWorkspaceContext();
 
@@ -26,6 +27,18 @@
   const naming = $derived(
     Boolean(installTemplate.fields.name.issues()?.length || installTemplate.fields.name.value()),
   );
+
+  // The instructions name the host an install under the template's name gets;
+  // another name gets its own host.
+  const appHost = $derived.by(() => {
+    const name = installTemplate.fields.name.value();
+
+    return !template.installedAppId && name && appSlug.safeParse(name).success
+      ? `${name}${template.appHost.slice(template.id.length)}`
+      : template.appHost;
+  });
+
+  const withAppHost = (html: string) => html.replaceAll(template.appHost, appHost);
 
   // The install saves these secrets first, so it waits for every value.
   const secretsEntered = $derived(
@@ -121,7 +134,7 @@
           />
           {#if helpHtml}
             <div id={`secret-help-${secret}`} class="text-muted-foreground">
-              <Markdown html={helpHtml} />
+              <Markdown html={withAppHost(helpHtml)} />
             </div>
           {/if}
         </div>
@@ -164,6 +177,6 @@
     >View source<ArrowUpRight class="size-3.5" /><span class="sr-only">Opens in a new tab</span></a
   >
   <div class="mt-8 border-t pt-6">
-    <Markdown html={template.html} />
+    <Markdown html={withAppHost(template.html)} />
   </div>
 </div>

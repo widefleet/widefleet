@@ -24,7 +24,15 @@ import { findMembers } from "./member-directory.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { observe, type Observation } from "./observation.ts";
-import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
+import {
+  appGrants,
+  apps,
+  artifacts,
+  deploymentEvents,
+  deployments,
+  jobs,
+  organizationRuntimes,
+} from "./schema.ts";
 import { readOnly, transact, type Transaction } from "./transactions.ts";
 import { lockOrganizationRuntime, requireAgentExecution } from "./organization-runtime.ts";
 import { operationId, type HostedExecution } from "./deployment-execution.ts";
@@ -712,17 +720,34 @@ export const createAppService = (
   templateInstalls: (principal: Principal) =>
     transact(database, async (transaction) => {
       const records = await transaction
-        .select({ id: apps.id, templateId: apps.templateId })
+        .select({ id: apps.id, hostname: apps.hostname, templateId: apps.templateId })
         .from(apps)
         .where(and(appVisibility(transaction, principal), isNotNull(apps.templateId)))
         .orderBy(desc(apps.createdAt));
 
-      const installed = new Map<string, string>();
+      const installed = new Map<string, { id: string; hostname: string }>();
 
-      for (const { id, templateId } of records)
-        if (templateId && !installed.has(templateId)) installed.set(templateId, id);
+      for (const { templateId, ...app } of records)
+        if (templateId && !installed.has(templateId)) installed.set(templateId, app);
 
       return Result.ok(installed);
+    }),
+  /** The host name a new original app of this name gets in the caller's organization. */
+  newAppHostname: (principal: Principal, slug: string) =>
+    readOnly(database, async (transaction) => {
+      const [execution] = await transaction
+        .select({ appHostnameSuffix: organizationRuntimes.appHostnameSuffix })
+        .from(organizationRuntimes)
+        .where(eq(organizationRuntimes.organizationId, principal.application.organizationId));
+
+      if (!execution)
+        return Result.err(
+          new InvalidOperation({ code: "NOT_FOUND", message: "Organization runtime not found" }),
+        );
+
+      return Result.ok(
+        contract.workerHostname(slug, execution.appHostnameSuffix, configuration.APP_DOMAIN),
+      );
     }),
   /**
    * The organization's app of this name, visible to the caller or not, and

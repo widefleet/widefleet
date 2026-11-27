@@ -761,6 +761,7 @@ export const createApi = (runtime: Runtime) => {
             input.templateId,
             runtime.templates.available,
             unwrap(await runtime.apps.templateInstalls(context.principal)),
+            unwrap(await runtime.apps.newAppHostname(context.principal, input.templateId)),
           ),
         ),
       ),

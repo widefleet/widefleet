@@ -10,6 +10,7 @@ import { createTestEnvironment } from "./environment.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
 import { AuthenticationFailed } from "../src/lib/server/identity.ts";
 import { runtimeConfigurationSchema } from "../src/lib/server/config.ts";
+import { apps } from "../src/lib/server/schema.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -172,7 +173,9 @@ it.each([undefined, "", "fixture-catalog-token"])(
 );
 
 it("reads a new template from its directory and frontmatter without provider-specific fields", async () => {
-  const markdown = "## Start\n\nCreate a board.\n\n```text\n---\n```\n";
+  const markdown =
+    "## Start\n\nCreate a board and add `https://YOUR-APP-HOST/callback`.\n\n```text\n---\n```\n";
+
   const requests: string[] = [];
   vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
@@ -199,7 +202,7 @@ it("reads a new template from its directory and frontmatter without provider-spe
       return Response.json({ main: "src/app.ts", secrets: { required: ["BOARD_TOKEN"] } });
 
     return new Response(
-      `\uFEFF---\r\nname: Team board\r\ndescription: >-\r\n  Organize tasks\r\n  together.\r\nfutureField: [one, two]\r\nid: spoofed\r\ninstalledAppId: ${crypto.randomUUID()}\r\nsecretHelp:\r\n  BOARD_TOKEN: "Open [API settings](https://example.test/settings)."\r\n---\r\n${markdown}`,
+      `\uFEFF---\r\nname: Team board\r\ndescription: >-\r\n  Organize tasks\r\n  together.\r\nfutureField: [one, two]\r\nid: spoofed\r\ninstalledAppId: ${crypto.randomUUID()}\r\nsecretHelp:\r\n  BOARD_TOKEN: "Open [API settings](https://example.test/settings) for YOUR-APP-HOST."\r\n---\r\n${markdown}`,
     );
   });
   const api = createApi(runtime);
@@ -219,16 +222,49 @@ it("reads a new template from its directory and frontmatter without provider-spe
   expect(template.id).toBe("kanban");
   expect(template.installedAppId).toBeNull();
   expect(template).not.toHaveProperty("futureField");
-  expect(template.markdown).toBe(markdown);
+
+  // An install under the template's name gets this host, which the instructions name.
+  const host = new URL(
+    `https://kanban.${environment.configuration.APP_DOMAIN}:${environment.configuration.APP_HTTPS_PORT}`,
+  ).host;
+
+  expect(template.appHost).toBe(host);
+  expect(template.markdown).toBe(markdown.replace("YOUR-APP-HOST", host));
   expect(template.network).toBeUndefined();
   expect(template.requiredSecrets).toEqual(["BOARD_TOKEN"]);
   expect(template.secretHelp).toEqual({
-    BOARD_TOKEN: "Open [API settings](https://example.test/settings).",
+    BOARD_TOKEN: `Open [API settings](https://example.test/settings) for ${host}.`,
   });
   expect(template.source).toBe("https://github.com/widefleet/widefleet/tree/main/templates/kanban");
   expect(template.prompt).toContain("catalog templates show kanban");
   expect(template.prompt).not.toMatch(/OAuth|personal account/i);
   expect(requests).not.toContainEqual(expect.stringContaining("outside"));
+
+  // Once installed under another name, the instructions name that app's host.
+  const appId = crypto.randomUUID();
+  const hostname = `board.${environment.configuration.APP_DOMAIN}`;
+
+  await environment.database.db.insert(apps).values({
+    id: appId,
+    slug: "board",
+    displayName: "Board",
+    organizationId: environment.application.organizationId,
+    ownerId: environment.owner.id,
+    hostname,
+    templateId: "kanban",
+    state: "active",
+  });
+
+  const installed = contract.appTemplate.parse(
+    await (await api(new Request("http://localhost/api/v1/catalog/templates/kanban"))).json(),
+  );
+
+  const installedHost = new URL(`https://${hostname}:${environment.configuration.APP_HTTPS_PORT}`)
+    .host;
+
+  expect(installed.installedAppId).toBe(appId);
+  expect(installed.appHost).toBe(installedHost);
+  expect(installed.markdown).toBe(markdown.replace("YOUR-APP-HOST", installedHost));
 });
 
 it.each([

@@ -16,7 +16,7 @@ installation uses your own Microsoft Entra application:
 
 1. Register an application for **Accounts in any organizational directory and
    personal Microsoft accounts**.
-2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI and
+2. Add `https://YOUR-APP-HOST/auth/callback/microsoft` as a **Web** redirect URI and
    add the delegated Microsoft Graph permissions `Mail.ReadWrite`, `Mail.Send`,
    `Calendars.ReadWrite`, `Contacts.ReadWrite` and `MailboxSettings.ReadWrite`.
 3. Create a client secret and save the application's client ID and the secret's

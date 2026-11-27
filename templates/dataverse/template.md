@@ -13,7 +13,7 @@ security roles there.
 
 1. Register a Microsoft Entra application for **Accounts in any organizational
    directory**.
-2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI and
+2. Add `https://YOUR-APP-HOST/auth/callback/microsoft` as a **Web** redirect URI and
    add the delegated **Dynamics CRM** permission `user_impersonation`.
 3. Create a client secret and save the application's client ID and the secret's
    **value** as `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET` on the app's

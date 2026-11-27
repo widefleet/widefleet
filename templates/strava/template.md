@@ -16,8 +16,7 @@ Strava account.
 
 1. Create an application on [Strava's API settings
    page](https://www.strava.com/settings/api) and set its **Authorization Callback
-   Domain** to the app's host name, such as `strava.example.com`. You can set it
-   once the app is installed.
+   Domain** to `YOUR-APP-HOST`.
 2. Enter the application's client ID and secret as `STRAVA_CLIENT_ID` and
    `STRAVA_CLIENT_SECRET` and install the template.
 

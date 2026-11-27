@@ -20,8 +20,7 @@ The app signs people in with your organization's Google OAuth client:
    the user type **Internal**, everyone in your Google Workspace can connect right
    away. An external app needs Google's verification for this scope.
 2. Create an OAuth client of the type **Web application** and add
-   `https://YOUR-APP-URL/auth/callback/google` as an authorized redirect URI. You
-   can add it once the app is installed and its URL is known.
+   `https://YOUR-APP-HOST/auth/callback/google` as an authorized redirect URI.
 3. Enter the client ID and secret as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
    and install the template.
 
