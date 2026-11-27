@@ -1,34 +1,40 @@
-import { workerDefinition, workerTails } from "./worker-definition.ts";
+import { workerBindings, workerSource, workerTails } from "./worker-definition.ts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
 // celld 0.6.2 cannot keep a call alive while it awaits another request's async
 // loader factory. Prepare code in each invoking request, then pass a synchronous
-// factory. Cache completed definitions only; weak references and a bounded index
-// avoid retaining inactive app code. No caller data belongs in this cache.
-const definitions = new Map<string, WeakRef<Awaited<ReturnType<typeof workerCode>>>>();
+// factory. Cache completed code only; weak references and a bounded index avoid
+// retaining inactive app code. No caller data belongs in this cache, and no
+// bindings either: a binding belongs to the request that created it. The loader
+// runs the factory in the request that calls get(), whenever it has no Worker
+// for the name, so the factory creates the bindings.
+const sources = new Map<string, WeakRef<Awaited<ReturnType<typeof appSource>>>>();
 
 export const appWorker = async (
   app: PublishedApp,
   environment: ParentEnvironment,
   context: ExecutionContext,
 ) => {
-  let definition = definitions.get(app.version)?.deref();
+  let source = sources.get(app.version)?.deref();
 
-  if (!definition) {
-    definition = await workerCode(app, environment, context);
+  if (!source) {
+    source = await appSource(app, environment);
 
-    if (definitions.size >= 64) {
-      const oldest = definitions.keys().next();
+    if (sources.size >= 64) {
+      const oldest = sources.keys().next();
 
-      if (!oldest.done) definitions.delete(oldest.value);
+      if (!oldest.done) sources.delete(oldest.value);
     }
 
-    definitions.set(app.version, new WeakRef(definition));
+    sources.set(app.version, new WeakRef(source));
   }
 
-  const code = definition;
+  const code = source;
 
-  return environment.WIDEFLEET_LOADER.get(app.version, () => code);
+  return environment.WIDEFLEET_LOADER.get(app.version, () => ({
+    ...code,
+    ...appBindings(app, environment, context),
+  }));
 };
 
 export const workerCode = async (
@@ -38,27 +44,34 @@ export const workerCode = async (
   workflow?: string,
   workflowSource = WIDEFLEET_WORKFLOW_SOURCE,
 ) => {
-  const identity = {
+  const bindings = appBindings(app, environment, context);
+
+  return { ...(await appSource(app, environment, workflow, workflowSource)), ...bindings };
+};
+
+const definition = (app: PublishedApp) => ({
+  scope: `apps/${app.appId}`,
+  identity: {
     organizationId: app.organizationId,
     appId: app.appId,
     deploymentId: app.deploymentId,
     buildId: app.metadata.debug?.build_id ?? null,
-  };
+  },
+  metadata: app.metadata,
+  modules: app.modules,
+  nativeBindings: app.nativeBindings,
+  capabilities: Object.keys(app.capabilities),
+});
 
-  const worker = await workerDefinition(
-    {
-      scope: `apps/${app.appId}`,
-      identity,
-      metadata: app.metadata,
-      modules: app.modules,
-      nativeBindings: app.nativeBindings,
-      capabilities: Object.keys(app.capabilities),
-    },
-    environment,
-    context,
-  );
-
-  const bindings = new Map(Object.entries(worker.env));
+// The bindings, outbound gateway and tails of an app's Worker, created in the
+// current request.
+const appBindings = (
+  app: PublishedApp,
+  environment: ParentEnvironment,
+  context: ExecutionContext,
+) => {
+  const input = definition(app);
+  const bindings = new Map(Object.entries(workerBindings(input, environment, context)));
 
   if (app.organizationId)
     bindings.set(
@@ -109,6 +122,23 @@ export const workerCode = async (
       context.exports.AppService({ props: { ...grant, sourceAppId: app.appId } }),
     );
 
+  return {
+    env: Object.fromEntries(bindings),
+    globalOutbound: context.exports.Gateway({
+      props: { origins: app.network.policy.backend, appId: app.appId },
+    }),
+    tails: workerTails(environment, context, input.identity, app.telemetry),
+  };
+};
+
+// The modules and compatibility settings of an app's Worker, which no request owns.
+const appSource = async (
+  app: PublishedApp,
+  environment: ParentEnvironment,
+  workflow?: string,
+  workflowSource = WIDEFLEET_WORKFLOW_SOURCE,
+) => {
+  const worker = await workerSource(definition(app), environment);
   const modules = new Map(Object.entries(worker.modules));
 
   // celld 0.6.2 registers the first builtin import surface it encounters.
@@ -156,20 +186,5 @@ ${(app.metadata.entrypoints ?? [])
         : worker.compatibilityFlags,
     mainModule: "__widefleet_bootstrap.js",
     modules: Object.fromEntries(modules),
-    env: Object.fromEntries(bindings),
-    globalOutbound: context.exports.Gateway({
-      props: { origins: app.network.policy.backend, appId: app.appId },
-    }),
-    tails: workerTails(
-      environment,
-      context,
-      {
-        organizationId: app.organizationId,
-        appId: app.appId,
-        deploymentId: app.deploymentId,
-        buildId: app.metadata.debug?.build_id ?? null,
-      },
-      app.telemetry,
-    ),
   };
 };
