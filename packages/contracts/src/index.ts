@@ -9,7 +9,7 @@ export { shortenTypeNames } from "./service-type-names.ts";
 export { serviceBindingTypes } from "./service-binding-types.ts";
 
 import { z } from "zod";
-import { appSourceSummary, gitBranch, gitCommit, sourceRevision } from "./source.ts";
+import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
 
 import {
   appRpcMethod,
@@ -168,8 +168,6 @@ export const appBuild = z.strictObject({
 export const appBuildDetails = appBuild.extend({ log: z.string() });
 
 export const appBuildInput = z.strictObject({
-  /** A commit of the app's branch; the branch's latest commit by default. */
-  commit: gitCommit.optional(),
   /** The project directory inside the repository; that of the active deployment by default. */
   directory: sourceRevision.shape.directory.optional(),
 });

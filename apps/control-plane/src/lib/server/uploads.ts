@@ -19,12 +19,9 @@ import { transact, type Transaction } from "./transactions.ts";
 import { encodeDocumentation, storeDocumentation } from "./artifact-documentation.ts";
 import { prepareModules, storeModules, type WorkerModule } from "./worker-modules.ts";
 
-/** Who uploads: a request's principal, or the actor recorded with a server build. */
-type Uploader = Pick<Principal, "id" | "admin" | "application">;
-
 const getSession = async (
   transaction: Transaction,
-  principal: Uploader,
+  principal: Principal,
   appId: string,
   sessionId: string,
 ) => {
@@ -58,7 +55,7 @@ export const createUploadService = (
   execution?: Pick<HostedExecution, "deploy">,
   source?: SourceBackend,
 ) => ({
-  start: (principal: Uploader, appId: string, manifest: z.infer<typeof contract.assetManifest>) =>
+  start: (principal: Principal, appId: string, manifest: z.infer<typeof contract.assetManifest>) =>
     transact(database, (transaction) =>
       Result.gen(async function* () {
         const record = yield* Result.await(managedApp(transaction, principal, appId));
@@ -88,7 +85,7 @@ export const createUploadService = (
       }),
     ),
   putAsset: (
-    principal: Uploader,
+    principal: Principal,
     appId: string,
     sessionId: string,
     hash: string,
@@ -130,7 +127,7 @@ export const createUploadService = (
       }),
     ),
   publish: async (
-    principal: Uploader,
+    principal: Principal,
     appId: string,
     metadata: z.infer<typeof contract.workerMetadata>,
     documentation: z.infer<typeof contract.serviceDocumentation> | null,

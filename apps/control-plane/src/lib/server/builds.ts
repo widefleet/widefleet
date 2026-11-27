@@ -1,13 +1,13 @@
-// Server builds: the app CI builds a commit from the app's Widefleet Git
-// repository with `widefleet build --output`, and the output is published
-// through the same upload path as `widefleet deploy`, under the authority of
-// whoever started the build.
+// Server builds: the app CI runs `widefleet deploy` on a commit from the app's
+// Widefleet Git repository, as on a computer, under the authority of whoever
+// started the build. It deploys with a token that is valid while the build runs.
 import * as contract from "@platform/contracts";
-import { ciBuildOutput, ciBuildRequest, ciBuildResult } from "@platform/contracts/builds";
+import { ciBuildRequest, ciBuildResult } from "@platform/contracts/builds";
 import { Result } from "better-result";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { z } from "zod";
+import type { z } from "zod";
 import { readableApp } from "./apps.ts";
+import { createBuildToken } from "./build-tokens.ts";
 import { sourceTarget } from "./app-source.ts";
 import type { Database } from "./database.ts";
 import { deploymentActor } from "./deployment-execution.ts";
@@ -16,20 +16,16 @@ import type { Principal } from "./identity.ts";
 import { appBuilds, apps, artifacts, deployments } from "./schema.ts";
 import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import { readOnly, transact } from "./transactions.ts";
-import type { createUploadService } from "./uploads.ts";
-import type { WorkerModule } from "./worker-modules.ts";
 
-/** The app CI, which keeps each build's output until it is released. */
+/** The app CI, which keeps each build's outcome until it is released. */
 export interface AppCi {
   build: (request: z.infer<typeof ciBuildRequest>) => Promise<z.infer<typeof ciBuildResult>>;
-  file: (id: string, path: string) => Promise<Uint8Array>;
   release: (id: string) => Promise<void>;
 }
 
 /** The CI Worker's `AppCi` entrypoint, whose answers are checked like any other input. */
 export const bindingAppCi = (binding: AppCi): AppCi => ({
   build: async (request) => ciBuildResult.parse(await binding.build(ciBuildRequest.parse(request))),
-  file: (id, path) => binding.file(id, path),
   release: (id) => binding.release(id),
 });
 
@@ -77,22 +73,13 @@ export const createBuildService = (
               }),
             );
 
-          const commit =
-            input.commit ?? (await sourceOperation(() => source.head(repository, branch)));
+          const commit = await sourceOperation(() => source.head(repository, branch));
 
           if (!commit)
             return Result.err(
               new InvalidOperation({
                 code: "CONFLICT",
                 message: `The branch ${branch} has no commits. Save source with widefleet deploy first`,
-              }),
-            );
-
-          if (input.commit && !(await sourceOperation(() => source.hasCommit(repository, commit))))
-            return Result.err(
-              new InvalidOperation({
-                code: "BAD_REQUEST",
-                message: "The commit is not stored in this app's repository",
               }),
             );
 
@@ -188,9 +175,8 @@ export const createBuildService = (
 export type BuildService = ReturnType<typeof createBuildService>;
 
 /**
- * Runs a recorded build to its end: build, upload and publish. A repeated run
- * continues where the previous one stopped; the build ID is the deployment's
- * request ID, so it publishes at most once.
+ * Runs a recorded build to its end. A repeated run builds again; the build ID
+ * is the deployment's request ID, so the build publishes at most once.
  */
 export const executeBuild = async (
   id: string,
@@ -199,132 +185,106 @@ export const executeBuild = async (
     withDatabase: <T>(operation: (database: Database) => Promise<T>) => Promise<T>;
     source: SourceBackend;
     ci: AppCi;
-    uploads: (
-      database: Database,
-    ) => Pick<ReturnType<typeof createUploadService>, "start" | "putAsset" | "publish">;
+    platformUrl: string;
   },
 ) => {
   const { withDatabase, source, ci } = services;
 
+  const token = createBuildToken();
+
   const loaded = await withDatabase(async (database) => {
     const [record] = await database
-      .select({ build: appBuilds, parentId: apps.parentId })
-      .from(appBuilds)
-      .innerJoin(apps, eq(apps.id, appBuilds.appId))
-      .where(eq(appBuilds.id, id));
+      .update(appBuilds)
+      .set({ status: "running", tokenHash: token.hash })
+      .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])))
+      .returning();
 
-    if (record?.build.status === "queued")
-      await database.update(appBuilds).set({ status: "running" }).where(eq(appBuilds.id, id));
+    if (!record) return undefined;
 
-    return record;
+    const [app] = await database
+      .select({ parentId: apps.parentId })
+      .from(apps)
+      .where(eq(apps.id, record.appId));
+
+    return { build: record, parentId: app?.parentId ?? null };
   });
 
-  // The app was removed with its builds.
+  // The build has finished, or its app was removed with it.
   if (!loaded) return;
   const { build, parentId } = loaded;
-
-  if (build.status === "succeeded" || build.status === "failed") return;
 
   const finish = (values: Partial<typeof appBuilds.$inferInsert>) =>
     withDatabase((database) =>
       database
         .update(appBuilds)
-        .set({ ...values, finishedAt: new Date() })
+        .set({ ...values, tokenHash: null, finishedAt: new Date() })
         .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"]))),
     );
 
-  const actor = deploymentActor.parse(build.actor);
+  const published = () =>
+    withDatabase(async (database) => {
+      const [deployment] = await database
+        .select({ id: deployments.id })
+        .from(deployments)
+        .where(and(eq(deployments.appId, build.appId), eq(deployments.requestId, id)));
 
-  const revision = contract.sourceRevision.parse({
-    commit: build.commit,
-    branch: build.branch,
-    directory: build.directory,
-  });
+      return deployment;
+    });
 
-  const result = await ci.build({
-    id,
-    repository: await sourceOperation(() => source.credential(parentId ?? build.appId, "read")),
-    commit: revision.commit,
-    directory: revision.directory,
-  });
+  // A run that stopped after publishing does not build again.
+  const previous = await published();
 
-  if (result.status === "failed") {
-    await finish({ status: "failed", message: result.message, log: result.log });
+  if (previous) {
+    await finish({ status: "succeeded", deploymentId: previous.id });
     await ci.release(id);
 
     return;
   }
 
-  const output = ciBuildOutput.parse(JSON.parse(result.output));
+  const actor = deploymentActor.parse(build.actor);
 
-  const published = await withDatabase(async (database) => {
-    // A run that stopped after publishing finds its deployment.
-    const [existing] = await database
-      .select({ id: deployments.id })
-      .from(deployments)
-      .where(and(eq(deployments.appId, build.appId), eq(deployments.requestId, id)));
+  const repository = await sourceOperation(() => source.repository(parentId ?? build.appId));
 
-    if (existing) return Result.ok(existing.id);
+  if (!repository) {
+    await finish({ status: "failed", message: "The app has no Git repository" });
+    await ci.release(id);
 
-    const uploads = services.uploads(database);
+    return;
+  }
 
-    return Result.gen(async function* () {
-      const session = yield* Result.await(
-        uploads.start(actor, build.appId, output.assets.manifest),
-      );
-
-      for (const hash of session.missing) {
-        const path = output.assets.files[hash];
-
-        if (!path)
-          return yield* new InvalidOperation({
-            code: "BAD_REQUEST",
-            message: "The build output lacks an asset of its manifest",
-          });
-
-        yield* Result.await(
-          uploads.putAsset(actor, build.appId, session.id, hash, await ci.file(id, path)),
-        );
-      }
-
-      const modules: WorkerModule[] = [];
-
-      for (const module of output.modules)
-        modules.push({
-          name: module.name,
-          type: module.type,
-          bytes: await ci.file(id, module.path),
-        });
-
-      const metadata = contract.workerMetadata.safeParse({
-        ...output.metadata,
-        assets: {
-          ...z.record(z.string(), z.json()).parse(output.metadata["assets"] ?? {}),
-          upload_session: session.id,
-        },
-        source: revision,
-      });
-
-      if (!metadata.success)
-        return yield* new InvalidOperation({
-          code: "BAD_REQUEST",
-          message: `The build is not deployable: ${z.prettifyError(metadata.error)}`,
-        });
-
-      const deployment = yield* Result.await(
-        uploads.publish(actor, build.appId, metadata.data, output.documentation, modules, id),
-      );
-
-      return Result.ok(deployment.id);
-    });
+  const result = await ci.build({
+    id,
+    appId: build.appId,
+    platform: {
+      url: services.platformUrl,
+      organizationId: actor.application.organizationId,
+      token: token.value,
+    },
+    repository: { url: repository.url },
+    source: contract.sourceRevision.parse({
+      commit: build.commit,
+      branch: build.branch,
+      directory: build.directory,
+    }),
   });
 
-  if (published.isErr()) {
-    // Unavailable storage or databases fail the attempt, which the caller retries.
-    if (!(published.error instanceof InvalidOperation)) throw published.error;
+  const deployment = await published();
 
-    await finish({ status: "failed", message: published.error.message, log: result.log });
-  } else await finish({ status: "succeeded", deploymentId: published.value, log: result.log });
+  if (result.status === "failed")
+    await finish({
+      status: "failed",
+      message: result.message,
+      log: result.log,
+      deploymentId: deployment?.id ?? null,
+    });
+  else if (deployment)
+    await finish({ status: "succeeded", deploymentId: deployment.id, log: result.log });
+  else
+    await finish({
+      status: "failed",
+      message: "widefleet deploy did not publish the build",
+      log: result.log,
+    });
 
   await ci.release(id);
 };
@@ -333,5 +293,5 @@ export const executeBuild = async (
 export const failBuild = (database: Database, id: string, message: string) =>
   database
     .update(appBuilds)
-    .set({ status: "failed", message, finishedAt: new Date() })
+    .set({ status: "failed", message, tokenHash: null, finishedAt: new Date() })
     .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])));

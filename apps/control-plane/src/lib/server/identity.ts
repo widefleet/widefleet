@@ -1,4 +1,5 @@
 import { companySignInLimit, companySsoAvailableSql, type SignIn } from "./sso-policy.ts";
+import { buildActor, isBuildToken } from "./build-tokens.ts";
 import { verifyAccessToken } from "./access-token.ts";
 import { Result, TaggedError, type InferOk } from "better-result";
 import { eq, sql } from "drizzle-orm";
@@ -171,14 +172,41 @@ export const createIdentityService = (
           });
         }
 
+        const bearer = authorization.slice(7);
+
+        if (isBuildToken(bearer)) {
+          if (scope === "network:manage")
+            return yield* new AuthenticationFailed({
+              code: "FORBIDDEN",
+              message: "Builds cannot manage network access",
+            });
+
+          const actor = yield* Result.await(
+            Result.tryPromise({
+              try: () => buildActor(database, bearer),
+              catch: (cause) =>
+                new DatabaseUnavailable({ message: "Could not verify the build", cause }),
+            }),
+          );
+
+          if (!actor || (allowUser && !(await allowUser(actor.id))))
+            return yield* new AuthenticationFailed({
+              code: "UNAUTHORIZED",
+              message: "The build has finished",
+            });
+
+          // The build's starter was signed in to its organization when it started.
+          return Result.ok({
+            userId: actor.id,
+            identityOrganizationId: actor.application.organizationId,
+            recovery: false,
+          } satisfies SignIn);
+        }
+
         const verified = yield* Result.await(
           Result.tryPromise({
             try: async () => {
-              return verifyAccessToken(
-                authorization.slice(7),
-                await auth.api.getJwks(),
-                configuration,
-              );
+              return verifyAccessToken(bearer, await auth.api.getJwks(), configuration);
             },
             catch: () =>
               new AuthenticationFailed({

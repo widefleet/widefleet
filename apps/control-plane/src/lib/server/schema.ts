@@ -291,10 +291,15 @@ export const appBuilds = pgTable(
     deploymentId: uuid("deployment_id").references(() => deployments.id, { onDelete: "set null" }),
     message: text(),
     log: text().notNull().default(""),
+    /** The SHA-256 of the token the running build deploys with. */
+    tokenHash: text("token_hash"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (table) => [index("app_build_app_idx").on(table.appId, table.createdAt)],
+  (table) => [
+    index("app_build_app_idx").on(table.appId, table.createdAt),
+    uniqueIndex("app_build_token_idx").on(table.tokenHash),
+  ],
 );
 
 export const deploymentEvents = pgTable("deployment_event", {

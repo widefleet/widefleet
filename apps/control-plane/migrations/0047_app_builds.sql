@@ -9,8 +9,11 @@ CREATE TABLE app_build (
   deployment_id uuid REFERENCES deployment(id) ON DELETE SET NULL,
   message text,
   log text NOT NULL DEFAULT '',
+  token_hash text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   finished_at timestamp with time zone
 );
 --> statement-breakpoint
 CREATE INDEX app_build_app_idx ON app_build (app_id, created_at);
+--> statement-breakpoint
+CREATE UNIQUE INDEX app_build_token_idx ON app_build (token_hash);

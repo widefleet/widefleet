@@ -71,8 +71,6 @@ enum Command {
         #[arg(long, value_enum, default_value = "sveltekit")]
         template: installation::Template,
     },
-    /// Build the app as `deploy` does and write the result to a directory. No login is required.
-    Build(deploy::BuildOptions),
     Login(auth::LoginOptions),
     Logout,
     Whoami,
@@ -194,9 +192,6 @@ async fn run(args: Arguments) -> Result<()> {
     } = &args.command
     {
         return installation::initialize(directory, *template);
-    }
-    if let Command::Build(options) = args.command {
-        return deploy::write_build(options).await;
     }
     let domain = match &args.command {
         Command::Login(options) => options.discovery.domain(),
@@ -435,7 +430,6 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Config(_)
         | Command::Telemetry(_)
         | Command::Init { .. }
-        | Command::Build(_)
         | Command::Login(_)
         | Command::Logout => {
             unreachable!("Local and authentication commands return before API dispatch")
@@ -450,7 +444,6 @@ async fn main() {
         Command::Config(_) => "config",
         Command::Telemetry(_) => "telemetry",
         Command::Init { .. } => "init",
-        Command::Build(_) => "build",
         Command::Login(_) => "login",
         Command::Logout => "logout",
         Command::Whoami => "whoami",

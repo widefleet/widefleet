@@ -298,19 +298,16 @@ pub struct DeploymentResult {
     pub requested_network: Option<platform_core::model::NetworkPolicy>,
 }
 
-struct Project {
-    config_path: PathBuf,
-    directory: PathBuf,
-    text: String,
-    configuration: Configuration,
-}
-
-fn read_project(config: &Path) -> Result<Project> {
-    let config_path = config.canonicalize()?;
-    let directory = config_path
+async fn publish(
+    api: &Api,
+    credentials: &auth::Credentials,
+    target: Target,
+    options: &Options,
+) -> Result<DeploymentResult> {
+    let config_path = options.config.canonicalize()?;
+    let project = config_path
         .parent()
-        .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?
-        .to_owned();
+        .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?;
     let configuration_text = std::fs::read_to_string(&config_path)?;
     let configuration: Configuration = jsonc_parser::parse_to_serde_value(
         &configuration_text,
@@ -353,32 +350,58 @@ fn read_project(config: &Path) -> Result<Project> {
         return Err(Error::invalid("Compatibility flags must be unique".into()));
     }
     check_required_secrets(&configuration)?;
-    Ok(Project {
-        config_path,
-        directory,
-        text: configuration_text,
-        configuration,
-    })
-}
-
-/// Everything a deployment uploads, built without contacting the platform.
-pub(crate) struct Build {
-    /// The deployment's metadata. `assets.upload_session` and `source` are set
-    /// when the build is uploaded.
-    metadata: WorkerMetadata,
-    documentation: serde_json::Value,
-    modules: Vec<(String, ModuleType, Vec<u8>)>,
-    assets: AssetFiles,
-}
-
-async fn build(project: Project, bundler: &Path, skip_build: bool) -> Result<Build> {
-    let Project {
-        directory,
-        configuration,
-        ..
-    } = project;
-    let project = directory.as_path();
-    if !skip_build && project.join("package.json").exists() {
+    if matches!(target, Target::App(None)) {
+        let name = configuration.name.as_deref().unwrap_or_default();
+        if name.is_empty()
+            || name.len() > 48
+            || matches!(name, "auth" | "mcp")
+            || !name.starts_with(|character: char| character.is_ascii_lowercase())
+            || !name.ends_with(|character: char| character.is_ascii_alphanumeric())
+            || !name.chars().all(|character| {
+                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+            })
+        {
+            return Err(Error::invalid("Set a valid name in the Wrangler configuration: 1-48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit; auth and mcp are reserved".into()).with_reason(FailureReason::InvalidAppName));
+        }
+        eprintln!("Target: {} on {}", name, api.origin_text());
+    }
+    let bundler = installation::bundler().await?;
+    let source_supported = if options.no_source {
+        false
+    } else {
+        match &target {
+            Target::App(app) => {
+                let target = app.map_or_else(
+                    || value!({ "slug": configuration.name }),
+                    |app| value!({ "appId": app }),
+                );
+                source::confirm_deployment_branch(
+                    api,
+                    credentials,
+                    project,
+                    &target,
+                    options.source_branch.as_deref(),
+                    options.allow_branch_mismatch,
+                )
+                .await?
+            }
+            Target::Preview(preview) => preview.source_branch.is_some(),
+        }
+    };
+    let source_tree = if source_supported {
+        let tree = source::snapshot(project).await?;
+        // The target lookup needs the app name before snapshotting. Ensure the
+        // configuration used by the build is still the one included in that snapshot.
+        if std::fs::read_to_string(&config_path)? != configuration_text {
+            return Err(Error::invalid(
+                "Project files changed before the build. Retry the deployment".into(),
+            ));
+        }
+        Some(tree)
+    } else {
+        None
+    };
+    if !options.skip_build && project.join("package.json").exists() {
         local_command(project, &["run", "build"]).await?;
     }
     let temporary = tempfile::tempdir_in(project)?;
@@ -393,7 +416,7 @@ async fn build(project: Project, bundler: &Path, skip_build: bool) -> Result<Bui
         .compatibility_flags
         .iter()
         .any(|flag| flag == "nodejs_compat");
-    let bundled = bundle(bundler, project, &entry, temporary.path(), node_compat).await?;
+    let bundled = bundle(&bundler, project, &entry, temporary.path(), node_compat).await?;
     // Service entrypoints are module exports, as in Cloudflare Workers. Workflow
     // classes use their standard declarations and are not RPC service entrypoints.
     let web =
@@ -408,7 +431,7 @@ async fn build(project: Project, bundler: &Path, skip_build: bool) -> Result<Bui
                 .any(|workflow| workflow.class_name == *name)
         })
         .collect();
-    let documentation =
+    let service_documentation =
         crate::service_docs::extract(project, temporary.path(), &entrypoints).await?;
     let worker = bundled.source;
     if worker.len() > 20 * 1024 * 1024 {
@@ -456,229 +479,11 @@ async fn build(project: Project, bundler: &Path, skip_build: bool) -> Result<Bui
         ))?),
     };
     temporary.close()?;
-    let mut worker_metadata = configuration.worker.metadata(
-        "worker.js".into(),
-        DebugMetadata {
-            build_id,
-            source_maps,
-        },
-    );
-    let bindings = &mut worker_metadata.bindings;
-    bindings.extend(
-        configuration
-            .queues
-            .producers
-            .into_iter()
-            .map(|producer| Binding::Queue {
-                name: producer.binding,
-                queue: producer.queue,
-            }),
-    );
-    bindings.extend(
-        configuration
-            .workflows
-            .into_iter()
-            .map(|workflow| Binding::Workflow {
-                name: workflow.binding,
-                workflow_name: workflow.name,
-                class_name: workflow.class_name,
-            }),
-    );
-    let metadata = WorkerMetadata {
-        web: Some(web),
-        entrypoints,
-        source: None,
-        network: declaration(project)?.network,
-        crons: configuration.triggers.crons,
-        queue_consumers: configuration.queues.consumers,
-        required_secrets: configuration.secrets.required,
-        worker: worker_metadata,
-        assets: WorkerAssets {
-            // Replaced by the upload session that receives the assets.
-            upload_session: Uuid::nil(),
-            binding: configuration
-                .assets
-                .map_or_else(|| "ASSETS".into(), |assets| assets.binding),
-        },
-    };
-    let mut modules = vec![("worker.js".into(), ModuleType::Esm, worker)];
-    modules.extend(
-        map_uploads
-            .into_iter()
-            .map(|(name, bytes)| (name, ModuleType::Sourcemap, bytes)),
-    );
-    Ok(Build {
-        metadata,
-        documentation,
-        modules,
-        assets,
-    })
-}
-
-#[derive(Args)]
-pub struct BuildOptions {
-    #[arg(long, default_value = "wrangler.jsonc")]
-    config: PathBuf,
-    /// Directory for the build; it must not exist yet.
-    #[arg(long)]
-    output: PathBuf,
-    #[arg(long)]
-    skip_build: bool,
-}
-
-/// The description of a build in `deployment.json`, which Widefleet servers
-/// read to deploy it. Paths are relative to the output directory.
-#[derive(serde::Serialize)]
-struct BuildOutput<'a> {
-    format: u8,
-    metadata: serde_json::Value,
-    documentation: &'a serde_json::Value,
-    modules: Vec<BuildModule<'a>>,
-    assets: BuildAssets<'a>,
-}
-
-#[derive(serde::Serialize)]
-struct BuildModule<'a> {
-    name: &'a str,
-    #[serde(rename = "type")]
-    kind: &'a ModuleType,
-    path: String,
-}
-
-#[derive(serde::Serialize)]
-struct BuildAssets<'a> {
-    manifest: &'a AssetManifest,
-    /// The file of each asset hash.
-    files: BTreeMap<&'a str, String>,
-}
-
-/// Builds the app as `deploy` does and writes the result to a directory
-/// instead of uploading it.
-pub async fn write_build(options: BuildOptions) -> Result<()> {
-    if options.output.exists() {
-        return Err(Error::invalid(format!(
-            "The output directory {} already exists",
-            options.output.display()
-        )));
-    }
-    let project = read_project(&options.config)?;
-    let built = build(project, &installation::bundler().await?, options.skip_build).await?;
-    std::fs::create_dir(&options.output)?;
-    std::fs::create_dir(options.output.join("modules"))?;
-    std::fs::create_dir(options.output.join("assets"))?;
-    let mut modules = Vec::new();
-    for (name, kind, bytes) in &built.modules {
-        let path = format!("modules/{name}");
-        std::fs::write(options.output.join(&path), bytes)?;
-        modules.push(BuildModule { name, kind, path });
-    }
-    let mut files = BTreeMap::new();
-    for (hash, source) in &built.assets.files {
-        let path = format!("assets/{hash}");
-        std::fs::copy(source, options.output.join(&path))?;
-        files.insert(hash.as_str(), path);
-    }
-    for (hash, bytes) in &built.assets.generated {
-        let path = format!("assets/{hash}");
-        std::fs::write(options.output.join(&path), bytes)?;
-        files.insert(hash.as_str(), path);
-    }
-    let mut metadata = serde_json::to_value(&built.metadata)?;
-    // The upload session belongs to the deployment that uploads this build.
-    if let Some(assets) = metadata
-        .get_mut("assets")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        assets.remove("upload_session");
-    }
-    let output = BuildOutput {
-        format: 1,
-        metadata,
-        documentation: &built.documentation,
-        modules,
-        assets: BuildAssets {
-            manifest: &built.assets.manifest,
-            files,
-        },
-    };
-    std::fs::write(
-        options.output.join("deployment.json"),
-        serde_json::to_vec_pretty(&output)?,
-    )?;
-    eprintln!("Build written to {}", options.output.display());
-    Ok(())
-}
-
-async fn publish(
-    api: &Api,
-    credentials: &auth::Credentials,
-    target: Target,
-    options: &Options,
-) -> Result<DeploymentResult> {
-    let project = read_project(&options.config)?;
-    let configuration = &project.configuration;
-    if matches!(target, Target::App(None)) {
-        let name = configuration.name.as_deref().unwrap_or_default();
-        if name.is_empty()
-            || name.len() > 48
-            || matches!(name, "auth" | "mcp")
-            || !name.starts_with(|character: char| character.is_ascii_lowercase())
-            || !name.ends_with(|character: char| character.is_ascii_alphanumeric())
-            || !name.chars().all(|character| {
-                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
-            })
-        {
-            return Err(Error::invalid("Set a valid name in the Wrangler configuration: 1-48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit; auth and mcp are reserved".into()).with_reason(FailureReason::InvalidAppName));
-        }
-        eprintln!("Target: {} on {}", name, api.origin_text());
-    }
-    let bundler = installation::bundler().await?;
-    let directory = project.directory.clone();
-    let name = configuration.name.clone();
-    let source_supported = if options.no_source {
-        false
-    } else {
-        match &target {
-            Target::App(app) => {
-                let target =
-                    app.map_or_else(|| value!({ "slug": name }), |app| value!({ "appId": app }));
-                source::confirm_deployment_branch(
-                    api,
-                    credentials,
-                    &directory,
-                    &target,
-                    options.source_branch.as_deref(),
-                    options.allow_branch_mismatch,
-                )
-                .await?
-            }
-            Target::Preview(preview) => preview.source_branch.is_some(),
-        }
-    };
-    let source_tree = if source_supported {
-        let tree = source::snapshot(&directory).await?;
-        // The target lookup needs the app name before snapshotting. Ensure the
-        // configuration used by the build is still the one included in that snapshot.
-        if std::fs::read_to_string(&project.config_path)? != project.text {
-            return Err(Error::invalid(
-                "Project files changed before the build. Retry the deployment".into(),
-            ));
-        }
-        Some(tree)
-    } else {
-        None
-    };
-    let Build {
-        mut metadata,
-        documentation,
-        modules,
-        assets,
-    } = build(project, &bundler, options.skip_build).await?;
     let app = match target {
         Target::Preview(preview) => preview.resolve(api, credentials).await?,
         Target::App(Some(app)) => app,
         Target::App(None) => {
-            let name = name.as_deref().ok_or_else(|| {
+            let name = configuration.name.as_deref().ok_or_else(|| {
                 Error::invalid("Set name in the Wrangler configuration before deploying".into())
                     .with_reason(FailureReason::AppNameMissing)
             })?;
@@ -714,7 +519,7 @@ async fn publish(
             api,
             credentials,
             app,
-            &directory,
+            project,
             options.source_branch.as_deref(),
             &source_tree,
         )
@@ -762,14 +567,62 @@ async fn publish(
         )
         .await?;
     }
-    metadata.assets.upload_session = session.id;
-    metadata.source = saved;
+    let mut worker_metadata = configuration.worker.metadata(
+        "worker.js".into(),
+        DebugMetadata {
+            build_id,
+            source_maps,
+        },
+    );
+    let bindings = &mut worker_metadata.bindings;
+    bindings.extend(
+        configuration
+            .queues
+            .producers
+            .into_iter()
+            .map(|producer| Binding::Queue {
+                name: producer.binding,
+                queue: producer.queue,
+            }),
+    );
+    bindings.extend(
+        configuration
+            .workflows
+            .into_iter()
+            .map(|workflow| Binding::Workflow {
+                name: workflow.binding,
+                workflow_name: workflow.name,
+                class_name: workflow.class_name,
+            }),
+    );
+    let metadata = WorkerMetadata {
+        web: Some(web),
+        entrypoints,
+        source: saved,
+        network: declaration(project)?.network,
+        crons: configuration.triggers.crons,
+        queue_consumers: configuration.queues.consumers,
+        required_secrets: configuration.secrets.required,
+        worker: worker_metadata,
+        assets: WorkerAssets {
+            upload_session: session.id,
+            binding: configuration
+                .assets
+                .map_or_else(|| "ASSETS".into(), |assets| assets.binding),
+        },
+    };
+    let mut modules = vec![("worker.js".into(), ModuleType::Esm, worker)];
+    modules.extend(
+        map_uploads
+            .into_iter()
+            .map(|(name, bytes)| (name, ModuleType::Sourcemap, bytes)),
+    );
     let deployment = upload::publish(
         api,
         credentials,
         &format!("/apps/{app}/worker"),
         &metadata,
-        Some(&documentation),
+        Some(&service_documentation),
         &modules,
     )
     .await?;

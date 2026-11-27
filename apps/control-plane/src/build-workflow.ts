@@ -2,16 +2,12 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import { z } from "zod";
-import { createArtifactStorage } from "./lib/server/artifact-storage.ts";
 import { bindingAppCi, executeBuild, failBuild } from "./lib/server/builds.ts";
 import type { CloudflareBindings } from "./lib/server/cloudflare-config.ts";
 import { readCloudflareConfiguration } from "./lib/server/cloudflare-config.ts";
 import { withCloudflareDatabase } from "./lib/server/cloudflare-database.ts";
-import { createCloudflareExecution } from "./lib/server/cloudflare-execution.ts";
 import type { Database } from "./lib/server/database.ts";
 import type { createRuntimeExtension } from "./lib/server/runtime-extension.ts";
-import { createR2Storage } from "./lib/server/storage/r2.ts";
-import { createUploadService } from "./lib/server/uploads.ts";
 
 export const buildWorkflowCommand = z.strictObject({ id: z.uuid() });
 
@@ -37,7 +33,6 @@ export const createBuildWorkflow = (createExtension: typeof createRuntimeExtensi
 
       if (!ci) throw new NonRetryableError("The app CI is not configured");
       const configuration = readCloudflareConfiguration(bindings);
-      const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
       const withDatabase = <T>(operation: (database: Database) => Promise<T>) =>
         withCloudflareDatabase(bindings, ({ db }) => operation(db));
@@ -61,14 +56,7 @@ export const createBuildWorkflow = (createExtension: typeof createRuntimeExtensi
             withDatabase,
             source,
             ci: bindingAppCi(ci),
-            uploads: (database) =>
-              createUploadService(
-                database,
-                storage,
-                configuration,
-                createCloudflareExecution(bindings, database, storage),
-                source,
-              ),
+            platformUrl: configuration.PLATFORM_URL,
           }),
         );
       } catch (error) {
