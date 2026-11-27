@@ -9,6 +9,10 @@ export type Operation = {
   path: string;
   /** Input names of path parameters, by the name the path uses. */
   pathParameters: Record<string, string>;
+  /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
+  optionalPathParameters?: string[];
+  /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
+  explodedParameters?: string[];
   /**
    * Query parameters by input name: the API's name, the separator that joins a
    * list into one value, or null to repeat the parameter, and whether it is required.
@@ -16,7 +20,7 @@ export type Operation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
-  body: "json" | "form" | "multipart" | "text" | null;
+  body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
   bodyRequired: boolean;
@@ -34,18 +38,6 @@ export const operations = {
     path: "/v2/organization",
     pathParameters: {},
     queryParameters: { include_external_accounts: ["include_external_accounts", null, false] },
-    headerParameters: {},
-    body: null,
-    bodyRequired: false,
-    response: "json",
-    pageable: false,
-    change: null,
-  },
-  listUserOrganizations: {
-    httpMethod: "GET",
-    path: "/v2/user_organizations",
-    pathParameters: {},
-    queryParameters: {},
     headerParameters: {},
     body: null,
     bodyRequired: false,

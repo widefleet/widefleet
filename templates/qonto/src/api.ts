@@ -1869,9 +1869,9 @@ export type ClientInvoiceCreatePayload = {
   header?: string;
   footer?: string;
   /**
-   * Currency for the total amount of the invoice. Trigram following ISO 4217.
+   * Currency of the invoice, as an ISO 4217 trigram. If omitted, the currency of the client is used.
    */
-  currency:
+  currency?:
     | "EUR"
     | "AED"
     | "AUD"
@@ -5153,9 +5153,9 @@ export type QuoteCreatePayload = {
    */
   terms_and_conditions: string;
   /**
-   * Currency code (ISO 4217, alpha 3)
+   * Currency of the quote, as an ISO 4217 trigram. If omitted, the currency of the client is used.
    */
-  currency: string;
+  currency?: string;
   /**
    * Optional header text for the quote.
    */
@@ -5668,7 +5668,7 @@ export type RecurringInvoiceCreatePayload = {
    */
   invoice_status?: "draft" | "unpaid";
   /**
-   * Currency for the recurring invoice and its items, as an ISO 4217 trigram. Defaults to `EUR`. Every item without its own `unit_price.currency` uses this value.
+   * Currency of the recurring invoice and its items, as an ISO 4217 trigram. If omitted, the currency of the client is used.
    */
   currency?: string;
   bank_account: RecurringInvoiceBankAccountPayload;
@@ -5814,7 +5814,7 @@ export type RecurringInvoiceUpdatePayload = {
    */
   end_date?: string | null;
   /**
-   * Currency for the recurring invoice and its items, as an ISO 4217 trigram. Every item's currency has to match it. Reset to `EUR` when left out, even if the recurring invoice used another currency.
+   * Currency of the recurring invoice and its items, as an ISO 4217 trigram. If omitted, the currency of the client is used. Every item's currency has to match it.
    */
   currency?: string;
   /**
@@ -7615,43 +7615,6 @@ export type UpdateInternationalBeneficiaryRequest = {
   };
 };
 
-/**
- * An organization the authenticated user is a member of.
- */
-export type UserOrganization = {
-  /**
-   * Unique identifier of the organization.
-   */
-  id: string;
-  /**
-   * Display name of the organization.
-   */
-  name: string;
-  /**
-   * Registered legal name of the organization.
-   */
-  legal_name: string;
-  /**
-   * Unique registration number of the organization (e.g. SIRET in France).
-   */
-  legal_number: string | null;
-  /**
-   * ISO 3166-1 alpha-2 country code of the organization's country of incorporation.
-   */
-  legal_country: string | null;
-  /**
-   * Role of the authenticated user within this organization.
-   *
-   * Can contain the following values:
-   * * `owner`: Account owner with full administrative rights.
-   * * `admin`: Administrator with broad management rights.
-   * * `manager`: Team manager with scoped permissions.
-   * * `employee`: Standard member with limited access.
-   * * `reporting`: Read-only reporting access.
-   */
-  membership_role: "owner" | "admin" | "manager" | "employee" | "reporting" | null;
-};
-
 export type VerifyPayeeResponse = {
   /**
    * Result of the payee verification
@@ -7905,19 +7868,6 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
     }>
   > {
     return run(this.env, this.ctx.props, "getOrganization", input);
-  }
-
-  /**
-   * List organizations for the authenticated user
-   *
-   * Returns the list of organizations the authenticated user belongs to.
-   */
-  async listUserOrganizations(input: Record<string, never> = {}): Promise<
-    QontoResult<{
-      organizations: UserOrganization[];
-    }>
-  > {
-    return run(this.env, this.ctx.props, "listUserOrganizations", input);
   }
 
   /**
@@ -11442,7 +11392,7 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
    * </Info>
    *
    * **Do note**:
-   * - The invoice "inherits" the `currency` of the provided client. If the `currency` is not set for that client, you will receive a validation error on the `/data/attributes/currency` property.
+   * - The invoice uses the provided `currency`. If it is omitted, the `currency` of the provided client is used. If neither is set, a validation error is returned.
    * - Italian organizations must have e-invoicing activated on the Qonto app in order to use this endpoint.
    *
    * Asks the user first unless their approval level is `none`.
@@ -11535,7 +11485,15 @@ export class QontoApi extends WorkerEntrypoint<TemplateEnvironment, QontoPropert
   /**
    * Cancel a client invoice
    *
-   * Updates the status of the client invoice identified by the `id` path paremeter from `unpaid` to `cancel`.
+   * Updates the status of the client invoice identified by the `id` path parameter from `unpaid` to `canceled`.
+   *
+   * <Warning>
+   *   **Important**: Only `unpaid` client invoices created in Qonto can be canceled. [Imported](/api-reference/business-api/invoicing/client-invoices/bulk-import-client-invoices) client invoices and `paid` client invoices cannot be canceled, and the request returns a `422` error with the code `forbidden_status`.
+   *
+   *   To remove an imported client invoice, [delete it](/api-reference/business-api/invoicing/client-invoices/delete-a-client-invoice) instead.
+   * </Warning>
+   *
+   * If the client invoice is already `canceled`, the request succeeds and returns the client invoice unchanged.
    *
    * Asks the user first unless their approval level is `none`.
    */

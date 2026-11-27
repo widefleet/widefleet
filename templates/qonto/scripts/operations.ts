@@ -9,9 +9,11 @@
 // src/run.ts handles.
 //
 // Not offered: trusting beneficiaries and approving or declining requests,
-// which would let a caller lift Qonto's own approvals; Embed partner and Sandbox
-// operations; the OAuth endpoints and SCA sessions, which the template uses
-// itself; and deprecated operations.
+// which would let a caller lift Qonto's own approvals; listing the user's
+// organizations, which only Qonto's separately approved User OAuth flow allows,
+// while the template connects one organization's membership; Embed partner and
+// Sandbox operations; the OAuth endpoints and SCA sessions, which the template
+// uses itself; and deprecated operations.
 import { download, index } from "./openapi.ts";
 
 /** Where the generator reads the API, and the names of the generated code. */
@@ -77,7 +79,6 @@ const supplierInvoiceForm = {
 export const operations = {
   // Organization, business accounts and statements
   "GET /v2/organization": { name: "getOrganization" },
-  listUserOrganizations: { name: "listUserOrganizations" },
   "GET /v2/subscription": { name: "getSubscription" },
   listBusinessAccounts: { name: "listBusinessAccounts" },
   getBusinessAccount: { name: "getBusinessAccount" },
