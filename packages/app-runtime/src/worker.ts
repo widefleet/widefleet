@@ -5,8 +5,9 @@ import type { ParentEnvironment, PublishedApp } from "./types.ts";
 // loader factory. Prepare code in each invoking request, then pass a synchronous
 // factory. Cache completed code only; weak references and a bounded index avoid
 // retaining inactive app code. No caller data belongs in this cache, and no
-// bindings either: a binding belongs to the request that created it, and the
-// loader calls the factory again whenever it has dropped the Worker.
+// bindings either: a binding belongs to the request that created it. The loader
+// runs the factory in the request that calls get(), whenever it has no Worker
+// for the name, so the factory creates the bindings.
 const sources = new Map<string, WeakRef<Awaited<ReturnType<typeof appSource>>>>();
 
 export const appWorker = async (
@@ -28,9 +29,12 @@ export const appWorker = async (
     sources.set(app.version, new WeakRef(source));
   }
 
-  const code = { ...source, ...appBindings(app, environment, context) };
+  const code = source;
 
-  return environment.WIDEFLEET_LOADER.get(app.version, () => code);
+  return environment.WIDEFLEET_LOADER.get(app.version, () => ({
+    ...code,
+    ...appBindings(app, environment, context),
+  }));
 };
 
 export const workerCode = async (

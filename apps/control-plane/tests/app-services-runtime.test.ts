@@ -194,7 +194,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
             };
           }
         | { count: number }
-        | { drop: boolean }
+        | { app: string | null }
         | { token: string }
         | { key: string; value: string }
         | z.infer<typeof runtimeRekeyInput>,
@@ -271,10 +271,11 @@ globalThis.fetch = (input, init) => {
   return originalFetch(url.origin === 'https://eu.i.posthog.com' ? new Request('http://127.0.0.1:${analyticsPort}'+url.pathname, request) : request);
 };
 ${executionRecorder}
-// A loader that has dropped every Worker it loaded, as the edge does when it evicts an idle one.
-let dropWorkers = false;
+// A loader that has dropped the Worker of one app before each call, as the edge does when it
+// evicts an idle one. Callers of that app stay loaded.
+let droppedApp = null;
 const dropping = (loader) => ({get:(name,code)=>loader.get(name+'/'+crypto.randomUUID(),code)});
-export class AppService extends Service { constructor(ctx, env) { super(ctx, recordExecution(dropWorkers ? {...env,WIDEFLEET_LOADER:dropping(env.WIDEFLEET_LOADER)} : env)); } }
+export class AppService extends Service { constructor(ctx, env) { super(ctx, recordExecution(ctx.props.app === droppedApp ? {...env,WIDEFLEET_LOADER:dropping(env.WIDEFLEET_LOADER)} : env)); } }
 export class UnconfiguredIdentity extends Identity { constructor(ctx, env) { super(ctx, {...env,WIDEFLEET_WORKLOAD_ISSUER:undefined}); } }
 const refreshIndex = (ctx, hostname) => ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal/.well-known/widefleet/service-index',{method:'POST',body:JSON.stringify({organizationId:'widefleet',hostname})}));
 let publishDuringScan = null;
@@ -293,7 +294,7 @@ export default { async fetch(request, env, ctx) {
       return runtime.fetch(new Request('https://mcp.apps.example.test'+url.pathname,request),{...env,WIDEFLEET_LOADER:loader,AUTH_CONFIG:routes},ctx);
     }
     if(url.pathname === '/publish-during-next-scan') { publishDuringScan=await request.json(); return Response.json(true); }
-    if(url.pathname === '/drop-workers') { dropWorkers=(await request.json()).drop; return Response.json(true); }
+    if(url.pathname === '/drop-workers') { droppedApp=(await request.json()).app; return Response.json(true); }
     if(url.pathname === '/drop-index') { await env.WIDEFLEET_PACKAGES.delete('service-index/widefleet.json'); return Response.json(true); }
     if(url.pathname === '/expire-index') { const object=await env.WIDEFLEET_PACKAGES.get('service-index/widefleet.json'); await env.WIDEFLEET_PACKAGES.put('service-index/widefleet.json',JSON.stringify({...await object.json(),builtAt:1})); return Response.json(true); }
     if(url.pathname === '/index') { const object=await env.WIDEFLEET_PACKAGES.get('service-index/widefleet.json'); return Response.json(object ? await object.json() : null); }
@@ -1494,8 +1495,8 @@ export default { async fetch(request, env, ctx) {
       expect((await request("/web")).status).toBe(404);
     });
     it("loads a dropped service Worker again with bindings of the request that calls it", async () => {
-      await request("/read");
-      await request("/drop-workers", { drop: true });
+      expect((await request("/read")).status).toBe(200);
+      await request("/drop-workers", { app: targetId });
 
       try {
         for (const attempt of [1, 2]) {
@@ -1506,7 +1507,7 @@ export default { async fetch(request, env, ctx) {
           expect(JSON.parse(body)).toEqual({ version: "v1", secret: "synthetic-one" });
         }
       } finally {
-        await request("/drop-workers", { drop: false });
+        await request("/drop-workers", { app: null });
       }
     });
     it("passes service execution budgets to both RPC and fetch invocations of cached apps", async () => {
