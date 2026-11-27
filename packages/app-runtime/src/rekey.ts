@@ -1,7 +1,7 @@
 import { runtimeRekeyInput, runtimeRekeyPage } from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
-import { openAppKey, parseAppKey, sealAppKey } from "./keys.ts";
+import { parseAppKey, sealAppKey } from "./keys.ts";
 import { open, seal, sealedUnderActiveVersion } from "./secrets.ts";
 import type { ParentEnvironment } from "./types.ts";
 
@@ -42,9 +42,8 @@ const decodePosition = (value: string) =>
 
 const snapshotPath = /^app-secrets\/[^/]+\/\d+\.json$/;
 
-const appKeyPath = /^app-keys\/([^/]+)\/[^/]+\.json$/;
+const appKeyPath = /^app-keys\/[^/]+\/[^/]+\.json$/;
 
-// Snapshots written before fingerprints were removed still carry one; the rewrite drops it.
 const snapshot = z.object({ ciphertext: z.string() });
 
 type Environment = Pick<ParentEnvironment, "WIDEFLEET_PACKAGES" | "WIDEFLEET_SECRETS_KEYS">;
@@ -68,15 +67,12 @@ const resealed = async (environment: Environment, path: string, body: string) =>
       : JSON.stringify({ ciphertext: await seal(environment, "app-secrets", path, plaintext) });
   }
 
-  const appId = appKeyPath.exec(path)?.[1];
+  if (!appKeyPath.test(path)) throw new Error("Unrecognized runtime storage object");
 
-  if (!appId) throw new Error("Unrecognized runtime storage object");
+  const { ciphertext } = parseAppKey(body);
+  const key = await open(environment, "app-keys", path, ciphertext);
 
-  const record = parseAppKey(body);
-  const key = await openAppKey(environment, appId, path, record);
-
-  return "ciphertext" in record &&
-    sealedUnderActiveVersion(environment, "app-keys", record.ciphertext)
+  return sealedUnderActiveVersion(environment, "app-keys", ciphertext)
     ? null
     : sealAppKey(environment, path, key);
 };

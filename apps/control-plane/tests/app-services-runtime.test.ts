@@ -1,6 +1,6 @@
 import { workloadToken } from "@platform/app-runtime/workload";
 import { chromium } from "@playwright/test";
-import { createLocalJWKSet, jwtVerify } from "jose";
+import { createLocalJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { createServer as createHttpServer } from "node:http";
@@ -28,6 +28,7 @@ import { z } from "zod";
 import { rekeyRuntime } from "../src/lib/server/runtime-rekey.ts";
 import type { TestHarness } from "wrangler";
 import { executionProfiles, executionRecorder } from "./cloudflare/execution-limits.fixture.ts";
+import { createSealing, parseKeyring } from "@platform/contracts/keyring";
 import { keySet, keyVersion } from "./keyring.fixture.ts";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -45,6 +46,9 @@ const analyticsBatch = z.object({ batch: z.array(analyticsEvent) });
 const sourceId = crypto.randomUUID();
 
 const targetId = crypto.randomUUID();
+
+// A key version the runtime keeps for reading only; the rewrite moves its values to the active one.
+const earlierKey = keyVersion("earlier", Buffer.alloc(32, 0xcd).toString("base64url"));
 
 const identitySourceId = crypto.randomUUID();
 
@@ -374,6 +378,7 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_CONTROL_TOKEN: token,
             WIDEFLEET_SECRETS_KEYS: keySet(
               keyVersion("test", Buffer.alloc(32, 0xab).toString("base64url")),
+              earlierKey,
             ),
             WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
             WIDEFLEET_MCP_ORIGIN: "https://mcp.apps.example.test",
@@ -1618,28 +1623,16 @@ export default { async fetch(request, env, ctx) {
       });
       expect(await (await request("/stored")).text()).not.toContain("fingerprint");
     });
-    it("rewrites stored values sealed before the runtime keyring under its active key version", async () => {
-      // A snapshot sealed with the raw bytes of the active version, as earlier runtimes stored it.
+    it("rewrites stored values under the active key version through the management endpoint", async () => {
       const path = `app-secrets/${targetId}/90.json`;
-      const iv = crypto.getRandomValues(new Uint8Array(12));
 
-      const sealed = new Uint8Array(
-        await crypto.subtle.encrypt(
-          { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(path) },
-          await crypto.subtle.importKey("raw", new Uint8Array(32).fill(0xab), "AES-GCM", false, [
-            "encrypt",
-          ]),
-          new TextEncoder().encode(JSON.stringify({ TOKEN: "synthetic-earlier" })),
-        ),
-      );
+      const ciphertext = await createSealing(
+        parseKeyring(keySet(earlierKey), "earlier"),
+        "runtime",
+      ).seal("app-secrets", path, new TextEncoder().encode('{"TOKEN":"synthetic-earlier"}'));
 
       expect(
-        (
-          await request("/put-stored", {
-            key: path,
-            value: JSON.stringify({ ciphertext: btoa(String.fromCharCode(...iv, ...sealed)) }),
-          })
-        ).status,
+        (await request("/put-stored", { key: path, value: JSON.stringify({ ciphertext }) })).status,
       ).toBe(200);
 
       const pass = () =>
@@ -1651,9 +1644,11 @@ export default { async fetch(request, env, ctx) {
       const stored = z.array(z.string()).parse(await (await request("/stored")).json());
 
       for (const value of stored)
-        expect(z.object({ ciphertext: z.string() }).parse(JSON.parse(value)).ciphertext).toContain(
-          ".",
-        );
+        expect(
+          decodeProtectedHeader(
+            z.object({ ciphertext: z.string() }).parse(JSON.parse(value)).ciphertext,
+          ).kid,
+        ).toBe("test:app-secrets");
     });
     it("blocks cached service invocations while the organization is suspended or unreadable", async () => {
       expect((await request("/read")).status).toBe(200);

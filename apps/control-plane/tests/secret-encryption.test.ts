@@ -105,20 +105,6 @@ describe("JWE ciphertexts", () => {
       await expect(encryption.decrypt(other, ciphertext)).rejects.toMatchObject(unreadable);
   });
 
-  // Temporary, until stored values are re-encrypted: the format before keys per kind.
-  it("decrypts a recorded JWE from before keys per kind", async () => {
-    // Recorded with the synthetic fixture key's bytes and no context.
-    const stored =
-      "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwia2lkIjoiZml4dHVyZSJ9..ucd4hnDSdgKovoQQ.qb4Hy4BREL_wLfXrmEjyLQ.a1rQlNW7OqwgEOn6s6Y9qw";
-
-    expect(decryptIndependently(stored, Buffer.from(fixtureKey, "base64url"))).toBe(
-      "synthetic secret",
-    );
-    expect(await createSecretEncryption({ keyring: fixture() }).decrypt(context, stored)).toBe(
-      "synthetic secret",
-    );
-  });
-
   it("encrypts with a new active version while earlier versions still decrypt", async () => {
     const previous = keyVersion("previous");
     const before = createSecretEncryption({ keyring: keyring(previous) });

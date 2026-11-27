@@ -1,4 +1,3 @@
-import { compactDecrypt, importJWK } from "jose";
 import {
   createSealing,
   keySetFormat,
@@ -72,38 +71,12 @@ export const ciphertextKeyVersion = (ciphertext: string) =>
   sealedKeyId(ciphertext)?.split(":")[0] ?? null;
 
 /**
- * Temporary: whether a ciphertext names only a key version, as values written
- * before keys per kind do. `reencrypt` moves them; remove with their reader.
- */
-export const isEarlierCiphertextFormat = (ciphertext: string) => {
-  const kid = sealedKeyId(ciphertext);
-
-  return kid !== null && !kid.includes(":");
-};
-
-/**
  * Encrypts the customer secrets that the control plane stores. Callers name
  * what they protect and never handle key material. New values always use the
  * active key version of `keyring`.
  */
 export const createSecretEncryption = ({ keyring }: { keyring: Keyring }) => {
   const sealing = createSealing(keyring, "control-plane");
-
-  // Temporary: values written before keys per kind use the version's own bytes.
-  const openEarlier = async (ciphertext: string) =>
-    (
-      await compactDecrypt(
-        ciphertext,
-        (protectedHeader) => {
-          const version = keyring.find((candidate) => candidate.id === protectedHeader.kid);
-
-          if (!version) throw new Error("The ciphertext names an unknown key version");
-
-          return importJWK(version.jwk);
-        },
-        { keyManagementAlgorithms: ["dir"], contentEncryptionAlgorithms: ["A256GCM"] },
-      )
-    ).plaintext;
 
   return {
     /** The version that encrypts new values. */
@@ -117,11 +90,7 @@ export const createSecretEncryption = ({ keyring }: { keyring: Keyring }) => {
       sealing.seal(context.kind, contextLabel(context), encoder.encode(value)),
     decrypt: async (context: SecretContext, ciphertext: string) => {
       try {
-        return decoder.decode(
-          isEarlierCiphertextFormat(ciphertext)
-            ? await openEarlier(ciphertext)
-            : await sealing.open(context.kind, contextLabel(context), ciphertext),
-        );
+        return decoder.decode(await sealing.open(context.kind, contextLabel(context), ciphertext));
       } catch {
         throw new InvalidOperation({
           code: "BAD_REQUEST",

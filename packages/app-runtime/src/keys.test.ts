@@ -2,7 +2,6 @@ import { decodeProtectedHeader } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { testKeyring } from "../fixtures/keyring.ts";
-import { appKeyBeforeKeyring } from "../fixtures/legacy.ts";
 
 // Each runtime isolate caches derived keys. A fresh module stands for a new isolate.
 const isolate = async () => {
@@ -92,24 +91,6 @@ describe("app keys", () => {
       kid: "test:app-keys",
       ctx: `app-keys/${first}/tokens.json`,
     });
-  });
-
-  it("uses the same key bytes from a record stored before the runtime keyring", async () => {
-    const material = crypto.getRandomValues(new Uint8Array(32));
-    const path = `app-keys/${first}/legacy.json`;
-
-    const { packages, environment: env } = environment();
-    const owner = { appId: first, hostname: "first.example.test" };
-
-    // The earlier record, with the bytes of testKeyring().
-    packages.objects.set(path, await appKeyBeforeKeyring(0xab, first, material));
-    const earlier = await (await isolate())(env, owner).sign("legacy", "session-token");
-
-    // The same bytes sealed with the runtime keyring sign the same way.
-    const { sealAppKey } = await import("./keys.ts");
-    packages.objects.set(path, await sealAppKey(env, path, material));
-
-    expect(await (await isolate())(env, owner).sign("legacy", "session-token")).toBe(earlier);
   });
 
   it("binds ciphertext to the app, the key name and the additional data", async () => {

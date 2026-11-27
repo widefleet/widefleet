@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
-import { CompactEncrypt, decodeProtectedHeader } from "jose";
+import { CompactEncrypt } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readAppLogin } from "../src/lib/server/app-login-client.ts";
 import { storedAppSecrets } from "../src/lib/server/app-secrets.ts";
@@ -40,15 +40,6 @@ const oldest = keyVersion("oldest");
 const service = (keys: ReturnType<typeof keyVersion>[]) =>
   createSecretEncryption({ keyring: parseKeyring(keySet(...keys), "test") });
 
-/**
- * Writes values as they were stored before keys per kind and context binding:
- * the oldest version's bytes and its ID alone as `kid`.
- */
-const older = (value: string) =>
-  new CompactEncrypt(new TextEncoder().encode(value))
-    .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: oldest.kid })
-    .encrypt(Buffer.from(oldest.k, "base64url"));
-
 /** The environment's key versions, which encrypted its fixture values. */
 const environmentKeys = () => keysOf(environment.environment.PLATFORM_ENCRYPTION_KEYS);
 
@@ -79,19 +70,16 @@ describe("re-encryption", () => {
   it("moves every location to the active version, keyed by slot, and resumes", async () => {
     const database = environment.database.db;
     const earlier = service([previous]);
+    const older = service([oldest]);
     const entry = await seedDeployment(database, { bindings: [] });
     const app = { organizationId: entry.organizationId, appId: entry.appId } as const;
-    // Two names that hold the same ciphertext still get their own values.
-    const shared = await older("shared");
 
     await database
       .update(apps)
       .set({
         secrets: {
-          TOKEN: await older("token"),
+          TOKEN: await older.encrypt({ kind: "app-secret", ...app, name: "TOKEN" }, "token"),
           OTHER: await earlier.encrypt({ kind: "app-secret", ...app, name: "OTHER" }, "other"),
-          FIRST: shared,
-          SECOND: shared,
         },
         secretRevision: 1,
       })
@@ -111,7 +99,10 @@ describe("re-encryption", () => {
           oidc,
           await environment.encryption.decrypt(oidc, provider?.oidcConfig ?? ""),
         ),
-        samlConfig: await older(JSON.stringify({ entryPoint: "https://saml.example.test" })),
+        samlConfig: await older.encrypt(
+          { kind: "sso-provider-config", field: "samlConfig" },
+          JSON.stringify({ entryPoint: "https://saml.example.test" }),
+        ),
       })
       .where(eq(ssoProvider.organizationId, "widefleet"));
     await database
@@ -121,15 +112,18 @@ describe("re-encryption", () => {
           { kind: "directory-client-secret", organizationId: "widefleet" },
           "directory-secret",
         ),
-        appClientSecret: await older("app-login-secret"),
+        appClientSecret: await older.encrypt(
+          { kind: "app-login-client-secret", organizationId: "widefleet" },
+          "app-login-secret",
+        ),
       })
       .where(eq(organizationSettings.organizationId, "widefleet"));
 
     const encryption = rotated();
     const before = await readSecretEncryption(database, encryption);
 
-    expect(before).toMatchObject({ activeKeyVersion: "current", earlierFormat: 5, failed: 0 });
-    expect(before.keyVersions).toMatchObject({ current: 0, previous: 3, oldest: 5 });
+    expect(before).toMatchObject({ activeKeyVersion: "current", failed: 0 });
+    expect(before.keyVersions).toMatchObject({ current: 0, previous: 3, oldest: 3 });
     expect(incomplete(before)).toBe(true);
 
     const result = await reencryptSecrets(database, encryption);
@@ -137,7 +131,7 @@ describe("re-encryption", () => {
 
     expect(result).toMatchObject({ changed: 0, failed: 0 });
     expect(result.reencrypted).toBe(Object.values(before.keyVersions).reduce((a, b) => a + b, 0));
-    expect(after).toMatchObject({ earlierFormat: 0, failed: 0 });
+    expect(after).toMatchObject({ failed: 0 });
     expect(after.keyVersions).toMatchObject({
       current: result.reencrypted,
       previous: 0,
@@ -152,12 +146,12 @@ describe("re-encryption", () => {
     const values = storedAppSecrets.parse(saved?.secrets);
 
     expect(saved?.secretRevision).toBe(1);
-    expect(values["FIRST"]).not.toBe(values["SECOND"]);
-
-    for (const name of ["FIRST", "SECOND"])
-      expect(
-        await encryption.decrypt({ kind: "app-secret", ...app, name }, values[name] ?? ""),
-      ).toBe("shared");
+    expect(
+      await encryption.decrypt(
+        { kind: "app-secret", ...app, name: "TOKEN" },
+        values["TOKEN"] ?? "",
+      ),
+    ).toBe("token");
     expect(
       (await readSsoConfiguration(database, encryption, "widefleet"))?.oidcConfig.clientSecret,
     ).toBeTruthy();
@@ -173,42 +167,6 @@ describe("re-encryption", () => {
         await directorySecret(),
       ),
     ).toBe("directory-secret");
-  });
-
-  it("moves values from before keys per kind that name the active version", async () => {
-    const database = environment.database.db;
-    const original = await directorySecret();
-
-    // Upgrading keeps the key: the stored value names the version that is still active.
-    await setDirectorySecret(
-      await new CompactEncrypt(new TextEncoder().encode("directory-secret"))
-        .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: current.kid })
-        .encrypt(Buffer.from(current.k, "base64url")),
-    );
-
-    try {
-      const encryption = rotated();
-      const before = await readSecretEncryption(database, encryption);
-
-      expect(before).toMatchObject({ earlierFormat: 1, failed: 0 });
-      expect(incomplete(before)).toBe(true);
-      expect(await reencryptSecrets(database, encryption)).toMatchObject({
-        reencrypted: 1,
-        failed: 0,
-      });
-      expect(incomplete(await readSecretEncryption(database, encryption))).toBe(false);
-      expect(decodeProtectedHeader(await directorySecret()).kid).toBe(
-        "current:directory-client-secret",
-      );
-      expect(
-        await encryption.decrypt(
-          { kind: "directory-client-secret", organizationId: "widefleet" },
-          await directorySecret(),
-        ),
-      ).toBe("directory-secret");
-    } finally {
-      await setDirectorySecret(original);
-    }
   });
 
   it("decrypts values that already name the active version instead of trusting the header", async () => {
