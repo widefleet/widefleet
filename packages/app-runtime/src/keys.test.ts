@@ -16,7 +16,6 @@ const second = "2a600000-0000-4000-8000-000000000002";
 
 const stored = z.union([
   z.object({ ciphertext: z.string() }),
-  z.object({ version: z.number(), wrapped: z.string() }),
   z.looseObject({ appId: z.string() }),
   z.looseObject({ deleted: z.literal(true) }),
 ]);

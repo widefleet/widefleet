@@ -1,12 +1,10 @@
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
-import { CompactEncrypt } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readAppLogin } from "../src/lib/server/app-login-client.ts";
 import { storedAppSecrets } from "../src/lib/server/app-secrets.ts";
@@ -234,19 +232,17 @@ describe("re-encryption", () => {
 
     const before = await readSecretEncryption(database, encryption);
 
-    // Values that name key versions the keyring does not hold.
-    const missing = (kid: string) =>
-      new CompactEncrypt(new TextEncoder().encode("value"))
-        .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid })
-        .encrypt(randomBytes(32));
+    // Values under key versions the keyring does not hold.
+    const missing = (kid: string, name: string) =>
+      service([keyVersion(kid)]).encrypt({ ...context, name }, "value");
 
     await database
       .update(apps)
       .set({
         secrets: {
           ACTIVE: await encryption.encrypt({ ...context, name: "ACTIVE" }, "active"),
-          CONSTRUCTOR: await missing("constructor"),
-          PROTO: await missing("__proto__"),
+          CONSTRUCTOR: await missing("constructor", "CONSTRUCTOR"),
+          PROTO: await missing("__proto__", "PROTO"),
         },
         secretRevision: 1,
       })
@@ -320,9 +316,10 @@ describe("the re-encryption command", () => {
       const original = await directorySecret();
 
       await setDirectorySecret(
-        await new CompactEncrypt(new TextEncoder().encode("unreadable"))
-          .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: "missing" })
-          .encrypt(randomBytes(32)),
+        await service([keyVersion("missing")]).encrypt(
+          { kind: "directory-client-secret", organizationId: "widefleet" },
+          "unreadable",
+        ),
       );
 
       try {

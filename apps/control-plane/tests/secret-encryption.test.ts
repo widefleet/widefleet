@@ -129,20 +129,27 @@ describe("JWE ciphertexts", () => {
     const plaintext = new TextEncoder().encode("value");
     const parts = ciphertext.split(".");
     const tag = parts[4] ?? "";
+    const header = decodeProtectedHeader(ciphertext);
+    const key = derivedKey(material, context.kind);
+
+    // Each case differs from a readable value in one header field.
+    const sealed = (
+      changes: { alg?: string; enc?: string; kid?: string },
+      secret: Uint8Array = key,
+    ) =>
+      new CompactEncrypt(plaintext)
+        .setProtectedHeader({ ...header, alg: "dir", enc: "A256GCM", ...changes })
+        .encrypt(secret);
+
+    expect(await encryption.decrypt(context, await sealed({}))).toBe("value");
 
     const rejected = [
       // A kid the keyring does not hold.
-      await new CompactEncrypt(plaintext)
-        .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: "missing" })
-        .encrypt(material),
+      await sealed({ kid: `missing:${context.kind}` }),
       // A content encryption algorithm other than A256GCM.
-      await new CompactEncrypt(plaintext)
-        .setProtectedHeader({ alg: "dir", enc: "A128GCM", kid: "fixture" })
-        .encrypt(material.subarray(0, 16)),
+      await sealed({ enc: "A128GCM" }, key.subarray(0, 16)),
       // A key management algorithm other than dir.
-      await new CompactEncrypt(plaintext)
-        .setProtectedHeader({ alg: "A256KW", enc: "A256GCM", kid: "fixture" })
-        .encrypt(material),
+      await sealed({ alg: "A256KW" }),
       // An altered authentication tag.
       [...parts.slice(0, 4), `${tag.at(0) === "A" ? "B" : "A"}${tag.slice(1)}`].join("."),
       "not-a-ciphertext",
