@@ -62,6 +62,11 @@
       "name": "widefleet-deployments",
       "class_name": "DeploymentWorkflow",
     },
+    {
+      "binding": "BUILDS",
+      "name": "widefleet-builds",
+      "class_name": "BuildWorkflow",
+    },
   ],
   "services": [
     {

@@ -138,6 +138,13 @@ const createSharedRuntime = (
 
   if (sendEmail) options.sendEmail = sendEmail;
 
+  const { APP_CI: ci, BUILDS: builds } = bindings;
+
+  if (ci && builds)
+    options.startBuild = async (id) => {
+      await builds.create({ id, params: { id } });
+    };
+
   if (bindings.APP_BUILDER && bindings.APP_DOCUMENTER)
     options.builder = bindingAppBuilder(bindings.APP_BUILDER, bindings.APP_DOCUMENTER);
 

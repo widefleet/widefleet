@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "widefleet-app-ci",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // Only the control plane reaches the CI, through a service binding to AppCi.
+  "workers_dev": false,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [{ "name": "BUILDS", "class_name": "BuildSandbox" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuildSandbox"] }],
+  "containers": [
+    {
+      "class_name": "BuildSandbox",
+      "scheduling_policy": "durable_object",
+      "images": { "build": { "dockerfile": "./Dockerfile" } },
+    },
+  ],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+}

@@ -1,9 +1,16 @@
-// The app builder's API: the control plane sends an app project's source files
-// and receives the Worker module, its source map and its metadata, as
-// `widefleet deploy` would upload them.
+// The builders' APIs. The app builder receives an app project's source files
+// and returns the Worker module, its source map and its metadata, as
+// `widefleet deploy` would upload them. The app CI builds a commit from Widefleet
+// Git with `widefleet build --output` and keeps the output until it is released.
 import { z } from "zod";
 import {
   appIconSource,
+  assetHash,
+  assetManifest,
+  moduleName,
+  sourceCredential,
+  sourceRevision,
+  storedModule,
   bindingName,
   generatedAppIcons,
   queueConsumer,
@@ -98,3 +105,39 @@ export const decodeBase64 = (text: string) =>
   Uint8Array.from(atob(text), (character) => character.charCodeAt(0));
 
 export const buildFailure = z.strictObject({ message: z.string() });
+
+/** A commit for the app CI to build, under the build's ID. */
+export const ciBuildRequest = z.strictObject({
+  id: z.uuid(),
+  /** A short-lived read credential for the app's repository. */
+  repository: sourceCredential,
+  commit: sourceRevision.shape.commit,
+  directory: sourceRevision.shape.directory,
+});
+
+/** `deployment.json` of `widefleet build --output`; paths are relative to the output. */
+export const ciBuildOutput = z.strictObject({
+  format: z.literal(1),
+  /** Worker metadata without the upload session, which publishing creates. */
+  metadata: z.record(z.string(), z.json()),
+  documentation: serviceDocumentation,
+  modules: z
+    .array(
+      z.strictObject({ name: moduleName, type: storedModule.shape.type, path: buildSourcePath }),
+    )
+    .min(1),
+  assets: z.strictObject({
+    manifest: assetManifest,
+    files: z.record(assetHash, buildSourcePath),
+  }),
+});
+
+export const ciBuildResult = z.discriminatedUnion("status", [
+  z.strictObject({
+    status: z.literal("succeeded"),
+    /** The text of `deployment.json`, which ciBuildOutput parses. */
+    output: z.string(),
+    log: z.string(),
+  }),
+  z.strictObject({ status: z.literal("failed"), message: z.string(), log: z.string() }),
+]);

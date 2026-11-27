@@ -10,7 +10,7 @@ import { apps, artifacts, deployments } from "./schema.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
-const sourceTarget = async (
+export const sourceTarget = async (
   transaction: Transaction,
   principal: Principal,
   appId: string,

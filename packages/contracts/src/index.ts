@@ -9,7 +9,7 @@ export { shortenTypeNames } from "./service-type-names.ts";
 export { serviceBindingTypes } from "./service-binding-types.ts";
 
 import { z } from "zod";
-import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
+import { appSourceSummary, gitBranch, gitCommit, sourceRevision } from "./source.ts";
 
 import {
   appRpcMethod,
@@ -146,6 +146,32 @@ export const deployment = z.strictObject({
   createdAt: z.iso.datetime(),
   finishedAt: z.iso.datetime().nullable(),
   message: z.string().nullable(),
+});
+
+/**
+ * A build of a commit from the app's Widefleet Git repository on the server,
+ * as `widefleet deploy` builds on a computer. A succeeded build has published
+ * its deployment, whose own status reports the rollout.
+ */
+export const appBuild = z.strictObject({
+  id: identifier,
+  appId: identifier,
+  source: sourceRevision,
+  status: z.enum(["queued", "running", "succeeded", "failed"]),
+  deploymentId: identifier.nullable(),
+  message: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  finishedAt: z.iso.datetime().nullable(),
+});
+
+/** A build with the output of its install and build commands. */
+export const appBuildDetails = appBuild.extend({ log: z.string() });
+
+export const appBuildInput = z.strictObject({
+  /** A commit of the app's branch; the branch's latest commit by default. */
+  commit: gitCommit.optional(),
+  /** The project directory inside the repository; that of the active deployment by default. */
+  directory: sourceRevision.shape.directory.optional(),
 });
 
 export const deploymentEvent = z.strictObject({

@@ -24,6 +24,7 @@ import { createJobService } from "./jobs.ts";
 import { createTemplateInstalls } from "./template-installs.ts";
 import type { AppBuilder } from "./app-builder.ts";
 import { createUploadService } from "./uploads.ts";
+import { createBuildService } from "./builds.ts";
 import type { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createTelemetry } from "./telemetry.ts";
 import { createDirectory } from "./directory.ts";
@@ -64,6 +65,7 @@ export const createRuntime = ({
   source,
   discoveryTransport = "node",
   builder,
+  startBuild,
   bundledRuntime,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
@@ -87,6 +89,8 @@ export const createRuntime = ({
   userConnectionRequest?: UserConnectionRequest;
   discoveryTransport?: "node" | "cloudflare";
   builder?: AppBuilder;
+  /** Starts a recorded server build; installations without an app CI leave it out. */
+  startBuild?: (id: string) => Promise<void>;
   bundledRuntime?: BundledRuntime;
 }) => {
   const publicSignup = Boolean(createOrganization);
@@ -211,6 +215,7 @@ export const createRuntime = ({
     appSecrets,
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads,
+    builds: createBuildService(database.db, source, startBuild),
     templates: createTemplateInstalls(configuration, apps, uploads, network, appSecrets, builder),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };

@@ -330,6 +330,13 @@
       "when": 1795996800000,
       "tag": "0046_require_converted_sso",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1796083200000,
+      "tag": "0047_app_builds",
+      "breakpoints": true
     }
   ]
 }

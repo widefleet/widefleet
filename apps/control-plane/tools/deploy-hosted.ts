@@ -158,6 +158,11 @@ for (const file of ["builder.js", "esbuild.wasm", "service-docs.wasm", "app-icon
       "Build the app builder first: cargo build --profile wasm -p platform-service-docs-wasm -p platform-app-icons-wasm --target wasm32-wasip1, then pnpm --filter @platform/app-builder build",
     );
 
+if (!existsSync(new URL("../../../packages/app-ci/dist/cli/widefleet", import.meta.url)))
+  throw new Error(
+    "Prepare the app CI's Widefleet CLI first: pnpm --filter @platform/app-ci build --binary target/release/widefleet, with a CLI built for Debian bookworm on linux/amd64",
+  );
+
 const controlDirectory = fileURLToPath(new URL("../", import.meta.url));
 
 const generatedDirectory = resolve(controlDirectory, ".wrangler/hosted");
@@ -393,14 +398,15 @@ try {
     await observation.close();
   }
 
-  // The control plane binds both builder Workers, so they deploy first. They are
-  // independent of each other; wait for both before reporting a failure, because
-  // cleanup removes the configuration files a running deployment still reads.
+  // The control plane binds the builder Workers and the CI, so they deploy first.
+  // They are independent of each other; wait for all before reporting a failure,
+  // because cleanup removes the configuration files a running deployment still reads.
   const builders = await Promise.allSettled(
     (
       [
         ["builder.json", configs.builder],
         ["documenter.json", configs.documenter],
+        ["ci.json", configs.ci],
       ] as const
     ).map(async ([file, config]) =>
       run("pnpm", [

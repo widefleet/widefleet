@@ -947,6 +947,29 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.apps.events(context.principal, input.appId, input.deploymentId)),
       ),
+    startBuild: write
+      .route({ method: "POST", path: "/apps/{appId}/builds" })
+      .input(contract.appPath.extend(contract.appBuildInput.shape))
+      .output(contract.appBuild)
+      .handler(async ({ context, input }) => {
+        const { appId, ...build } = input;
+
+        return unwrap(await runtime.builds.start(context.principal, appId, build));
+      }),
+    builds: read
+      .route({ method: "GET", path: "/apps/{appId}/builds" })
+      .input(contract.appPath)
+      .output(z.array(contract.appBuild))
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.builds.list(context.principal, input.appId)),
+      ),
+    build: read
+      .route({ method: "GET", path: "/apps/{appId}/builds/{buildId}" })
+      .input(contract.appPath.extend({ buildId: contract.identifier }))
+      .output(contract.appBuildDetails)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.builds.read(context.principal, input.appId, input.buildId)),
+      ),
     rollback: write
       .route({ method: "POST", path: "/apps/{appId}/rollback" })
       .input(contract.appPath.extend(contract.rollbackInput.shape))
