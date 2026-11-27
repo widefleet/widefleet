@@ -425,16 +425,18 @@ it("confines a build's token to its app", async () => {
         statuses[name] = (await asBuild(request, path, init)).status;
       };
 
-      await status("own", `/apps/${app.id}/deployments`);
-      await status("other", `/apps/${other.id}/deployments`);
+      await status("own", `/apps/${app.id}/network`);
+      await status("other", `/apps/${other.id}/network`);
       // Input fields can name an app as the path does.
-      await status("override", `/apps/${app.id}/deployments?appId=${other.id}`);
+      await status("override", `/apps/${app.id}/network?appId=${other.id}`);
+      // Builds make only the requests of `widefleet deploy`.
+      await status("history", `/apps/${app.id}/deployments`);
       await status("target", "/apps/source-target", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ appId: other.id }),
       });
-      await status("list", "/apps");
+      await status("list", `/apps?appId=${app.id}`);
       await status("build", `/apps/${app.id}/builds`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -449,6 +451,7 @@ it("confines a build's token to its app", async () => {
     own: 200,
     other: 403,
     override: 403,
+    history: 403,
     target: 403,
     list: 403,
     build: 403,
@@ -468,9 +471,75 @@ it("stops accepting a build's token when it expires", async () => {
         .set({ tokenExpiresAt: new Date(Date.now() - 1000) })
         .where(eq(appBuilds.id, request.id));
 
-      expect((await asBuild(request, `/apps/${app.id}/deployments`)).status).toBe(401);
+      expect((await asBuild(request, `/apps/${app.id}/network`)).status).toBe(401);
 
       return { status: "failed", message: "Stopped", log: "" };
     }),
   );
+});
+
+it("keeps a recorded failure when a run that published is repeated", async () => {
+  const app = await createApp("failed-after-publish");
+  heads.set(app.id, commit);
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  const failing = ci(async (request) => {
+    expect((await deploy(request)).status).toBe(200);
+
+    return {
+      status: "failed",
+      message: "widefleet deploy failed with exit code 1",
+      log: "Failed\n",
+    };
+  });
+
+  // The first run published and stopped before it recorded the CI's outcome.
+  await run(build.id, {
+    ...failing,
+    release: async () => {
+      throw new Error("The CI was unreachable");
+    },
+  }).catch(() => {});
+  await environment.database.db
+    .update(appBuilds)
+    .set({ status: "running", finishedAt: null })
+    .where(eq(appBuilds.id, build.id));
+
+  await run(build.id, failing);
+
+  const [record] = await environment.database.db
+    .select()
+    .from(appBuilds)
+    .where(eq(appBuilds.id, build.id));
+
+  expect(record).toMatchObject({
+    status: "failed",
+    message: "widefleet deploy failed with exit code 1",
+    log: "Failed\n",
+  });
+  expect(record?.deploymentId).not.toBeNull();
+  expect(ciRequests).toHaveLength(1);
+});
+
+it("stores logs with NUL characters", async () => {
+  const app = await createApp("nul-log");
+  heads.set(app.id, commit);
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  await run(
+    build.id,
+    ci(async () => ({ status: "failed", message: "Stopped\u0000", log: "binary\u0000output\n" })),
+  );
+
+  const [record] = await environment.database.db
+    .select()
+    .from(appBuilds)
+    .where(eq(appBuilds.id, build.id));
+
+  expect(record).toMatchObject({ status: "failed", message: "Stopped", log: "binaryoutput\n" });
+});
+
+it("retries a run that starts before its build is committed", async () => {
+  await expect(run(crypto.randomUUID(), succeeded)).rejects.toThrow(/not recorded/);
+  expect(ciRequests).toEqual([]);
 });

@@ -122,8 +122,11 @@ export const createApi = (runtime: Runtime) => {
 
   const inputApp = z.object({ appId: z.string() });
 
-  const authenticateWrite = async (request: Request, appId: string | undefined) => {
-    const principal = unwrap(await runtime.identity.authenticate(request, "platform:write", true));
+  const authenticateWrite = async (request: Request, appId?: string, builds = false) => {
+    const principal = unwrap(
+      await runtime.identity.authenticate(request, "platform:write", builds),
+    );
+
     confine(principal, appId);
     principals.set(request, principal);
     runtime.reporting.active(principal.id);
@@ -131,27 +134,26 @@ export const createApi = (runtime: Runtime) => {
     return principal;
   };
 
-  const read = base.use(async ({ context, next }, input) => {
-    const principal = unwrap(
-      await runtime.identity.authenticate(context.request, "platform:read", true),
-    );
+  const authenticated = (scope: "platform:read" | "platform:write", builds: boolean) =>
+    base.use(async ({ context, next }, input) => {
+      const appId = inputApp.safeParse(input).data?.appId;
+      const principal = unwrap(await runtime.identity.authenticate(context.request, scope, builds));
 
-    confine(principal, inputApp.safeParse(input).data?.appId);
-    principals.set(context.request, principal);
+      confine(principal, appId);
+      principals.set(context.request, principal);
+      runtime.reporting.active(principal.id);
 
-    runtime.reporting.active(principal.id);
+      return next({ context: { principal } });
+    });
 
-    return next({ context: { principal } });
-  });
+  const read = authenticated("platform:read", false);
 
-  const write = base.use(async ({ context, next }, input) => {
-    const principal = await authenticateWrite(
-      context.request,
-      inputApp.safeParse(input).data?.appId,
-    );
+  const write = authenticated("platform:write", false);
 
-    return next({ context: { principal } });
-  });
+  // The requests of `widefleet deploy`, which server builds also make for their app.
+  const deployRead = authenticated("platform:read", true);
+
+  const deployWrite = authenticated("platform:write", true);
 
   // Installation-wide endpoints only need a signed-in person, so browsers can call them
   // without naming an organization.
@@ -546,7 +548,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.migrations.read(context.principal, input.appId, input.jobId)),
       ),
-    network: read
+    network: deployRead
       .route({ method: "GET", path: "/apps/{appId}/network" })
       .input(contract.appPath)
       .output(contract.networkState)
@@ -829,7 +831,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.apps.setAbout(context.principal, input.appId, input.about)),
       ),
-    sourceDeployTarget: write
+    sourceDeployTarget: deployWrite
       // Deployment tokens need this read-only check without platform:read scope.
       .route({ method: "POST", path: "/apps/source-target" })
       .input(contract.sourceDeployTargetInput)
@@ -844,7 +846,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.source.read(context.principal, input.appId)),
       ),
-    prepareSource: write
+    prepareSource: deployWrite
       .route({ method: "POST", path: "/apps/{appId}/source/prepare" })
       .input(contract.appPath.strict())
       .output(contract.sourcePreparation)
@@ -1024,7 +1026,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.agents.disable(context.principal, input.agentId)),
       ),
-    startUpload: write
+    startUpload: deployWrite
       .route({ method: "POST", path: "/apps/{appId}/assets-upload-session" })
       .input(contract.appPath.extend(contract.createUploadInput.shape))
       .output(contract.uploadSession)
@@ -1232,7 +1234,7 @@ export const createApi = (runtime: Runtime) => {
 
     if (upload && request.method === "PUT") {
       const appId = contract.identifier.parse(upload[1]);
-      const principal = await authenticateWrite(request, appId);
+      const principal = await authenticateWrite(request, appId, true);
 
       if (upload[2] === "worker") {
         const key = idempotencyKey(request);

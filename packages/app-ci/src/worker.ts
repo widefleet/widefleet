@@ -43,8 +43,6 @@ interface BuildSandboxState extends DurableObjectState {
   readonly exports: { Outbound: (options: { props: OutboundProps }) => Fetcher };
 }
 
-const decoder = new TextDecoder();
-
 const denied = (request: Request) =>
   new Response(`Builds cannot reach ${request.method} ${new URL(request.url).origin}\n`, {
     status: 403,
@@ -76,7 +74,7 @@ const deployment = (method: string, path: string, appId: string) => {
       ["/api/v1/apps/source-target", `${app}/source/prepare`, `${app}/assets-upload-session`],
     ],
     ["PUT", [`${app}/assets/[^/]+/[^/]+`, `${app}/worker`]],
-    ["GET", [`${app}/deployments`, `${app}/deployments/[^/]+/events`, `${app}/network`]],
+    ["GET", [`${app}/network`]],
   ]);
 
   return (calls.get(method) ?? []).some((pattern) => new RegExp(`^${pattern}$`).test(path));
@@ -169,12 +167,23 @@ export class BuildSandbox extends DurableObject<Env> {
     this.#exports = ctx.exports;
   }
 
-  async build(request: z.infer<typeof ciBuildRequest>) {
-    // A repeated call returns the outcome of the build that already ran.
+  #current: Promise<z.infer<typeof ciBuildResult>> | undefined;
+
+  build(request: z.infer<typeof ciBuildRequest>) {
+    // A repeated call returns the outcome of the build that already ran, or
+    // waits for the one that is running.
     const recorded = this.result();
 
     if (recorded) return recorded;
 
+    this.#current ??= this.#build(request).finally(() => {
+      this.#current = undefined;
+    });
+
+    return this.#current;
+  }
+
+  async #build(request: z.infer<typeof ciBuildRequest>) {
     if (this.#container.running) await this.#container.destroy();
 
     const image = this.#container.images["build"];
@@ -193,12 +202,6 @@ export class BuildSandbox extends DurableObject<Env> {
         },
       },
     });
-
-    // HTTPS intercepts are registered before start(), so the CA exists when it runs.
-    await this.#container.interceptOutboundHttps("*", outbound);
-    await this.#container.interceptAllOutboundHttp(outbound);
-    this.#container.start({ image, instance: "standard-2", enableInternet: false });
-    await this.#container.setInactivityTimeout(inactivityTimeout);
 
     const { commit, branch, directory } = request.source;
     const project = directory === "." ? source : `${source}/${directory}`;
@@ -236,12 +239,17 @@ export class BuildSandbox extends DurableObject<Env> {
         signal: deadline.signal,
       });
 
-      const { stdout, exitCode } = await process.output();
-      const text = decoder.decode(stdout);
+      // Only the end of the output is kept, however much a command prints.
+      let text = "";
 
-      if (logged) log = `${log}${text}`.slice(-logLimit);
+      if (process.stdout)
+        for await (const chunk of process.stdout.pipeThrough(new TextDecoderStream())) {
+          text = `${text}${chunk}`.slice(-logLimit);
 
-      return { text, exitCode };
+          if (logged) log = `${log}${chunk}`.slice(-logLimit);
+        }
+
+      return { text, exitCode: await process.exitCode };
     };
 
     // A command ended by the deadline fails like any other.
@@ -255,6 +263,12 @@ export class BuildSandbox extends DurableObject<Env> {
 
     const result = await (async (): Promise<z.infer<typeof ciBuildResult>> => {
       try {
+        // HTTPS intercepts are registered before start(), so the CA exists when it runs.
+        await this.#container.interceptOutboundHttps("*", outbound);
+        await this.#container.interceptAllOutboundHttp(outbound);
+        this.#container.start({ image, instance: "standard-2", enableInternet: false });
+        await this.#container.setInactivityTimeout(inactivityTimeout);
+
         // The checkout is on the app's branch, as `widefleet deploy` expects.
         const checkout = [
           ["git", "clone", "--no-checkout", "--quiet", request.repository.url, source],
@@ -311,15 +325,18 @@ export class BuildSandbox extends DurableObject<Env> {
     return recorded.success ? recorded.data : null;
   }
 
+  // A failed alarm is retried, so it must not delete itself.
   override async alarm() {
-    await this.release();
+    if (this.#container.running) await this.#container.destroy();
+
+    this.ctx.storage.kv.delete("result");
   }
 
   async release() {
+    if (this.#container.running) await this.#container.destroy();
+
     this.ctx.storage.kv.delete("result");
     await this.ctx.storage.deleteAlarm();
-
-    if (this.#container.running) await this.#container.destroy();
   }
 }
 

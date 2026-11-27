@@ -131,23 +131,13 @@ export const createBuildService = (
 
           if (!record) throw new Error("The build was not recorded");
 
+          // The build is recorded only with its workflow; one that starts before
+          // the commit waits for the record.
+          await run(record.id);
+
           return Result.ok(record);
         }),
       );
-
-      try {
-        await run(build.id);
-      } catch (cause) {
-        await database
-          .update(appBuilds)
-          .set({
-            status: "failed",
-            message: "The build could not be started",
-            finishedAt: new Date(),
-          })
-          .where(eq(appBuilds.id, build.id));
-        throw cause;
-      }
 
       return Result.ok(presentBuild(build));
     }),
@@ -207,6 +197,14 @@ export const executeBuild = async (
   const token = createBuildToken();
 
   const loaded = await withDatabase(async (database) => {
+    const [recorded] = await database
+      .select({ status: appBuilds.status })
+      .from(appBuilds)
+      .where(eq(appBuilds.id, id));
+
+    // The request that started the build may not have committed yet; the run is retried.
+    if (!recorded) throw new Error("The build is not recorded");
+
     const [record] = await database
       .update(appBuilds)
       .set({ status: "running", tokenHash: token.hash, tokenExpiresAt: token.expiresAt })
@@ -223,8 +221,7 @@ export const executeBuild = async (
     return { build: record, parentId: app?.parentId ?? null };
   });
 
-  // The build has finished, or its app was removed with it. A previous run may
-  // have stopped before it released the CI.
+  // The build has finished. A previous run may have stopped before it released the CI.
   if (!loaded) {
     await ci.release(id);
 
@@ -233,11 +230,21 @@ export const executeBuild = async (
 
   const { build, parentId } = loaded;
 
+  // PostgreSQL text cannot hold NUL, which command output may contain.
+  const text = (value: string | null | undefined) => value?.replaceAll("\u0000", "");
+
   const finish = (values: Partial<typeof appBuilds.$inferInsert>) =>
     withDatabase((database) =>
       database
         .update(appBuilds)
-        .set({ ...values, tokenHash: null, tokenExpiresAt: null, finishedAt: new Date() })
+        .set({
+          ...values,
+          message: text(values.message),
+          log: text(values.log),
+          tokenHash: null,
+          tokenExpiresAt: null,
+          finishedAt: new Date(),
+        })
         .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"]))),
     );
 
@@ -251,17 +258,34 @@ export const executeBuild = async (
       return deployment;
     });
 
+  // The outcome of a build that published follows its recorded result.
+  const conclude = async (
+    result: z.infer<typeof ciBuildResult> | null,
+    deployment: { id: string } | undefined,
+  ) => {
+    if (result?.status === "failed")
+      await finish({
+        status: "failed",
+        message: result.message,
+        log: result.log,
+        deploymentId: deployment?.id ?? null,
+      });
+    else if (deployment)
+      await finish({ status: "succeeded", deploymentId: deployment.id, log: result?.log ?? "" });
+    else
+      await finish({
+        status: "failed",
+        message: "widefleet deploy did not publish the build",
+        log: result?.log ?? "",
+      });
+
+    await ci.release(id);
+  };
+
   // A run that stopped after publishing does not build again.
   const previous = await published();
 
-  if (previous) {
-    const recorded = await ci.result(id);
-
-    await finish({ status: "succeeded", deploymentId: previous.id, log: recorded?.log ?? "" });
-    await ci.release(id);
-
-    return;
-  }
+  if (previous) return conclude(await ci.result(id), previous);
 
   const actor = deploymentActor.parse(build.actor);
 
@@ -290,25 +314,7 @@ export const executeBuild = async (
     }),
   });
 
-  const deployment = await published();
-
-  if (result.status === "failed")
-    await finish({
-      status: "failed",
-      message: result.message,
-      log: result.log,
-      deploymentId: deployment?.id ?? null,
-    });
-  else if (deployment)
-    await finish({ status: "succeeded", deploymentId: deployment.id, log: result.log });
-  else
-    await finish({
-      status: "failed",
-      message: "widefleet deploy did not publish the build",
-      log: result.log,
-    });
-
-  await ci.release(id);
+  return conclude(result, await published());
 };
 
 /** Records a build whose runs all failed. */
