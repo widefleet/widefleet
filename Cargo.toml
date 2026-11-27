@@ -41,6 +41,7 @@ tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 thiserror = "=2.0.21"
 uuid = { version = "=1.27.0", features = ["v4", "serde"] }
+getrandom = "=0.4.3"
 sha2 = "=0.11.0"
 blake3 = "=1.8.7"
 base64 = "=0.23.1"

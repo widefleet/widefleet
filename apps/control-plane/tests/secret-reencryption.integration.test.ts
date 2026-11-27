@@ -12,9 +12,9 @@ import { readAppLogin } from "../src/lib/server/app-login-client.ts";
 import { storedAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { apps, organizationSettings } from "../src/lib/server/schema.ts";
+import { parseKeyring } from "@platform/contracts/keyring";
 import {
   createSecretEncryption,
-  parseKeyring,
   type SecretEncryption,
 } from "../src/lib/server/secret-encryption.ts";
 import {
@@ -290,6 +290,7 @@ describe("the re-encryption command", () => {
     }
   };
 
+  // Four command runs, each a Node process that loads the control plane.
   it("never creates keys and exits nonzero while a value does not decrypt", async () => {
     const state = await mkdtemp(join(tmpdir(), "widefleet-reencryption-"));
 
@@ -338,5 +339,5 @@ describe("the re-encryption command", () => {
     } finally {
       await rm(state, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });

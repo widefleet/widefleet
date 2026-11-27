@@ -14,6 +14,7 @@ import { z } from "zod";
 import { hashAsset } from "../../src/lib/server/asset-hash.ts";
 import { appSource, parentSource } from "./runtime.fixture.ts";
 import { executionProfiles } from "./execution-limits.fixture.ts";
+import { keySet, keyVersion } from "../keyring.fixture.ts";
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in workerd", () => {
   let directory: string;
@@ -195,7 +196,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
           WIDEFLEET_LOGS: "cloudflare",
           PRIVATE_ROOT_SECRET: "parent-only-fixture",
           WIDEFLEET_CONTROL_TOKEN: controlToken,
-          WIDEFLEET_SECRETS_KEY: "01".repeat(32),
+          WIDEFLEET_SECRETS_KEYS: keySet(
+            keyVersion("test", Buffer.alloc(32, 0x01).toString("base64url")),
+          ),
           WIDEFLEET_CONFIGURATION: JSON.stringify({
             crons: { "* * * * *": [hostname, previewHostname] },
             queues: {
@@ -326,6 +329,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
   it("uses the private service binding without a token and does not forward app requests", async () => {
     expect(await json("/.well-known/widefleet/runtime")).toEqual({
       runtimeVersion: release.version,
+      keyVersion: "test",
     });
     expect(await json("/.well-known/widefleet/ready")).toMatchObject({ version: app.version });
 
@@ -1406,7 +1410,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         await writeFile(join(directory, "runtime.js"), source);
         worker = await start();
 
-        expect(await json("/.well-known/widefleet/runtime")).toEqual({ runtimeVersion: version });
+        expect(await json("/.well-known/widefleet/runtime")).toEqual({
+          runtimeVersion: version,
+          keyVersion: "test",
+        });
         expect(
           await Promise.all(
             [hostname, previewHostname].map((host) => json("/resources", undefined, host)),

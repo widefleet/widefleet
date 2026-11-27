@@ -1,11 +1,11 @@
 import { createDecipheriv, randomBytes } from "node:crypto";
 import { CompactEncrypt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
+import { parseKeyring } from "@platform/contracts/keyring";
 import {
   configuredSecretEncryption,
   createSecretEncryption,
   generateKeyring,
-  parseKeyring,
 } from "../src/lib/server/secret-encryption.ts";
 import { keySet, keyVersion } from "./keyring.fixture.ts";
 

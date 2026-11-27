@@ -1,20 +1,32 @@
 import { z } from "zod";
+import { unwrapLegacyAppKey } from "./legacy-runtime-ciphertext.ts";
+import { open, runtimeKeyring, seal } from "./secrets.ts";
 import type { ParentEnvironment } from "./types.ts";
 
 // Apps use these keys through the binding and never receive key material. Each
-// named key is 32 random bytes, stored only wrapped with AES-KW under a key
-// derived from the installation key and the app ID, so another app's wrapping
-// key fails AES-KW's integrity check. Purpose keys are derived from it with HKDF.
+// named key is 32 random bytes, stored only sealed with the runtime keyring and
+// bound to its path, so a stored key cannot serve another app or key name.
+// Purpose keys are derived from it with HKDF.
 
 export const appKeyName = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Key names use 1–63 lowercase letters, digits and hyphens");
 
-type Environment = Pick<ParentEnvironment, "WIDEFLEET_PACKAGES" | "WIDEFLEET_SECRETS_KEY">;
+type Environment = Pick<ParentEnvironment, "WIDEFLEET_PACKAGES" | "WIDEFLEET_SECRETS_KEYS">;
 
 export type KeyData = string | Uint8Array<ArrayBuffer>;
 
-const storedKey = z.strictObject({ version: z.literal(1), wrapped: z.string() });
+const sealedKey = z.strictObject({ ciphertext: z.string() });
+
+// Temporary, with legacy-runtime-ciphertext.ts: keys written before the runtime keyring.
+const legacyKey = z.strictObject({ version: z.literal(1), wrapped: z.string() });
+
+const storedAppKey = z.union([sealedKey, legacyKey]);
+
+type StoredAppKey = z.infer<typeof storedAppKey>;
+
+/** Parses the stored record of an app key. */
+export const parseAppKey = (text: string) => storedAppKey.parse(JSON.parse(text));
 
 const ciphertextPrefix = "v1.";
 
@@ -42,32 +54,20 @@ const unbase64url = (value: string) =>
 
 const keyPath = (appId: string, name: string) => `app-keys/${appId}/${name}.json`;
 
-const wrappingKey = async (environment: Environment, appId: string) =>
-  crypto.subtle.deriveKey(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: new Uint8Array(),
-      info: encoder.encode(`widefleet app key wrapping v1\n${appId}`),
-    },
-    await crypto.subtle.importKey(
-      "raw",
-      Uint8Array.from(
-        z
-          .string()
-          .regex(/^[a-f0-9]{64}$/)
-          .parse(environment.WIDEFLEET_SECRETS_KEY)
-          .match(/../g) ?? [],
-        (byte) => Number.parseInt(byte, 16),
-      ),
-      "HKDF",
-      false,
-      ["deriveKey"],
-    ),
-    { name: "AES-KW", length: 256 },
-    false,
-    ["wrapKey", "unwrapKey"],
-  );
+/** Formats the stored record of an app key's bytes. */
+export const sealAppKey = async (environment: Environment, path: string, key: Uint8Array) =>
+  JSON.stringify(sealedKey.parse({ ciphertext: await seal(environment, path, key) }));
+
+/** The exact bytes of a stored app key record at `path`. */
+export const openAppKey = async (
+  environment: Environment,
+  appId: string,
+  path: string,
+  record: StoredAppKey,
+) =>
+  "ciphertext" in record
+    ? open(environment, path, record.ciphertext)
+    : unwrapLegacyAppKey(runtimeKeyring(environment).keyring, appId, unbase64url(record.wrapped));
 
 export type KeyOwner = { appId: string; hostname: string };
 
@@ -91,25 +91,14 @@ const requirePublished = async (environment: Environment, owner: KeyOwner) => {
 const loadKey = async (environment: Environment, owner: KeyOwner, name: string) => {
   const { appId } = owner;
   const path = keyPath(appId, name);
-  const kek = await wrappingKey(environment, appId);
   let stored = await environment.WIDEFLEET_PACKAGES.get(path);
 
   if (!stored) {
     await requirePublished(environment, owner);
 
-    const material = await crypto.subtle.importKey(
-      "raw",
-      crypto.getRandomValues(new Uint8Array(32)),
-      { name: "HMAC", hash: "SHA-256" },
-      true,
-      ["sign"],
-    );
-
-    const wrapped = new Uint8Array(await crypto.subtle.wrapKey("raw", material, kek, "AES-KW"));
-
     await environment.WIDEFLEET_PACKAGES.put(
       path,
-      JSON.stringify(storedKey.parse({ version: 1, wrapped: base64url(wrapped) })),
+      await sealAppKey(environment, path, crypto.getRandomValues(new Uint8Array(32))),
       { onlyIf: { etagDoesNotMatch: "*" } },
     );
     stored = await environment.WIDEFLEET_PACKAGES.get(path);
@@ -117,11 +106,9 @@ const loadKey = async (environment: Environment, owner: KeyOwner, name: string) 
     if (!stored) throw new Error("App key storage is unavailable");
   }
 
-  return crypto.subtle.unwrapKey(
+  return crypto.subtle.importKey(
     "raw",
-    unbase64url(storedKey.parse(await stored.json()).wrapped),
-    kek,
-    "AES-KW",
+    await openAppKey(environment, appId, path, storedAppKey.parse(await stored.json())),
     "HKDF",
     false,
     ["deriveKey"],

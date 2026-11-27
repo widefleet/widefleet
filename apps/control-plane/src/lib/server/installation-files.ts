@@ -3,11 +3,11 @@ import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
+import { parseKeyring } from "@platform/contracts/keyring";
 import {
   createSecretEncryption,
   generateKeyring,
   includesKeyVersions,
-  parseKeyring,
 } from "./secret-encryption.ts";
 
 export const readOptionalFile = async (path: string) => {

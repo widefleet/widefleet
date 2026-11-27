@@ -13,6 +13,7 @@ import {
 import { signWorkloadToken, workloadKeys } from "./workload-keys.ts";
 import { workloadKeyGrace, workloadRotationInterval } from "./workload-protocol.ts";
 import { encryptSecrets } from "./secrets.ts";
+import { testKeyring } from "../fixtures/keyring.ts";
 
 let runtime: Miniflare;
 
@@ -48,7 +49,7 @@ const start = () =>
 
 const environment = async () => ({
   WIDEFLEET_PACKAGES: await runtime.getR2Bucket("PACKAGES"),
-  WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
+  WIDEFLEET_SECRETS_KEYS: testKeyring(),
 });
 
 beforeEach(async () => {
@@ -150,7 +151,7 @@ it("signs with the next key when another call created or rotated the ring a mome
 it("refuses issuance with the wrong encryption key without replacing the stored authority", async () => {
   const env = await environment();
   const original = await workloadKeys(env);
-  const wrongKey = { ...env, WIDEFLEET_SECRETS_KEY: "cd".repeat(32) };
+  const wrongKey = { ...env, WIDEFLEET_SECRETS_KEYS: testKeyring(["test", 0xcd]) };
   await expect(signWorkloadToken(wrongKey, issuer, identity, "data")).rejects.toThrow();
   expect((await workloadKeys(env)).jwks).toEqual(original.jwks);
 });

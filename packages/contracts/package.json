@@ -7,12 +7,14 @@
   "exports": {
     ".": "./src/index.ts",
     "./builds": "./src/builds.ts",
-    "./jsonc": "./src/jsonc.ts"
+    "./jsonc": "./src/jsonc.ts",
+    "./keyring": "./src/keyring.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "jose": "6.2.10",
     "zod": "4.6.5"
   }
 }

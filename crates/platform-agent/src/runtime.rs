@@ -1,12 +1,15 @@
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, path::Path};
 use platform_core::{Error, Result, model::RuntimeRelease};
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 // Persist independently of access credentials. Concurrent bootstrap/agent starts
-// must agree on one key; replacing it would make published snapshots unreadable.
-pub async fn secrets_key(store: &dyn ObjectStore, organization_id: &str) -> Result<String> {
-    let path = Path::from(format!("organizations/{organization_id}/app-secrets-key"));
+// must agree on one keyring; replacing it would make published snapshots unreadable.
+// The keyring uses the runtime's format: a JWK Set of 32-byte keys, active first.
+pub async fn secrets_keys(store: &dyn ObjectStore, organization_id: &str) -> Result<String> {
+    let path = Path::from(format!(
+        "organizations/{organization_id}/app-secrets-keyring.json"
+    ));
     let failure =
         |error: object_store::Error| Error::invalid(format!("Runtime key storage failed: {error}"));
     let missing = match store.head(&path).await {
@@ -15,9 +18,19 @@ pub async fn secrets_key(store: &dyn ObjectStore, organization_id: &str) -> Resu
         Err(error) => return Err(failure(error)),
     };
     if missing {
-        let value = platform_core::sha256(
-            format!("{}{}{}", Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()).as_bytes(),
-        );
+        let mut key = [0u8; 32];
+        let mut id = [0u8; 4];
+        getrandom::fill(&mut key)
+            .and_then(|()| getrandom::fill(&mut id))
+            .map_err(|error| Error::invalid(format!("Runtime key generation failed: {error}")))?;
+        let value = json!({
+            "keys": [{
+                "kty": "oct",
+                "kid": format!("{:08x}", u32::from_be_bytes(id)),
+                "k": URL_SAFE_NO_PAD.encode(key)
+            }]
+        })
+        .to_string();
         match store
             .put_opts(
                 &path,
@@ -42,12 +55,14 @@ pub async fn secrets_key(store: &dyn ObjectStore, organization_id: &str) -> Resu
         .map_err(failure)?;
     let value =
         String::from_utf8(bytes.to_vec()).map_err(|error| Error::invalid(error.to_string()))?;
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(Error::invalid("Invalid app secret encryption key".into()));
+    // The runtime validates each key; an empty or malformed set fails here first.
+    let keys = serde_json::from_str::<Value>(&value)
+        .ok()
+        .and_then(|keyring| keyring["keys"].as_array().map(Vec::len));
+    if !keys.is_some_and(|count| count > 0) {
+        return Err(Error::invalid(
+            "Invalid app secret encryption keyring".into(),
+        ));
     }
     Ok(value)
 }
@@ -60,7 +75,7 @@ pub fn supports_celld(version: &str) -> bool {
 pub fn configuration(
     release: &RuntimeRelease,
     token: &str,
-    secrets_key: &str,
+    secrets_keys: &str,
     app_domain: Option<&str>,
     app_https_port: u16,
 ) -> Result<Value> {
@@ -73,7 +88,7 @@ pub fn configuration(
         "name": "widefleet", "main": release.main, "no_bundle": true,
         "compatibility_date": "2026-10-01", "compatibility_flags": ["nodejs_compat"],
         "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
-        "vars": { "WIDEFLEET_CONTROL_TOKEN": token, "WIDEFLEET_SECRETS_KEY": secrets_key, "WIDEFLEET_MANAGEMENT_HTTP": "true", "WIDEFLEET_CONFIGURATION": "{\"crons\":{},\"queues\":{}}" },
+        "vars": { "WIDEFLEET_CONTROL_TOKEN": token, "WIDEFLEET_SECRETS_KEYS": secrets_keys, "WIDEFLEET_MANAGEMENT_HTTP": "true", "WIDEFLEET_CONFIGURATION": "{\"crons\":{},\"queues\":{}}" },
         "r2_buckets": [{ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-packages" }],
         "kv_namespaces": [
             { "binding": "AUTH_CONFIG", "id": "widefleet-auth" },
@@ -145,20 +160,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_starts_reuse_one_independent_encryption_key() -> platform_core::Result<()> {
+    async fn concurrent_starts_reuse_one_independent_encryption_keyring()
+    -> platform_core::Result<()> {
         let store = object_store::memory::InMemory::new();
         let organization = "test-organization";
         let (first, second) = tokio::join!(
-            super::secrets_key(&store, organization),
-            super::secrets_key(&store, organization)
+            super::secrets_keys(&store, organization),
+            super::secrets_keys(&store, organization)
         );
         let first = first?;
         assert_eq!(first, second?);
-        assert_eq!(first.len(), 64);
-        assert_eq!(first, super::secrets_key(&store, organization).await?);
+        let keyring: serde_json::Value = serde_json::from_str(&first)?;
+        let key = &keyring["keys"][0];
+        assert_eq!(key["kty"], "oct");
+        assert_eq!(key["kid"].as_str().map(str::len), Some(8));
+        assert_eq!(key["k"].as_str().map(str::len), Some(43));
+        assert_eq!(first, super::secrets_keys(&store, organization).await?);
         assert_ne!(
             first,
-            super::secrets_key(&store, "other-organization").await?
+            super::secrets_keys(&store, "other-organization").await?
         );
         Ok(())
     }

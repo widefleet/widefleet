@@ -7,11 +7,8 @@ import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
 import { savePackage } from "../src/lib/server/package-storage.ts";
 import { agents, apps, jobs, organizationRuntimes } from "../src/lib/server/schema.ts";
-import {
-  createSecretEncryption,
-  generateKeyring,
-  parseKeyring,
-} from "../src/lib/server/secret-encryption.ts";
+import { parseKeyring } from "@platform/contracts/keyring";
+import { createSecretEncryption, generateKeyring } from "../src/lib/server/secret-encryption.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";

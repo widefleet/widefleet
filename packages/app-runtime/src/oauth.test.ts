@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { managedOAuth, openAccessToken, type OAuthIdentity } from "./oauth.ts";
 import { managedOAuthConfiguration } from "./oauth-protocol.ts";
+import { testKeyring } from "../fixtures/keyring.ts";
 
 const identity: OAuthIdentity = {
   appId: "2a600000-0000-4000-8000-000000000001",
@@ -28,7 +29,7 @@ const googleAliases = [
 ] as const;
 
 const environment = {
-  WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
+  WIDEFLEET_SECRETS_KEYS: testKeyring(),
   WIDEFLEET_OAUTH: JSON.stringify({
     origin: "https://oauth.example.test",
     clients: {
@@ -259,6 +260,35 @@ describe("managed OAuth broker", () => {
     );
 
     expect(refreshed.accessToken).toMatch(/^wft1\./);
+    // The largest values still fit the limits of the requests that carry them.
+    expect(granted.accessToken.length).toBeLessThanOrEqual(30000);
+    expect(granted.refreshToken.length).toBeLessThanOrEqual(12000);
+  });
+
+  it("retires access placeholders and refresh grants once another key version is active", async () => {
+    const { broker, exchange } = await authorize();
+    const granted = tokens.parse(await broker.request(identity, exchange));
+
+    const rotated = {
+      ...environment,
+      WIDEFLEET_SECRETS_KEYS: testKeyring(["next", 0xcd], ["test", 0xab]),
+    };
+
+    await expect(
+      managedOAuth(rotated).request(identity, {
+        action: "refresh",
+        client: "google",
+        refreshToken: granted.refreshToken,
+      }),
+    ).rejects.toThrow();
+    expect(
+      await openAccessToken(
+        rotated,
+        identity.appId,
+        granted.accessToken,
+        new URL("https://gmail.googleapis.com/"),
+      ),
+    ).toBeNull();
   });
 
   it("rejects cross-app, cross-organization, cross-user and cross-client grants before calling providers", async () => {
@@ -386,7 +416,7 @@ describe("managed OAuth broker", () => {
   });
 
   it("keeps unconfigured runtimes disabled and rejects credentials selected by a caller", async () => {
-    const disabled = managedOAuth({ WIDEFLEET_SECRETS_KEY: environment.WIDEFLEET_SECRETS_KEY });
+    const disabled = managedOAuth({ WIDEFLEET_SECRETS_KEYS: environment.WIDEFLEET_SECRETS_KEYS });
 
     expect(
       await disabled.request(identity, { action: "configuration", client: "google" }),
@@ -483,7 +513,7 @@ describe("managed OAuth with a Client ID Metadata Document", () => {
   const documentUrl = "https://oauth.example.test/oauth/client-metadata.json";
 
   const metadataEnvironment = {
-    WIDEFLEET_SECRETS_KEY: environment.WIDEFLEET_SECRETS_KEY,
+    WIDEFLEET_SECRETS_KEYS: environment.WIDEFLEET_SECRETS_KEYS,
     WIDEFLEET_OAUTH: JSON.stringify({
       origin: "https://oauth.example.test",
       clients: {

@@ -44,6 +44,71 @@ async fn event(api: &Api, configuration: &Configuration, job: &Job, message: &st
     Ok(())
 }
 
+#[derive(Default, serde::Deserialize)]
+struct RekeyCounts {
+    current: u64,
+    rewritten: u64,
+    unreadable: u64,
+    conflicts: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct RekeyPage {
+    #[serde(flatten)]
+    counts: RekeyCounts,
+    cursor: Option<String>,
+}
+
+// Seals runtime storage again under the active key version, page by page, and
+// describes the outcome for the job message. New values are always sealed under
+// the active version, so a pass without unreadable values or conflicts leaves
+// every value under it. The runtime is already committed, so a failure is only
+// reported.
+async fn rekey<F, P>(mut page: F) -> String
+where
+    F: FnMut(Value) -> P,
+    P: Future<Output = Result<Value>>,
+{
+    let mut total = RekeyCounts::default();
+    let mut cursor: Option<String> = None;
+    loop {
+        let request = match &cursor {
+            Some(cursor) => value!({ "cursor": cursor }),
+            None => value!({}),
+        };
+        let next = match page(request)
+            .await
+            .and_then(|result| Ok(serde_json::from_value::<RekeyPage>(result)?))
+        {
+            Ok(next) => next,
+            // Job messages are limited, and the error can carry the runtime's response.
+            Err(error) => {
+                return format!("Runtime storage could not be sealed again: {error}")
+                    .chars()
+                    .take(4000)
+                    .collect();
+            }
+        };
+        total.current += next.counts.current;
+        total.rewritten += next.counts.rewritten;
+        total.unreadable += next.counts.unreadable;
+        total.conflicts += next.counts.conflicts;
+        cursor = next.cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    let advice = if total.unreadable > 0 || total.conflicts > 0 {
+        ". Keep earlier key versions and update the runtime again"
+    } else {
+        ""
+    };
+    format!(
+        "Runtime storage: {} current, {} rewritten, {} unreadable, {} conflicts{advice}",
+        total.current, total.rewritten, total.unreadable, total.conflicts
+    )
+}
+
 async fn recover(docker: &Docker, configuration: &Configuration, job: &Job) -> Result<()> {
     if let Some(recovery) = execution::recover(configuration, job).await? {
         if recovery.reload {
@@ -255,6 +320,15 @@ async fn execute(
     {
         tracing::warn!(job = %job.id, %error, "Could not refresh the service search index");
     }
+    if matches!(job.kind, JobKind::Runtime) {
+        let container = &configuration.runtime_container;
+        let token = &prepared.token;
+        let message = rekey(move |request| async move {
+            docker::runtime_request(docker, container, token, "rekey", &request).await
+        })
+        .await;
+        return Ok(Some(value!({ "message": message })));
+    }
     Ok(None)
 }
 
@@ -446,5 +520,37 @@ async fn main() {
     if let Err(error) = result {
         tracing::error!(%error, "Agent stopped");
         std::process::exit(if panicked { 101 } else { 1 });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn rekey_adds_up_every_page() {
+        let mut requests = Vec::new();
+        let mut pages = vec![
+            value!({ "current": 0, "rewritten": 3, "unreadable": 0, "conflicts": 0, "cursor": "next" }),
+            value!({ "current": 2, "rewritten": 1, "unreadable": 1, "conflicts": 0, "cursor": null }),
+        ]
+        .into_iter();
+        let message = rekey(|request| {
+            requests.push(request);
+            let page = pages.next();
+            async move { page.ok_or_else(|| Error::invalid("No page left".into())) }
+        })
+        .await;
+        assert_eq!(
+            message,
+            "Runtime storage: 2 current, 4 rewritten, 1 unreadable, 0 conflicts. Keep earlier key versions and update the runtime again"
+        );
+        assert_eq!(requests, vec![value!({}), value!({ "cursor": "next" })]);
+    }
+
+    #[tokio::test]
+    async fn rekey_reports_a_failed_page() {
+        let message = rekey(|_| async { Err(Error::invalid("runtime unavailable".into())) }).await;
+        assert!(message.starts_with("Runtime storage could not be sealed again"));
     }
 }

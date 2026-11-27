@@ -44,6 +44,7 @@ import {
   jobs,
   organizationRuntimes,
 } from "../../src/lib/server/schema.ts";
+import { keySet, keyVersion } from "../keyring.fixture.ts";
 
 const resourceName = (appId: string, kind: string, name: string) =>
   `r${createHash("sha256").update(`${appId}/${kind}/${name}`).digest("hex").slice(0, 40)}`;
@@ -1010,7 +1011,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             CLOUDFLARE_API_TOKEN: "local-provisioning-token",
             APP_RUNTIME_NAME: "fixture-runtime",
             WIDEFLEET_CONTROL_TOKEN: token,
-            WIDEFLEET_SECRETS_KEY: "a".repeat(64),
+            WIDEFLEET_SECRETS_KEYS: keySet(
+              keyVersion("test", Buffer.alloc(32, 0xaa).toString("base64url")),
+            ),
             WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
           },
           hyperdrive: [

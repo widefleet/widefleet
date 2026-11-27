@@ -5,6 +5,8 @@ import { mcpRequest } from "./mcp.ts";
 import { mcpLoginRequest } from "./mcp-login.ts";
 
 import { prepareAppSecrets } from "./app-secrets.ts";
+import { rekeyRuntimeStorage } from "./rekey.ts";
+import { runtimeKeyring } from "./secrets.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
 import { managedOAuth } from "./oauth.ts";
 
@@ -307,11 +309,17 @@ const manageRuntime = async (
     return manageUserConnection(request, environment, context);
 
   if (url.pathname === "/.well-known/widefleet/runtime") {
-    return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });
+    return Response.json({
+      runtimeVersion: WIDEFLEET_RUNTIME_VERSION,
+      keyVersion: runtimeKeyring(environment).keyring[0].id,
+    });
   }
 
   if (url.pathname === "/.well-known/widefleet/app-secrets")
     return prepareAppSecrets(request, environment);
+
+  if (url.pathname === "/.well-known/widefleet/rekey")
+    return rekeyRuntimeStorage(request, environment);
 
   if (url.pathname === "/.well-known/widefleet/workflows") {
     if (request.method !== "POST") return new Response(null, { status: 403 });

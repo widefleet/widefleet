@@ -54,7 +54,7 @@ const accessGrant = z.object({
 
 const accessTokenPrefix = "wft1.";
 
-type Environment = { WIDEFLEET_SECRETS_KEY: string; WIDEFLEET_OAUTH?: string };
+type Environment = { WIDEFLEET_SECRETS_KEYS: string; WIDEFLEET_OAUTH?: string };
 
 type Client = z.infer<typeof managedOAuthClient>;
 
@@ -87,16 +87,21 @@ const configuration = (environment: Environment) => {
 
 const callbackPath = (client: string) => `/oauth/callback/${client}`;
 
-// Sealed values keep their earlier encoding. They hold provider tokens, so they
-// are not limited to the size of an app secret.
+// Sealed values are bearer values that clients hold. They open only under the
+// active key version, so a new active version retires every value sealed
+// earlier. They hold provider tokens, so they are not limited to the size of an
+// app secret.
 const seal = (environment: Environment, purpose: string, payload: string) =>
   encryptText(environment, `managed-oauth/${purpose}/v1`, JSON.stringify({ payload }));
 
 const open = async (environment: Environment, purpose: string, value: string) =>
   z
     .object({ payload: z.string() })
-    .parse(JSON.parse(await decryptText(environment, `managed-oauth/${purpose}/v1`, value)))
-    .payload;
+    .parse(
+      JSON.parse(
+        await decryptText(environment, `managed-oauth/${purpose}/v1`, value, { activeOnly: true }),
+      ),
+    ).payload;
 
 // Provider modules log token endpoint failures with the provider's response,
 // whose descriptions can contain credentials.

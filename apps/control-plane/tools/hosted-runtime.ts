@@ -76,16 +76,23 @@ export const deployHostedRuntime = (
   });
 
 // A new Worker version takes a few seconds to reach every Cloudflare location, so
-// a check right after the deployment can still reach the previous version.
-export const waitForRuntimeVersion = async (
-  read: () => Promise<string>,
-  version: string,
+// a check right after the deployment can still reach the previous version, which
+// may not answer in the same shape yet.
+export const waitForRuntime = async (
+  isActive: () => Promise<boolean>,
   { attempts = 30, interval = 2_000 } = {},
 ) => {
-  for (let attempt = 1; ; attempt++) {
-    if ((await read()) === version) return;
+  let failure: unknown;
 
-    if (attempt >= attempts) throw new Error("The requested Runtime version is not active");
+  for (let attempt = 1; ; attempt++) {
+    try {
+      if (await isActive()) return;
+    } catch (error) {
+      failure = error;
+    }
+
+    if (attempt >= attempts)
+      throw new Error("The requested Runtime version is not active", { cause: failure });
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
 };

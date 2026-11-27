@@ -32,9 +32,7 @@ export const cloudflareRuntimeUpload = (release: z.infer<typeof contract.runtime
   return body;
 };
 
-export const readCloudflareRuntimeVersion = async (
-  bindings: Pick<CloudflareBindings, "APP_RUNTIME">,
-) => {
+const readCloudflareRuntime = async (bindings: Pick<CloudflareBindings, "APP_RUNTIME">) => {
   if (!bindings.APP_RUNTIME) throw new Error("App runtime is not configured");
 
   const response = await bindings.APP_RUNTIME.fetch(
@@ -49,6 +47,20 @@ export const readCloudflareRuntimeVersion = async (
     throw new Error(`Runtime version check failed (HTTP ${response.status})`);
   }
 
-  return z.object({ runtimeVersion: contract.runtimeVersion }).parse(await response.json())
-    .runtimeVersion;
+  return response.text();
 };
+
+export const readCloudflareRuntimeVersion = async (
+  bindings: Pick<CloudflareBindings, "APP_RUNTIME">,
+) =>
+  z
+    .object({ runtimeVersion: contract.runtimeVersion })
+    .parse(JSON.parse(await readCloudflareRuntime(bindings))).runtimeVersion;
+
+/** The release and the active runtime key version of the runtime Worker that answers. */
+export const readCloudflareRuntimeStatus = async (
+  bindings: Pick<CloudflareBindings, "APP_RUNTIME">,
+) =>
+  z
+    .object({ runtimeVersion: contract.runtimeVersion, keyVersion: z.string() })
+    .parse(JSON.parse(await readCloudflareRuntime(bindings)));

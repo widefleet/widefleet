@@ -21,7 +21,7 @@ import {
   runtimeReleases,
 } from "../../src/lib/server/schema.ts";
 import { CloudflareBindingUpdatePending } from "../../src/lib/server/cloudflare-binding-updates.ts";
-import { deployHostedRuntime, waitForRuntimeVersion } from "../../tools/hosted-runtime.ts";
+import { deployHostedRuntime, waitForRuntime } from "../../tools/hosted-runtime.ts";
 import { hostedConfigurations, hostedInstallation } from "../../tools/hosted-configuration.ts";
 import { provisionHostedResources } from "../../tools/hosted-resources.ts";
 
@@ -506,23 +506,30 @@ describe("Hosted resource provisioning", () => {
 
 describe("Hosted infrastructure deployment coordination", () => {
   it("waits until the deployed Runtime version answers", async () => {
-    const answers = ["0.1.0", "0.1.0", "0.2.0"];
+    // An earlier version that answers in another shape counts as not active yet.
+    const answers: (boolean | "unreadable")[] = [false, "unreadable", true];
     let reads = 0;
 
-    await waitForRuntimeVersion(async () => answers[reads++] ?? "0.2.0", "0.2.0", {
-      interval: 0,
-    });
+    await waitForRuntime(
+      async () => {
+        const answer = answers[reads++];
+
+        if (answer === "unreadable") throw new Error("Unexpected runtime status");
+
+        return answer ?? true;
+      },
+      { interval: 0 },
+    );
     expect(reads).toBe(3);
 
     reads = 0;
     await expect(
-      waitForRuntimeVersion(
+      waitForRuntime(
         async () => {
           reads++;
 
-          return "0.1.0";
+          return false;
         },
-        "0.2.0",
         { attempts: 3, interval: 0 },
       ),
     ).rejects.toThrow("The requested Runtime version is not active");
