@@ -23,7 +23,7 @@ const legacyKey = z.strictObject({ version: z.literal(1), wrapped: z.string() })
 
 const storedAppKey = z.union([sealedKey, legacyKey]);
 
-export type StoredAppKey = z.infer<typeof storedAppKey>;
+type StoredAppKey = z.infer<typeof storedAppKey>;
 
 /** Parses the stored record of an app key. */
 export const parseAppKey = (text: string) => storedAppKey.parse(JSON.parse(text));
@@ -52,7 +52,7 @@ const unbase64url = (value: string) =>
     character.charCodeAt(0),
   );
 
-export const keyPath = (appId: string, name: string) => `app-keys/${appId}/${name}.json`;
+const keyPath = (appId: string, name: string) => `app-keys/${appId}/${name}.json`;
 
 /** Formats the stored record of an app key's bytes. */
 export const sealAppKey = async (environment: Environment, path: string, key: Uint8Array) =>
