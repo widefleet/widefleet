@@ -15,20 +15,45 @@ type Definition = {
   capabilities?: string[];
 };
 
+/** A Worker's code and bindings, for a Worker loaded in the current request. */
 export const workerDefinition = async (
   input: Definition,
   environment: ParentEnvironment,
   context: Pick<ExecutionContext, "exports">,
 ) => {
+  const env = workerBindings(input, environment, context);
+
+  return { ...(await workerSource(input, environment)), env };
+};
+
+/** A Worker's code, which does not depend on a request and can be kept between requests. */
+export const workerSource = async (input: Definition, environment: ParentEnvironment) => {
   try {
-    return await prepareWorkerDefinition(input, environment, context);
+    return await prepareWorkerSource(input, environment);
   } catch (cause) {
     reportRuntimeException(cause, environment, { operation: "prepare_worker", ...input.identity });
     throw cause;
   }
 };
 
-const prepareWorkerDefinition = async (
+/**
+ * A Worker's resource bindings. Each binding is a stub that belongs to the request that creates
+ * it, so every request that may load the Worker creates its own.
+ */
+export const workerBindings = (
+  input: Definition,
+  environment: ParentEnvironment,
+  context: Pick<ExecutionContext, "exports">,
+) => {
+  try {
+    return prepareWorkerBindings(input, environment, context);
+  } catch (cause) {
+    reportRuntimeException(cause, environment, { operation: "prepare_worker", ...input.identity });
+    throw cause;
+  }
+};
+
+const prepareWorkerBindings = (
   input: Definition,
   environment: ParentEnvironment,
   context: Pick<ExecutionContext, "exports">,
@@ -79,6 +104,10 @@ const prepareWorkerDefinition = async (
     }
   }
 
+  return Object.fromEntries(bindings);
+};
+
+const prepareWorkerSource = async (input: Definition, environment: ParentEnvironment) => {
   const modules = await loadModules(environment, input.scope, input.modules);
   modules.set(
     "__widefleet_bindings.js",
@@ -91,7 +120,6 @@ const prepareWorkerDefinition = async (
       ? input.metadata.compatibility_flags
       : [...new Set([...input.metadata.compatibility_flags, "nodejs_als"])],
     modules: Object.fromEntries(modules),
-    env: Object.fromEntries(bindings),
   };
 };
 
