@@ -3,7 +3,6 @@
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import { Label } from "@platform/ui/label";
-  import FormIssues from "#shadcn/FormIssues.svelte";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { page } from "$app/state";
   import Markdown from "#shadcn/components/Markdown.svelte";
@@ -13,6 +12,8 @@
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import { getWorkspaceContext } from "#lib/workspace-context";
   import { appSlug } from "@platform/contracts";
+  import { toast } from "@platform/ui/sonner";
+  import { failureMessage } from "#lib/sso-setup.svelte";
 
   const workspace = getWorkspaceContext();
 
@@ -40,6 +41,20 @@
 
   const withAppHost = (html: string) => html.replaceAll(template.appHost, appHost);
 
+  // A failed install keeps what was entered and says why in a toast.
+  const install = installTemplate.enhance(async ({ submit, fields }) => {
+    try {
+      if (await submit()) return;
+      toast.error(`Could not install ${template.name}.`, {
+        description: (fields.allIssues() ?? []).map((issue) => issue.message).join(" "),
+      });
+    } catch (cause) {
+      toast.error(`Could not install ${template.name}.`, {
+        description: failureMessage(cause, "Try again."),
+      });
+    }
+  });
+
   // The install saves these secrets first, so it waits for every value.
   const secretsEntered = $derived(
     template.requiredSecrets.every((secret) =>
@@ -59,8 +74,13 @@
   />
 {/snippet}
 
+<!-- The field appears when the template's name is taken, ready for another name. -->
 {#snippet nameField(classes: string, id?: string)}
   <Input
+    {@attach (input) => {
+      // Once the install that asked for it has finished.
+      if (installTemplate.pending === 0) input.focus();
+    }}
     {...installTemplate.fields.name.as("text")}
     {id}
     aria-label="App name"
@@ -92,7 +112,7 @@
         >Open</Button
       >
     {:else if template.installable && template.requiredSecrets.length === 0}
-      <form {...installTemplate} class="flex w-full gap-2 sm:w-auto">
+      <form {...install} class="flex w-full gap-2 sm:w-auto">
         {@render installFields()}
         {#if naming}
           {@render nameField("min-w-0 flex-1 sm:w-48")}
@@ -108,7 +128,7 @@
   </div>
   {#if !template.installedAppId && template.installable && template.requiredSecrets.length > 0}
     <form
-      {...installTemplate}
+      {...install}
       class="mt-6 space-y-4 rounded-lg border p-4"
       aria-labelledby="secrets-heading"
     >
@@ -153,7 +173,6 @@
       >
     </form>
   {/if}
-  <FormIssues issues={installTemplate.fields.allIssues()} />
   {#if !template.installedAppId && template.installable && template.network && template.network.backend.length + template.network.browser.length > 0}
     <p class="text-muted-foreground mt-3 text-sm leading-6">
       Installing allows the app to connect to

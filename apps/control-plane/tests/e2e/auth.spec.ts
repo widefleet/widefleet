@@ -3369,7 +3369,20 @@ test.describe(`app templates`, () => {
     await page.getByLabel("QONTO_CLIENT_ID", { exact: true }).fill("synthetic-client-id");
     await page.getByLabel("QONTO_CLIENT_SECRET", { exact: true }).fill("synthetic-client-secret");
     await page.getByRole("button", { name: "Install", exact: true }).click();
+
+    // A toast explains the taken name, and the name field is ready for another.
+    await expect(page.getByText("Could not install Qonto.", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("An app named qonto already exists. Install the template under another name."),
+    ).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
     const name = page.getByLabel("App name", { exact: true });
+    await expect(name).toBeFocused();
+    // Shoot the toast once it has finished appearing.
+    await page
+      .locator("[data-sonner-toast]")
+      .evaluate((toast) => Promise.all(toast.getAnimations().map(({ finished }) => finished)));
+    await shoot("template-install-name-taken");
     await name.fill("qonto-finance");
     await expect(page.locator("code", { hasText: "/auth/callback/qonto" })).toHaveText(
       `https://${takenHost.replace(/^qonto/u, "qonto-finance")}/auth/callback/qonto`,
