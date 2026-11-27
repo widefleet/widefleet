@@ -58,7 +58,7 @@ describe("versioned authentication secrets", () => {
       { version: 1, value: earlier },
     ]);
     expect(
-      runtimeConfigurationSchema.parse(settings({ BETTER_AUTH_SECRETS: " " })).BETTER_AUTH_SECRETS,
+      runtimeConfigurationSchema.parse(settings({ BETTER_AUTH_SECRETS: "" })).BETTER_AUTH_SECRETS,
     ).toBeUndefined();
 
     for (const secrets of [
@@ -68,6 +68,7 @@ describe("versioned authentication secrets", () => {
       `2:${current},2:${earlier}`,
       `${"9".repeat(22)}:${current}`,
       `2:${current},`,
+      " ",
     ])
       expect(
         runtimeConfigurationSchema.safeParse(settings({ BETTER_AUTH_SECRETS: secrets })).success,

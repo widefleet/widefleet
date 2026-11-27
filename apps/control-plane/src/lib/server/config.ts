@@ -92,11 +92,12 @@ export const runtimeConfigurationSchema = z.object({
   APP_HTTPS_PORT: z.coerce.number().int().min(1).max(65535).default(443),
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
   // Better Auth's versioned secrets, current first. Values written before
-  // versions still open with BETTER_AUTH_SECRET.
+  // versions still open with BETTER_AUTH_SECRET. Empty counts as unset, as for
+  // Better Auth, which reads the variable itself when the option is unset.
   BETTER_AUTH_SECRETS: z
     .string()
     .optional()
-    .transform((value) => value?.trim() || undefined)
+    .transform((value) => value || undefined)
     .pipe(betterAuthSecrets.optional()),
   GITHUB_TOKEN: z.string().trim().optional(),
   PLATFORM_STATE_DIRECTORY: z.string().min(1).default("/var/lib/widefleet"),
