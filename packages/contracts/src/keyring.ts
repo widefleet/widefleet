@@ -1,4 +1,4 @@
-import { base64url } from "jose";
+import { CompactEncrypt, base64url, compactDecrypt, decodeProtectedHeader } from "jose";
 import { z } from "zod";
 
 // The control plane and the runtime keep their keys in the same format: a
@@ -68,4 +68,117 @@ export const parseKeyring = (text: string, source: string): Keyring => {
   if (!active) throw new Error(`${source} must list at least one key in ${keySetFormat}`);
 
   return [active, ...others];
+};
+
+// Sealed values are JWE compact serializations (RFC 7516): direct encryption
+// with A256GCM, `kid` naming the key version and the purpose as
+// `<version>:<purpose>`, and the value's context as `ctx`. Each version derives
+// one key per purpose with HKDF-SHA256 (RFC 5869), so a weakness in how one
+// purpose uses its key does not reach the others. The protected header is
+// authenticated, and opening requires the context the reader expects, so a
+// value cannot be moved to another object or purpose.
+const header = { alg: "dir", enc: "A256GCM" } as const;
+
+const encoder = new TextEncoder();
+
+// A fixed salt of hash length, as RFC 5869 recommends when no random salt is kept.
+const salt = new Uint8Array(32);
+
+/** The `kid` a sealed value names, or `null` when it names none or is malformed. */
+export const sealedKeyId = (value: string) => {
+  try {
+    const kid = z.string().safeParse(decodeProtectedHeader(value).kid);
+
+    return kid.success ? kid.data : null;
+  } catch {
+    return null;
+  }
+};
+
+export type OpenOptions = {
+  /**
+   * Accepts only the active key version. Bearer values that clients hold use
+   * this, so a new active version retires every bearer value sealed earlier.
+   */
+  activeOnly?: boolean;
+};
+
+/**
+ * Seals and opens values with `keyring`. `namespace` separates the derived
+ * keys of different services that could share key material.
+ */
+export const createSealing = (keyring: Keyring, namespace: string) => {
+  const keys = new Map<string, Promise<CryptoKey>>();
+
+  const keyId = (version: KeyVersion, purpose: string) => `${version.id}:${purpose}`;
+
+  const key = (version: KeyVersion, purpose: string) => {
+    const id = keyId(version, purpose);
+    let derived = keys.get(id);
+
+    if (!derived) {
+      derived = crypto.subtle
+        .importKey("raw", new Uint8Array(base64url.decode(version.jwk.k)), "HKDF", false, [
+          "deriveKey",
+        ])
+        .then((root) =>
+          crypto.subtle.deriveKey(
+            {
+              name: "HKDF",
+              hash: "SHA-256",
+              salt,
+              info: encoder.encode(`widefleet ${namespace} ${purpose} v1`),
+            },
+            root,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"],
+          ),
+        );
+      keys.set(id, derived);
+    }
+
+    return derived;
+  };
+
+  return {
+    /** Whether `value` is sealed for `purpose` under the active key version. */
+    isCurrent: (purpose: string, value: string) =>
+      sealedKeyId(value) === keyId(keyring[0], purpose),
+
+    /** Seals `data` for `purpose` and `context` under the active key version. */
+    seal: async (purpose: string, context: string, data: Uint8Array) =>
+      new CompactEncrypt(data)
+        .setProtectedHeader({ ...header, kid: keyId(keyring[0], purpose), ctx: context })
+        .encrypt(await key(keyring[0], purpose)),
+
+    /** Opens a value sealed for `purpose` and `context`. */
+    open: async (
+      purpose: string,
+      context: string,
+      value: string,
+      { activeOnly = false }: OpenOptions = {},
+    ) => {
+      const versions = activeOnly ? keyring.slice(0, 1) : keyring;
+
+      const { plaintext, protectedHeader } = await compactDecrypt(
+        value,
+        (protectedHeader) => {
+          const version = versions.find(
+            (candidate) => keyId(candidate, purpose) === protectedHeader.kid,
+          );
+
+          if (!version) throw new Error("The sealed value names an unknown key version or purpose");
+
+          return key(version, purpose);
+        },
+        { keyManagementAlgorithms: [header.alg], contentEncryptionAlgorithms: [header.enc] },
+      );
+
+      if (protectedHeader["ctx"] !== context)
+        throw new Error("The sealed value belongs to another context");
+
+      return plaintext;
+    },
+  };
 };

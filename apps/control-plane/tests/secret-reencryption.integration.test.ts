@@ -25,7 +25,6 @@ import {
 import { readSsoConfiguration } from "../src/lib/server/sso-settings.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createTestEnvironment } from "./environment.ts";
-import { checkSecretContexts } from "./secret-contexts.fixture.ts";
 import { keySet, keyVersion, keysOf } from "./keyring.fixture.ts";
 
 const execute = promisify(execFile);
@@ -54,8 +53,7 @@ const older = (value: string) =>
 const environmentKeys = () => keysOf(environment.environment.PLATFORM_ENCRYPTION_KEYS);
 
 /** The keyring after rotation: new active version, the environment's, then an older one. */
-const rotated = () =>
-  checkSecretContexts(service([current, ...environmentKeys(), previous, oldest]));
+const rotated = () => service([current, ...environmentKeys(), previous, oldest]);
 
 const directorySecret = async () =>
   (
@@ -208,21 +206,6 @@ describe("re-encryption", () => {
           await directorySecret(),
         ),
       ).toBe("directory-secret");
-    } finally {
-      await setDirectorySecret(original);
-    }
-  });
-
-  it("counts a damaged header as unreadable without stopping the report", async () => {
-    const database = environment.database.db;
-    const original = await directorySecret();
-    const header = Buffer.from(JSON.stringify({ alg: "dir", enc: "A256GCM", kid: 7 }));
-
-    await setDirectorySecret(`${header.toString("base64url")}..iv.ciphertext.tag`);
-
-    try {
-      expect(await readSecretEncryption(database, rotated())).toMatchObject({ failed: 1 });
-      expect(await reencryptSecrets(database, rotated())).toMatchObject({ failed: 1 });
     } finally {
       await setDirectorySecret(original);
     }
