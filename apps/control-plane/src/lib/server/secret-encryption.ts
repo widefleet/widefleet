@@ -51,7 +51,7 @@ export const includesKeyVersions = (keyring: Keyring, required: Keyring) =>
 
 // Ciphertexts are sealed with the shared keyring format: one key per kind of
 // value, and the value's context as `ctx`, so a value cannot be moved to
-// another row, organization or kind.
+// another kind, or to another row or organization its context names.
 
 const encoder = new TextEncoder();
 
