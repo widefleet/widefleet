@@ -1,10 +1,31 @@
 ---
 title: Network permissions
 description: Allow external destinations and understand backend and browser enforcement.
-lastModified: 2026-10-23
+lastModified: 2026-11-26
 ---
 
 New apps start with no external destinations allowed. The trusted runtime checks backend requests; browser responses carry a platform-controlled Content Security Policy (CSP). D1, R2, KV, Queues and static asset bindings continue to work without granting a network origin.
+
+## Request origins from your app
+
+List the origins your app needs in `widefleet.jsonc` beside `wrangler.jsonc`:
+
+```jsonc
+{
+  "network": {
+    "backend": ["https://api.example.com"],
+    "browser": ["https://assets.example.com"],
+  },
+}
+```
+
+Each deployment requests these origins. The app's owner or an administrator grants them.
+
+## Allow origins in management
+
+Open the app and choose **Connections**. The **Network permissions** card lists the origins the latest deployment requests; choose **Allow** to grant one. Choose **Add origin** to allow another origin for the backend or the browser, and the remove button beside an origin to revoke it. While a change is being applied, the card shows its status; after a failed activation, choose **Retry**.
+
+App owners and administrators change the lists; collaborators see them.
 
 ## CLI
 
