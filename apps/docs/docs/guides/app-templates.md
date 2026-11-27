@@ -35,10 +35,12 @@ widefleet catalog templates install gmail \
 ```
 
 `show` returns the template's setup steps and the secrets it requires in
-`requiredSecrets`. `install` saves each secret from its file, deploys the app and
-prints the app as JSON. Use `--name` to install a template a second time under
-another name. If your login cannot change network permissions, the CLI prints the
-`widefleet network allow` command an administrator runs to finish the setup.
+`requiredSecrets`. Redirect URIs in the steps already use the app's host, in
+`appHost`. `install` saves each secret from its file, deploys the app and prints
+the app as JSON. Use `--name` to install a template a second time under another
+name; that app's host starts with the name instead. If your login cannot change
+network permissions, the CLI prints the `widefleet network allow` command an
+administrator runs to finish the setup.
 
 Use `--organization ID` when you work across organizations. See
 [organization selection](/reference/cli-configuration#select-an-organization).
