@@ -93,6 +93,7 @@ export const authenticationOptions = (
     appName: "Widefleet",
     baseURL: configuration.PLATFORM_URL,
     secret: configuration.BETTER_AUTH_SECRET,
+    secrets: configuration.BETTER_AUTH_SECRETS,
     trustedOrigins: [configuration.PLATFORM_URL],
     socialProviders: providers,
     user: Object.keys(providers).length

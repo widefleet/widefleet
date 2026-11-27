@@ -36,6 +36,7 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   LOGIN_CODE_DELIVERY?: string;
   APP_DOMAIN: string;
   BETTER_AUTH_SECRET: string;
+  BETTER_AUTH_SECRETS?: string;
   GITHUB_TOKEN?: string;
   /** The keyring, active version first. */
   PLATFORM_ENCRYPTION_KEYS: string;

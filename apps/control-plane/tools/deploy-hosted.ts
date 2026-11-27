@@ -82,6 +82,7 @@ const secrets = z
       .refine((value) => ["postgres:", "postgresql:"].includes(new URL(value).protocol)),
     BETTER_AUTH_SECRET: z.string().min(32),
     // Validated with the rest of the configuration below, before any change.
+    BETTER_AUTH_SECRETS: z.string().min(1),
     PLATFORM_ENCRYPTION_KEYS: z.string().min(1),
     WIDEFLEET_CONTROL_TOKEN: z.string().min(32),
     WIDEFLEET_SECRETS_KEYS: z.string().min(1),
@@ -184,6 +185,8 @@ const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
 const sensitive = [
   ...Object.values(secrets),
+  // Each version alone, since the list also contains BETTER_AUTH_SECRET.
+  ...(configuration.BETTER_AUTH_SECRETS ?? []).map(({ value }) => value),
   ...Object.values(socialCredentials),
   ...Object.values(controlSecretOverrides),
   password,
@@ -300,6 +303,7 @@ try {
       ...controlSecretOverrides,
       ...socialCredentials,
       BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET,
+      BETTER_AUTH_SECRETS: secrets.BETTER_AUTH_SECRETS,
       PLATFORM_ENCRYPTION_KEYS: secrets.PLATFORM_ENCRYPTION_KEYS,
       APP_COOKIE_SECRET: secrets.APP_COOKIE_SECRET,
       CLOUDFLARE_API_TOKEN: secrets.WIDEFLEET_PROVISIONING_TOKEN,
