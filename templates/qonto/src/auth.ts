@@ -15,7 +15,6 @@ import { ensureUser } from "./database.ts";
 export const scopes = [
   "offline_access",
   "organization.read",
-  "user_organization.read",
   "subscription.read",
   "bank_account.write",
   "attachment.read",
