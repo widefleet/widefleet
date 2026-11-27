@@ -139,7 +139,18 @@ export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
         grantType === "refresh_token" &&
         credential.authorization.expiresAt - Date.now() < accessTokenTTL * 1000
       ) {
-        const renewal = await (await companyOAuth(configuration)).renew(credential);
+        const renewal = await companyOAuth(configuration)
+          .then((company) => company.renew(credential))
+          .catch((cause: unknown) => {
+            // Renewal reports provider failures as results; anything thrown here is
+            // unexpected and must not end the grant.
+            console.error("MCP company authorization renewal failed", {
+              error: cause instanceof Error ? cause.name : "UnknownError",
+              message: cause instanceof Error ? cause.message.slice(0, 300) : undefined,
+            });
+
+            return { status: "unavailable", credential: undefined } as const;
+          });
 
         if (renewal.status === "unavailable")
           throw new OAuthError("temporarily_unavailable", {

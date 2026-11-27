@@ -34,8 +34,6 @@ export const sessionRenewal = (verified: () => CompanyAuthorization | undefined)
           (candidate) => candidate.id === "company",
         );
 
-        if (!provider) throw new APIError("SERVICE_UNAVAILABLE");
-
         const renewal = await renewCompanyAuthorization(
           provider,
           verified,

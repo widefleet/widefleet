@@ -104,32 +104,42 @@ export const providerIdentity = async (
   // audience and nonce verification. This maps already verified claims.
   const claims = decodeJwt(idToken);
 
+  // A rejected claim does not change on retry: the person must sign in again.
+  const rejected = (message: string) => new APIError("UNAUTHORIZED", { message });
+
+  const claimed = <T>(result: z.ZodSafeParseResult<T>, message: string) => {
+    if (!result.success) throw rejected(message);
+
+    return result.data;
+  };
+
   // Better Auth checks the exact published issuer. This additional comparison
   // tolerates a trailing slash in the saved OIDC URL without changing that check.
   const tokenIssuer = provider.type === "oidc" ? claims.iss?.replace(/\/$/, "") : claims.iss;
 
   if (tokenIssuer !== issuer(provider) || claims["email_verified"] === false)
-    throw new Error("The company identity is not trusted");
+    throw rejected("The company identity is not trusted");
 
   if (
     provider.type === "google" &&
     (claims["hd"] !== provider.domain || claims["email_verified"] !== true)
   )
-    throw new APIError("UNAUTHORIZED", {
-      message: "The identity is not a verified Workspace account in this domain",
-    });
+    throw rejected("The identity is not a verified Workspace account in this domain");
 
   if (
     provider.type === "oidc" &&
     provider.organizationClaim &&
     claims[provider.organizationClaim] !== organizationId
   )
-    throw new Error("The identity belongs to a different organization");
+    throw rejected("The identity belongs to a different organization");
 
   const subject =
     provider.type === "entra"
-      ? z.object({ oid: z.uuid(), tid: z.literal(provider.tenantId) }).parse(claims).oid
-      : z.string().min(1).parse(claims.sub);
+      ? claimed(
+          z.object({ oid: z.uuid(), tid: z.literal(provider.tenantId) }).safeParse(claims),
+          "The identity belongs to a different tenant",
+        ).oid
+      : claimed(z.string().min(1).safeParse(claims.sub), "The identity has no subject");
 
   const groupClaim = provider.type === "oidc" ? provider.groupsClaim : "groups";
 
@@ -144,16 +154,22 @@ export const providerIdentity = async (
       ? await graphGroups(accessToken)
       : provider.type === "google"
         ? lookupGoogleGroups && accessToken
-          ? await googleGroups(accessToken, z.email().parse(claims["email"]))
+          ? await googleGroups(
+              accessToken,
+              claimed(z.email().safeParse(claims["email"]), "The identity has no valid email"),
+            )
           : []
-        : groups.parse(claims[groupClaim] ?? []);
+        : claimed(groups.safeParse(claims[groupClaim] ?? []), "The identity has invalid groups");
 
-  const identity = proxyIdentity.parse({
-    id: subject,
-    name: claims[provider.type === "oidc" ? provider.nameClaim : "name"] ?? "",
-    email: claims[provider.type === "oidc" ? provider.emailClaim : "email"],
-    groups: membership,
-  });
+  const identity = claimed(
+    proxyIdentity.safeParse({
+      id: subject,
+      name: claims[provider.type === "oidc" ? provider.nameClaim : "name"] ?? "",
+      email: claims[provider.type === "oidc" ? provider.emailClaim : "email"],
+      groups: membership,
+    }),
+    "The identity's claims are invalid",
+  );
 
   return { claims, identity };
 };

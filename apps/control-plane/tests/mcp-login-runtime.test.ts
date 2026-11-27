@@ -976,7 +976,7 @@ describe("MCP OAuth in the data plane", () => {
 
   it("issues tokens from a current authorization without contacting the provider", async () => {
     const connection = await connect();
-    const requests = idp.refreshRequests.length;
+    const requests = idp.requests.length;
     let token = connection.refresh_token;
 
     for (let refresh = 0; refresh < 3; refresh++) {
@@ -985,7 +985,26 @@ describe("MCP OAuth in the data plane", () => {
       token = z.object({ refresh_token: z.string() }).parse(await response.json()).refresh_token;
     }
 
-    expect(idp.refreshRequests).toHaveLength(requests);
+    expect(idp.requests).toHaveLength(requests);
+  });
+
+  it("keeps the grant when provider discovery is unavailable during renewal", async () => {
+    idp.settings.tokenSeconds = 240;
+
+    try {
+      const connection = await connect();
+      idp.settings.available = false;
+      const failed = await refreshWith(connection.client, connection.refresh_token);
+
+      expect(failed.status, await failed.clone().text()).toBe(503);
+      expect(await failed.json()).toMatchObject({ error: "temporarily_unavailable" });
+      idp.settings.available = true;
+      const retry = await refreshWith(connection.client, connection.refresh_token);
+      expect(retry.status, await retry.clone().text()).toBe(200);
+    } finally {
+      idp.settings.available = true;
+      idp.settings.tokenSeconds = 3600;
+    }
   });
 
   it("keeps the grant when the provider's signing keys are unavailable during renewal", async () => {
@@ -995,12 +1014,12 @@ describe("MCP OAuth in the data plane", () => {
 
     try {
       const connection = await connect();
-      idp.settings.keysAvailable = false;
+      idp.settings.keys = "unavailable";
       const failed = await refreshWith(connection.client, connection.refresh_token);
 
       expect(failed.status, await failed.clone().text()).toBe(503);
       expect(await failed.json()).toMatchObject({ error: "temporarily_unavailable" });
-      idp.settings.keysAvailable = true;
+      idp.settings.keys = "published";
       // The retry uses the provider credential rotated by the failed attempt.
       const retry = await refreshWith(connection.client, connection.refresh_token);
       expect(retry.status, await retry.clone().text()).toBe(200);
@@ -1009,7 +1028,7 @@ describe("MCP OAuth in the data plane", () => {
         .poll(() => activity.at(-1)?.properties.trigger, { timeout: 8_000 })
         .toBe("mcp_renewal");
     } finally {
-      idp.settings.keysAvailable = true;
+      idp.settings.keys = "published";
       idp.settings.rotateRefreshTokens = false;
       idp.settings.refreshReplaySeconds = 30;
       idp.settings.tokenSeconds = 3600;
