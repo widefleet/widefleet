@@ -59,6 +59,33 @@ export const runtimeConfigurationSchema = z.object({
   APP_DOMAIN: z.string().regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/),
   APP_HTTPS_PORT: z.coerce.number().int().min(1).max(65535).default(443),
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
+  // Better Auth's versioned secrets, current first, as comma-separated
+  // "<version>:<secret>" entries. Values written before versions still open
+  // with BETTER_AUTH_SECRET.
+  BETTER_AUTH_SECRETS: z
+    .string()
+    .transform((value) => value.split(",").map((entry) => entry.trim()))
+    .pipe(
+      z
+        .array(
+          z
+            .string()
+            .regex(
+              /^\d+:.{32,}$/,
+              "Use <version>:<secret> entries with secrets of 32 or more characters",
+            )
+            .transform((entry) => {
+              const separator = entry.indexOf(":");
+
+              return {
+                version: Number(entry.slice(0, separator)),
+                value: entry.slice(separator + 1),
+              };
+            }),
+        )
+        .min(1),
+    )
+    .optional(),
   GITHUB_TOKEN: z.string().trim().optional(),
   PLATFORM_STATE_DIRECTORY: z.string().min(1).default("/var/lib/widefleet"),
   PLATFORM_APP_RUNTIME_URL: telemetryUrl.default("http://runtime:8080"),
