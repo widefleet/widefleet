@@ -171,7 +171,7 @@ export const operations = {
     bodyRequired: true,
     response: "json",
     pageable: false,
-    change: "create",
+    change: "update",
   },
   updateRow: {
     httpMethod: "PATCH",

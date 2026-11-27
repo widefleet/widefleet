@@ -22,9 +22,9 @@ export const levelTexts = {
       "Every new row, table and column asks first, and so do changing, linking, sharing, deleting and calling actions.",
   },
   updates_and_deletions: {
-    title: "Ask except for new rows",
+    title: "Ask except for additions",
     detail:
-      "New rows, tables and columns are created at once. Changing, linking, sharing, deleting and calling actions ask first.",
+      "Columns and rows added to another row are created at once. New rows in a table, changing, linking, sharing, deleting and calling actions ask first.",
   },
   none: {
     title: "Never ask",

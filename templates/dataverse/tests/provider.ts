@@ -215,15 +215,6 @@ export const provider = () => {
       // Every environment answers alike; the tests check which one was called.
       const path = `${api}${url.pathname.replace(/^\/api\/data\/v9\.2/, "")}`;
 
-      // The service document lists entity sets; unbound actions are not among them.
-      if (path === `${api}/` && request.method === "GET")
-        return Response.json({
-          value: [
-            { name: "accounts", kind: "EntitySet", url: "accounts" },
-            { name: "EntityDefinitions", kind: "EntitySet", url: "EntityDefinitions" },
-          ],
-        });
-
       if (
         decodeURIComponent(path) ===
           `${api}/EntityDefinitions(LogicalName='new_scrap')/Attributes` &&

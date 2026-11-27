@@ -22,7 +22,8 @@ import type { Environment, Properties } from "./context.ts";
  * logical names; lookup columns read as `_<name>_value` and are set with
  * `<navigation property>@odata.bind`, such as
  * `"parentcustomerid_account@odata.bind": "/accounts(<id>)"`. A created row's
- * address is in the result's `headers` as `OData-EntityId`; `createRow` and
+ * address is in the result's `headers` as `OData-EntityId`. Its address may
+ * name an action as well as a table, so `createRow` asks like an action. `createRow` and
  * `updateRow` answer the row itself when `prefer` is `return=representation`.
  * `updateRow` creates a missing row unless `ifMatch` is `*`. An `id` is the
  * row's ID or an alternate key, such as `accountnumber='A-1'`, and for an

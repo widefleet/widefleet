@@ -10,7 +10,6 @@ import {
   approval,
   dataverseError,
   type DataverseProperties,
-  entitySets,
   failure,
   serviceRoot,
   throttled,
@@ -102,7 +101,6 @@ const rowAddress = (item: Request, path: string) => {
 const changeOf = (
   item: Request,
   path: string,
-  sets: Set<string> | null,
   rows: ReadonlyMap<string, string | null>,
 ): Change | null => {
   const parts = segments(path);
@@ -121,18 +119,19 @@ const changeOf = (
   // Some functions write, though OData functions only read.
   if (item.method === "GET") return known ?? null;
 
-  // A segment qualified by a namespace calls a bound action; a root that is no
-  // entity set, an unbound one.
+  // A segment qualified by a namespace calls a bound action, and a POST to a
+  // name at the root may call an unbound one, as OData addresses both like a
+  // table. What a solution's action changes is unknown, so it counts as an update.
   const action =
     parts.some((part) => (/^[^(]*/.exec(part)?.[0] ?? "").includes(".")) ||
-    (!reference && sets !== null && !sets.has(root));
+    (item.method === "POST" && !reference && parts.length === 1);
 
-  // What a solution's action changes is unknown, so it counts as an update.
   if (action) return known === undefined ? "update" : known;
 
   if (item.method === "DELETE") return "delete";
 
-  // A new row that binds existing rows changes them.
+  // A related row, through an unqualified navigation property, is created; one
+  // that binds existing rows changes them.
   if (item.method === "POST" && parts.at(-1) !== "$ref")
     return changesExisting(item.body) ? "update" : "create";
 
@@ -323,20 +322,11 @@ export const batch = async (
     };
   });
 
-  // Whether a new row goes to an entity set needs the environment's entity sets.
-  const needsSets = plan.some((part) =>
-    part.items.some(({ item, path }) => item.method !== "GET" && !path.startsWith("$")),
-  );
-
-  const sets = needsSets ? await entitySets(environment, connection, root.href) : null;
-
-  if (sets?.status === "failed") return sets.result;
-
   const changes = plan.flatMap((part) => {
     const rows = new Map<string, string | null>();
 
     return part.items.flatMap(({ item, path }) => {
-      const change = changeOf(item, path, sets?.names ?? null, rows);
+      const change = changeOf(item, path, rows);
 
       if (item.contentId !== undefined) rows.set(item.contentId, rowAddress(item, path));
 
