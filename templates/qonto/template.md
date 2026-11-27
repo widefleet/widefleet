@@ -20,8 +20,8 @@ their Qonto role. Payments that Qonto protects are approved in the Qonto app.
 2. Add `https://YOUR-APP-URL/auth/callback/qonto` as a redirect URI. You can add it
    once the app is installed and its URL is known.
 3. Under **Scopes**, select every scope except `beneficiary.trust`,
-   `request_review.write` and `embed_auth_link.write`. Trusting beneficiaries and
-   reviewing requests stay with the people Qonto names.
+   `request_review.write` and `embed_auth_link.write`. Only people in the Qonto app
+   can then trust beneficiaries and approve requests.
 4. Create the app. It starts in the Sandbox with test data; publish it to Production
    from the app's page.
 5. Enter the Production client ID and secret as `QONTO_CLIENT_ID` and
