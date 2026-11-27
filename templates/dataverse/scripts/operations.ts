@@ -213,9 +213,10 @@ const offered = {
     headers: unchanged,
     parameters: [...unmasked, partition, labelLanguages],
   },
+  // Its address may name an unbound action, so it asks like one.
   "entitySet.create": {
     name: "createRow",
-    change: "create",
+    change: "update",
     headers: { ...solution, ...duplicateDetection },
   },
   "entitySet.update": {

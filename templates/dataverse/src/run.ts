@@ -23,48 +23,9 @@ export const dataverseError = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 });
 
-// The service document names the environment's entity sets.
-const serviceDocument = z.object({
-  value: z.array(z.object({ name: z.string(), kind: z.string().optional() })),
-});
-
-type Connection = ReturnType<typeof accountConnection>;
-
 /** The service root of the environment a request goes to. */
 export const serviceRoot = (url: string) =>
   new URL(new URL(base.replace("{environment}", "environment")).pathname, url);
-
-/**
- * The names of the environment's entity sets, from its service document, or
- * the result to return when it cannot be read.
- */
-export const entitySets = async (environment: Environment, connection: Connection, url: string) => {
-  const root = serviceRoot(url);
-  const listed = await connection.send(root.href, { headers: { accept: "application/json" } });
-
-  if (listed.status !== "connected") return { status: "failed", result: listed } as const;
-  const read = await boundedJson(listed.response);
-
-  if (read.status === "too_large") throw new Error("Dataverse's service document is too large");
-
-  if (!listed.response.ok)
-    return {
-      status: "failed",
-      result: failure(
-        environment,
-        listed.response,
-        url,
-        dataverseError.safeParse(read.body).data ?? null,
-      ),
-    } as const;
-
-  const names = serviceDocument
-    .parse(read.body)
-    .value.filter((set) => (set.kind ?? "EntitySet") === "EntitySet")
-    .map((set) => set.name);
-
-  return { status: "read", names: new Set(names) } as const;
-};
 
 /**
  * Whether a change may run: null when the user's approval level lets it run or
@@ -124,16 +85,19 @@ const byName = new Set([
 ]);
 
 /**
- * The change a call makes. A new row whose body binds existing rows changes
- * them; an action or function called by name makes the change of the known
- * operation it is, and an unknown action counts as an update.
+ * The change a call makes. OData addresses a table and an unbound action the
+ * same way, so `createRow` may run an action and asks like one. A related row
+ * goes through an unqualified navigation property, which no bound action is, so
+ * creating it is a creation, unless its body binds existing rows. An action or
+ * function called by name makes the change of the known operation it is, and an
+ * unknown action counts as an update.
  */
 const changeOf = (
   method: keyof typeof operations,
   operation: (typeof operations)[keyof typeof operations],
   input: Arguments,
 ): Change | null => {
-  if (method === "createRow" || method === "createRelatedRow")
+  if (method === "createRelatedRow")
     return changesExisting(definedJson.optional().parse(input["body"])) ? "update" : "create";
 
   if (!byName.has(method)) return operation.change;
@@ -196,35 +160,21 @@ export const runOperation = async <T>(
   if (status.status !== "connected") return status;
   const request = restRequest(address, method, operation, input);
 
-  // OData addresses a table and an unbound action the same way, and a related
-  // collection and a bound action too, so a new row goes only to an entity set
-  // the environment lists, through a navigation property, never to an action.
-  // An action keeps its own method and the change it makes.
-  if (method === "createRow" || method === "createRelatedRow") {
-    // Bound actions are qualified by their namespace; navigation properties never
-    // are. A key holds no further segments, except inside a quoted value.
-    if (
-      method === "createRelatedRow" &&
-      (z
-        .string()
-        .parse(input["id"])
-        .replace(/'(?:[^']|'')*'/g, "''")
-        .includes("/") ||
-        !/^\w+$/.test(z.string().parse(input["navigationProperty"])))
-    )
-      throw new InvalidRequest(
-        "createRelatedRow's navigationProperty must be a navigation property, such as Attributes. Call actions with their own method or callAction.",
-      );
-
-    const sets = await entitySets(environment, connection, request.url);
-
-    if (sets.status === "failed") return sets.result;
-
-    if (!sets.names.has(z.string().parse(input["entitySet"])))
-      throw new InvalidRequest(
-        `${method}'s entitySet must be an entity set of the environment, such as accounts. Call actions with their own method or callAction.`,
-      );
-  }
+  // A related row is named by a key and an unqualified navigation property;
+  // bound actions are qualified by their namespace. A key holds no further
+  // segments, except inside a quoted value.
+  if (
+    method === "createRelatedRow" &&
+    (z
+      .string()
+      .parse(input["id"])
+      .replace(/'(?:[^']|'')*'/g, "''")
+      .includes("/") ||
+      !/^\w+$/.test(z.string().parse(input["navigationProperty"])))
+  )
+    throw new InvalidRequest(
+      "createRelatedRow's navigationProperty must be a navigation property, such as Attributes. Call actions with their own method or callAction.",
+    );
 
   if (operation.change) {
     const asked = await approval(

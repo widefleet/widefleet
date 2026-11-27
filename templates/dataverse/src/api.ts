@@ -4692,7 +4692,7 @@ export class DataverseApi extends WorkerEntrypoint<TemplateEnvironment, Datavers
   /**
    * Create a row. Lookups are set with `<navigation property>@odata.bind`.
    *
-   * Asks the user first when their approval level is `all_changes`.
+   * Asks the user first unless their approval level is `none`.
    */
   async createRow(input: {
     /**

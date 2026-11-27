@@ -241,46 +241,41 @@ describe("Dataverse personal account app", () => {
     const alice = browser("alice");
     await ready(alice, "101");
 
-    // By default, creating runs at once; deleting asks first.
-    expect(await (await alice.request("/rpc/create")).json()).toMatchObject({
-      status: "connected",
-      data: { accountid: "account-new" },
-    });
-    expect(upstream.calls.map(({ method, url }) => `${method} ${url}`)).toEqual([
-      `GET ${sales}/`,
-      `POST ${sales}/accounts`,
-    ]);
-    expect(upstream.calls[1]).toMatchObject({
-      body: JSON.stringify({ name: "New" }),
-      type: "application/json",
-    });
-    expect(await (await alice.request("/rpc/delete")).json()).toMatchObject({
-      resultType: "input_required",
-    });
-    expect(upstream.calls).toHaveLength(2);
+    // OData addresses a table and an unbound action alike, so createRow asks
+    // like an action, as deleting does, and nothing reaches Dataverse first.
+    for (const path of ["/rpc/create", "/rpc/create?set=BulkDelete", "/rpc/delete"])
+      expect(await (await alice.request(path)).json()).toMatchObject({
+        resultType: "input_required",
+      });
+    expect(upstream.calls).toHaveLength(0);
 
-    // An action at the address of a table is never created as a row.
-    expect((await alice.request("/rpc/create?set=BulkDelete")).status).toBe(500);
-    expect(upstream.calls.at(-1)).toMatchObject({ method: "GET", url: `${sales}/` });
-
-    // A column is created through its table's navigation property; a bound
-    // action at that address is not.
-    upstream.calls.length = 0;
+    // A column is created through its table's navigation property at once; a
+    // bound action at that address is not.
     expect(await (await alice.request("/rpc/related")).json()).toEqual({
       status: "connected",
       data: null,
     });
     expect(upstream.calls.map(({ method, url }) => `${method} ${decodeURIComponent(url)}`)).toEqual(
-      [`GET ${sales}/`, `POST ${sales}/EntityDefinitions(LogicalName='new_scrap')/Attributes`],
+      [`POST ${sales}/EntityDefinitions(LogicalName='new_scrap')/Attributes`],
     );
 
     for (const query of [
       "navigation=Microsoft.Dynamics.CRM.AddPrivilegesRole",
       `id=${encodeURIComponent("x)/Microsoft.Dynamics.CRM.BulkDelete(")}`,
-      "set=BulkDelete",
     ])
       expect((await alice.request(`/rpc/related?${query}`)).status).toBe(500);
     expect(upstream.calls.filter(({ method }) => method === "POST")).toHaveLength(1);
+    upstream.calls.length = 0;
+
+    // Approved, the new row is created.
+    alice.identity.answer = "accept";
+    expect(await (await alice.request("/rpc/create")).json()).toMatchObject({
+      status: "connected",
+      data: { accountid: "account-new" },
+    });
+    expect(upstream.calls).toMatchObject([
+      { method: "POST", url: `${sales}/accounts`, body: JSON.stringify({ name: "New" }) },
+    ]);
     upstream.calls.length = 0;
 
     alice.identity.answer = "decline";
@@ -316,7 +311,10 @@ describe("Dataverse personal account app", () => {
       ],
     };
 
-    // Creating runs at once by default; the answers come in order.
+    // A new row at the root may be an action, so the batch asks; approved, the
+    // answers come in order.
+    expect(await (await batch(created)).json()).toMatchObject({ resultType: "input_required" });
+    alice.identity.answer = "accept";
     expect(await (await batch(created)).json()).toEqual({
       status: "connected",
       data: {
@@ -355,6 +353,8 @@ describe("Dataverse personal account app", () => {
       `GET ${sales}/accounts?$select=name HTTP/1.1`,
     ])
       expect(sent?.body).toContain(line);
+
+    alice.identity.answer = "";
 
     // Binding existing rows to a new one changes them, and some functions write,
     // whichever method sends them.
@@ -438,9 +438,12 @@ describe("Dataverse personal account app", () => {
       expect((await batch({ ...created, requests: [request] })).status).toBe(500);
 
     // A created row's address and a file upload's bytes.
+    alice.identity.answer = "accept";
     expect(await (await alice.request("/rpc/create")).json()).toMatchObject({
       headers: { "OData-EntityId": `${sales}/accounts(account-new)` },
     });
+    alice.identity.answer = "";
+
     // An upload replaces the file, so it asks first.
     expect(await (await alice.request("/rpc/upload")).json()).toMatchObject({
       resultType: "input_required",
@@ -553,16 +556,12 @@ describe("Dataverse personal account app", () => {
       retryAfter: "20",
     });
 
-    // Widefleet answers an origin the app may not reach with a plain 403,
-    // also when creating a row first reads the service document.
-    for (const path of ["/rpc/list", "/rpc/create"]) {
-      upstream.state.answer = { status: 403, body: null, headers: {} };
-
-      expect(await (await alice.request(path)).json()).toEqual({
-        status: "network_required",
-        origin: environments.sales,
-      });
-    }
+    // Widefleet answers an origin the app may not reach with a plain 403.
+    upstream.state.answer = { status: 403, body: null, headers: {} };
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "network_required",
+      origin: environments.sales,
+    });
 
     upstream.state.answer = {
       status: 200,
