@@ -1,7 +1,6 @@
 import { compactDecrypt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
 import { testKeyring } from "../fixtures/keyring.ts";
-import { sealedBeforeKeyring } from "../fixtures/legacy.ts";
 import { decryptText, encryptText, sealedUnderActiveVersion } from "./secrets.ts";
 
 const encoder = new TextEncoder();
@@ -98,14 +97,5 @@ describe("runtime sealing", () => {
     await expect(decryptText(keyring(["two", 2]), "app-secrets", "scope", sealed)).rejects.toThrow(
       "The sealed value names an unknown key version or purpose",
     );
-  });
-
-  it("opens a value sealed before the runtime keyring with the active key's bytes", async () => {
-    const earlier = await sealedBeforeKeyring(0xab, "scope", "value");
-    const environment = { WIDEFLEET_SECRETS_KEYS: testKeyring() };
-
-    expect(sealedUnderActiveVersion(environment, "app-secrets", earlier)).toBe(false);
-    expect(await decryptText(environment, "app-secrets", "scope", earlier)).toBe("value");
-    await expect(decryptText(environment, "app-secrets", "other", earlier)).rejects.toThrow();
   });
 });

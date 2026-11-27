@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { unwrapLegacyAppKey } from "./legacy-runtime-ciphertext.ts";
-import { open, runtimeKeyring, seal } from "./secrets.ts";
+import { open, seal } from "./secrets.ts";
 import type { ParentEnvironment } from "./types.ts";
 
 // Apps use these keys through the binding and never receive key material. Each
@@ -18,15 +17,8 @@ export type KeyData = string | Uint8Array<ArrayBuffer>;
 
 const sealedKey = z.strictObject({ ciphertext: z.string() });
 
-// Temporary, with legacy-runtime-ciphertext.ts: keys written before the runtime keyring.
-const legacyKey = z.strictObject({ version: z.literal(1), wrapped: z.string() });
-
-const storedAppKey = z.union([sealedKey, legacyKey]);
-
-type StoredAppKey = z.infer<typeof storedAppKey>;
-
 /** Parses the stored record of an app key. */
-export const parseAppKey = (text: string) => storedAppKey.parse(JSON.parse(text));
+export const parseAppKey = (text: string) => sealedKey.parse(JSON.parse(text));
 
 const ciphertextPrefix = "v1.";
 
@@ -57,17 +49,6 @@ const keyPath = (appId: string, name: string) => `app-keys/${appId}/${name}.json
 /** Formats the stored record of an app key's bytes. */
 export const sealAppKey = async (environment: Environment, path: string, key: Uint8Array) =>
   JSON.stringify(sealedKey.parse({ ciphertext: await seal(environment, "app-keys", path, key) }));
-
-/** The exact bytes of a stored app key record at `path`. */
-export const openAppKey = async (
-  environment: Environment,
-  appId: string,
-  path: string,
-  record: StoredAppKey,
-) =>
-  "ciphertext" in record
-    ? open(environment, "app-keys", path, record.ciphertext)
-    : unwrapLegacyAppKey(runtimeKeyring(environment).keyring, appId, unbase64url(record.wrapped));
 
 export type KeyOwner = { appId: string; hostname: string };
 
@@ -108,7 +89,7 @@ const loadKey = async (environment: Environment, owner: KeyOwner, name: string) 
 
   return crypto.subtle.importKey(
     "raw",
-    await openAppKey(environment, appId, path, storedAppKey.parse(await stored.json())),
+    await open(environment, "app-keys", path, sealedKey.parse(await stored.json()).ciphertext),
     "HKDF",
     false,
     ["deriveKey"],

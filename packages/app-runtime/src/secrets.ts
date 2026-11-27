@@ -6,7 +6,6 @@ import {
   type Keyring,
   type OpenOptions,
 } from "@platform/contracts/keyring";
-import { isLegacySealed, openLegacy } from "./legacy-runtime-ciphertext.ts";
 import type { ParentEnvironment } from "./types.ts";
 
 type Environment = Pick<ParentEnvironment, "WIDEFLEET_SECRETS_KEYS">;
@@ -71,13 +70,7 @@ export const open = (
   context: string,
   value: string,
   options?: OpenOptions,
-) => {
-  const parsed = runtimeKeyring(environment);
-
-  return isLegacySealed(value)
-    ? openLegacy(parsed.keyring, context, value)
-    : parsed.sealing.open(purpose, context, value, options);
-};
+) => runtimeKeyring(environment).sealing.open(purpose, context, value, options);
 
 /** Seals text for `purpose` and `scope`. */
 export const encryptText = (

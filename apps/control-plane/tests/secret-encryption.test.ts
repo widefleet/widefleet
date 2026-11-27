@@ -1,7 +1,8 @@
 import { createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { CompactEncrypt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
-import { parseKeyring } from "@platform/contracts/keyring";
+import { z } from "zod";
+import { createSealing, parseKeyring } from "@platform/contracts/keyring";
 import {
   ciphertextKeyVersion,
   configuredSecretEncryption,
@@ -105,20 +106,6 @@ describe("JWE ciphertexts", () => {
       await expect(encryption.decrypt(other, ciphertext)).rejects.toMatchObject(unreadable);
   });
 
-  // Temporary, until stored values are re-encrypted: the format before keys per kind.
-  it("decrypts a recorded JWE from before keys per kind", async () => {
-    // Recorded with the synthetic fixture key's bytes and no context.
-    const stored =
-      "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwia2lkIjoiZml4dHVyZSJ9..ucd4hnDSdgKovoQQ.qb4Hy4BREL_wLfXrmEjyLQ.a1rQlNW7OqwgEOn6s6Y9qw";
-
-    expect(decryptIndependently(stored, Buffer.from(fixtureKey, "base64url"))).toBe(
-      "synthetic secret",
-    );
-    expect(await createSecretEncryption({ keyring: fixture() }).decrypt(context, stored)).toBe(
-      "synthetic secret",
-    );
-  });
-
   it("encrypts with a new active version while earlier versions still decrypt", async () => {
     const previous = keyVersion("previous");
     const before = createSecretEncryption({ keyring: keyring(previous) });
@@ -143,20 +130,41 @@ describe("JWE ciphertexts", () => {
     const plaintext = new TextEncoder().encode("value");
     const parts = ciphertext.split(".");
     const tag = parts[4] ?? "";
+    const header = decodeProtectedHeader(ciphertext);
+    const key = derivedKey(material, context.kind);
+
+    // Each case differs from a readable value in one header field.
+    const sealed = (
+      changes: { alg?: string; enc?: string; kid?: string },
+      secret: Uint8Array = key,
+    ) =>
+      new CompactEncrypt(plaintext)
+        .setProtectedHeader({ ...header, alg: "dir", enc: "A256GCM", ...changes })
+        .encrypt(secret);
+
+    expect(await encryption.decrypt(context, await sealed({}))).toBe("value");
+
+    const otherAlgorithms = [
+      // A content encryption algorithm other than A256GCM.
+      await sealed({ enc: "A128GCM" }, key.subarray(0, 16)),
+      // A key management algorithm other than dir.
+      await sealed({ alg: "A256KW" }),
+    ];
+
+    // The derived key would fail both anyway, so the allowlist must reject them first.
+    for (const value of otherAlgorithms)
+      await expect(
+        createSealing(fixture(), "control-plane").open(
+          context.kind,
+          z.string().parse(header["ctx"]),
+          value,
+        ),
+      ).rejects.toMatchObject({ code: "ERR_JOSE_ALG_NOT_ALLOWED" });
 
     const rejected = [
       // A kid the keyring does not hold.
-      await new CompactEncrypt(plaintext)
-        .setProtectedHeader({ alg: "dir", enc: "A256GCM", kid: "missing" })
-        .encrypt(material),
-      // A content encryption algorithm other than A256GCM.
-      await new CompactEncrypt(plaintext)
-        .setProtectedHeader({ alg: "dir", enc: "A128GCM", kid: "fixture" })
-        .encrypt(material.subarray(0, 16)),
-      // A key management algorithm other than dir.
-      await new CompactEncrypt(plaintext)
-        .setProtectedHeader({ alg: "A256KW", enc: "A256GCM", kid: "fixture" })
-        .encrypt(material),
+      await sealed({ kid: `missing:${context.kind}` }),
+      ...otherAlgorithms,
       // An altered authentication tag.
       [...parts.slice(0, 4), `${tag.at(0) === "A" ? "B" : "A"}${tag.slice(1)}`].join("."),
       "not-a-ciphertext",

@@ -2940,7 +2940,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         });
         await worker.fetch(`http://fixture/storage?key=app-keys/${entry.appId}/tokens.json`, {
           method: "PUT",
-          body: JSON.stringify({ version: 1, wrapped: "synthetic-wrapped-key" }),
+          body: JSON.stringify({ ciphertext: "synthetic-sealed-key" }),
         });
       }
 
