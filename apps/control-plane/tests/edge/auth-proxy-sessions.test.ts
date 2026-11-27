@@ -97,6 +97,8 @@ describe("Auth proxy session lifecycle", () => {
     idp.settings.name = "Example User";
     idp.settings.groups = ["accounting"];
     idp.settings.graphFailure = "";
+    idp.settings.keysAvailable = true;
+    idp.settings.refreshReplaySeconds = 30;
     idp.refreshRequests.length = 0;
     cookie = await login();
   });
@@ -283,6 +285,31 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit()).status).toBe(200);
   });
 
+  it("preserves the login when the provider's signing keys are unavailable", async () => {
+    idp.settings.rotateRefreshTokens = true;
+    idp.settings.refreshReplaySeconds = 0;
+    expireIdentity();
+    idp.settings.keysAvailable = false;
+    const unavailable = await visit();
+
+    expect(unavailable.status).toBe(503);
+    expect(cookies(unavailable)).toContain(".account_data=");
+    expect(cookies(unavailable)).not.toContain(".session_data=");
+    idp.settings.keysAvailable = true;
+
+    // The browser keeps its session and stores the rotated provider credential.
+    const rotated = [
+      ...new Map(
+        `${cookie}; ${cookies(unavailable)}`
+          .split("; ")
+          .map((pair) => [pair.split("=")[0], pair] as const),
+      ).values(),
+    ].join("; ");
+
+    expect((await visit(configuration, rotated)).status).toBe(200);
+    expect((await visit(configuration, cookie)).status).toBe(401);
+  });
+
   it("delivers rotated credentials even when the app throws", async () => {
     appFailure = true;
     await expect(visit()).rejects.toThrow("Fixture app unavailable");
@@ -299,7 +326,15 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit(configuration, cookie)).status).toBe(401);
   });
 
-  it.each(["invalid_grant", "invalid_request", "invalid_client", "missing-refresh-token"])(
+  it("keeps the login while the provider rejects the client credentials", async () => {
+    idp.settings.refreshFailure = "invalid_client";
+    expireIdentity();
+    expect((await visit()).status).toBe(503);
+    idp.settings.refreshFailure = "";
+    expect((await visit()).status).toBe(200);
+  });
+
+  it.each(["invalid_grant", "invalid_request", "missing-refresh-token"])(
     "requires login after %s",
     async (failure) => {
       if (failure === "missing-refresh-token") {
@@ -488,7 +523,7 @@ describe("Auth proxy session lifecycle", () => {
       const limited = await visit();
 
       expect(logged).toHaveBeenCalledWith(
-        "App session renewal failed",
+        "Company authorization renewal failed",
         expect.objectContaining({ stage: "identity", type: "APIError" }),
       );
       logged.mockRestore();

@@ -1,8 +1,14 @@
 import { z } from "zod";
 import { createAuthentication } from "./authentication.ts";
+import {
+  authorization,
+  renewCompanyAuthorization,
+  verifyCompanyIdentity,
+  type CompanyAuthorization,
+  type CompanyCredential,
+} from "./company-authorization.ts";
 import { type AuthConfiguration, sessionVersion } from "./configuration.ts";
 import { issuer } from "./identity.ts";
-import { authorization } from "./renewal.ts";
 
 // MCP uses the same provider verification and directory lookup as app sign-in,
 // but owns a separate upstream grant rather than copying an app's rotating cookie.
@@ -24,19 +30,6 @@ export const companyTokens = z.object({
   tokenType: z.string().optional(),
 });
 
-export class CompanySignInRequired extends Error {
-  readonly error = "invalid_grant";
-}
-
-export class CompanyRefreshFailure extends Error {
-  constructor(
-    readonly credential: z.infer<typeof companyCredential>,
-    cause: unknown,
-  ) {
-    super("Company identity could not be refreshed", { cause });
-  }
-}
-
 export const companySession = async (configuration: AuthConfiguration, headers: Headers) => {
   const auth = await createAuthentication(configuration, false);
   const session = await auth.api.getSession({ headers });
@@ -46,7 +39,7 @@ export const companySession = async (configuration: AuthConfiguration, headers: 
 };
 
 export const companyOAuth = async (configuration: AuthConfiguration) => {
-  let verified: z.infer<typeof authorization> | undefined;
+  let verified: CompanyAuthorization | undefined;
 
   const auth = await createAuthentication(configuration, true, (value) => {
     verified = value;
@@ -58,39 +51,25 @@ export const companyOAuth = async (configuration: AuthConfiguration) => {
   if (!provider) throw new Error("Company sign-in is unavailable");
   const version = await sessionVersion(configuration);
 
-  const identify = async (
-    tokens: Parameters<typeof provider.getUserInfo>[0],
-    previous?: z.infer<typeof companyCredential>,
-  ) => {
-    verified = undefined;
-
-    if (!tokens.idToken || !(await provider.getUserInfo(tokens)) || !verified)
-      throw new CompanySignInRequired("Company identity could not be verified");
-    const current = authorization.parse(verified);
-
-    if (
-      current.expiresAt <= Date.now() ||
-      (previous &&
-        (current.subject !== previous.authorization.subject ||
-          current.identity.id !== previous.authorization.identity.id ||
-          (current.nonce !== undefined && current.nonce !== previous.authorization.nonce)))
-    )
-      throw new CompanySignInRequired("Company identity changed or expired");
+  const identify = async (tokens: z.infer<typeof companyTokens>, nonce: string) => {
+    const current = await verifyCompanyIdentity(provider, () => verified, {
+      ...tokens,
+      expectedIdTokenNonce: nonce,
+    });
 
     return companyCredential.parse({
-      authorization: { ...current, nonce: previous?.authorization.nonce ?? current.nonce },
+      authorization: current,
       version,
-      refreshToken: tokens.refreshToken ?? previous?.refreshToken,
-      refreshExpiresAt: tokens.refreshTokenExpiresAt?.getTime() ?? previous?.refreshExpiresAt,
-      scopes: tokens.scopes?.length ? tokens.scopes : previous?.scopes,
+      refreshToken: tokens.refreshToken,
+      refreshExpiresAt: tokens.refreshTokenExpiresAt?.getTime(),
+      scopes: tokens.scopes,
     });
   };
 
   return {
     issuer: issuer(configuration.provider),
     version,
-    identify: (tokens: z.infer<typeof companyTokens>, nonce: string) =>
-      identify({ ...tokens, expectedIdTokenNonce: nonce }),
+    identify,
     authorize: async (state: string, verifier: string, nonce: string, loginHint?: string) =>
       provider.createAuthorizationURL({
         state,
@@ -99,46 +78,46 @@ export const companyOAuth = async (configuration: AuthConfiguration) => {
         redirectURI: configuration.redirectUrl,
         loginHint,
       }),
-    exchange: async (code: string, verifier: string, nonce: string) => {
-      const tokens = await provider.validateAuthorizationCode({
-        code,
-        codeVerifier: verifier,
-        redirectURI: configuration.redirectUrl,
-      });
-
-      return identify({ ...tokens, expectedIdTokenNonce: nonce });
-    },
-    refresh: async (previous: z.infer<typeof companyCredential>) => {
-      if (
-        previous.version !== version ||
-        !previous.refreshToken ||
-        (previous.refreshExpiresAt !== undefined && previous.refreshExpiresAt <= Date.now())
-      )
-        throw new CompanySignInRequired("Company sign-in must be renewed");
-
-      if (!provider.refreshAccessToken) throw new Error("Company sign-in cannot be refreshed");
-      const tokens = await provider.refreshAccessToken(previous.refreshToken);
-
-      try {
-        return await identify(
-          {
-            ...tokens,
-            scopes: tokens.scopes?.length ? tokens.scopes : previous.scopes,
-          },
-          previous,
-        );
-      } catch (cause) {
-        // Keep the replacement credential when a directory or key lookup fails.
-        // The old verified identity and its deadline remain unchanged.
-        throw new CompanyRefreshFailure(
-          companyCredential.parse({
-            ...previous,
-            refreshToken: tokens.refreshToken ?? previous.refreshToken,
-            refreshExpiresAt: tokens.refreshTokenExpiresAt?.getTime() ?? previous.refreshExpiresAt,
-            scopes: tokens.scopes?.length ? tokens.scopes : previous.scopes,
+    exchange: async (code: string, verifier: string, nonce: string) =>
+      identify(
+        companyTokens.parse(
+          await provider.validateAuthorizationCode({
+            code,
+            codeVerifier: verifier,
+            redirectURI: configuration.redirectUrl,
           }),
-          cause,
-        );
+        ),
+        nonce,
+      ),
+    // Renews the grant's company authorization. A returned credential replaces the
+    // grant's credential, even when the authorization itself was not renewed.
+    renew: async (previous: z.infer<typeof companyCredential>) => {
+      if (previous.version !== version) return { status: "sign-in-required" } as const;
+
+      const renewal = await renewCompanyAuthorization(
+        provider,
+        () => verified,
+        previous.authorization,
+        previous,
+      );
+
+      const grant = (credential: CompanyCredential, current = previous.authorization) =>
+        companyCredential.parse({ ...previous, ...credential, authorization: current });
+
+      switch (renewal.status) {
+        case "renewed":
+          return {
+            status: renewal.status,
+            credential: grant(renewal.credential, renewal.authorization),
+          };
+        case "unavailable":
+        case "denied":
+          return {
+            status: renewal.status,
+            credential: renewal.credential && grant(renewal.credential),
+          };
+        default:
+          return renewal;
       }
     },
   };

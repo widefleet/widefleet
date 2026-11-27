@@ -1,83 +1,15 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthEndpoint, getSessionFromCtx } from "better-auth/api";
 import { getAccountCookie, setAccountCookie, setSessionCookie } from "better-auth/cookies";
-import { z } from "zod";
-import { proxyIdentity } from "./identity.ts";
+import {
+  authorization,
+  renewCompanyAuthorization,
+  type CompanyAuthorization,
+} from "./company-authorization.ts";
 
-export const authorization = z.object({
-  identity: proxyIdentity,
-  subject: z.string().min(1),
-  nonce: z.string().optional(),
-  expiresAt: z.number().finite().positive(),
-});
-
-const tokens = z.object({
-  accessToken: z.string().min(1),
-  refreshToken: z.string().min(1).optional(),
-  idToken: z.string().min(1).optional(),
-  accessTokenExpiresAt: z.date().optional(),
-  refreshTokenExpiresAt: z.date().optional(),
-  scopes: z.array(z.string()).optional(),
-  tokenType: z.string().optional(),
-});
-
-// Only overlapping requests in this isolate share work. No session state is kept here.
-const pending = new Map<string, Promise<z.infer<typeof tokens>>>();
-
-const tokenFailure = z.object({ error: z.string().optional(), status: z.number().optional() });
-
-// Logs error codes and messages only, never tokens or claims.
-export const failureSummary = (cause: unknown) => {
-  const failure = tokenFailure.safeParse(cause);
-
-  return {
-    type: cause instanceof Error ? cause.name : "non-error",
-    message: cause instanceof Error ? cause.message.slice(0, 300) : undefined,
-    status: failure.success ? failure.data.status : undefined,
-    error: failure.success ? failure.data.error : undefined,
-  };
-};
-
-const refreshError = (cause: unknown) => {
-  const failure = failureSummary(cause);
-
-  console.error("App session renewal failed", { stage: "refresh", ...failure });
-
-  if (failure.error === "invalid_grant") return new APIError("UNAUTHORIZED");
-
-  if (failure.status === 403) return new APIError("FORBIDDEN");
-
-  // Keep the session through outages and rate limits. Any other provider
-  // rejection or malformed token response fails again on retry; a new login can
-  // still succeed, so it must not leave the session stuck.
-  if (
-    cause instanceof z.ZodError ||
-    (failure.status !== undefined &&
-      failure.status >= 400 &&
-      failure.status < 500 &&
-      failure.status !== 429)
-  )
-    return new APIError("UNAUTHORIZED");
-
-  return new APIError("SERVICE_UNAVAILABLE");
-};
-
-const refreshTogether = async (key: string, refresh: () => Promise<z.infer<typeof tokens>>) => {
-  const existing = pending.get(key);
-
-  if (existing) return existing;
-
-  const result = refresh();
-  pending.set(key, result);
-
-  try {
-    return await result;
-  } finally {
-    pending.delete(key);
-  }
-};
-
-export const sessionRenewal = (verified: () => z.infer<typeof authorization> | undefined) =>
+// Renews an app session whose company authorization expired. The account cookie
+// holds the provider credential; the session holds the verified authorization.
+export const sessionRenewal = (verified: () => CompanyAuthorization | undefined) =>
   ({
     id: "app-session-renewal",
     endpoints: {
@@ -94,10 +26,7 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
           !account ||
           account.userId !== current.user.id ||
           account.providerId !== "company" ||
-          account.accountId !== previous.data.identity.id ||
-          !account.refreshToken ||
-          (account.refreshTokenExpiresAt &&
-            new Date(account.refreshTokenExpiresAt).getTime() <= Date.now())
+          account.accountId !== previous.data.identity.id
         )
           throw new APIError("UNAUTHORIZED");
 
@@ -105,96 +34,56 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
           (candidate) => candidate.id === "company",
         );
 
-        if (!provider?.refreshAccessToken) {
-          console.error("App session renewal failed", { stage: "discovery" });
-          throw new APIError("SERVICE_UNAVAILABLE");
-        }
+        if (!provider) throw new APIError("SERVICE_UNAVAILABLE");
 
-        const refresh = provider.refreshAccessToken;
-        const credential = account.refreshToken;
-        let renewed: z.infer<typeof tokens>;
+        const renewal = await renewCompanyAuthorization(
+          provider,
+          verified,
+          previous.data,
+          {
+            refreshToken: account.refreshToken ?? undefined,
+            refreshExpiresAt: account.refreshTokenExpiresAt
+              ? new Date(account.refreshTokenExpiresAt).getTime()
+              : undefined,
+            // Better Auth stores account scopes as a comma-separated string.
+            scopes: account.scope?.split(",").filter(Boolean),
+          },
+          ctx,
+        );
 
-        try {
-          renewed = await refreshTogether(
-            JSON.stringify([provider.issuer, account.accountId, credential]),
-            async () => {
-              try {
-                return tokens.parse(await refresh(credential, ctx));
-              } catch (cause) {
-                const failure = tokenFailure.safeParse(cause);
-
-                // Another isolate may still be committing the provider's rotation
-                // replay response. Retry once before requiring a fresh login.
-                if (!failure.success || failure.data.error !== "invalid_grant") throw cause;
-                await new Promise((resolve) => setTimeout(resolve, 100));
-
-                return tokens.parse(await refresh(credential, ctx));
-              }
-            },
-          );
-        } catch (cause) {
-          throw refreshError(cause);
-        }
-
-        // An omitted refresh scope inherits the original grant (OAuth 2.0 §6).
-        // Better Auth stores account scopes as a comma-separated string.
-        renewed = {
-          ...renewed,
-          scopes: renewed.scopes?.length
-            ? renewed.scopes
-            : account.scope?.split(",").filter(Boolean),
-        };
-
-        // Persist rotation even if a subsequent directory lookup fails. This does
+        // Persist rotation even when the identity could not be verified. This does
         // not extend authorization: that still requires a verified new identity.
-        await setAccountCookie(ctx, {
-          ...account,
-          scope: renewed.scopes?.join(",") ?? account.scope,
-          accessToken: null,
-          idToken: null,
-          refreshToken: renewed.refreshToken ?? account.refreshToken,
-          accessTokenExpiresAt: renewed.accessTokenExpiresAt,
-          refreshTokenExpiresAt: renewed.refreshTokenExpiresAt ?? account.refreshTokenExpiresAt,
-        });
-
-        // Refresh responses may omit the ID token. Never reuse the old ID token's
-        // authorization claims as evidence of a newly verified identity.
-        if (!renewed.idToken) throw new APIError("UNAUTHORIZED");
-        let profile: Awaited<ReturnType<typeof provider.getUserInfo>>;
-
-        try {
-          profile = await provider.getUserInfo(renewed);
-        } catch (cause) {
-          // Directory failures surface as error responses, not exceptions, so
-          // the proxy cannot log them after this point.
-          console.error("App session renewal failed", {
-            stage: "identity",
-            ...failureSummary(cause),
+        if (renewal.status !== "sign-in-required" && renewal.credential)
+          await setAccountCookie(ctx, {
+            ...account,
+            scope: renewal.credential.scopes?.join(",") ?? account.scope,
+            accessToken: null,
+            idToken: null,
+            refreshToken: renewal.credential.refreshToken,
+            refreshTokenExpiresAt:
+              renewal.credential.refreshExpiresAt === undefined
+                ? account.refreshTokenExpiresAt
+                : new Date(renewal.credential.refreshExpiresAt),
           });
-          throw cause;
-        }
 
-        const next = authorization.safeParse(verified());
+        if (renewal.status === "sign-in-required") throw new APIError("UNAUTHORIZED");
 
-        if (
-          !profile ||
-          !next.success ||
-          next.data.subject !== previous.data.subject ||
-          next.data.identity.id !== previous.data.identity.id ||
-          (next.data.nonce !== undefined && next.data.nonce !== previous.data.nonce) ||
-          next.data.expiresAt <= Date.now()
-        ) {
-          console.error("App session renewal failed", { stage: "verification" });
-          throw new APIError("UNAUTHORIZED");
-        }
+        if (renewal.status === "denied") throw new APIError("FORBIDDEN");
+
+        if (renewal.status === "unavailable")
+          throw new APIError(
+            "SERVICE_UNAVAILABLE",
+            undefined,
+            renewal.retryAfter ? { "Retry-After": renewal.retryAfter } : undefined,
+          );
 
         const now = new Date();
 
         const user = {
           ...current.user,
-          name: next.data.identity.name,
-          email: next.data.identity.email,
-          appAuthorization: { ...next.data, nonce: previous.data.nonce },
+          name: renewal.authorization.identity.name,
+          email: renewal.authorization.identity.email,
+          appAuthorization: renewal.authorization,
         };
 
         await setSessionCookie(ctx, {
@@ -206,7 +95,7 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
           user,
         });
 
-        return ctx.json(next.data.identity);
+        return ctx.json(renewal.authorization.identity);
       }),
     },
   }) satisfies BetterAuthPlugin;
