@@ -123,8 +123,28 @@ their approval level on the app's page:
 - **Never ask**
 
 A method that asks returns `input_required`. MCP clients show the question to the
-person. A calling app shows it itself and answers with `withInput`, as described
-in [Ask the user before continuing](/guides/app-services#ask-the-user-before-continuing).
+person. In your own app, the person's tap on **Save** is already their approval:
+answer right away with `withInput` and call the method again with exactly the same
+arguments. Compute values such as timestamps once, before the first call:
+
+```ts
+const recordedOn = new Date().toISOString();
+const input = {
+  environment,
+  entitySet: "new_rounds",
+  body: { new_line: 8, new_recordedon: recordedOn },
+};
+let result = await env.DATAVERSE.createRow(input);
+
+if (result.resultType === "input_required")
+  result = await env.DATAVERSE.withInput({
+    inputResponses: { approve: { action: "accept" } },
+    requestState: result.requestState,
+  }).createRow(input);
+```
+
+Each answer belongs to one call, so answer every call that asks on its own. See
+[Ask the user before continuing](/guides/app-services#ask-the-user-before-continuing).
 
 ## Customize a template
 
