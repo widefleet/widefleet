@@ -7,6 +7,8 @@ RUN apt-get update \
   && npm install --global pnpm@12.4.2 \
   && npm cache clean --force
 COPY dist/cli /opt/widefleet
+# Build artifacts can lose their execute bits between jobs.
+RUN chmod 755 /opt/widefleet/widefleet /opt/widefleet/esbuild
 ENV PATH=/opt/widefleet:$PATH
 WORKDIR /build
 CMD ["sleep", "infinity"]

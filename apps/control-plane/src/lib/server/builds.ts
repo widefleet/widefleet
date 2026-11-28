@@ -4,7 +4,7 @@
 import * as contract from "@platform/contracts";
 import { ciBuildRequest, ciBuildResult, ciBuildTimeLimit } from "@platform/contracts/builds";
 import { Result } from "better-result";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { readableApp } from "./apps.ts";
 import { createBuildToken } from "./build-tokens.ts";
@@ -157,7 +157,7 @@ export const createBuildService = (
                 identityOrganizationId: signIn.identityOrganizationId,
                 recovery: signIn.recovery,
                 reads: signIn.reads,
-                deadline: new Date(Date.now() + ciBuildTimeLimit * 1000),
+                deadline: sql`now() + make_interval(secs => ${ciBuildTimeLimit})`,
               })
               .returning();
 

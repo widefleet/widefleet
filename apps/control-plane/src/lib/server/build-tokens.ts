@@ -6,7 +6,7 @@
 // The token names its build and is sealed with the installation's keyring, so
 // it is not stored. Every run of a build gets a new one, and all of them stay
 // valid as long as the build, so a run that joins another never ends its token.
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "./database.ts";
 import { deploymentActor } from "./deployment-execution.ts";
@@ -60,7 +60,8 @@ export const buildSignIn = async (
       and(
         eq(appBuilds.id, buildId),
         eq(appBuilds.status, "running"),
-        gt(appBuilds.deadline, new Date()),
+        // The deadline is in database time.
+        gt(appBuilds.deadline, sql`now()`),
       ),
     );
 

@@ -299,6 +299,9 @@ export class BuildSandbox extends DurableObject<Env> {
 
         if (Date.now() >= deadlineAt) return failed("");
 
+        // A release while intercepts were registered ends the build before it starts.
+        if (this.ctx.storage.kv.get("released")) return failed("The build was released");
+
         this.#container.start({ image, instance: "standard-2", enableInternet: false });
         await this.#container.setInactivityTimeout(inactivityTimeout);
 
@@ -369,11 +372,16 @@ export class BuildSandbox extends DurableObject<Env> {
   }
 
   // A run that reaches this object after the release finds the outcome and
-  // does not build again, so the outcome stays. A run in progress records its own.
+  // does not build again, so the outcome stays. A run in progress does not start
+  // its container, records its own outcome and keeps the deadline alarm.
   async release() {
+    this.ctx.storage.kv.put("released", true);
+
     if (this.#container.running) await this.#container.destroy();
 
-    if (!this.#current && !this.#recorded())
+    if (this.#current) return;
+
+    if (!this.#recorded())
       this.ctx.storage.kv.put("result", {
         status: "failed",
         message: "The build was released before it finished",
