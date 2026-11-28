@@ -11,6 +11,20 @@ index b59a5a92e37358992b2a49eef734ebc79cbcfa82..f2f52b8d4e48c7496d2719c669776ed5
  			return {
  				user: {
  					name: user.name,
+diff --git a/dist/social-providers/notion.mjs b/dist/social-providers/notion.mjs
+index e9b2cf124da764e243869f7e5e910df3ea54eb7d..658425056d03ca311f4b6ea7135959f2691aafaf 100644
+--- a/dist/social-providers/notion.mjs
++++ b/dist/social-providers/notion.mjs
+@@ -44,7 +44,8 @@ const notion = (options) => {
+ 					clientKey: options.clientKey,
+ 					clientSecret: options.clientSecret
+ 				},
+-				tokenEndpoint
++				tokenEndpoint,
++				authentication: "basic"
+ 			});
+ 		},
+ 		async getUserInfo(token) {
 diff --git a/dist/types/init-options.d.mts b/dist/types/init-options.d.mts
 index dbd062fe15786fba29b7b71bb02955608d3072b3..224047a7909c30df65764d9dcb6168d91bb1e96c 100644
 --- a/dist/types/init-options.d.mts
@@ -59,6 +73,19 @@ index f3a243bc7eb8dbb21bf02dce32190fe409aca62f..983c6500807327c0a3b3c19d7f92cb15
  								user.verified_secondary_email?.includes(user.email))
  						? true
  						: false;
+diff --git a/src/social-providers/notion.ts b/src/social-providers/notion.ts
+index 2f517a150d0458f881c7ae3133b425980b7760ac..076bb0ca2d4792d4cdb81e1b7d290cace835c7e2 100644
+--- a/src/social-providers/notion.ts
++++ b/src/social-providers/notion.ts
+@@ -73,6 +73,8 @@ export const notion = (options: NotionOptions) => {
+ 							clientSecret: options.clientSecret,
+ 						},
+ 						tokenEndpoint,
++						// Notion authenticates the client with HTTP Basic, as for the code.
++						authentication: "basic",
+ 					});
+ 				},
+ 		async getUserInfo(token) {
 diff --git a/src/types/init-options.ts b/src/types/init-options.ts
 index b3026375bd9a1a41419253d85bd31e43e55e50c7..007a6f1033004038210cc7b450e48ea3e7376dfc 100644
 --- a/src/types/init-options.ts

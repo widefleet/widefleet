@@ -253,7 +253,7 @@ const revoke = async (config: Configuration, client: Client, token: string) => {
   const headers = new Headers({ accept: "application/json" });
 
   if (isMetadataDocumentClient(client)) body.set("client_id", clientId);
-  else if (client.revocationAuthentication === "basic")
+  else if (client.revocationEndpointAuthMethod === "client_secret_basic")
     headers.set("authorization", encodeBasicCredentials(clientId, client.clientSecret));
   else {
     body.set("client_id", clientId);

@@ -59,7 +59,7 @@ const environment = {
         scopes: [],
         hosts: ["https://api.notion.com"],
         revocationUrl: "https://api.notion.com/v1/oauth/revoke",
-        revocationAuthentication: "basic",
+        revocationEndpointAuthMethod: "client_secret_basic",
       },
     },
   }),
@@ -105,11 +105,14 @@ beforeEach(() => {
         authorization: request.headers.get("authorization"),
       });
 
-      if (
-        request.url === "https://oauth2.googleapis.com/revoke" ||
-        request.url === "https://api.notion.com/v1/oauth/revoke"
-      )
-        return new Response(null);
+      if (request.url === "https://oauth2.googleapis.com/revoke") return new Response(null);
+
+      // Notion revokes only with the client's credentials in HTTP Basic.
+      if (request.url === "https://api.notion.com/v1/oauth/revoke")
+        return request.headers.get("authorization") ===
+          `Basic ${btoa("test-notion:test-notion-secret")}` && !body.has("client_secret")
+          ? Response.json({ request_id: "request-1" })
+          : Response.json({ error: "invalid_client" }, { status: 401 });
 
       return tokenResponse(body);
     }),
@@ -429,6 +432,9 @@ describe("managed OAuth broker", () => {
       }),
     ).toEqual({ revoked: true });
     expect(requests.at(-1)?.body.get("token")).toBe("provider-refresh-1");
+    // Without a method, the credentials go in the form.
+    expect(requests.at(-1)?.body.get("client_secret")).toBe("test-secret");
+    expect(requests.at(-1)?.authorization).toBeNull();
     expect(
       await broker.request(identity, {
         action: "revoke",
@@ -445,7 +451,7 @@ describe("managed OAuth broker", () => {
     ).rejects.toThrow("another app");
   });
 
-  it("authorizes a client without scopes and revokes with HTTP Basic authentication", async () => {
+  it("authorizes a client without scopes, refreshes and revokes with HTTP Basic authentication", async () => {
     const broker = managedOAuth(environment);
 
     const authorizeNotion = (scopes: string[]) =>
@@ -471,6 +477,22 @@ describe("managed OAuth broker", () => {
       }),
     );
 
+    // Notion authenticates the client with HTTP Basic for codes and refreshes alike.
+    const basic = `Basic ${btoa("test-notion:test-notion-secret")}`;
+    expect(requests.at(-1)).toMatchObject({ url: "https://api.notion.com/v1/oauth/token" });
+    expect(requests.at(-1)?.authorization).toBe(basic);
+    expect(requests.at(-1)?.body.has("client_secret")).toBe(false);
+    tokens.parse(
+      await broker.request(identity, {
+        action: "refresh",
+        client: "notion",
+        refreshToken: granted.refreshToken,
+      }),
+    );
+    expect(requests.at(-1)?.body.get("grant_type")).toBe("refresh_token");
+    expect(requests.at(-1)?.authorization).toBe(basic);
+    expect(requests.at(-1)?.body.has("client_secret")).toBe(false);
+
     expect(
       await broker.request(identity, {
         action: "revoke",
@@ -483,8 +505,52 @@ describe("managed OAuth broker", () => {
     expect(requests.at(-1)).toEqual({
       url: "https://api.notion.com/v1/oauth/revoke",
       body: new URLSearchParams({ token: "provider-refresh-1" }),
-      authorization: `Basic ${btoa("test-notion:test-notion-secret")}`,
+      authorization: basic,
     });
+  });
+
+  it("keeps scopes required except for registered clients and revocation methods to registered clients with a revocation URL", () => {
+    const valid = (client: Record<string, string | string[]>) =>
+      managedOAuthConfiguration.safeParse({
+        origin: "https://oauth.example.test",
+        clients: { example: client },
+      }).success;
+
+    const registered = {
+      provider: "notion",
+      clientId: "id",
+      clientSecret: "secret",
+      scopes: [],
+      hosts: ["https://api.notion.com"],
+    };
+
+    const metadataDocument = {
+      registration: "client-id-metadata-document",
+      authorizationUrl: "https://auth.example.test/authorize",
+      tokenUrl: "https://auth.example.test/token",
+      scopes: ["read"],
+      hosts: ["https://api.example.test"],
+      revocationUrl: "https://auth.example.test/revoke",
+    };
+
+    expect(valid(registered)).toBe(true);
+    expect(valid({ ...registered, revocationEndpointAuthMethod: "client_secret_basic" })).toBe(
+      false,
+    );
+    expect(
+      valid({
+        ...registered,
+        revocationUrl: "https://api.notion.com/v1/oauth/revoke",
+        revocationEndpointAuthMethod: "client_secret_basic",
+      }),
+    ).toBe(true);
+    expect(valid(metadataDocument)).toBe(true);
+    // Without scopes, the server could grant its defaults to a public client.
+    expect(valid({ ...metadataDocument, scopes: [] })).toBe(false);
+    // A public client has no secret to authenticate with.
+    expect(valid({ ...metadataDocument, revocationEndpointAuthMethod: "client_secret_post" })).toBe(
+      false,
+    );
   });
 
   it("keeps unconfigured runtimes disabled and rejects credentials selected by a caller", async () => {

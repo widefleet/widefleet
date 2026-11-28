@@ -15,19 +15,15 @@ const scope = z.string().regex(/^[\x21\x23-\x5B\x5D-\x7E]+$/);
 const endpoint = z.url().startsWith("https://");
 
 // Settings every managed client shares. The operator decides which scopes apps
-// may request and which API origins its access tokens reach. A service without
-// scopes, such as Notion, whose integration settings decide its access, lists none.
+// may request and which API origins its access tokens reach.
 const clientPolicy = {
-  scopes: z.array(scope),
+  scopes: z.array(scope).min(1),
   hosts: z.array(origin("Access token hosts must be canonical HTTPS origins")).min(1),
   // The issuer a callback's `iss` parameter must name (RFC 9207). `{tenantid}`
   // stands for one tenant ID, as Microsoft's multi-tenant issuers publish it.
   issuer: endpoint.optional(),
   // RFC 7009 token revocation, used when a user disconnects an account.
   revocationUrl: endpoint.optional(),
-  // How a registered client authenticates there: with its credentials in the
-  // form, or with HTTP Basic authentication, which Notion requires.
-  revocationAuthentication: z.enum(["form", "basic"]).optional(),
 };
 
 /**
@@ -36,13 +32,24 @@ const clientPolicy = {
  * details, with optional provider options such as `accessType` for Google or
  * `tenantId` for Microsoft.
  */
-export const registeredOAuthClient = z.strictObject({
-  provider: z.enum(socialProviderList),
-  clientId: z.string().min(1).max(512),
-  clientSecret: z.string().min(1).max(2048),
-  options: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
-  ...clientPolicy,
-});
+export const registeredOAuthClient = z
+  .strictObject({
+    provider: z.enum(socialProviderList),
+    clientId: z.string().min(1).max(512),
+    clientSecret: z.string().min(1).max(2048),
+    options: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
+    ...clientPolicy,
+    // A service whose registration decides the client's access, such as
+    // Notion's integration capabilities, takes no scopes: it lists none.
+    scopes: z.array(scope),
+    // How the client authenticates at the revocation endpoint, with RFC 8414's
+    // method names: credentials in the form, the default, or HTTP Basic, which
+    // Notion requires.
+    revocationEndpointAuthMethod: z.enum(["client_secret_post", "client_secret_basic"]).optional(),
+  })
+  .refine((client) => !client.revocationEndpointAuthMethod || client.revocationUrl, {
+    error: "A revocation authentication method needs a revocation URL",
+  });
 
 /**
  * A service whose authorization server accepts OAuth Client ID Metadata
