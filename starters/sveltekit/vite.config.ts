@@ -4,5 +4,11 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   build: { sourcemap: true },
-  plugins: [sveltekit({ adapter: adapter() })],
+  plugins: [
+    sveltekit({
+      adapter: adapter(),
+      experimental: { remoteFunctions: true },
+      compilerOptions: { experimental: { async: true } },
+    }),
+  ],
 });

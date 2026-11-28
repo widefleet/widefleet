@@ -10,7 +10,7 @@ export const getNotes = createServerFn().handler(async ({ context }) => {
 
   if (notes.isErr()) throw notes.error;
 
-  return { title: env.APP_NAME, user: context.user, notes: notes.value };
+  return { user: context.user, notes: notes.value };
 });
 
 export const saveNote = createServerFn({ method: "POST" })
@@ -82,5 +82,10 @@ export const saveNote = createServerFn({ method: "POST" })
       return { saved: false, message: saved.error.message };
     }
 
-    return { saved: true, message: "Deine Notiz wurde gespeichert." };
+    // The note list returns with this response, so the browser needs no second request.
+    const notes = await listNotes();
+
+    if (notes.isErr()) throw notes.error;
+
+    return { saved: true, id, notes: notes.value };
   });

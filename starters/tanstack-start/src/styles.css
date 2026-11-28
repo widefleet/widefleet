@@ -97,6 +97,11 @@ form > [data-slot="field"] {
   background: var(--ui-muted);
 }
 
+/* A shared note whose photo is still on its way to the server. */
+.note[data-uploading] img {
+  opacity: 0.55;
+}
+
 .note-body {
   display: grid;
   flex: 1;

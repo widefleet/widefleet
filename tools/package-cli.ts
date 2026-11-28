@@ -97,8 +97,15 @@ for (const [name, target] of [
   ])
     await cp(join(source, file), join(template, file), { recursive: true });
 
-  if ((await readdir(source)).includes("README.md"))
+  const entries = await readdir(source);
+
+  if (entries.includes("README.md"))
     await copyFile(join(source, "README.md"), join(template, "README.md"));
+
+  // Static files such as the app icon: `static` in SvelteKit, `public` in Vite apps.
+  for (const directory of ["static", "public"])
+    if (entries.includes(directory))
+      await cp(join(source, directory), join(template, directory), { recursive: true });
 
   for (const file of [".gitattributes", ".gitignore", ".oxlintrc.json", ".oxfmtrc.json"])
     await copyFile(join(root, file), join(template, file));

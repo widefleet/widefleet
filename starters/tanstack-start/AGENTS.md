@@ -10,6 +10,7 @@ Build the interface from UI SDK components in `@ui-sdk/react`. The docs for the 
 
 Use `context.user` in server functions and server routes for the verified company identity. Preserve authentication in `src/server.ts`; identity headers are trustworthy only on the platform's private ingress.
 Keep CSRF protection in `src/start.ts`. Apps do not have their own cookie sessions.
+Keep server data in TanStack Query with the query client that `src/router.tsx` creates per router; never share one across requests. Fill queries in route loaders and change data with mutations that call server functions. Show a change in the interface at once, mark it until the server confirms it, and undo it with a message if it fails.
 Declare resources in `wrangler.jsonc` and deploy through Widefleet.
 The Vite configuration selects the source entry for local development and builds the Worker declared by Wrangler. Keep the browser assets separate from server output.
 Run `pnpm types` after adding routes or changing bindings. Do not edit `.platform` generated files.

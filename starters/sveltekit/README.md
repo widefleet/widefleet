@@ -38,7 +38,8 @@ Keep this variable set for subsequent commands, including `widefleet logout`. Th
 
 ## App contract
 
-- Edit `src/routes` to build your app. Read `locals.user` in server handlers; the server hook validates the platform identity headers.
+- Edit `src/routes` to build your app. Read `locals.user` in server loads and handlers, or `getRequestEvent().locals.user` in remote functions; the server hook validates the platform identity headers.
+- The notes example reads and saves through the remote functions in `src/lib/notes.remote.ts`. `vite.config.ts` enables SvelteKit's `experimental.remoteFunctions` and Svelte's `experimental.async` for them. A shared note appears at once and is marked until the server confirms it; if it cannot be saved, it returns to the form. The browser reduces photos larger than 1600 pixels to JPEG before uploading them.
 - Declare D1, R2, KV, queue producers/consumers, cron schedules, static assets and plain text variables in `wrangler.jsonc`. Resource names remain stable across deployments. The initial names are isolated per app.
 - Build a single bundled Worker module. The starter enables `nodejs_compat`; existing `nodejs_als` projects remain supported. The CLI validates configuration before uploading.
 - Use `locals.user` for the platform's authenticated identity. The platform handles login, strips cookies from app requests and removes `Set-Cookie` from app responses.
