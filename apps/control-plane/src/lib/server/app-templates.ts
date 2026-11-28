@@ -13,6 +13,7 @@ import type { Principal } from "./identity.ts";
 import type { Configuration } from "./config.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { iconPaths, maxIconBytes } from "./app-icons.ts";
+import { appUrl } from "./apps.ts";
 import { declaredAssets, declaredSecrets } from "./template-project.ts";
 import { readBody } from "./upload-body.ts";
 
@@ -107,7 +108,7 @@ const loadRequiredSecrets = async (id: string) => {
 export const templateCatalog = (
   principal: Principal,
   configuration: Pick<Configuration, "PLATFORM_URL" | "GITHUB_TOKEN">,
-  installed: ReadonlyMap<string, string>,
+  installed: ReadonlyMap<string, { id: string }>,
   search = "",
 ) =>
   Result.tryPromise({
@@ -149,7 +150,7 @@ export const templateCatalog = (
                   id: template.id,
                   name: template.name,
                   description: template.description,
-                  installedAppId: installed.get(template.id) ?? null,
+                  installedAppId: installed.get(template.id)?.id ?? null,
                 },
               ]
             : [],
@@ -161,12 +162,21 @@ export const templateCatalog = (
       new StorageUnavailable({ message: "App templates are unavailable. Try again later.", cause }),
   });
 
+// Instructions name the app's host with this placeholder, as a provider's
+// redirect URI needs it before the app is installed.
+const appHostPlaceholder = "YOUR-APP-HOST";
+
+/**
+ * A template whose instructions name the installed app's host, or the host an
+ * install under the template's name gets.
+ */
 export const readTemplate = (
   principal: Principal,
-  configuration: Pick<Configuration, "PLATFORM_URL">,
+  configuration: Pick<Configuration, "PLATFORM_URL" | "APP_HTTPS_PORT">,
   id: string,
   installable: boolean,
-  installed: ReadonlyMap<string, string>,
+  installed: ReadonlyMap<string, { id: string; hostname: string }>,
+  newAppHostname: string,
 ) =>
   Result.gen(async function* () {
     const template = yield* Result.await(
@@ -191,12 +201,27 @@ export const readTemplate = (
     if (!template)
       return yield* new InvalidOperation({ code: "NOT_FOUND", message: "App template not found" });
 
+    const install = installed.get(id);
+
+    const appHost = new URL(
+      appUrl(install?.hostname ?? newAppHostname, configuration.APP_HTTPS_PORT),
+    ).host;
+
+    const withHost = (text: string) => text.replaceAll(appHostPlaceholder, appHost);
+
     return Result.ok(
       appTemplate.parse({
         ...template,
+        markdown: withHost(template.markdown),
+        secretHelp:
+          template.secretHelp &&
+          Object.fromEntries(
+            Object.entries(template.secretHelp).map(([name, help]) => [name, withHost(help)]),
+          ),
+        appHost,
         prompt: `Set up the ${template.name} app on Widefleet. Read https://widefleet.com/SKILL.md, then run ${cli(principal, configuration)} catalog templates show ${id} and follow its template instructions. Reuse a suitable existing app where possible. Help me finish setup and report its URL and any steps that still need my attention.`,
         installable,
-        installedAppId: installed.get(id) ?? null,
+        installedAppId: install?.id ?? null,
       }),
     );
   });

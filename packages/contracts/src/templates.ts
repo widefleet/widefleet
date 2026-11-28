@@ -31,6 +31,11 @@ export const appTemplate = appTemplateSummary.extend({
   requiredSecrets: z.array(z.string()),
   /** Markdown help keyed by the secret name in Wrangler. */
   secretHelp: z.record(z.string(), z.string()).optional(),
+  /**
+   * The host `markdown` and `secretHelp` name for the app: the installed app's,
+   * or the one an install under the template's ID gets.
+   */
+  appHost: z.string(),
 });
 
 export const appTemplateCatalog = z.strictObject({

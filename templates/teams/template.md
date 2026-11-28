@@ -18,7 +18,7 @@ If the app asks for `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET`, your
 installation uses your own Microsoft Entra application:
 
 1. Register an application for **Accounts in any organizational directory**.
-2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI and
+2. Add `https://YOUR-APP-HOST/auth/callback/microsoft` as a **Web** redirect URI and
    add the delegated Microsoft Graph permissions `Chat.ReadWrite`,
    `ChatMessage.Send`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`,
    `ChannelMessage.Read.All` and `ChannelMessage.Send`.

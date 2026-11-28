@@ -14,7 +14,7 @@ organization with SAML single sign-on asks each person to authorize it.
 
 If the app asks for `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, your installation
 uses your own GitHub OAuth app: register one with the authorization callback URL
-`https://YOUR-APP-URL/auth/callback/github` and save its credentials on the app's
+`https://YOUR-APP-HOST/auth/callback/github` and save its credentials on the app's
 **Secrets** page.
 
 ## Use it

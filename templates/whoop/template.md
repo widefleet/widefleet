@@ -17,8 +17,7 @@ agents and apps. Each person connects their own WHOOP membership.
    Dashboard](https://developer-dashboard.whoop.com/) with the scopes
    `read:profile`, `read:body_measurement`, `read:cycles`, `read:recovery`,
    `read:sleep` and `read:workout`.
-2. Add `https://YOUR-APP-URL/auth/callback/whoop` as a redirect URL. You can add it
-   once the app is installed and its URL is known.
+2. Add `https://YOUR-APP-HOST/auth/callback/whoop` as a redirect URL.
 3. Enter the client ID and secret as `WHOOP_CLIENT_ID` and `WHOOP_CLIENT_SECRET` and
    install the template.
 

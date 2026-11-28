@@ -3275,6 +3275,11 @@ test.describe(`app templates`, () => {
     const clientId = page.getByLabel("GOOGLE_CLIENT_ID", { exact: true });
     const clientSecret = page.getByLabel("GOOGLE_CLIENT_SECRET", { exact: true });
 
+    // The instructions name the redirect URI of the app this install creates.
+    const redirectUri = page.locator("code", { hasText: "/auth/callback/google" });
+    await expect(redirectUri).not.toContainText("YOUR-APP-HOST");
+    const shownRedirectUri = await redirectUri.textContent();
+
     // Install waits for every value, which stays hidden.
     await expect(clientId).toHaveAttribute("type", "password");
     await expect(install).toBeDisabled();
@@ -3290,11 +3295,14 @@ test.describe(`app templates`, () => {
     const appId = z.uuid().parse(page.url().split("/").at(-2));
 
     const [installed] = await environment.database.db
-      .select({ secrets: apps.secrets, templateId: apps.templateId })
+      .select({ secrets: apps.secrets, templateId: apps.templateId, hostname: apps.hostname })
       .from(apps)
       .where(eq(apps.id, appId));
 
     expect(installed?.templateId).toBe("gmail");
+    expect(shownRedirectUri).toBe(
+      `https://${new URL(`https://${installed?.hostname}:${environment.configuration.APP_HTTPS_PORT}`).host}/auth/callback/google`,
+    );
     expect(Object.keys(storedAppSecrets.parse(installed?.secrets)).sort()).toEqual([
       "GOOGLE_CLIENT_ID",
       "GOOGLE_CLIENT_SECRET",
@@ -3324,6 +3332,62 @@ test.describe(`app templates`, () => {
     await page.getByRole("button", { name: "Save secret", exact: true }).click();
     await expect(page.getByText("Missing", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Required", { exact: true })).toHaveCount(2);
+
+    // A deployed app has the template's name: the install asks for another
+    // name, and the instructions follow it.
+    const taken = await context.request.post("/api/v1/apps", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+      data: { slug: "qonto", displayName: "Qonto" },
+    });
+
+    expect(taken.ok()).toBe(true);
+    const takenApp = app.parse(await taken.json());
+    const takenHost = new URL(takenApp.url).host;
+    const takenArtifactId = crypto.randomUUID();
+    await environment.database.db.insert(artifacts).values({
+      id: takenArtifactId,
+      appId: takenApp.id,
+      metadata: workerMetadata.parse({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        assets: { upload_session: takenArtifactId },
+      }),
+      manifest: {},
+      modules: [],
+    });
+    await environment.database.db.insert(deployments).values({
+      id: crypto.randomUUID(),
+      appId: takenApp.id,
+      artifactId: takenArtifactId,
+      status: "succeeded",
+      requestId: crypto.randomUUID(),
+    });
+    await page.goto("/widefleet/catalog/templates/qonto");
+    await expect(page.locator("code", { hasText: "/auth/callback/qonto" })).toHaveText(
+      `https://${takenHost}/auth/callback/qonto`,
+    );
+    await page.getByLabel("QONTO_CLIENT_ID", { exact: true }).fill("synthetic-client-id");
+    await page.getByLabel("QONTO_CLIENT_SECRET", { exact: true }).fill("synthetic-client-secret");
+    await page.getByRole("button", { name: "Install", exact: true }).click();
+
+    // A toast explains the taken name, and the name field is ready for another.
+    await expect(page.getByText("Could not install Qonto.", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("An app named qonto already exists. Install the template under another name."),
+    ).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    const name = page.getByLabel("App name", { exact: true });
+    await expect(name).toBeFocused();
+    // Shoot the toast once it has finished appearing.
+    await page
+      .locator("[data-sonner-toast]")
+      .evaluate((toast) => Promise.all(toast.getAnimations().map(({ finished }) => finished)));
+    await shoot("template-install-name-taken");
+    await name.fill("qonto-finance");
+    await expect(page.locator("code", { hasText: "/auth/callback/qonto" })).toHaveText(
+      `https://${takenHost.replace(/^qonto/u, "qonto-finance")}/auth/callback/qonto`,
+    );
+    await shoot("template-install-renamed");
   });
 
   test("keeps Manage and the template list usable while templates are unavailable", async ({

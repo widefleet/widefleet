@@ -12,7 +12,7 @@ Install the template, open the app and connect your Linear account.
 
 If the app asks for `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`, your installation
 uses your own Linear OAuth application: create one in Linear's API settings with the
-callback URL `https://YOUR-APP-URL/auth/callback/linear` and save its credentials on
+callback URL `https://YOUR-APP-HOST/auth/callback/linear` and save its credentials on
 the app's **Secrets** page.
 
 ## Use it
