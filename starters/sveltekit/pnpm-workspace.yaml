@@ -1,0 +1,6 @@
+packages: []
+strictPeerDependencies: true
+strictDepBuilds: true
+allowBuilds:
+  esbuild: true
+  workerd: true
