@@ -232,13 +232,13 @@
         onclick={changeEmail}
         class="text-muted-foreground mb-5 -ml-2 gap-1.5 px-2 text-xs"
       >
-        <ArrowLeft class="size-3.5" />Back to sign in
+        <ArrowLeft class="size-3.5" />{register ? "Back" : "Back to sign in"}
       </Button>
       <h1 class="text-2xl font-semibold leading-tight tracking-tight">Check your email</h1>
       <p class="text-muted-foreground mt-2 text-sm leading-6">
         {codeDelivery === "console"
           ? "If this address has an invitation or membership, its six-digit code is in the server log."
-          : publicSignup
+          : register || publicSignup
             ? "Enter the six-digit code we sent to your email address."
             : "If this address has an invitation or membership, a six-digit code is on its way."}
       </p>
@@ -255,7 +255,7 @@
       >
     </div>
   {/if}
-  {#if register}
+  {#if register && !(focused && sentTo !== null)}
     <div class="space-y-2">
       <Label for="signup-name">Your name</Label>
       <Input
@@ -265,6 +265,7 @@
         required
         maxlength={100}
         disabled={busy || sentTo !== null}
+        class={focused ? "h-11" : undefined}
       />
     </div>
   {/if}
@@ -344,7 +345,9 @@
             ? "Verify and sign in"
             : "Sign in"
         : focused
-          ? "Continue with email"
+          ? register
+            ? "Create account"
+            : "Continue with email"
           : "Continue"}</Button
   >
   {#if sentTo !== null && focused}

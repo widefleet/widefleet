@@ -86,7 +86,7 @@ for (const entry of ["registration", "sign-in"] as const)
       await page.getByLabel("Email", { exact: true }).fill("new-builder@mail.test");
       await page
         .getByRole("button", {
-          name: entry === "registration" ? "Continue" : "Continue with email",
+          name: entry === "registration" ? "Create account" : "Continue with email",
           exact: true,
         })
         .click();
