@@ -247,6 +247,11 @@ export class BuildSandbox extends DurableObject<Env> {
     this.ctx.storage.kv.put("deadline", deadlineAt);
     await this.ctx.storage.setAlarm(deadlineAt);
 
+    // The build's container time counts over all of its runs.
+    let seconds = this.#seconds();
+
+    let started: number | undefined;
+
     const deadline = new AbortController();
 
     // Stopping the container also ends processes that outlive their command.
@@ -292,7 +297,7 @@ export class BuildSandbox extends DurableObject<Env> {
       log,
     });
 
-    const result = await (async (): Promise<z.infer<typeof ciBuildResult>> => {
+    const result = await (async (): Promise<Omit<z.infer<typeof ciBuildResult>, "seconds">> => {
       try {
         if (Date.now() >= deadlineAt) return failed("");
 
@@ -304,6 +309,8 @@ export class BuildSandbox extends DurableObject<Env> {
         // A release while intercepts were registered ends the build before it starts.
         if (this.ctx.storage.kv.get("released")) return failed("The build was released");
 
+        started = Date.now();
+        this.ctx.storage.kv.put("started", started);
         this.#container.start({ image, instance: "standard-2", enableInternet: false });
         await this.#container.setInactivityTimeout(inactivityTimeout);
 
@@ -347,17 +354,25 @@ export class BuildSandbox extends DurableObject<Env> {
         clearTimeout(timer);
 
         if (this.#container.running) await this.#container.destroy();
+
+        if (started !== undefined) {
+          seconds += (Date.now() - started) / 1000;
+          this.ctx.storage.kv.put("seconds", seconds);
+          this.ctx.storage.kv.delete("started");
+        }
       }
     })();
 
     // The log is kept until the control plane releases the build, at most for a day.
     const expiresAt = Date.now() + logLifetime;
 
-    this.ctx.storage.kv.put("result", result);
+    const outcome = ciBuildResult.parse({ ...result, seconds });
+
+    this.ctx.storage.kv.put("result", outcome);
     this.ctx.storage.kv.put("expires", expiresAt);
     await this.ctx.storage.setAlarm(expiresAt);
 
-    return result;
+    return outcome;
   }
 
   // Stops a container past the build's deadline and drops the log of an outcome
@@ -366,7 +381,13 @@ export class BuildSandbox extends DurableObject<Env> {
     const now = Date.now();
     const deadlineAt = instant.safeParse(this.ctx.storage.kv.get("deadline")).data ?? 0;
 
-    if (this.#container.running && now >= deadlineAt) await this.#container.destroy();
+    if (this.#container.running && now >= deadlineAt) {
+      await this.#container.destroy();
+
+      // A run this object lost ends here, so a later run charges no more for it.
+      // A run in progress counts its own time when it ends.
+      if (!this.#current) this.#seconds(now);
+    }
 
     const expiresAt = instant.safeParse(this.ctx.storage.kv.get("expires")).data;
 
@@ -388,10 +409,32 @@ export class BuildSandbox extends DurableObject<Env> {
         status: "failed",
         message: "The build was released before it finished",
         log: "",
+        seconds: this.#seconds(),
       } satisfies z.infer<typeof ciBuildResult>);
 
     this.#dropLog("");
     await this.ctx.storage.deleteAlarm();
+  }
+
+  /**
+   * The container time of all runs until `now`. A run this object lost when it
+   * restarted counts until then and ends. Its container may have stopped
+   * earlier without being seen, so it counts at most until the deadline, as
+   * long as it could have run.
+   */
+  #seconds(now = Date.now()) {
+    const seconds = instant.safeParse(this.ctx.storage.kv.get("seconds")).data ?? 0;
+    const lost = instant.safeParse(this.ctx.storage.kv.get("started")).data;
+
+    if (lost === undefined) return seconds;
+
+    const deadlineAt = instant.safeParse(this.ctx.storage.kv.get("deadline")).data ?? now;
+    const total = seconds + Math.max(0, Math.min(now, deadlineAt) - lost) / 1000;
+
+    this.ctx.storage.kv.put("seconds", total);
+    this.ctx.storage.kv.delete("started");
+
+    return total;
   }
 
   #dropLog(log: string) {

@@ -44,14 +44,14 @@ export const createBuildWorkflow = (createExtension: typeof createRuntimeExtensi
         const configuration = readCloudflareConfiguration(bindings);
         const encryption = configuredSecretEncryption(configuration);
 
-        // The source backend uses its binding only; the database belongs to this phase.
-        const source = await withDatabase(
-          async (database) =>
-            createExtension({
-              database,
-              configuration,
-              binding: (name, schema) => schema.parse(bindings[name]),
-            }).source,
+        // The source backend uses its binding only, and the build policy the database
+        // it is given; the extension's database belongs to this phase.
+        const { source, buildPolicy } = await withDatabase(async (database) =>
+          createExtension({
+            database,
+            configuration,
+            binding: (name, schema) => schema.parse(bindings[name]),
+          }),
         );
 
         if (!source)
@@ -64,6 +64,7 @@ export const createBuildWorkflow = (createExtension: typeof createRuntimeExtensi
             ci: bindingAppCi(ci),
             platformUrl: configuration.PLATFORM_URL,
             encryption,
+            policy: buildPolicy,
           }),
         );
       } catch (error) {

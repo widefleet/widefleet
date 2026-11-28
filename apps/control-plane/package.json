@@ -45,7 +45,8 @@
     "./analytics": "./src/lib/server/analytics.ts",
     "./auth-client-extension": "./src/lib/auth-client-extension.ts",
     "./source-backend": "./src/lib/server/source-backend.ts",
-    "./source-artifacts": "./src/lib/server/source-artifacts.ts"
+    "./source-artifacts": "./src/lib/server/source-artifacts.ts",
+    "./builds": "./src/lib/server/builds.ts"
   },
   "scripts": {
     "test:e2e": "playwright test",
