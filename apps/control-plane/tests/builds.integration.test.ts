@@ -1,12 +1,14 @@
 import * as contract from "@platform/contracts";
-import type { ciBuildRequest, ciBuildResult } from "@platform/contracts/builds";
+import { ciBuildResult, ciBuildTimeLimit, type ciBuildRequest } from "@platform/contracts/builds";
 import { Result } from "better-result";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import { createApi } from "../src/lib/server/api.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
-import { executeBuild, type AppCi } from "../src/lib/server/builds.ts";
+import { executeBuild, failBuild, type AppCi } from "../src/lib/server/builds.ts";
+import { InvalidOperation } from "../src/lib/server/errors.ts";
+import type { BuildPolicy } from "../src/lib/server/runtime-extension.ts";
 import { AuthenticationFailed } from "../src/lib/server/identity.ts";
 import { createRuntime, type Runtime } from "../src/lib/server/runtime-services.ts";
 import { appBuilds, apps, artifacts, deployments } from "../src/lib/server/schema.ts";
@@ -43,6 +45,24 @@ const source = {
 } satisfies SourceBackend;
 
 const started: string[] = [];
+
+// The installation's build policy: what it admits, and the container time it settles.
+const admitted: { id: string; organizationId: string; appId: string }[] = [];
+
+const settled: { id: string; seconds: number | null }[] = [];
+
+let admission = (): number | InvalidOperation => ciBuildTimeLimit;
+
+const policy: BuildPolicy = {
+  admit: async (_transaction, build) => {
+    admitted.push(build);
+
+    return admission();
+  },
+  settle: async (_executor, build) => {
+    settled.push(build);
+  },
+};
 
 const ended = new Set<string>();
 
@@ -139,12 +159,15 @@ const deploy = async (
   });
 };
 
-const ci = (
-  result: (request: z.infer<typeof ciBuildRequest>) => Promise<z.infer<typeof ciBuildResult>>,
-): AppCi => ({
+/** The outcome of a fake CI run; each run uses a minute of container time. */
+type Outcome =
+  | { status: "succeeded"; log: string }
+  | { status: "failed"; message: string; log: string };
+
+const ci = (result: (request: z.infer<typeof ciBuildRequest>) => Promise<Outcome>): AppCi => ({
   build: async (request) => {
     ciRequests.push(request);
-    const outcome = await result(request);
+    const outcome = ciBuildResult.parse({ ...(await result(request)), seconds: 60 });
     outcomes.set(request.id, outcome);
 
     return outcome;
@@ -172,6 +195,7 @@ const run = (id: string, appCi: AppCi) =>
     ci: appCi,
     platformUrl: environment.configuration.PLATFORM_URL,
     encryption: environment.encryption,
+    policy,
   });
 
 const api = (path: string, init?: RequestInit) =>
@@ -207,6 +231,7 @@ beforeAll(async () => {
     reporting: environment.reporting,
     encryption: environment.encryption,
     source,
+    buildPolicy: policy,
     builds: {
       start: async (id) => {
         started.push(id);
@@ -255,6 +280,9 @@ beforeEach(async () => {
   outcomes.clear();
   ended.clear();
   writeOnly = false;
+  admitted.length = 0;
+  settled.length = 0;
+  admission = () => ciBuildTimeLimit;
 });
 
 afterAll(async () => environment?.close());
@@ -778,4 +806,63 @@ it("accepts a build's token only for the build it names", async () => {
   );
 
   expect(statuses).toEqual([401, 401, 401]);
+});
+
+it("starts only builds the installation admits, with the container time it grants", async () => {
+  const app = await createApp("admitted-build");
+  heads.set(app.id, commit);
+
+  admission = () => new InvalidOperation({ code: "FORBIDDEN", message: "Builds are not enabled" });
+
+  const refused = await startBuild(app.id);
+
+  expect(refused.status).toBe(403);
+  expect(await refused.text()).toMatch(/Builds are not enabled/);
+  expect(started).toEqual([]);
+  expect(
+    await environment.database.db.select().from(appBuilds).where(eq(appBuilds.appId, app.id)),
+  ).toEqual([]);
+
+  admission = () => 600;
+
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  expect(admitted.at(-1)).toEqual({
+    id: build.id,
+    organizationId: environment.application.organizationId,
+    appId: app.id,
+  });
+
+  await run(build.id, succeeded);
+
+  // The build stops when its granted time after admission is over, and the
+  // time it used is settled as it finishes.
+  expect(ciRequests[0]?.deadline).toBe(Date.parse(build.createdAt) + 600 * 1000);
+  expect(settled).toEqual([{ id: build.id, seconds: 60 }]);
+
+  // A repeated run settles nothing again.
+  await run(build.id, succeeded);
+  expect(settled).toHaveLength(1);
+});
+
+it("keeps the reservation of builds that end without the CI's time", async () => {
+  const app = await createApp("unsettled-time");
+  heads.set(app.id, commit);
+  const failing = contract.appBuild.parse(await (await startBuild(app.id)).json());
+  const stopped = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  // Their containers may still run until their deadline.
+  await failBuild(environment.database.db, failing.id, "The build could not finish");
+  ended.add(stopped.id);
+  await api(`/apps/${app.id}/builds/${stopped.id}`);
+
+  expect(settled).toEqual([]);
+  expect(
+    (
+      await environment.database.db
+        .select({ status: appBuilds.status })
+        .from(appBuilds)
+        .where(eq(appBuilds.appId, app.id))
+    ).map(({ status }) => status),
+  ).toEqual(["failed", "failed"]);
 });

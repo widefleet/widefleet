@@ -4,7 +4,8 @@ import type { Observation } from "./observation.ts";
 import type { z } from "zod";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { Configuration } from "./config.ts";
-import type { Database } from "./database.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
+import type { InvalidOperation } from "./errors.ts";
 import type { SendEmail } from "./email.ts";
 import type { SourceBackend } from "./source-backend.ts";
 import type { CreateOrganization } from "./onboarding.ts";
@@ -16,8 +17,32 @@ export interface AuthenticationExtension {
   allowUser?: (userId: string) => Promise<boolean>;
 }
 
+/**
+ * How much container time server builds may use. Without a policy, every build
+ * may run for the CI's longest build time.
+ */
+export interface BuildPolicy {
+  /**
+   * Admits a new build in the transaction that records it, and returns the
+   * seconds of container time it may use, or why it cannot start.
+   */
+  admit: (
+    transaction: DatabaseExecutor,
+    build: { id: string; organizationId: string; appId: string },
+  ) => Promise<number | InvalidOperation>;
+  /**
+   * Records the container time a finished build used, in the transaction that
+   * finishes it. Unknown time (null) counts as all the time it was admitted with.
+   */
+  settle: (
+    executor: DatabaseExecutor,
+    build: { id: string; seconds: number | null },
+  ) => Promise<void>;
+}
+
 export interface RuntimeExtension {
   source?: SourceBackend;
+  buildPolicy?: BuildPolicy;
   authentication?: AuthenticationExtension;
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;

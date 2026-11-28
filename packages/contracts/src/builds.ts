@@ -123,7 +123,10 @@ export const ciBuildRequest = z.strictObject({
   deadline: z.int().positive(),
 });
 
+/** The container time a build used, in seconds. */
+const seconds = z.number().nonnegative();
+
 export const ciBuildResult = z.discriminatedUnion("status", [
-  z.strictObject({ status: z.literal("succeeded"), log: z.string() }),
-  z.strictObject({ status: z.literal("failed"), message: z.string(), log: z.string() }),
+  z.strictObject({ status: z.literal("succeeded"), log: z.string(), seconds }),
+  z.strictObject({ status: z.literal("failed"), message: z.string(), log: z.string(), seconds }),
 ]);

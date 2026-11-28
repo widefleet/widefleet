@@ -14,10 +14,14 @@ import { deploymentActor } from "./deployment-execution.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import type { SecretEncryption } from "./secret-encryption.ts";
+import type { BuildPolicy } from "./runtime-extension.ts";
 import type { SignIn } from "./sso-policy.ts";
 import { appBuilds, apps, artifacts, deployments } from "./schema.ts";
 import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import { readOnly, transact } from "./transactions.ts";
+
+/** The longest a build runs, in seconds; a build policy admits at most this. */
+export { ciBuildTimeLimit } from "@platform/contracts/builds";
 
 /**
  * The app CI. It runs each build at most once and keeps its outcome; releasing
@@ -49,6 +53,34 @@ const presentBuild = (record: typeof appBuilds.$inferSelect) =>
     finishedAt: record.finishedAt?.toISOString() ?? null,
   });
 
+/**
+ * Finishes a build that is still queued or running, which ends its tokens. A build
+ * whose outcome the CI reported is settled at once with its container time.
+ * Otherwise its container may still run until its deadline, so the policy keeps
+ * the build's whole reservation and slot until then.
+ */
+const endBuild = (
+  database: Database,
+  policy: BuildPolicy | undefined,
+  id: string,
+  values: Partial<typeof appBuilds.$inferInsert>,
+  seconds?: number | null,
+) =>
+  database.transaction(async (transaction) => {
+    const [ended] = await transaction
+      .update(appBuilds)
+      .set({
+        ...values,
+        finishedAt: new Date(),
+      })
+      .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])))
+      .returning();
+
+    if (ended && seconds !== undefined) await policy?.settle(transaction, { id, seconds });
+
+    return ended;
+  });
+
 const unavailable = () =>
   new InvalidOperation({
     code: "CONFLICT",
@@ -59,6 +91,7 @@ export const createBuildService = (
   database: Database,
   source?: SourceBackend,
   workflows?: { start: (id: string) => Promise<void>; ended: (id: string) => Promise<boolean> },
+  policy?: BuildPolicy,
 ) => {
   // A build whose workflow ended without finishing it has failed, and its token
   // ends with it. A build that finished meanwhile keeps its outcome.
@@ -67,15 +100,10 @@ export const createBuildService = (
 
     if (!(await workflows.ended(record.id).catch(() => false))) return record;
 
-    const [failed] = await database
-      .update(appBuilds)
-      .set({
-        status: "failed",
-        message: "The build stopped before it finished",
-        finishedAt: new Date(),
-      })
-      .where(and(eq(appBuilds.id, record.id), inArray(appBuilds.status, ["queued", "running"])))
-      .returning();
+    const failed = await endBuild(database, undefined, record.id, {
+      status: "failed",
+      message: "The build stopped before it finished",
+    });
 
     if (failed) return failed;
 
@@ -141,10 +169,19 @@ export const createBuildService = (
                 : undefined) ??
               ".";
 
+            const id = crypto.randomUUID();
+
+            // The installation may limit how much container time builds use.
+            const admitted = policy
+              ? await policy.admit(transaction, { id, organizationId: app.organizationId, appId })
+              : ciBuildTimeLimit;
+
+            if (admitted instanceof InvalidOperation) return Result.err(admitted);
+
             const [record] = await transaction
               .insert(appBuilds)
               .values({
-                id: crypto.randomUUID(),
+                id,
                 appId,
                 actor: deploymentActor.parse({
                   id: principal.id,
@@ -157,7 +194,9 @@ export const createBuildService = (
                 identityOrganizationId: signIn.identityOrganizationId,
                 recovery: signIn.recovery,
                 reads: signIn.reads,
-                deadline: sql`now() + make_interval(secs => ${ciBuildTimeLimit})`,
+                // Like a reservation of the policy, the deadline counts from the
+                // start of this transaction.
+                deadline: sql`now() + make_interval(secs => ${Math.min(Math.floor(admitted), ciBuildTimeLimit)})`,
               })
               .returning();
 
@@ -226,9 +265,11 @@ export const executeBuild = async (
     ci: AppCi;
     platformUrl: string;
     encryption: SecretEncryption;
+    /** Settles the build's container time; installations without one do not limit it. */
+    policy: BuildPolicy | undefined;
   },
 ) => {
-  const { withDatabase, source, ci } = services;
+  const { withDatabase, source, ci, policy } = services;
 
   const loaded = await withDatabase(async (database) => {
     const [recorded] = await database
@@ -267,17 +308,16 @@ export const executeBuild = async (
   // PostgreSQL text cannot hold NUL, which command output may contain.
   const text = (value: string | null | undefined) => value?.replaceAll("\u0000", "");
 
-  const finish = (values: Partial<typeof appBuilds.$inferInsert>) =>
+  // Without the CI's seconds, the build keeps its reservation until its deadline.
+  const finish = (values: Partial<typeof appBuilds.$inferInsert>, seconds?: number) =>
     withDatabase((database) =>
-      database
-        .update(appBuilds)
-        .set({
-          ...values,
-          message: text(values.message),
-          log: text(values.log),
-          finishedAt: new Date(),
-        })
-        .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"]))),
+      endBuild(
+        database,
+        policy,
+        id,
+        { ...values, message: text(values.message), log: text(values.log) },
+        seconds,
+      ),
     );
 
   const published = () =>
@@ -301,27 +341,31 @@ export const executeBuild = async (
     result: z.infer<typeof ciBuildResult> | null,
     deployment: Awaited<ReturnType<typeof published>>,
   ) => {
-    // The CI loses the log of a run if it restarts before recording it.
+    // The CI loses the log and the container time of a run if it restarts before
+    // recording them; the build then keeps all the time it was admitted with.
     const log = result?.log ?? "The CI restarted during the build; its log was not kept.\n";
+    const seconds = result?.seconds;
     const deploymentId = deployment?.id ?? null;
 
     if (result?.status === "failed")
-      await finish({ status: "failed", message: result.message, log, deploymentId });
+      await finish({ status: "failed", message: result.message, log, deploymentId }, seconds);
     else if (!deployment)
-      await finish({
-        status: "failed",
-        message: "widefleet deploy did not publish the build",
-        log,
-      });
+      await finish(
+        { status: "failed", message: "widefleet deploy did not publish the build", log },
+        seconds,
+      );
     // Code in the build can name another commit than the one it was asked to build.
     else if (deployment.commit !== build.commit)
-      await finish({
-        status: "failed",
-        message: `The build published ${deployment.commit ?? "no commit"} instead of ${build.commit}`,
-        log,
-        deploymentId,
-      });
-    else await finish({ status: "succeeded", deploymentId, log });
+      await finish(
+        {
+          status: "failed",
+          message: `The build published ${deployment.commit ?? "no commit"} instead of ${build.commit}`,
+          log,
+          deploymentId,
+        },
+        seconds,
+      );
+    else await finish({ status: "succeeded", deploymentId, log }, seconds);
 
     await ci.release(id);
   };
@@ -337,6 +381,7 @@ export const executeBuild = async (
   const repository = await sourceOperation(() => source.repository(parentId ?? build.appId));
 
   if (!repository) {
+    // An earlier run may have used container time before the repository was removed.
     await finish({ status: "failed", message: "The app has no Git repository" });
     await ci.release(id);
 
@@ -377,12 +422,6 @@ export const failBuild = async (database: Database, id: string, message: string)
 
   if (!recorded) throw new Error("The build is not recorded");
 
-  await database
-    .update(appBuilds)
-    .set({
-      status: "failed",
-      message,
-      finishedAt: new Date(),
-    })
-    .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])));
+  // Its container may still run, so its time is not settled.
+  await endBuild(database, undefined, id, { status: "failed", message });
 };
