@@ -115,6 +115,13 @@ Normally, deploy the main app from `main`. If you deploy from another branch,
 Widefleet asks you to confirm: it will update `main` in the app's repository and
 publish that code as the main app. Press Enter to cancel.
 
+If your repository has no local `main`, for example because `git init` named the
+first branch `master`, rename it before deploying:
+
+```sh
+git branch -m main
+```
+
 To confirm this for a single command in an agent or CI session, use
 `widefleet deploy --allow-branch-mismatch`. This also applies to checkouts without
 a local branch. The flag does not bypass a preview's branch requirement or
