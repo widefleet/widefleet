@@ -1,0 +1,8 @@
+{
+  // The provider origin this connector calls: Notion's API and its token
+  // endpoint. Deploying requests it; the app's owner or an administrator
+  // allows it.
+  "network": {
+    "backend": ["https://api.notion.com"],
+  },
+}

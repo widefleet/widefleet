@@ -36,6 +36,7 @@ const clients = {
     ],
   },
   linear: { client: "linear", scopes: ["read", "write"] },
+  notion: { client: "notion", scopes: [] },
 } as const;
 
 type Provider = keyof typeof clients;

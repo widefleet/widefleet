@@ -42,6 +42,9 @@ export interface OpenapiRules {
    * removes the fields of a form body. `form` replaces a form body's whole
    * schema, such as with variants that each require their own fields, and
    * `requiredBody` requires a body the description leaves optional.
+   * `encodedPathParameters` names path parameters whose values the API hands
+   * out already URL-encoded, such as Notion's property IDs, which are sent as
+   * they are.
    */
   operations: Record<
     string,
@@ -56,6 +59,7 @@ export interface OpenapiRules {
       fields?: Readonly<Record<string, Json>> | undefined;
       form?: Json | undefined;
       requiredBody?: boolean | undefined;
+      encodedPathParameters?: readonly string[] | undefined;
     }
   >;
   /**
@@ -240,6 +244,8 @@ export type OpenapiOperation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[];
+  /** Path parameters sent as given, by the name the path uses: values the API hands out URL-encoded. */
+  encodedPathParameters?: string[];
   /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
   explodedParameters?: string[];
   /**
@@ -249,6 +255,8 @@ export type OpenapiOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
+  /** Headers every request sends with their one allowed value, such as an API version. */
+  fixedHeaders?: Record<string, string>;
   body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
@@ -722,8 +730,20 @@ export const generateOpenapi = (
         ),
       );
 
+      // `string` itself, or a named type of any string, such as Notion's IDs.
+      const anyString = (type: string) => {
+        const named = schemas[takenTypes.get(type) ?? ""];
+
+        return (
+          type === "string" ||
+          (named?.type === "string" && !named.enum && !named.nullable && named.format !== "binary")
+        );
+      };
+
+      const widest = [...types].find(anyString);
+
       const covered = [...types].map((type) =>
-        types.has("string") && type !== "string" ? stringValues(type) : null,
+        widest !== undefined && type !== widest && !anyString(type) ? stringValues(type) : null,
       );
 
       const union = [...types].filter((type, index) => type !== "null" && !covered[index]);
@@ -955,6 +975,28 @@ export const generateOpenapi = (
       (value) => (value.in === "path" || value.in === "query") && !value.deprecated,
     );
 
+    // A header the description requires with one allowed value, such as
+    // Notion's API version, is not an input: every request sends that value,
+    // the one the generated types describe.
+    const fixedHeaders = Object.fromEntries(
+      [...declared.values()].flatMap((value) => {
+        const target = value.schema?.$ref
+          ? schemas[value.schema.$ref.replace("#/components/schemas/", "")]
+          : value.schema;
+
+        const [only, ...others] = target?.enum ?? [];
+        const fixed = z.string().safeParse(only);
+
+        return value.in === "header" &&
+          value.required === true &&
+          !value.deprecated &&
+          fixed.success &&
+          others.length === 0
+          ? [[value.name, fixed.data]]
+          : [];
+      }),
+    );
+
     // Every place in the path needs a path parameter to fill it.
     for (const [, name] of path.matchAll(/\{([^}]+)\}/g))
       if (!parameters.some((value) => value.in === "path" && value.name === name))
@@ -1103,6 +1145,15 @@ export const generateOpenapi = (
     };
 
     if (Object.keys(formLists).length) call.formLists = formLists;
+
+    if (Object.keys(fixedHeaders).length) call.fixedHeaders = fixedHeaders;
+
+    for (const name of rule.encodedPathParameters ?? [])
+      if (!parameters.some((value) => value.in === "path" && value.name === name))
+        throw new Error(`${id} has no path parameter ${name} to send encoded`);
+
+    if (rule.encodedPathParameters?.length)
+      call.encodedPathParameters = [...rule.encodedPathParameters];
 
     const optionalPath = parameters.flatMap((value) =>
       value.in === "path" && value.required === false ? [value.name] : [],
@@ -1342,6 +1393,8 @@ export type Operation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[];
+  /** Path parameters sent as given, by the name the path uses: values the API hands out URL-encoded. */
+  encodedPathParameters?: string[];
   /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
   explodedParameters?: string[];
   /**
@@ -1351,6 +1404,8 @@ export type Operation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
+  /** Headers every request sends with their one allowed value, such as an API version. */
+  fixedHeaders?: Record<string, string>;
   body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string>;
