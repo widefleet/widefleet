@@ -102,6 +102,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     new URL(next, url.origin).pathname === "/device";
 
   return {
+    // Installation setup sends the new administrator here to verify their address.
+    fromSetup: url.searchParams.has("setup"),
     signedOut: !locals.session,
     continueAs,
     socialProviders: companyOnly ? [] : availableSocialProviders(runtime.configuration),

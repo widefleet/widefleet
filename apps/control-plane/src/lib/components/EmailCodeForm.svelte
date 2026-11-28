@@ -234,7 +234,9 @@
       >
         <ArrowLeft class="size-3.5" />{register ? "Back" : "Back to sign in"}
       </Button>
-      <h1 class="text-2xl font-semibold leading-tight tracking-tight">Check your email</h1>
+      <h1 class="text-2xl font-semibold leading-tight tracking-tight">
+        {codeDelivery === "console" ? "Enter your sign-in code" : "Check your email"}
+      </h1>
       <p class="text-muted-foreground mt-2 text-sm leading-6">
         {codeDelivery === "console"
           ? "If this address has an invitation or membership, its six-digit code is in the server log."
