@@ -20,8 +20,9 @@ const certificates = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 // The log keeps the end of the output, where failures are reported.
 const logLimit = 256 * 1024;
 
-// Keeps a container running after its build call was lost, so the workflow's
-// retry joins the run. The deadline alarm still stops it.
+// Keeps a container running for a while after its build call was lost, so the
+// workflow's retry can join the run while this object still holds it. The
+// deadline alarm still stops it.
 const inactivityTimeout = 15 * 60 * 1000;
 
 // The log of an outcome nobody released is dropped after this.

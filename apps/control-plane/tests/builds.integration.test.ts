@@ -368,6 +368,33 @@ it("publishes once when a build runs again after publishing", async () => {
   expect(record).toMatchObject({ status: "succeeded", deploymentId: published[0]?.id });
 });
 
+it("concludes a build that published when its repository is gone before the run is repeated", async () => {
+  const app = await createApp("published-repository-gone");
+  heads.set(app.id, commit);
+  const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  // The first run published, then stopped before it recorded its outcome.
+  await run(
+    build.id,
+    ci(async (request) => {
+      expect((await deploy(request)).status).toBe(200);
+
+      throw new Error("The CI was interrupted");
+    }),
+  ).catch(() => {});
+
+  heads.delete(app.id);
+  await run(build.id, succeeded);
+
+  const [record] = await environment.database.db
+    .select()
+    .from(appBuilds)
+    .where(eq(appBuilds.id, build.id));
+
+  expect(record).toMatchObject({ status: "succeeded" });
+  expect(record?.deploymentId).not.toBeNull();
+});
+
 it("records a failed build with the end of its log", async () => {
   const app = await createApp("failing-build");
   heads.set(app.id, commit);

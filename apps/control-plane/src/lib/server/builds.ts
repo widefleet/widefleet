@@ -326,6 +326,12 @@ export const executeBuild = async (
     await ci.release(id);
   };
 
+  // A run that stopped after publishing does not build again; it waits for
+  // the CI if the build is still finishing there, whatever changed since.
+  const previous = await published();
+
+  if (previous) return conclude(await ci.result(id), previous);
+
   const actor = deploymentActor.parse(build.actor);
 
   const repository = await sourceOperation(() => source.repository(parentId ?? build.appId));
@@ -353,12 +359,6 @@ export const executeBuild = async (
     }),
     deadline: build.deadline.getTime(),
   };
-
-  // A run that stopped after publishing does not build again; it waits for
-  // the CI if the build is still finishing there.
-  const previous = await published();
-
-  if (previous) return conclude(await ci.result(id), previous);
 
   const result = await ci.build(request);
 

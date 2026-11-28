@@ -14,7 +14,9 @@ export const buildWorkflowCommand = z.strictObject({ id: z.uuid() });
 
 const options = {
   retries: { limit: 2, delay: "30 seconds", backoff: "exponential" },
-  timeout: "45 minutes",
+  // Cloudflare advises step timeouts of at most 30 minutes; a build stops at its
+  // deadline, at most 30 minutes after it was started, before its step began.
+  timeout: "30 minutes",
 } as const;
 
 // The installation's runtime extension provides the Git repositories, so the
