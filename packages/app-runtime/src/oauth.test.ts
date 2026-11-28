@@ -497,14 +497,15 @@ describe("managed OAuth broker", () => {
       await broker.request(identity, {
         action: "revoke",
         client: "notion",
-        token: granted.refreshToken,
+        token: granted.accessToken,
       }),
     ).toEqual({ revoked: true });
 
-    // The credentials go in the Authorization header, never in the form.
+    // Notion revokes access tokens. The credentials go in the Authorization
+    // header, never in the form.
     expect(requests.at(-1)).toEqual({
       url: "https://api.notion.com/v1/oauth/revoke",
-      body: new URLSearchParams({ token: "provider-refresh-1" }),
+      body: new URLSearchParams({ token: "provider-access" }),
       authorization: basic,
     });
   });
