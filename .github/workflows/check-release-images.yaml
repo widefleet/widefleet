@@ -2,58 +2,48 @@ name: Check release images
 
 on:
   pull_request:
-    paths:
-      - .github/workflows/*release-images.yaml
-      - .github/workflows/publish-images.yaml
-      - .github/workflows/publish-cli.yaml
-      - .dockerignore
-      - LICENSE
-      - tools/*release*.sh
-      - infra/**
-      - crates/**
-      - Cargo.*
-      - rust-toolchain.toml
-      - apps/control-plane/**
-      - apps/*/package.json
-      - starters/**
-      - packages/**
-      - patches/**
-      - package.json
-      - pnpm-*.yaml
-      - tsconfig*.json
-      - vitest.config.ts
-      - "!**/*.md"
-      # The app runtime embeds the plugin skill served by its MCP server.
-      - plugins/widefleet/skills/**
   push:
     branches: [main]
-    paths:
-      - "**"
-      - "!**/*.md"
-      - plugins/widefleet/skills/**
-      - "!docs/**"
-      - "!apps/docs/**"
-      # The control-plane deployment reads this workspace package manifest.
-      - "apps/docs/package.json"
 
 permissions:
   contents: read
 
 cache-mode: none
 
-concurrency:
-  group: check-release-images-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      images: ${{ steps.changes.outputs.images }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select image checks from the complete diff
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/check-image-changes.py
+
   pull-request:
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.images == 'true'
+    # A skipped image check must not cancel an earlier run that needs the images.
+    concurrency:
+      group: check-release-images-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     cache-mode: read
     uses: ./.github/workflows/build-release-images.yaml
     with:
       ref: ${{ github.sha }}
   main:
-    if: github.event_name == 'push'
+    needs: changes
+    if: github.event_name == 'push' && needs.changes.outputs.images == 'true'
+    concurrency:
+      group: check-release-images-${{ github.ref }}
+      cancel-in-progress: true
     cache-mode: write
     uses: ./.github/workflows/build-release-images.yaml
     with:

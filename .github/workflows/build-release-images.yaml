@@ -41,11 +41,17 @@ jobs:
       - uses: actions/setup-node@v6.5.0
         with:
           node-version: 26.8.2
+      - uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5
+        with:
+          version: v29.8.1
       - name: Check source
         run: |
           npm install --global pnpm@12.4.2
           pnpm install --frozen-lockfile
           pnpm check
+      - name: Verify image context and cache boundaries
+        if: hashFiles('apps/control-plane/tests/installation/image-context.test.ts') != ''
+        run: RUN_IMAGE_CONTEXT_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation/image-context.test.ts
 
   build:
     name: Build ${{ matrix.component }}
