@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEVICE_CODE_GRANT_TYPE } from "@better-auth/oauth-provider";
 import { decodeJwt } from "jose";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
 import { createTestEnvironment } from "./environment.ts";
@@ -12,6 +12,7 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import {
   invitation,
   member,
+  oauthRefreshToken,
   organization,
   session,
   ssoProvider,
@@ -956,7 +957,7 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     expect(ownCompany.status).toBe(403);
   });
 
-  it("renews built-in app login, tolerates duplicate refreshes and rechecks membership", async () => {
+  const builtInAppLogin = async () => {
     const organizationId = crypto.randomUUID();
     await environment.database.db.insert(organization).values({
       id: organizationId,
@@ -991,44 +992,87 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     );
 
     if (!client) throw new Error("Expected an app client");
+    const { clientId, clientSecret } = client.management;
+
+    // Each sign-in starts its own grant from a fresh session and authorization code.
+    const signIn = async () => {
+      const global = await environment.users.login({ userId });
+      const cookie = new Headers(global.headers).get("cookie") ?? "";
+      const verifier = randomBytes(32).toString("base64url");
+      const callback = `https://auth.${environment.configuration.APP_DOMAIN}/oauth2/${organizationId}/callback`;
+
+      const parameters = new URLSearchParams({
+        client_id: clientId,
+        response_type: "code",
+        redirect_uri: callback,
+        scope: "openid profile email offline_access",
+        state: crypto.randomUUID(),
+        nonce: crypto.randomUUID(),
+        code_challenge_method: "S256",
+        code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+      });
+
+      const target = new URL(
+        await redirect(await request(`/oauth2/authorize?${parameters}`, undefined, cookie)),
+      );
+
+      const issued = await request(
+        "/oauth2/token",
+        new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: clientId,
+          client_secret: clientSecret,
+          code: z.string().parse(target.searchParams.get("code")),
+          redirect_uri: callback,
+          code_verifier: verifier,
+        }),
+      );
+
+      expect(issued.status, await issued.clone().text()).toBe(200);
+
+      return tokenResponse.extend({ id_token: z.string() }).parse(await issued.json());
+    };
+
+    const renew = (refreshToken: string) =>
+      request(
+        "/oauth2/token",
+        new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+        }),
+      );
+
+    const revoke = (refreshToken: string) =>
+      request(
+        "/oauth2/revoke",
+        new URLSearchParams({
+          token: refreshToken,
+          token_type_hint: "refresh_token",
+          client_id: clientId,
+          client_secret: clientSecret,
+        }),
+      );
+
+    return { organizationId, clientId, signIn, renew, revoke };
+  };
+
+  // Moves every rotated refresh token of the client past its reuse window, as a copy
+  // presented later would be.
+  const expireReuseWindow = (clientId: string) =>
+    environment.database.db
+      .update(oauthRefreshToken)
+      .set({ rotationReplayExpiresAt: new Date(0) })
+      .where(and(eq(oauthRefreshToken.clientId, clientId), isNotNull(oauthRefreshToken.rotatedAt)));
+
+  it("renews built-in app login, tolerates duplicate refreshes and rechecks membership", async () => {
+    const { organizationId, signIn, renew } = await builtInAppLogin();
     await saveUserPicture(environment.database.db, userId, {
       bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       contentType: "image/png",
     });
-    const global = await environment.users.login({ userId });
-    const cookie = new Headers(global.headers).get("cookie") ?? "";
-    const verifier = randomBytes(32).toString("base64url");
-    const callback = `https://auth.${environment.configuration.APP_DOMAIN}/oauth2/${organizationId}/callback`;
-
-    const parameters = new URLSearchParams({
-      client_id: client.management.clientId,
-      response_type: "code",
-      redirect_uri: callback,
-      scope: "openid profile email offline_access",
-      state: crypto.randomUUID(),
-      nonce: crypto.randomUUID(),
-      code_challenge_method: "S256",
-      code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-    });
-
-    const target = new URL(
-      await redirect(await request(`/oauth2/authorize?${parameters}`, undefined, cookie)),
-    );
-
-    const issued = await request(
-      "/oauth2/token",
-      new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: client.management.clientId,
-        client_secret: client.management.clientSecret,
-        code: z.string().parse(target.searchParams.get("code")),
-        redirect_uri: callback,
-        code_verifier: verifier,
-      }),
-    );
-
-    expect(issued.status, await issued.clone().text()).toBe(200);
-    const grant = tokenResponse.extend({ id_token: z.string() }).parse(await issued.json());
+    const grant = await signIn();
 
     // Apps receive the copied picture as a URL on this installation.
     const [stored] = await environment.database.db
@@ -1067,17 +1111,6 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
       await tokenViewer(auth, new Headers({ authorization: "Bearer not-a-token" })),
     ).toBeNull();
 
-    const renew = (refreshToken: string) =>
-      request(
-        "/oauth2/token",
-        new URLSearchParams({
-          grant_type: "refresh_token",
-          client_id: client.management.clientId,
-          client_secret: client.management.clientSecret,
-          refresh_token: refreshToken,
-        }),
-      );
-
     const renewed = await renew(grant.refresh_token);
     expect(renewed.status, await renewed.clone().text()).toBe(200);
     const current = tokenResponse.extend({ id_token: z.string() }).parse(await renewed.json());
@@ -1090,6 +1123,60 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
       .delete(member)
       .where(and(eq(member.organizationId, organizationId), eq(member.userId, userId)));
     expect((await renew(current.refresh_token)).status).toBe(403);
+  });
+
+  it("ends only the replayed app sign-in and keeps the user's other sign-ins", async () => {
+    const { signIn, renew, revoke, clientId } = await builtInAppLogin();
+    const copied = await signIn();
+    const other = await signIn();
+    const third = await signIn();
+
+    const rotated = tokenResponse.parse(await (await renew(copied.refresh_token)).json());
+    await expireReuseWindow(clientId);
+
+    // A copy that kept the rotated token presents it after the window.
+    const replayed = await renew(copied.refresh_token);
+    expect(replayed.status).toBe(400);
+    expect(await replayed.json()).toMatchObject({ error: "invalid_grant" });
+    expect((await renew(rotated.refresh_token)).status).toBe(400);
+
+    const userInfo = await auth.handler(
+      new Request(`${authUrl}/oauth2/userinfo`, {
+        headers: { authorization: `Bearer ${rotated.access_token}` },
+      }),
+    );
+
+    expect(userInfo.status).toBe(401);
+
+    const kept = await renew(other.refresh_token);
+    expect(kept.status, await kept.clone().text()).toBe(200);
+    const current = tokenResponse.parse(await kept.json());
+
+    // Revoking an already rotated token also ends only its own sign-in.
+    await expireReuseWindow(clientId);
+    expect((await revoke(other.refresh_token)).status).toBe(400);
+    expect((await renew(current.refresh_token)).status).toBe(400);
+    const untouched = await renew(third.refresh_token);
+    expect(untouched.status, await untouched.clone().text()).toBe(200);
+  });
+
+  it("still ends every device grant of the client on replay, which has no authorization code", async () => {
+    const authorize = async () => {
+      const device = await start();
+      await confirmed(await approve(await consent(device.user_code, firstCookie), firstCookie));
+
+      return tokenResponse.parse(await (await poll(device.device_code)).json());
+    };
+
+    const replayedGrant = await authorize();
+    const otherGrant = await authorize();
+
+    const rotated = await refresh(replayedGrant.refresh_token);
+    expect(rotated.status, await rotated.clone().text()).toBe(200);
+    await expireReuseWindow(cliClientId);
+
+    expect((await refresh(replayedGrant.refresh_token)).status).toBe(400);
+    expect((await refresh(otherGrant.refresh_token)).status).toBe(400);
   });
 
   it("uses real CLI credentials for plugin operations without creating browser sessions", async () => {

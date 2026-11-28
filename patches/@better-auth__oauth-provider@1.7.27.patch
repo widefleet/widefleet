@@ -1,3 +1,74 @@
+diff --git a/dist/authorize-DXnMh0ha.mjs b/dist/authorize-DXnMh0ha.mjs
+index 3de02d49fbdc30125311a398136cab368f33299c..1ae3d2189b58a3bf0f9d5b11b1cc868c2bf313bd 100644
+--- a/dist/authorize-DXnMh0ha.mjs
++++ b/dist/authorize-DXnMh0ha.mjs
+@@ -1792,7 +1792,38 @@ function grantRevokedDuringIssuance() {
+ *
+ * @internal
+ */
+-async function invalidateRefreshFamily(ctx, clientId, userId) {
++async function invalidateRefreshFamily(ctx, clientId, refreshToken) {
++	const { userId, authorizationCodeId } = refreshToken;
++	// Every token issued from one authorization code, across all of its
++	// rotations, carries that code's ID. A replay then only ends that grant,
++	// so the user's other sign-ins with this client stay valid.
++	if (authorizationCodeId) {
++		const where = [
++			{
++				field: "clientId",
++				value: clientId
++			},
++			{
++				field: "userId",
++				value: userId
++			},
++			{
++				field: "authorizationCodeId",
++				value: authorizationCodeId
++			}
++		];
++		const deleteGrantAccessTokens = () => ctx.context.adapter.deleteMany({
++			model: "oauthAccessToken",
++			where
++		});
++		await deleteGrantAccessTokens();
++		await ctx.context.adapter.deleteMany({
++			model: "oauthRefreshToken",
++			where
++		});
++		await deleteGrantAccessTokens();
++		return;
++	}
+ 	const deleteLinkedAccessTokens = () => ctx.context.adapter.deleteMany({
+ 		model: "oauthAccessToken",
+ 		where: [
+@@ -2535,7 +2566,7 @@ async function handleRefreshTokenGrant(ctx, opts) {
+ 				error: "invalid_grant"
+ 			});
+ 		}
+-		await invalidateRefreshFamily(ctx, client_id, refreshToken.userId);
++		await invalidateRefreshFamily(ctx, client_id, refreshToken);
+ 		throw new APIError("BAD_REQUEST", {
+ 			error_description: "invalid refresh token",
+ 			error: "invalid_grant"
+@@ -7220,7 +7251,7 @@ async function revokeRefreshToken(ctx, opts, token, clientId) {
+ 		error: "invalid_request"
+ 	});
+ 	if (refreshToken.revoked) {
+-		if (refreshToken.clientId === clientId) await invalidateRefreshFamily(ctx, clientId, refreshToken.userId);
++		if (refreshToken.clientId === clientId) await invalidateRefreshFamily(ctx, clientId, refreshToken);
+ 		throw new APIError$1("BAD_REQUEST", {
+ 			error_description: "refresh token revoked",
+ 			error: "invalid_request"
+@@ -7241,7 +7272,7 @@ async function revokeRefreshToken(ctx, opts, token, clientId) {
+ 		increment: {},
+ 		set: { revoked: /* @__PURE__ */ new Date(iat * 1e3) }
+ 	})) {
+-		await invalidateRefreshFamily(ctx, clientId, refreshToken.userId);
++		await invalidateRefreshFamily(ctx, clientId, refreshToken);
+ 		throw new APIError$1("BAD_REQUEST", {
+ 			error_description: "refresh token revoked",
+ 			error: "invalid_request"
 diff --git a/dist/index.mjs b/dist/index.mjs
 index 1f870ae7a9937ddcc98ca39a38dca2b4488ff3be..00a2ff8e8d90e3e4f0cddd48be5199480087dc15 100644
 --- a/dist/index.mjs

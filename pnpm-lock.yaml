@@ -164,7 +164,7 @@ settings:
 
 patchedDependencies:
   '@better-auth/core@1.7.27': d0a8d40c08c14702f534a902327f1f3c3aaee4ad8db58cedb10184e06add1d3e
-  '@better-auth/oauth-provider@1.7.27': 1fa00c5288c642c073533be7b2a2adea08379e47074e11af892d94c7738caddd
+  '@better-auth/oauth-provider@1.7.27': 0add4a447243333580ae97f4391d0b3339bf001619f11ac421024304331361f5
   '@better-auth/sso@1.7.27': 39273684973460350196805b0573cd78655d590c5515361cdc9c71f5c60cfa3f
   '@cloudflare/worker-bundler@0.2.6': 0eb0808184ef590337ab61d84c78de641ce65a713d7c6dc1ba070b0ac664cb99
   '@cloudflare/workers-oauth-provider@1.2.4': f21d52790d10f0313efdc1b0a03895a0f63f54f7dfd6b6bd51c889c69415b5d5
@@ -233,7 +233,7 @@ importers:
         version: 1.7.27(patch_hash=d0a8d40c08c14702f534a902327f1f3c3aaee4ad8db58cedb10184e06add1d3e)(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.5))(jose@6.2.10)(kysely@0.29.6)(nanostores@1.5.4)
       '@better-auth/oauth-provider':
         specifier: 1.7.27
-        version: 1.7.27(patch_hash=1fa00c5288c642c073533be7b2a2adea08379e47074e11af892d94c7738caddd)(bcbf92be8604636c74c228b10e1132b4)
+        version: 1.7.27(patch_hash=0add4a447243333580ae97f4391d0b3339bf001619f11ac421024304331361f5)(bcbf92be8604636c74c228b10e1132b4)
       '@better-auth/sso':
         specifier: 1.7.27
         version: 1.7.27(patch_hash=39273684973460350196805b0573cd78655d590c5515361cdc9c71f5c60cfa3f)(bcbf92be8604636c74c228b10e1132b4)
@@ -8335,7 +8335,7 @@ snapshots:
       '@better-auth/core': 1.7.27(patch_hash=d0a8d40c08c14702f534a902327f1f3c3aaee4ad8db58cedb10184e06add1d3e)(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.5))(jose@6.2.10)(kysely@0.29.6)(nanostores@1.5.4)
       '@better-auth/utils': 0.5.1
 
-  '@better-auth/oauth-provider@1.7.27(patch_hash=1fa00c5288c642c073533be7b2a2adea08379e47074e11af892d94c7738caddd)(bcbf92be8604636c74c228b10e1132b4)':
+  '@better-auth/oauth-provider@1.7.27(patch_hash=0add4a447243333580ae97f4391d0b3339bf001619f11ac421024304331361f5)(bcbf92be8604636c74c228b10e1132b4)':
     dependencies:
       '@better-auth/core': 1.7.27(patch_hash=d0a8d40c08c14702f534a902327f1f3c3aaee4ad8db58cedb10184e06add1d3e)(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.5))(jose@6.2.10)(kysely@0.29.6)(nanostores@1.5.4)
       '@better-auth/utils': 0.5.1
