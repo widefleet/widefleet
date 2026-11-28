@@ -1,0 +1,7 @@
+# A copy of the starter is its own workspace, with the build scripts it needs.
+packages: []
+strictPeerDependencies: true
+strictDepBuilds: true
+allowBuilds:
+  esbuild: true
+  workerd: true

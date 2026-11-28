@@ -88,6 +88,7 @@ for (const [name, target] of [
     "tools",
     "package.json",
     "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
     "tsconfig.json",
     "vite.config.ts",
     "wrangler.jsonc",
@@ -103,11 +104,6 @@ for (const [name, target] of [
     await copyFile(join(root, file), join(template, file));
 
   await cp(join(root, "tools/oxlint"), join(template, "tools/oxlint"), { recursive: true });
-
-  await writeFile(
-    join(template, "pnpm-workspace.yaml"),
-    "packages: []\nstrictPeerDependencies: true\nstrictDepBuilds: true\nallowBuilds:\n  esbuild: true\n  workerd: true\n",
-  );
 
   // Verify each independent lockfile without resolving new versions during packaging.
   await runPnpm(["install", "--lockfile-only", "--frozen-lockfile", "--ignore-scripts"], template);
