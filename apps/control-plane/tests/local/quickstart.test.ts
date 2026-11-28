@@ -62,13 +62,23 @@ describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () =>
       }
 
       await page.getByLabel("Deine Notiz", { exact: true }).fill(note);
-      await page
-        .getByLabel("Ein Foto dazu", { exact: true })
-        .setInputFiles({ name: "test.png", mimeType: "image/png", buffer: photo });
+      // The label opens the photo picker once the page has hydrated.
+      const chooser = page.waitForEvent("filechooser");
+      await expect
+        .poll(async () => {
+          await page.getByLabel("Ein Foto dazu", { exact: true }).click();
+
+          return Promise.race([
+            chooser.then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(resolve, 500, false)),
+          ]);
+        })
+        .toBe(true);
+      await (await chooser).setFiles({ name: "test.png", mimeType: "image/png", buffer: photo });
       await page.getByRole("button", { name: "Notiz teilen", exact: true }).click();
       await expect
-        .poll(() => page.getByRole("status").textContent())
-        .toContain("Deine Notiz wurde gespeichert");
+        .poll(() => page.getByText("Deine Notiz wurde gespeichert.", { exact: true }).count())
+        .toBe(1);
       const article = page.getByRole("article").filter({ hasText: note });
       const imagePath = await article.getByRole("img").getAttribute("src");
       expect(imagePath).toMatch(/^\/photos\//);

@@ -166,6 +166,12 @@ importers:
 
   .:
     dependencies:
+      '@ui-sdk/core':
+        specifier: 0.1.0-beta.18
+        version: 0.1.0-beta.18
+      '@ui-sdk/svelte':
+        specifier: 0.1.0-beta.18
+        version: 0.1.0-beta.18(@ui-sdk/core@0.1.0-beta.18)(svelte@5.57.1)
       better-result:
         specifier: 3.0.1
         version: 3.0.1
@@ -1018,6 +1024,15 @@ packages:
 
   '@types/node@22.18.0':
     resolution: {integrity: sha512-m5ObIqwsUp6BZzyiy4RdZpzWGub9bqLJMvZDD0QMXhxjqMHMENlj+SqF5QxoUwaQNFe+8kz8XM8ZQhqkQPTgMQ==}
+
+  '@ui-sdk/core@0.1.0-beta.18':
+    resolution: {integrity: sha512-y5S6komEjZ2dtD/rrW0ulkP67zNZpfbTBmtynuw4oLvhazXoEQI7Yk1/jMuOVOJvj0RUk8tLY/iyckbzaI+CrA==}
+
+  '@ui-sdk/svelte@0.1.0-beta.18':
+    resolution: {integrity: sha512-sD0wRq/krocdbWr+lM1Eu25IfhNNGrHoEVuVL+IeW49SgsIx0GAkiTOCgKhcz+LKTBp2tpxkpRTyJzbgXDOR+Q==}
+    peerDependencies:
+      '@ui-sdk/core': ^0.1.0-beta.18
+      svelte: '>=5.33'
 
   acorn@8.18.0:
     resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
@@ -1915,6 +1930,13 @@ snapshots:
   '@types/node@22.18.0':
     dependencies:
       undici-types: 6.21.0
+
+  '@ui-sdk/core@0.1.0-beta.18': {}
+
+  '@ui-sdk/svelte@0.1.0-beta.18(@ui-sdk/core@0.1.0-beta.18)(svelte@5.57.1)':
+    dependencies:
+      '@ui-sdk/core': 0.1.0-beta.18
+      svelte: 5.57.1
 
   acorn@8.18.0: {}
 
