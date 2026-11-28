@@ -236,6 +236,9 @@ export class BuildSandbox extends DurableObject<Env> {
       PLATFORM_ORGANIZATION: request.platform.organizationId,
       // The CLI sends it; the Outbound entrypoint replaces it with the build's token.
       PLATFORM_ACCESS_TOKEN: "replaced-by-the-ci",
+      // pnpm fails a fresh install when a dependency's build script is not approved,
+      // as in apps that lack allowBuilds. The build skips those scripts instead.
+      pnpm_config_strict_dep_builds: "false",
     };
 
     let log = "";
