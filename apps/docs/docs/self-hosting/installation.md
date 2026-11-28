@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure and recover a company installation.
-lastModified: 2026-11-18
+lastModified: 2026-11-19
 ---
 
 This guide installs Widefleet **0.7.6** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -210,7 +210,7 @@ Use matching 0.7.6 control-plane, agent, CLI and app runtime releases. The nativ
 
 Check the selected and active versions with `widefleet runtime status`. Use the [runtime commands](/reference/runtime#versions-and-updates) to update or roll back with an administrator login. Updating container images and activating a runtime remain separate actions.
 
-Widefleet 0.7.6 serves [MCP](/guides/mcp) at `mcp.APP_DOMAIN` through the existing app wildcard DNS and certificate. The app name `mcp` is reserved; move an existing app with that name before upgrading. To offer Google and Microsoft in the MCP connection page, add the [MCP redirect addresses](/reference/social-sign-in#configure-an-installation).
+Widefleet 0.7.6 serves [MCP](/guides/mcp) at `mcp.APP_DOMAIN` through the existing app wildcard DNS and certificate. The app name `mcp` is reserved; move an existing app with that name before upgrading.
 
 ## Management members and app collaboration
 

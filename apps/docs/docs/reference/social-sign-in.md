@@ -1,7 +1,7 @@
 ---
 title: Google and Microsoft sign-in
 description: Sign in with a personal provider account and configure providers for an installation.
-lastModified: 2026-11-18
+lastModified: 2026-11-19
 ---
 
 Widefleet **0.4.15 or newer** supports Google and Microsoft sign-in. When enabled
@@ -42,15 +42,6 @@ URI of `PLATFORM_URL/api/auth/callback/widefleet-microsoft`. Create a client sec
 and retain its **value**, rather than its identifier. Widefleet uses Microsoft's
 `common` endpoint and requests `openid`, `profile` and `email`. See
 [Microsoft provider configuration](https://better-auth.com/docs/authentication/microsoft).
-
-[MCP clients](/guides/mcp) use the same registrations for their Google and
-Microsoft sign-in. Add these redirect URIs as well, replacing `APP_DOMAIN` with
-the installation's app domain:
-
-```text
-https://mcp.APP_DOMAIN/oauth/callback/google
-https://mcp.APP_DOMAIN/oauth/callback/microsoft
-```
 
 If organizations grant app access through Google groups, enable the Cloud Identity
 API in this Google client's project as described in

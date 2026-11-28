@@ -1,7 +1,7 @@
 ---
 title: CLI authentication
 description: Credential stores, headless sessions, token renewal and external credentials.
-lastModified: 2026-10-23
+lastModified: 2026-11-19
 ---
 
 Run `widefleet login`, open the printed link and approve the device code in your
@@ -17,7 +17,11 @@ Sign in again after upgrading from an earlier version. See
 
 ## Agent login
 
-Ask the agent to start `widefleet login` and keep it running in a background
+An agent connected to Widefleet through [MCP](/guides/mcp#build-apps) signs in
+the CLI itself: it calls `cli_login` and runs the returned
+`widefleet login --code` command. No browser approval is needed.
+
+Otherwise, ask the agent to start `widefleet login` and keep it running in a background
 terminal session. Open the link it provides, enter your email if prompted and
 approve the displayed device code in your own browser. The agent can then verify
 access with `widefleet whoami` and continue the task.

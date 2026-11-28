@@ -1,7 +1,7 @@
 ---
 title: Connect AI clients with MCP
 description: Use your organization's app services from Claude and other MCP clients.
-lastModified: 2026-11-18
+lastModified: 2026-11-19
 ---
 
 Connect an AI client such as Claude to Widefleet. The client can then find the
@@ -23,25 +23,28 @@ Add a remote MCP server with your installation's address:
 
 The client opens the Widefleet connection page in your browser:
 
-- If you are already signed in to an app, choose **Continue as** your account and organization.
-- Otherwise choose **Google** or **Microsoft** and sign in with your company account.
-  If the account belongs to several organizations, select one.
-- If your organization signs in with another provider, choose **Continue with Widefleet**.
+- Choose your organization if the page lists it. It lists organizations you are
+  signed in to in an app and organizations you connected before in this browser.
+- Otherwise enter your work email and choose **Continue with email**. Widefleet opens your
+  company sign-in.
+- If you are a guest in the organization, or your organization signs in with
+  Widefleet, choose **Continue with Widefleet** and select the organization.
 
 The client then shows Widefleet as connected. Ask it which Widefleet services are
 available to you to check the connection.
 
 ## Use app services
 
-The client gets five tools:
+The client gets six tools:
 
-| Tool       | Purpose                                                     |
-| ---------- | ----------------------------------------------------------- |
-| `search`   | Find services available to you.                             |
-| `describe` | Read a service's method signatures and documentation.       |
-| `call`     | Call a service method.                                      |
-| `execute`  | Combine several calls in a short JavaScript script.         |
-| `skills`   | Read the `widefleet` skill for building and deploying apps. |
+| Tool        | Purpose                                                       |
+| ----------- | ------------------------------------------------------------- |
+| `search`    | Find services available to you.                               |
+| `describe`  | Read a service's method signatures and documentation.         |
+| `call`      | Call a service method.                                        |
+| `execute`   | Combine several calls in a short JavaScript script.           |
+| `skills`    | Read the `widefleet` skill for building and deploying apps.   |
+| `cli_login` | Sign in the Widefleet CLI in the client's shell as your user. |
 
 A client typically searches for a service, describes it and then calls a method.
 For a service with a `Reader.status()` method, the `call` arguments are:
@@ -94,6 +97,16 @@ The `widefleet` skill teaches the client to create and deploy apps with the
 [CLI](/reference/cli). Clients read it through the `skills` tool or as the
 `skill://widefleet/SKILL.md` resource.
 
+When the CLI has no session, for example in a new sandbox, the client calls
+`cli_login` and runs the command it returns:
+
+```sh
+widefleet login --url https://app.widefleet.com --code CODE
+```
+
+The CLI signs in as you for the organization you connected, without opening a
+browser. Each code works once and expires after two minutes.
+
 ## Choose who can use an app's services
 
 MCP follows each app's **Access → App access** rules. Everyone who may open an
@@ -112,8 +125,10 @@ widefleet access set --app inventory --group warehouse-readers
   that the app's access groups include you.
 - **A service has no method documentation:** redeploy it with the current CLI.
   See [missing API documentation](/guides/app-services#missing-api-documentation).
-- **Sign-in fails after choosing Google or Microsoft:** ask your administrator to
-  check the [MCP redirect addresses](/reference/social-sign-in#configure-an-installation).
+- **Widefleet sign-in is unavailable:** open one of your organization's apps in
+  the same browser and sign in, then choose **Check again**.
+- **`cli_login` reports that no account matches:** sign in to Widefleet in your
+  browser once, then ask the client to run `cli_login` again.
 - **The client asks you to sign in again:** reconnect Widefleet in the client.
 
 Next, [publish a service](/guides/app-services#publish-a-service) to make your
