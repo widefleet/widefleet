@@ -6,6 +6,19 @@ set -euo pipefail
 # toolchain is used by the ordinary agent Dockerfile and this cached CI build.
 cache=${RELEASE_CARGO_CACHE:?Set RELEASE_CARGO_CACHE to an absolute directory}
 binaries=${RELEASE_BINARIES:?Set RELEASE_BINARIES to an absolute directory}
+# Release images need the agent and the CLI; an image that only runs the CLI
+# sets RELEASE_PACKAGES=platform-cli and skips compiling the agent.
+read -r -a packages <<< "${RELEASE_PACKAGES:-platform-agent platform-cli}"
+cargo_packages=()
+executables=()
+for package in "${packages[@]}"; do
+  case "$package" in
+    platform-agent) executables+=(platform-agent) ;;
+    platform-cli) executables+=(widefleet) ;;
+    *) echo "RELEASE_PACKAGES names $package; use platform-agent and platform-cli" >&2; exit 1 ;;
+  esac
+  cargo_packages+=(--package "$package")
+done
 mkdir -p "$cache/cargo" "$cache/target" "$binaries/source/target/release"
 docker build --platform linux/amd64 --target toolchain \
   --file infra/agent/Dockerfile --tag widefleet-release-toolchain .
@@ -24,15 +37,16 @@ docker run --rm --platform linux/amd64 --user "$user" \
     RUSTUP_TOOLCHAIN=$(rustup default | cut -d " " -f 1)
     export RUSTUP_TOOLCHAIN
     cd /source
-    cargo build --locked --release --package platform-agent --package platform-cli
-  '
-install -m 755 "$cache/target/release/platform-agent" "$cache/target/release/widefleet" \
-  "$binaries/source/target/release/"
+    cargo build --locked --release "$@"
+  ' bash "${cargo_packages[@]}"
+for executable in "${executables[@]}"; do
+  install -m 755 "$cache/target/release/$executable" "$binaries/source/target/release/"
+done
 
 # Tar retains executable permissions when transported through Actions artifacts.
 git rev-parse HEAD > "$binaries/revision"
 (
   cd "$binaries"
-  sha256sum source/target/release/platform-agent source/target/release/widefleet > SHA256SUMS
+  sha256sum "${executables[@]/#/source/target/release/}" > SHA256SUMS
   tar -cf release-binaries.tar revision SHA256SUMS source
 )
