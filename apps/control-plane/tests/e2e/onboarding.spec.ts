@@ -237,7 +237,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     const operator = await operatorContext.newPage();
     await operator.goto("/setup");
     await operator.waitForLoadState("networkidle");
-    await operator.getByLabel("Name", { exact: true }).fill("Email Setup Owner");
+    await operator.getByLabel("Your name", { exact: true }).fill("Email Setup Owner");
     await operator.getByLabel("Organization name", { exact: true }).fill("Example Team");
     await operator.getByLabel("Email", { exact: true }).fill("email-setup@example.test");
     await operator.getByRole("button", { name: "Create account and continue" }).click();

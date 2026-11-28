@@ -25,7 +25,7 @@
 
     try {
       const { next } = await createOwner({ name, email, organizationName });
-      await goto(`/sign-in?${new URLSearchParams({ email, next })}`);
+      await goto(`/sign-in?${new URLSearchParams({ email, next, setup: "1" })}`);
     } catch (cause) {
       message = cause instanceof Error ? cause.message : "Could not complete setup.";
     } finally {
@@ -34,18 +34,16 @@
   };
 </script>
 
-<svelte:head><title>Welcome · Widefleet</title></svelte:head>
+<svelte:head><title>Set up Widefleet · Widefleet</title></svelte:head>
 <AuthLayout>
-  <p class="text-primary mb-3 text-xs font-medium">WELCOME TO WIDEFLEET</p>
-  <h1 class="text-2xl font-semibold leading-tight tracking-tight">Set up your workspace.</h1>
+  <h1 class="text-2xl font-semibold leading-tight tracking-tight">Set up Widefleet</h1>
   <p class="text-muted-foreground mt-3 text-sm leading-6">
-    Name your organization and create its first administrator. Sign in with a one-time code to get
-    started.
+    Name your organization and create the first administrator account.
   </p>
   <div class="text-muted-foreground mt-6 flex items-center gap-2 text-[11px]">
     <span class="text-foreground font-medium">1. Account</span><ArrowRight class="size-3" /><span
-      >2. Sign-in</span
-    ><ArrowRight class="size-3" /><span>3. First app</span>
+      >2. Sign in</span
+    >
   </div>
   <form onsubmit={create} class="mt-7 space-y-5">
     <div class="space-y-2">
@@ -53,19 +51,20 @@
         id="organization-name"
         bind:value={organizationName}
         autocomplete="organization"
+        placeholder="Acme Inc."
         required
         maxlength={200}
-        class="h-10"
+        class="h-11"
       />
     </div>
     <div class="space-y-2">
-      <Label for="owner-name">Name</Label><Input
+      <Label for="owner-name">Your name</Label><Input
         id="owner-name"
         bind:value={name}
         autocomplete="name"
         required
         maxlength={100}
-        class="h-10"
+        class="h-11"
       />
     </div>
     <div class="space-y-2">
@@ -74,12 +73,13 @@
         bind:value={email}
         type="email"
         autocomplete="email"
+        placeholder="name@example.com"
         required
-        class="h-10"
+        class="h-11"
       />
     </div>
     {#if message}<Feedback kind="error">{message}</Feedback>{/if}
-    <Button type="submit" disabled={busy} class="h-10 w-full"
+    <Button type="submit" disabled={busy} class="h-11 w-full"
       >{busy ? "Creating account …" : "Create account and continue"}<ArrowRight /></Button
     >
   </form>

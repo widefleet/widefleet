@@ -86,7 +86,11 @@
         Sign in to {data.organizationName ?? "Widefleet"}
       </h1>
       <p class="text-muted-foreground mt-2 text-sm leading-6">
-        {data.next.startsWith("/device") ? "Sign in to continue." : "Welcome back."}
+        {data.next.startsWith("/device")
+          ? "Sign in to continue."
+          : data.fromSetup
+            ? "Sign in with a one-time code to finish setup."
+            : "Welcome back."}
       </p>
       {#if data.provider && (data.organizationSlug || !data.emailSignIn)}<Button
           onclick={signIn}

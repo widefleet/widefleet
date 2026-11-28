@@ -75,7 +75,7 @@ test("verifies company DNS and enforces company SSO", async ({ page, request }) 
       .toBe(true);
     await page.goto("/");
     await expect(page).toHaveURL(/\/setup$/);
-    await page.getByLabel("Name", { exact: true }).fill("IT Admin");
+    await page.getByLabel("Your name", { exact: true }).fill("IT Admin");
     await page.getByLabel("Organization name", { exact: true }).fill("Example Team");
     await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
     environment.authControl.available(false);

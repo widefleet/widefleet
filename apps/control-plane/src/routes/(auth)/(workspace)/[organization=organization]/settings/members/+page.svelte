@@ -136,6 +136,14 @@
       <FormIssues issues={inviteMember.fields.allIssues()} />
     </form>
   </details>
+{:else}
+  <p class="text-muted-foreground mt-6 text-sm leading-6">
+    Email invitations are unavailable. New members join when they first sign in with your company
+    account. <a
+      class="text-foreground font-medium underline underline-offset-4"
+      href={workspace.path("/settings/company-sign-in")}>Manage company sign-in</a
+    >
+  </p>
 {/if}
 <div class="mt-7 flex flex-wrap items-center justify-between gap-4 border-b pb-5">
   <form method="GET" role="search" class="flex w-full max-w-md gap-2">

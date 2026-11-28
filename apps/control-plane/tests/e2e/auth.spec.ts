@@ -3119,7 +3119,7 @@ test("focuses code entry and returns to the same email without another send", as
   await expect(page.getByText("Sign in to continue.", { exact: true })).toBeVisible();
   await page.getByLabel("Email", { exact: true }).fill("Reader@EXAMPLE.TEST");
   await page.getByLabel("Email", { exact: true }).press("Enter");
-  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Enter your sign-in code" })).toBeVisible();
   await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Continue with Google/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toHaveCount(0);
@@ -3194,9 +3194,9 @@ test("keeps the email step usable after a failed send and clears feedback on bac
   await expect(page.getByRole("alert")).toContainText("Could not send a sign-in code");
   await expect(page.getByLabel("Email", { exact: true })).toBeEnabled();
   await expect(page.getByLabel("Email", { exact: true })).toHaveValue("reader@example.test");
-  await expect(page.getByRole("heading", { name: "Check your email" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Enter your sign-in code" })).toHaveCount(0);
   await page.getByRole("button", { name: "Continue with email", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Enter your sign-in code" })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to sign in", exact: true }).click();
   await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
