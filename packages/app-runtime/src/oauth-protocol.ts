@@ -15,15 +15,19 @@ const scope = z.string().regex(/^[\x21\x23-\x5B\x5D-\x7E]+$/);
 const endpoint = z.url().startsWith("https://");
 
 // Settings every managed client shares. The operator decides which scopes apps
-// may request and which API origins its access tokens reach.
+// may request and which API origins its access tokens reach. A service without
+// scopes, such as Notion, whose integration settings decide its access, lists none.
 const clientPolicy = {
-  scopes: z.array(scope).min(1),
+  scopes: z.array(scope),
   hosts: z.array(origin("Access token hosts must be canonical HTTPS origins")).min(1),
   // The issuer a callback's `iss` parameter must name (RFC 9207). `{tenantid}`
   // stands for one tenant ID, as Microsoft's multi-tenant issuers publish it.
   issuer: endpoint.optional(),
   // RFC 7009 token revocation, used when a user disconnects an account.
   revocationUrl: endpoint.optional(),
+  // How a registered client authenticates there: with its credentials in the
+  // form, or with HTTP Basic authentication, which Notion requires.
+  revocationAuthentication: z.enum(["form", "basic"]).optional(),
 };
 
 /**
@@ -76,7 +80,7 @@ export const oauthRequest = z.discriminatedUnion("action", [
   z.strictObject({
     action: z.literal("authorize"),
     client: managedOAuthClientName,
-    scopes: z.array(scope).min(1).max(64),
+    scopes: z.array(scope).max(64),
     state: z.string().min(1).max(256),
     codeVerifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
   }),

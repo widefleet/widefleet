@@ -2,6 +2,7 @@ import { runWithEndpointContext } from "@better-auth/core/context";
 import { createLogger } from "@better-auth/core/env";
 import {
   createAuthorizationURL,
+  encodeBasicCredentials,
   refreshAccessToken,
   validateAuthorizationCode,
   type OAuth2Tokens,
@@ -247,14 +248,22 @@ const issuerMatches = (expected: string, actual: string) => {
 
 const revoke = async (config: Configuration, client: Client, token: string) => {
   if (!client.revocationUrl) return false;
-  const body = new URLSearchParams({ token, client_id: clientIdOf(config, client) });
+  const clientId = clientIdOf(config, client);
+  const body = new URLSearchParams({ token });
+  const headers = new Headers({ accept: "application/json" });
 
-  if (!isMetadataDocumentClient(client)) body.set("client_secret", client.clientSecret);
+  if (isMetadataDocumentClient(client)) body.set("client_id", clientId);
+  else if (client.revocationAuthentication === "basic")
+    headers.set("authorization", encodeBasicCredentials(clientId, client.clientSecret));
+  else {
+    body.set("client_id", clientId);
+    body.set("client_secret", client.clientSecret);
+  }
 
   const response = await fetch(client.revocationUrl, {
     method: "POST",
     body,
-    headers: { accept: "application/json" },
+    headers,
     redirect: "manual",
     signal: AbortSignal.timeout(15000),
   });
@@ -386,7 +395,12 @@ export const managedOAuth = (environment: Environment) => ({
     };
 
     if (request.action === "authorize") {
-      if (disallowed(client, request.scopes).length > 0)
+      // Without scopes, a server may grant its own defaults; only a client
+      // without scopes, such as Notion's, may ask for none.
+      if (
+        disallowed(client, request.scopes).length > 0 ||
+        (request.scopes.length === 0 && client.scopes.length > 0)
+      )
         throw new Error("The requested scopes are not allowed for this client");
 
       const ticket = await seal(
