@@ -11,7 +11,7 @@ const base64url = (value: Uint8Array) =>
 const encode = (value: string) => base64url(new TextEncoder().encode(value));
 
 // Synthetic providers check PKCE, callback URI, credentials and one-use codes.
-export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear") => {
+export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear" | "notion") => {
   const codes = new Map<string, { user: string; challenge: string | null; redirect: string }>();
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
@@ -33,6 +33,8 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
     microsoft:
       "openid profile email offline_access User.Read Files.ReadWrite.All Mail.ReadWrite Mail.Send Calendars.ReadWrite Contacts.ReadWrite MailboxSettings.ReadWrite Chat.ReadWrite ChatMessage.Send Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send",
     linear: "read write",
+    // Notion's integration settings decide its access; it grants no scopes.
+    notion: "",
   };
 
   const tokenURLs = {
@@ -40,13 +42,24 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
     github: "https://github.com/login/oauth/access_token",
     microsoft: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
     linear: "https://api.linear.app/oauth/token",
+    notion: "https://api.notion.com/v1/oauth/token",
   };
 
   // RFC 7009 revocation, where the provider offers it.
   const revocationURLs: Partial<Record<typeof kind, string>> = {
     google: "https://oauth2.googleapis.com/revoke",
     linear: "https://api.linear.app/oauth/revoke",
+    notion: "https://api.notion.com/v1/oauth/revoke",
   };
+
+  // Notion authenticates clients with HTTP Basic authentication only; the others
+  // take the credentials in the form.
+  const authenticated = (request: Request, form: URLSearchParams) =>
+    kind === "notion"
+      ? request.headers.get("authorization") ===
+        `Basic ${btoa(`test-${kind}-client:test-${kind}-secret`)}`
+      : form.get("client_id") === `test-${kind}-client` &&
+        form.get("client_secret") === `test-${kind}-secret`;
 
   const tokens = (user: string) => {
     const accessToken = `synthetic-access-${crypto.randomUUID()}`;
@@ -95,6 +108,17 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
       scope: scopes[kind],
     };
 
+    // Notion answers with the bot and the person who authorized it, and no scope.
+    if (kind === "notion")
+      return Response.json({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: "bearer",
+        bot_id: `bot-${user}`,
+        workspace_id: "workspace-1",
+        owner: { type: "user", user: { object: "user", id: user } },
+      });
+
     // Linear's token responses carry no ID token without the openid scope.
     return Response.json(
       kind === "linear" ? result : { ...result, id_token: `${unsigned}.${signature}` },
@@ -108,8 +132,10 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));
 
-      // Linear OAuth applications make PKCE optional; Better Auth's Linear provider omits it.
-      const optional = kind === "linear" && !url.searchParams.has("code_challenge");
+      // Linear OAuth applications make PKCE optional; Better Auth's Linear provider
+      // omits it. Notion has no PKCE.
+      const optional =
+        (kind === "linear" || kind === "notion") && !url.searchParams.has("code_challenge");
 
       const challenge = optional
         ? null
@@ -137,11 +163,14 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
         const form = new URLSearchParams(await request.text());
         const token = form.get("token") ?? "";
 
-        if (
-          form.get("client_id") !== `test-${kind}-client` ||
-          form.get("client_secret") !== `test-${kind}-secret` ||
-          !(refresh.delete(token) || access.delete(token))
-        )
+        if (!authenticated(request, form))
+          return Response.json({ error: "invalid_client" }, { status: 401 });
+
+        // Notion revokes access tokens only; it answers a refresh token
+        // without revoking anything.
+        if (kind === "notion" && refresh.has(token)) return Response.json({});
+
+        if (!(refresh.delete(token) || access.delete(token)))
           return Response.json({ error: "invalid_token" }, { status: 400 });
         state.revocations++;
 
@@ -153,10 +182,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
           ? new URLSearchParams(z.record(z.string(), z.string()).parse(await request.json()))
           : new URLSearchParams(await request.text());
 
-        if (
-          form.get("client_id") !== `test-${kind}-client` ||
-          form.get("client_secret") !== `test-${kind}-secret`
-        )
+        if (!authenticated(request, form))
           return Response.json({ error: "invalid_client" }, { status: 400 });
 
         if (form.get("grant_type") === "authorization_code") {
@@ -246,6 +272,18 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
             : { data: { issues: { nodes: [] } } },
         );
       }
+
+      // Notion's API: the token's bot, owned by the person, and search.
+      if (url.href === "https://api.notion.com/v1/users/me")
+        return Response.json({
+          object: "user",
+          id: `bot-${user}`,
+          type: "bot",
+          bot: { owner: { type: "user", user: { object: "user", id: user, name: user } } },
+        });
+
+      if (url.href === "https://api.notion.com/v1/search")
+        return Response.json({ object: "list", results: [], next_cursor: null, has_more: false });
 
       throw new Error(`Unexpected request: ${url.origin}${url.pathname}`);
     },

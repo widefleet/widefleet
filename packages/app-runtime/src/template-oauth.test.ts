@@ -64,6 +64,13 @@ const clients = {
     hosts: ["https://api.linear.app"],
     revocationUrl: "https://api.linear.app/oauth/revoke",
   },
+  notion: {
+    provider: "notion",
+    scopes: [],
+    hosts: ["https://api.notion.com"],
+    revocationUrl: "https://api.notion.com/v1/oauth/revoke",
+    revocationEndpointAuthMethod: "client_secret_basic",
+  },
 };
 
 // Origins the synthetic providers serve, as an app's network policy allows them.
@@ -73,6 +80,7 @@ const origins = [
   "https://login.microsoftonline.com",
   "https://graph.microsoft.com",
   "https://api.linear.app",
+  "https://api.notion.com",
 ];
 
 for (const [template, kind, prefix] of [
@@ -82,6 +90,7 @@ for (const [template, kind, prefix] of [
   ["excel", "microsoft", "MICROSOFT"],
   ["teams", "microsoft", "MICROSOFT"],
   ["linear", "linear", "LINEAR"],
+  ["notion", "notion", "NOTION"],
 ] as const)
   describe(`${template} managed OAuth`, () => {
     const origin = `https://${template}.example.test:25453`;
