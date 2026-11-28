@@ -163,7 +163,14 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
         const form = new URLSearchParams(await request.text());
         const token = form.get("token") ?? "";
 
-        if (!authenticated(request, form) || !(refresh.delete(token) || access.delete(token)))
+        if (!authenticated(request, form))
+          return Response.json({ error: "invalid_client" }, { status: 401 });
+
+        // Notion revokes access tokens only; it answers a refresh token
+        // without revoking anything.
+        if (kind === "notion" && refresh.has(token)) return Response.json({});
+
+        if (!(refresh.delete(token) || access.delete(token)))
           return Response.json({ error: "invalid_token" }, { status: 400 });
         state.revocations++;
 
