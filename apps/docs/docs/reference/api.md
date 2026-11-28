@@ -322,3 +322,49 @@ restored version.
 Rollback queues a retained code artifact from the same app while preserving its current database and files. Deletion marks the app unwritable and queues teardown after earlier jobs; management records and artifacts are removed after the agent confirms teardown.
 
 See [CLI authentication](/reference/authentication) for credentials, [CLI reference](/reference/cli) for command output, and [runtime](/reference/runtime) for activation and removal behavior.
+
+## Build on the server
+
+Widefleet Cloud builds and deploys saved source for you, so a client without a
+local build, such as a chat assistant, can publish an app. Save the source first,
+for example with `widefleet deploy` or a Git push to the app's repository. Then
+start a build with the same app permissions as a deployment:
+
+```http
+POST /api/v1/apps/{appId}/builds
+Content-Type: application/json
+
+{}
+```
+
+The build uses the latest commit of the app's branch and the project directory of
+the active deployment. Pass `directory` to choose another project directory.
+Widefleet installs the locked dependencies and runs `widefleet deploy` for the app,
+with the built commit as the deployment's source. If the branch moves on before
+the build saves its source, the build fails, as `widefleet deploy` does from an
+outdated checkout. Network origins that the new version requests stay requested
+until an owner or administrator allows them.
+
+The response describes the build:
+
+```json
+{
+  "id": "0b9a8f2e-6c1d-4f3a-9e7b-2d5c4a1f8e60",
+  "appId": "5f2c7d1a-3b4e-4c6f-8a9d-1e2f3a4b5c6d",
+  "source": {
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "branch": "main",
+    "directory": "."
+  },
+  "status": "queued",
+  "deploymentId": null,
+  "message": null,
+  "createdAt": "2026-11-27T10:00:00.000Z",
+  "finishedAt": null
+}
+```
+
+Follow it with `GET /api/v1/apps/{appId}/builds/{buildId}`, which adds the `log`
+of the install and deploy commands. `status` moves from `queued` and `running` to
+`succeeded`, with the `deploymentId` to follow in the deployment history, or to
+`failed`, with a `message`. `GET /api/v1/apps/{appId}/builds` lists recent builds.
