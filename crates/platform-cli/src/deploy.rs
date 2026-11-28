@@ -269,12 +269,6 @@ fn add_app_icons(assets: &mut AssetFiles) -> Result<()> {
     Ok(())
 }
 
-#[derive(Deserialize)]
-struct PackageManifest {
-    // Only the presence of `build` matters; pnpm validates the scripts themselves.
-    scripts: Option<serde_json::Map<String, serde_json::Value>>,
-}
-
 /// Whether package.json declares a `build` script, or `None` without package.json.
 fn declares_build_script(project: &Path) -> Result<Option<bool>> {
     let bytes = match std::fs::read(project.join("package.json")) {
@@ -284,13 +278,10 @@ fn declares_build_script(project: &Path) -> Result<Option<bool>> {
     };
     // pnpm accepts a byte order mark, so the CLI does as well.
     let text = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
-    let manifest: PackageManifest = serde_json::from_slice(text)
+    let manifest: serde_json::Value = serde_json::from_slice(text)
         .map_err(|error| Error::invalid(format!("Invalid package.json: {error}")))?;
-    Ok(Some(
-        manifest
-            .scripts
-            .is_some_and(|scripts| scripts.contains_key("build")),
-    ))
+    // Only the presence of `build` matters; pnpm validates the scripts themselves.
+    Ok(Some(manifest.pointer("/scripts/build").is_some()))
 }
 
 async fn local_command(project: &Path, arguments: &[&str]) -> Result<()> {
@@ -1114,6 +1105,9 @@ mod tests {
             (r#"{"name":"app","scripts":{"build":"vite build"}}"#, true),
             ("\u{feff}{\"scripts\":{\"build\":\"vite build\"}}", true),
             (r#"{"scripts":{"build":"echo hello","other":false}}"#, true),
+            (r#"{"scripts":[]}"#, false),
+            (r#"{"scripts":false}"#, false),
+            (r#"{"scripts":{},"scripts":{"build":"vite build"}}"#, true),
         ] {
             std::fs::write(root.join("package.json"), manifest)?;
             assert_eq!(declares_build_script(root)?, Some(declared), "{manifest}");
