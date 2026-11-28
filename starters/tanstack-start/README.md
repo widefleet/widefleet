@@ -44,6 +44,13 @@ changing bindings; `.platform` contains generated files. Use `pnpm build` when
 building manually: it generates a single version for browser and server error
 reports. Direct `vite build` exits with a message to use the build script.
 
+The notes example keeps server data in TanStack Query. `src/router.tsx` creates one
+query client per router, so a server-rendered page never contains another person's
+data. The route loader fills the cache during server rendering. A shared note
+appears at once and is marked until the server confirms it; if it cannot be saved,
+it returns to the form. `saveNote` returns the updated list with its response. The
+browser reduces photos larger than 1600 pixels to JPEG before uploading them.
+
 The example uses `DB` and `FILES`; keep those declarations while using its notes
 and photos. Database and file contents survive code deployments and rollback.
 Use [explicit migrations](https://widefleet.com/docs/guides/migrations) when

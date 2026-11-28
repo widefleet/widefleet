@@ -76,12 +76,13 @@ describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () =>
         .toBe(true);
       await (await chooser).setFiles({ name: "test.png", mimeType: "image/png", buffer: photo });
       await page.getByRole("button", { name: "Notiz teilen", exact: true }).click();
-      await expect
-        .poll(() => page.getByText("Deine Notiz wurde gespeichert.", { exact: true }).count())
-        .toBe(1);
       const article = page.getByRole("article").filter({ hasText: note });
+
+      // The note appears at once and shows its date once the server has saved it.
+      await expect.poll(() => article.locator("time").count()).toBe(1);
+      // The photo is shown from the device until the uploaded copy has loaded.
+      await expect.poll(() => article.getByRole("img").getAttribute("src")).toMatch(/^\/photos\//);
       const imagePath = await article.getByRole("img").getAttribute("src");
-      expect(imagePath).toMatch(/^\/photos\//);
 
       if (!imagePath) throw new Error("Saved note did not reference its photo");
       const image = await context.request.get(`${origin}${imagePath}`);

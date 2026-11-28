@@ -176,7 +176,7 @@ describe.runIf(process.env["RUN_CAPTURE_TESTS"] === "1")("TanStack Start on cell
               compatibility_flags: z.array(z.string()),
               d1_databases: z.array(z.record(z.string(), z.string())),
               r2_buckets: z.array(z.record(z.string(), z.string())),
-              vars: z.record(z.string(), z.string()),
+              vars: z.record(z.string(), z.string()).optional(),
             })
             .parse(config),
           name: "tanstack-fixture",
@@ -255,9 +255,11 @@ describe.runIf(process.env["RUN_CAPTURE_TESTS"] === "1")("TanStack Start on cell
       await page.getByRole("button", { name: "Notiz teilen", exact: true }).click();
       const submitted = await mutation;
 
-      await expect
-        .poll(() => page.getByText("Deine Notiz wurde gespeichert.", { exact: true }).count())
-        .toBe(1);
+      // The note appears at once and shows its date once the server has saved it.
+      const note = page.getByRole("article").filter({ hasText: "Persisted TanStack note" });
+
+      await expect.poll(() => note.count()).toBe(1);
+      await expect.poll(() => note.locator("time").count()).toBe(1);
       await page.reload();
       expect(await page.textContent("article")).toContain("Persisted TanStack note");
       const photo = await page.locator("article img").getAttribute("src");

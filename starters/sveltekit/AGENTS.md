@@ -2,7 +2,8 @@
 
 Read README.md for the app contract and CLI commands. Keep this project independent of the Widefleet source repository.
 Use the installed `widefleet` CLI for app creation, deployment, history and rollback. Run `pnpm check` before deploying.
-Use `locals.user` for the authenticated company identity. Never trust identity headers outside the platform's private ingress.
+Use `locals.user` for the authenticated company identity, through `getRequestEvent()` in remote functions. Never trust identity headers outside the platform's private ingress.
+Read and change data with remote functions, as `src/lib/notes.remote.ts` does. Show a change in the interface at once, mark it until the server confirms it, and undo it with a message if it fails.
 
 ## Interface
 
