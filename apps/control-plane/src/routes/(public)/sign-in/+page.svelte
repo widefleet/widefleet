@@ -89,7 +89,7 @@
         {data.next.startsWith("/device")
           ? "Sign in to continue."
           : data.fromSetup
-            ? "Verify your email to finish setting up Widefleet."
+            ? "Sign in with a one-time code to finish setup."
             : "Welcome back."}
       </p>
       {#if data.provider && (data.organizationSlug || !data.emailSignIn)}<Button

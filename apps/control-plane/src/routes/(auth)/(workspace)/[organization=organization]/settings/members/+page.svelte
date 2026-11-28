@@ -138,11 +138,11 @@
   </details>
 {:else}
   <p class="text-muted-foreground mt-6 text-sm leading-6">
-    New members join when they first sign in with your company account. Set up
-    <a
+    Email invitations are unavailable. New members join when they first sign in with your company
+    account. <a
       class="text-foreground font-medium underline underline-offset-4"
-      href={workspace.path("/settings/company-sign-in")}>company sign-in</a
-    > to let your team in.
+      href={workspace.path("/settings/company-sign-in")}>Manage company sign-in</a
+    >
   </p>
 {/if}
 <div class="mt-7 flex flex-wrap items-center justify-between gap-4 border-b pb-5">
