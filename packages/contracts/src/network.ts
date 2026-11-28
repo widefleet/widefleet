@@ -47,6 +47,12 @@ export const networkChange = z.strictObject({
   origins: z.array(networkOrigin).min(1),
 });
 
+/** Applies the current lists again after a failed activation, without changing them. */
+export const networkRetry = z.strictObject({ action: z.literal("retry") });
+
+/** What a hosted network command applies: a change to the lists or a retry. */
+export const networkUpdate = z.union([networkChange, networkRetry]);
+
 export const networkState = networkSnapshot.extend({
   appliedRevision: z.number().int().nonnegative().nullable(),
   state: z.enum(["saved", "pending", "active", "failed"]),

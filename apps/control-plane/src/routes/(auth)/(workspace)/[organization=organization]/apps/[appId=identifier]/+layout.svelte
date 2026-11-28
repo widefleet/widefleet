@@ -2,6 +2,7 @@
   import { page } from "$app/state";
   import { getAppDetails, getAppSource } from "#lib/apps.remote";
   import { getAppConnections } from "#lib/connections.remote";
+  import { getAppNetwork } from "#lib/network.remote";
   import { getAppServices, getServiceDescription } from "#lib/services.remote";
   import type { manageWorkflow } from "#lib/workflows.remote";
   import { Button } from "@platform/ui/button";
@@ -99,11 +100,18 @@
           }).refresh(),
         ]);
 
+      // Activation and new deployments change both the bindings and the network permissions.
       if (activeTab === "connections")
-        await getAppConnections({
-          organizationId: workspace.organizationId,
-          appId: route.appId,
-        }).refresh();
+        await Promise.all([
+          getAppConnections({
+            organizationId: workspace.organizationId,
+            appId: route.appId,
+          }).refresh(),
+          getAppNetwork({
+            organizationId: workspace.organizationId,
+            appId: route.appId,
+          }).refresh(),
+        ]);
     } catch {
       // The query exposes the failure without replacing the last confirmed result.
     } finally {

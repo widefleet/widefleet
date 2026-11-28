@@ -10,7 +10,7 @@ import { apps, artifacts, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 
-const present = (app: typeof apps.$inferSelect) =>
+export const presentNetwork = (app: typeof apps.$inferSelect) =>
   contract.networkState.parse({
     revision: app.networkRevision,
     policy: app.networkPolicy,
@@ -25,6 +25,12 @@ const present = (app: typeof apps.$inferSelect) =>
           : "pending",
   });
 
+// Collaborators see an app's network permissions; only its owner or an administrator changes them.
+const mayChange = (
+  principal: Pick<Principal, "id" | "application">,
+  app: typeof apps.$inferSelect,
+) => principal.application.admin || app.ownerId === principal.id;
+
 export const validateNetworkChange = async (
   transaction: Transaction,
   principal: Pick<Principal, "id" | "admin" | "application">,
@@ -35,7 +41,7 @@ export const validateNetworkChange = async (
   if (access.isErr()) return access;
   const app = access.value;
 
-  if (!principal.application.admin && app.ownerId !== principal.id)
+  if (!mayChange(principal, app))
     return Result.err(
       new InvalidOperation({
         code: "FORBIDDEN",
@@ -55,7 +61,7 @@ export const applyNetworkChange = async (
   transaction: Transaction,
   principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
-  input: z.infer<typeof contract.networkChange>,
+  input: z.infer<typeof contract.networkUpdate>,
   enqueue = true,
 ) => {
   const access = await validateNetworkChange(transaction, principal, appId);
@@ -63,19 +69,22 @@ export const applyNetworkChange = async (
   if (access.isErr()) return access;
   const app = access.value;
   const policy = contract.networkPolicy.parse(app.networkPolicy);
-  const current = policy[input.target];
-  const selected = new Set(current);
+  let changed = false;
 
-  for (const origin of input.origins)
-    if (input.action === "allow") selected.add(origin);
-    else selected.delete(origin);
+  // A retry keeps the lists exactly as stored, so it never undoes a concurrent change.
+  if (input.action !== "retry") {
+    const current = policy[input.target];
+    const selected = new Set(current);
 
-  policy[input.target] = [...selected].sort();
+    for (const origin of input.origins)
+      if (input.action === "allow") selected.add(origin);
+      else selected.delete(origin);
 
-  const changed =
-    current.length !== selected.size || current.some((origin) => !selected.has(origin));
+    policy[input.target] = [...selected].sort();
+    changed = current.length !== selected.size || current.some((origin) => !selected.has(origin));
+  }
 
-  if (!changed && !app.networkError) return Result.ok(present(app));
+  if (!changed && !app.networkError) return Result.ok(presentNetwork(app));
 
   const [updated] = await transaction
     .update(apps)
@@ -99,7 +108,7 @@ export const applyNetworkChange = async (
       kind: "configure",
     });
 
-  return Result.ok(present(updated));
+  return Result.ok(presentNetwork(updated));
 };
 
 // The origins the app's latest deployment declares, as the current version.
@@ -136,21 +145,38 @@ export const withDeclaration = (
       })
     : state;
 
+const view = (
+  database: Database,
+  principal: Pick<Principal, "id" | "admin" | "application">,
+  appId: string,
+) =>
+  transact(database, async (transaction) => {
+    const app = await managedApp(transaction, principal, appId);
+
+    if (app.isErr()) return app;
+
+    return Result.ok({
+      network: withDeclaration(
+        presentNetwork(app.value),
+        await declaredNetwork(transaction, appId),
+      ),
+      canManage: app.value.state !== "deleting" && mayChange(principal, app.value),
+    });
+  });
+
 export const createNetworkService = (database: Database, execution?: HostedExecution) => ({
-  read: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
-    transact(database, async (transaction) => {
-      const app = await managedApp(transaction, principal, appId);
+  read: async (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) => {
+    const viewed = await view(database, principal, appId);
 
-      if (app.isErr()) return app;
-
-      return Result.ok(
-        withDeclaration(present(app.value), await declaredNetwork(transaction, appId)),
-      );
-    }),
+    return viewed.isErr() ? Result.err(viewed.error) : Result.ok(viewed.value.network);
+  },
+  // The management page also needs to know whether to offer changes.
+  view: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
+    view(database, principal, appId),
   change: async (
     principal: Pick<Principal, "id" | "admin" | "application">,
     appId: string,
-    input: z.infer<typeof contract.networkChange>,
+    input: z.infer<typeof contract.networkUpdate>,
   ) => {
     const changed = await (execution
       ? execution.network(principal, appId, input)

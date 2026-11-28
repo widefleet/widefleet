@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { app as appContract, appResource, capabilityState } from "@platform/contracts";
+  import type { app as appContract, appResource } from "@platform/contracts";
   import type { z } from "zod";
   import { getAppConnections } from "#lib/connections.remote";
   import { connectApp, disconnectApp } from "#lib/services.remote";
@@ -16,6 +16,8 @@
   import AppStatus from "./AppStatus.svelte";
   import Feedback from "./Feedback.svelte";
   import AppConnectionActions from "./AppConnectionActions.svelte";
+  import AppNetwork from "./AppNetwork.svelte";
+  import CapabilityStatus from "./CapabilityStatus.svelte";
   import { getWorkspaceContext } from "#lib/workspace-context";
 
   const workspace = getWorkspaceContext();
@@ -42,13 +44,6 @@
     ].sort(),
   );
 
-  const labels = {
-    active: "Active",
-    saved: "Saved",
-    pending: "Pending",
-    failed: "Failed",
-  } satisfies Record<z.infer<typeof capabilityState>["state"], string>;
-
   const resourceLabels = {
     d1: "Database",
     r2_bucket: "Object storage",
@@ -74,16 +69,6 @@
     };
   };
 </script>
-
-{#snippet status(state: z.infer<typeof capabilityState>["state"], removing = false)}
-  <Badge variant="outline" class="shrink-0 gap-1.5 font-normal">
-    <span
-      aria-hidden="true"
-      class={`size-1.5 rounded-full ${state === "active" ? "bg-emerald-500" : state === "failed" ? "bg-destructive" : state === "pending" ? "bg-amber-500" : "bg-muted-foreground/50"}`}
-    ></span>
-    {removing ? (state === "failed" ? "Removal failed" : "Removal pending") : labels[state]}
-  </Badge>
-{/snippet}
 
 <section aria-labelledby="connections-heading" class="space-y-6">
   <div class="flex flex-wrap items-start justify-between gap-4">
@@ -200,7 +185,7 @@
                         >{item.desired?.app ?? item.active?.app}</span
                       ></span
                     >
-                    {@render status(item.state, !item.desired)}
+                    <CapabilityStatus state={item.state} removing={!item.desired} />
                     <ChevronDown
                       class="text-muted-foreground size-4 shrink-0 group-open:rotate-180"
                     />
@@ -238,6 +223,8 @@
           {/if}
         </div>
 
+        <AppNetwork appId={app.id} />
+
         <div class="bg-background rounded-lg border shadow-xs">
           <div class="flex items-center gap-2 border-b px-4 py-4 text-sm font-medium">
             <Database class="text-muted-foreground size-4" />Resources<Badge
@@ -261,7 +248,7 @@
                         >{resourceLabels[resource.type]}</span
                       ><code class="block text-xs wrap-anywhere">{resource.binding}</code></span
                     >
-                    {@render status("active")}
+                    <CapabilityStatus state="active" />
                   </Accordion.Trigger>
                   <Accordion.Content
                     ><dl class="space-y-2 text-xs">

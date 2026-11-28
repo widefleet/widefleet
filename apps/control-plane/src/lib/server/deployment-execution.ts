@@ -34,7 +34,7 @@ export const deploymentCommand = z.discriminatedUnion("kind", [
   command.extend({
     kind: z.literal("network"),
     actor: deploymentActor,
-    input: contract.networkChange,
+    input: contract.networkUpdate,
   }),
   command.extend({
     kind: z.literal("capabilities"),
@@ -144,7 +144,7 @@ export type HostedExecution = {
   network: (
     actor: z.infer<typeof deploymentActor>,
     appId: string,
-    input: z.infer<typeof contract.networkChange>,
+    input: z.infer<typeof contract.networkUpdate>,
   ) => Promise<
     Result<
       z.infer<typeof contract.networkState>,
