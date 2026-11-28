@@ -149,10 +149,13 @@ const ci = (
 
     return outcome;
   },
-  result: async (request) => outcomes.get(request.id) ?? null,
+  result: async (id) => outcomes.get(id) ?? null,
+  // As the CI, a released build keeps its outcome without the log.
   release: async (id) => {
     released.push(id);
-    outcomes.delete(id);
+    const outcome = outcomes.get(id);
+
+    if (outcome) outcomes.set(id, { ...outcome, log: "" });
   },
 });
 
@@ -168,6 +171,7 @@ const run = (id: string, appCi: AppCi) =>
     source,
     ci: appCi,
     platformUrl: environment.configuration.PLATFORM_URL,
+    encryption: environment.encryption,
   });
 
 const api = (path: string, init?: RequestInit) =>
@@ -406,7 +410,7 @@ it("fails a build that finished without publishing", async () => {
     .from(appBuilds)
     .where(eq(appBuilds.id, build.id));
 
-  expect(record).toMatchObject({ status: "failed", deploymentId: null, tokenHash: null });
+  expect(record).toMatchObject({ status: "failed", deploymentId: null });
   expect(record?.message).toMatch(/did not publish/);
 });
 
@@ -490,7 +494,7 @@ it("confines a build's token to its app", async () => {
   });
 });
 
-it("stops accepting a build's token when it expires", async () => {
+it("stops accepting a build's token at its deadline", async () => {
   const app = await createApp("expired-build");
   heads.set(app.id, commit);
   const build = contract.appBuild.parse(await (await startBuild(app.id)).json());
@@ -498,9 +502,11 @@ it("stops accepting a build's token when it expires", async () => {
   await run(
     build.id,
     ci(async (request) => {
+      expect(request.deadline).toBeGreaterThan(Date.now());
+
       await environment.database.db
         .update(appBuilds)
-        .set({ tokenExpiresAt: new Date(Date.now() - 1000) })
+        .set({ deadline: new Date(Date.now() - 1000) })
         .where(eq(appBuilds.id, request.id));
 
       expect((await asBuild(request, `/apps/${app.id}/network`)).status).toBe(401);
@@ -628,7 +634,7 @@ it("keeps the token of a running build valid when its run is repeated", async ()
   await run(
     build.id,
     ci(async (first) => {
-      // A repeated run issues a new token while the first run still makes requests.
+      // A repeated run gets its own token while the first run still makes requests.
       await run(
         build.id,
         ci(async (second) => {
@@ -674,7 +680,7 @@ it("ends the token of a build whose workflow ended and keeps a finished outcome"
     .from(appBuilds)
     .where(eq(appBuilds.id, stopped.id));
 
-  expect(record).toMatchObject({ status: "failed", tokenHash: null, previousTokenHash: null });
+  expect(record).toMatchObject({ status: "failed" });
   expect(
     contract.appBuildDetails.parse(
       await (await api(`/apps/${app.id}/builds/${finished.id}`)).json(),
@@ -707,4 +713,42 @@ it("fails a build that published another commit", async () => {
   expect(record?.status).toBe("failed");
   expect(record?.message).toBe(`The build published ${other} instead of ${commit}`);
   expect(record?.deploymentId).not.toBeNull();
+});
+
+it("accepts a build's token only for the build it names", async () => {
+  const app = await createApp("forged-build");
+  heads.set(app.id, commit);
+  const first = contract.appBuild.parse(await (await startBuild(app.id)).json());
+  const second = contract.appBuild.parse(await (await startBuild(app.id)).json());
+
+  const statuses: number[] = [];
+
+  await run(
+    second.id,
+    ci(async () => {
+      await run(
+        first.id,
+        ci(async (request) => {
+          const sealed = request.platform.token.slice(request.platform.token.indexOf(".") + 1);
+
+          // The sealed part of one build's token does not open for another build.
+          for (const token of [`wfb_${second.id}.${sealed}`, `wfb_${second.id}`, "wfb_"])
+            statuses.push(
+              (
+                await asBuild(
+                  { ...request, platform: { ...request.platform, token } },
+                  `/apps/${app.id}/network`,
+                )
+              ).status,
+            );
+
+          return { status: "failed", message: "Stopped", log: "" };
+        }),
+      );
+
+      return { status: "failed", message: "Stopped", log: "" };
+    }),
+  );
+
+  expect(statuses).toEqual([401, 401, 401]);
 });

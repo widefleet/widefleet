@@ -20,13 +20,13 @@ const certificates = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 // The log keeps the end of the output, where failures are reported.
 const logLimit = 256 * 1024;
 
-// A build that does not finish by then is stopped.
-const buildDeadline = 30 * 60 * 1000;
-
 // Stops a container whose build call was lost.
 const inactivityTimeout = 15 * 60 * 1000;
 
-const resultLifetime = 24 * 60 * 60 * 1000;
+// The log of an outcome nobody released is dropped after this.
+const logLifetime = 24 * 60 * 60 * 1000;
+
+const instant = z.number().nonnegative();
 
 interface Env {
   BUILDS: DurableObjectNamespace<BuildSandbox>;
@@ -163,9 +163,9 @@ export class BuildSandbox extends DurableObject<Env> {
   #current: Promise<z.infer<typeof ciBuildResult>> | undefined;
 
   build(request: z.infer<typeof ciBuildRequest>) {
-    // A repeated call returns the outcome of the build that already ran, or
-    // joins the one that is running.
-    if (this.#current) return this.#join(request);
+    // A repeated call joins the run in progress or returns the recorded outcome,
+    // which stays after the build is released.
+    if (this.#current) return this.#current;
 
     const recorded = this.#recorded();
 
@@ -179,20 +179,11 @@ export class BuildSandbox extends DurableObject<Env> {
   }
 
   /** The outcome of a build that ran, waiting for one that is running. */
-  result(request: z.infer<typeof ciBuildRequest>) {
-    return this.#current ? this.#join(request) : this.#recorded();
+  result() {
+    return this.#current ?? this.#recorded();
   }
 
-  /** Each call issues a new token, which a running build continues with. */
-  async #join(request: z.infer<typeof ciBuildRequest>) {
-    const current = this.#current;
-
-    if (this.#container.running) await this.#intercept(request);
-
-    return current ?? this.#recorded();
-  }
-
-  // Registering a target again replaces its handler without dropping connections.
+  // Intercepts last as long as the container, so each run registers them.
   async #intercept(request: z.infer<typeof ciBuildRequest>) {
     const outbound = this.#exports.Outbound({
       props: {
@@ -247,13 +238,23 @@ export class BuildSandbox extends DurableObject<Env> {
 
     let log = "";
 
+    // No run goes past the build's deadline. The alarm stops the container then
+    // even if this object restarts in between.
+    const deadlineAt = request.deadline;
+
+    this.ctx.storage.kv.put("deadline", deadlineAt);
+    await this.ctx.storage.setAlarm(deadlineAt);
+
     const deadline = new AbortController();
 
     // Stopping the container also ends processes that outlive their command.
-    const timer = setTimeout(() => {
-      deadline.abort();
-      void this.#container.destroy();
-    }, buildDeadline);
+    const timer = setTimeout(
+      () => {
+        deadline.abort();
+        void this.#container.destroy();
+      },
+      Math.max(0, deadlineAt - Date.now()),
+    );
 
     const run = async (argv: string[], cwd: string, logged = true) => {
       if (logged) log += `$ ${argv.join(" ")}\n`;
@@ -282,16 +283,22 @@ export class BuildSandbox extends DurableObject<Env> {
     // A command ended by the deadline fails like any other.
     const failed = (message: string) => ({
       status: "failed" as const,
-      message: deadline.signal.aborted
-        ? `The build did not finish within ${buildDeadline / 60_000} minutes`
-        : message,
+      message:
+        deadline.signal.aborted || Date.now() >= deadlineAt
+          ? "The build did not finish in time"
+          : message,
       log,
     });
 
     const result = await (async (): Promise<z.infer<typeof ciBuildResult>> => {
       try {
+        if (Date.now() >= deadlineAt) return failed("");
+
         // HTTPS intercepts are registered before start(), so the CA exists when it runs.
         await this.#intercept(request);
+
+        if (Date.now() >= deadlineAt) return failed("");
+
         this.#container.start({ image, instance: "standard-2", enableInternet: false });
         await this.#container.setInactivityTimeout(inactivityTimeout);
 
@@ -314,11 +321,11 @@ export class BuildSandbox extends DurableObject<Env> {
         }
 
         // `widefleet deploy` would commit changed files, but builds cannot push.
-        const changed = await run(["git", "-C", source, "status", "--porcelain"], "/build", false);
+        const changed = await run(["git", "-C", source, "status", "--porcelain"], "/build");
 
         if (changed.exitCode !== 0 || changed.text.trim())
           return failed(
-            `pnpm install changed files of the repository. Commit them or ignore them in Git:\n${changed.text}`,
+            "pnpm install changed files of the repository. Commit them or ignore them in Git",
           );
 
         const deploy = await run(["widefleet", "deploy", "--no-wait", request.appId], project);
@@ -338,25 +345,51 @@ export class BuildSandbox extends DurableObject<Env> {
       }
     })();
 
+    // The log is kept until the control plane releases the build, at most for a day.
+    const expiresAt = Date.now() + logLifetime;
+
     this.ctx.storage.kv.put("result", result);
-    // The outcome is kept until the control plane releases it, at most for a day.
-    await this.ctx.storage.setAlarm(Date.now() + resultLifetime);
+    this.ctx.storage.kv.put("expires", expiresAt);
+    await this.ctx.storage.setAlarm(expiresAt);
 
     return result;
   }
 
-  // A failed alarm is retried, so it must not delete itself.
+  // Stops a container past the build's deadline and drops the log of an outcome
+  // nobody released. A failed alarm is retried, so it must not delete itself.
   override async alarm() {
-    if (this.#container.running) await this.#container.destroy();
+    const now = Date.now();
+    const deadlineAt = instant.safeParse(this.ctx.storage.kv.get("deadline")).data ?? 0;
 
-    this.ctx.storage.kv.delete("result");
+    if (this.#container.running && now >= deadlineAt) await this.#container.destroy();
+
+    const expiresAt = instant.safeParse(this.ctx.storage.kv.get("expires")).data;
+
+    if (expiresAt !== undefined && now >= expiresAt) this.#dropLog("The log expired.\n");
   }
 
+  // A run that reaches this object after the release finds the outcome and
+  // does not build again, so the outcome stays. A run in progress records its own.
   async release() {
     if (this.#container.running) await this.#container.destroy();
 
-    this.ctx.storage.kv.delete("result");
+    if (!this.#current && !this.#recorded())
+      this.ctx.storage.kv.put("result", {
+        status: "failed",
+        message: "The build was released before it finished",
+        log: "",
+      } satisfies z.infer<typeof ciBuildResult>);
+
+    this.#dropLog("");
     await this.ctx.storage.deleteAlarm();
+  }
+
+  #dropLog(log: string) {
+    const recorded = this.#recorded();
+
+    if (recorded) this.ctx.storage.kv.put("result", { ...recorded, log });
+
+    this.ctx.storage.kv.delete("expires");
   }
 }
 
@@ -368,10 +401,8 @@ export class AppCi extends WorkerEntrypoint<Env> {
     return this.env.BUILDS.getByName(request.id).build(request);
   }
 
-  result(input: z.input<typeof ciBuildRequest>) {
-    const request = ciBuildRequest.parse(input);
-
-    return this.env.BUILDS.getByName(request.id).result(request);
+  result(id: string) {
+    return this.env.BUILDS.getByName(id).result();
   }
 
   release(id: string) {

@@ -1,5 +1,6 @@
 import { companySignInLimit, companySsoAvailableSql, type SignIn } from "./sso-policy.ts";
 import { buildSignIn, isBuildToken } from "./build-tokens.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import { verifyAccessToken } from "./access-token.ts";
 import { Result, TaggedError, type InferOk } from "better-result";
 import { eq, sql } from "drizzle-orm";
@@ -45,6 +46,8 @@ export const createIdentityService = (
     defaultOrganizationId: installationOrganizationId,
   },
   allowUser?: (userId: string) => Promise<boolean>,
+  /** Opens build tokens; without it, builds cannot authenticate. */
+  encryption?: SecretEncryption,
 ) => {
   const memberships = (signIn: SignIn) =>
     Result.tryPromise({
@@ -198,7 +201,7 @@ export const createIdentityService = (
 
           const build = yield* Result.await(
             Result.tryPromise({
-              try: () => buildSignIn(database, bearer),
+              try: async () => (encryption ? buildSignIn(database, encryption, bearer) : null),
               catch: (cause) =>
                 new DatabaseUnavailable({ message: "Could not verify the build", cause }),
             }),

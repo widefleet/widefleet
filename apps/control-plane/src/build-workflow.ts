@@ -8,6 +8,7 @@ import { readCloudflareConfiguration } from "./lib/server/cloudflare-config.ts";
 import { withCloudflareDatabase } from "./lib/server/cloudflare-database.ts";
 import type { Database } from "./lib/server/database.ts";
 import type { createRuntimeExtension } from "./lib/server/runtime-extension.ts";
+import { configuredSecretEncryption } from "./lib/server/secret-encryption.ts";
 
 export const buildWorkflowCommand = z.strictObject({ id: z.uuid() });
 
@@ -39,6 +40,7 @@ export const createBuildWorkflow = (createExtension: typeof createRuntimeExtensi
 
         if (!ci) throw new NonRetryableError("The app CI is not configured");
         const configuration = readCloudflareConfiguration(bindings);
+        const encryption = configuredSecretEncryption(configuration);
 
         // The source backend uses its binding only; the database belongs to this phase.
         const source = await withDatabase(
@@ -59,6 +61,7 @@ export const createBuildWorkflow = (createExtension: typeof createRuntimeExtensi
             source,
             ci: bindingAppCi(ci),
             platformUrl: configuration.PLATFORM_URL,
+            encryption,
           }),
         );
       } catch (error) {

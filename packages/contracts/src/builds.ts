@@ -103,6 +103,9 @@ export const decodeBase64 = (text: string) =>
 
 export const buildFailure = z.strictObject({ message: z.string() });
 
+/** The longest a server build runs, in seconds, counted from when it starts. */
+export const ciBuildTimeLimit = 30 * 60;
+
 /** A commit for the app CI to deploy, under the build's ID. */
 export const ciBuildRequest = z.strictObject({
   id: z.uuid(),
@@ -116,6 +119,8 @@ export const ciBuildRequest = z.strictObject({
   /** The app's repository, which the CI reads with credentials of the build. */
   repository: z.strictObject({ url: sourceCredential.shape.url }),
   source: sourceRevision,
+  /** When the build stops in milliseconds since the epoch, however often it runs. */
+  deadline: z.int().positive(),
 });
 
 export const ciBuildResult = z.discriminatedUnion("status", [

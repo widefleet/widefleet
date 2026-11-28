@@ -174,6 +174,7 @@ export const createRuntime = ({
       configuration,
       organizationAccess,
       authentication?.allowUser,
+      encryption,
     ),
     directory: createDirectory(
       async (organizationId) => (await settings.resolve(organizationId)).identity,

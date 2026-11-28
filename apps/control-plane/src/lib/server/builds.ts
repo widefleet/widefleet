@@ -2,9 +2,9 @@
 // Widefleet Git repository, as on a computer, under the authority of whoever
 // started the build. It deploys with a token that is valid while the build runs.
 import * as contract from "@platform/contracts";
-import { ciBuildRequest, ciBuildResult } from "@platform/contracts/builds";
+import { ciBuildRequest, ciBuildResult, ciBuildTimeLimit } from "@platform/contracts/builds";
 import { Result } from "better-result";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
 import { readableApp } from "./apps.ts";
 import { createBuildToken } from "./build-tokens.ts";
@@ -13,26 +13,27 @@ import type { Database } from "./database.ts";
 import { deploymentActor } from "./deployment-execution.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
+import type { SecretEncryption } from "./secret-encryption.ts";
 import type { SignIn } from "./sso-policy.ts";
 import { appBuilds, apps, artifacts, deployments } from "./schema.ts";
 import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import { readOnly, transact } from "./transactions.ts";
 
-/** The app CI, which keeps each build's outcome until it is released. */
+/**
+ * The app CI. It runs each build at most once and keeps its outcome; releasing
+ * a build stops its container and drops its log.
+ */
 export interface AppCi {
   build: (request: z.infer<typeof ciBuildRequest>) => Promise<z.infer<typeof ciBuildResult>>;
   /** The outcome of a build that ran, waiting for one that is running. */
-  result: (
-    request: z.infer<typeof ciBuildRequest>,
-  ) => Promise<z.infer<typeof ciBuildResult> | null>;
+  result: (id: string) => Promise<z.infer<typeof ciBuildResult> | null>;
   release: (id: string) => Promise<void>;
 }
 
 /** The CI Worker's `AppCi` entrypoint, whose answers are checked like any other input. */
 export const bindingAppCi = (binding: AppCi): AppCi => ({
   build: async (request) => ciBuildResult.parse(await binding.build(ciBuildRequest.parse(request))),
-  result: async (request) =>
-    ciBuildResult.nullable().parse(await binding.result(ciBuildRequest.parse(request))),
+  result: async (id) => ciBuildResult.nullable().parse(await binding.result(id)),
   release: (id) => binding.release(id),
 });
 
@@ -71,9 +72,6 @@ export const createBuildService = (
       .set({
         status: "failed",
         message: "The build stopped before it finished",
-        tokenHash: null,
-        previousTokenHash: null,
-        tokenExpiresAt: null,
         finishedAt: new Date(),
       })
       .where(and(eq(appBuilds.id, record.id), inArray(appBuilds.status, ["queued", "running"])))
@@ -159,6 +157,7 @@ export const createBuildService = (
                 identityOrganizationId: signIn.identityOrganizationId,
                 recovery: signIn.recovery,
                 reads: signIn.reads,
+                deadline: new Date(Date.now() + ciBuildTimeLimit * 1000),
               })
               .returning();
 
@@ -226,11 +225,10 @@ export const executeBuild = async (
     source: SourceBackend;
     ci: AppCi;
     platformUrl: string;
+    encryption: SecretEncryption;
   },
 ) => {
   const { withDatabase, source, ci } = services;
-
-  const token = createBuildToken();
 
   const loaded = await withDatabase(async (database) => {
     const [recorded] = await database
@@ -243,12 +241,7 @@ export const executeBuild = async (
 
     const [record] = await database
       .update(appBuilds)
-      .set({
-        status: "running",
-        previousTokenHash: sql`${appBuilds.tokenHash}`,
-        tokenHash: token.hash,
-        tokenExpiresAt: token.expiresAt,
-      })
+      .set({ status: "running" })
       .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])))
       .returning();
 
@@ -282,9 +275,6 @@ export const executeBuild = async (
           ...values,
           message: text(values.message),
           log: text(values.log),
-          tokenHash: null,
-          previousTokenHash: null,
-          tokenExpiresAt: null,
           finishedAt: new Date(),
         })
         .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"]))),
@@ -353,7 +343,7 @@ export const executeBuild = async (
     platform: {
       url: services.platformUrl,
       organizationId: actor.application.organizationId,
-      token: token.value,
+      token: await createBuildToken(services.encryption, id),
     },
     repository: { url: repository.url },
     source: contract.sourceRevision.parse({
@@ -361,13 +351,14 @@ export const executeBuild = async (
       branch: build.branch,
       directory: build.directory,
     }),
+    deadline: build.deadline.getTime(),
   };
 
   // A run that stopped after publishing does not build again; it waits for
   // the CI if the build is still finishing there.
   const previous = await published();
 
-  if (previous) return conclude(await ci.result(request), previous);
+  if (previous) return conclude(await ci.result(id), previous);
 
   const result = await ci.build(request);
 
@@ -391,8 +382,6 @@ export const failBuild = async (database: Database, id: string, message: string)
     .set({
       status: "failed",
       message,
-      tokenHash: null,
-      tokenExpiresAt: null,
       finishedAt: new Date(),
     })
     .where(and(eq(appBuilds.id, id), inArray(appBuilds.status, ["queued", "running"])));
