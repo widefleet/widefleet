@@ -994,11 +994,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     const previewResult = contract.deployment
       .extend({ url: z.url(), source: contract.sourceRevision.nullable() })
-      .parse(
-        JSON.parse(
-          (await cli("preview", "--name", "review", "--skip-build", "--no-wait", "--json")).stdout,
-        ),
-      );
+      .parse(JSON.parse((await cli("preview", "--name", "review", "--no-wait", "--json")).stdout));
 
     const preview = contract.app.parse(
       await (await request(`/apps/${previewResult.appId}`, "GET")).json(),
@@ -1118,15 +1114,13 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     const app = await createApp("node-compat");
     await configure(["nodejs_als"]);
-    await expect(cli("deploy", app.id, "--skip-build", "--no-wait")).rejects.toThrow(
-      "Worker bundling failed",
-    );
+    await expect(cli("deploy", app.id, "--no-wait")).rejects.toThrow("Worker bundling failed");
     await configure(["unsupported_flag"]);
-    await expect(cli("deploy", app.id, "--skip-build", "--no-wait")).rejects.toThrow(
+    await expect(cli("deploy", app.id, "--no-wait")).rejects.toThrow(
       "Supported compatibility flags",
     );
     await configure(["nodejs_compat", "nodejs_compat"]);
-    await expect(cli("deploy", app.id, "--skip-build", "--no-wait")).rejects.toThrow(
+    await expect(cli("deploy", app.id, "--no-wait")).rejects.toThrow(
       "Compatibility flags must be unique",
     );
     expect(
@@ -1134,7 +1128,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     ).toHaveLength(0);
 
     await configure(["nodejs_compat"]);
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await agent();
     expect(
       z.array(contract.deployment).parse(JSON.parse((await cli("history", app.id)).stdout))[0]
@@ -1188,7 +1182,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       }),
     );
     const app = await createApp("capabilities");
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     const initial = await agent();
     expect(initial.stdout + initial.stderr).toContain(publicationMessage);
 
@@ -1251,7 +1245,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     config["triggers"] = { crons: [] };
     config["queues"] = { producers: [{ binding: "JOBS", queue: "fixture" }], consumers: [] };
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await agent();
 
     for (const queue of ["fixture", "dead"]) {
@@ -1334,14 +1328,14 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     config["triggers"] = { crons: ["* * * * *"] };
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await agent();
     expect(await read("/fixture/crons")).toEqual({ "* * * * *": [app.hostname] });
 
     config["triggers"] = { crons: [] };
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
     await hold();
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     const cronActivation = agent();
     void cronActivation.catch(() => undefined);
 
@@ -1371,7 +1365,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     };
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
     await hold();
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     const activation = agent();
     void activation.catch(() => undefined);
 
@@ -1434,7 +1428,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     config["queues"] = { producers: [{ binding: "JOBS", queue: "fixture" }], consumers: [] };
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
     await hold();
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     const interrupted = agent();
     void interrupted.catch(() => undefined);
 
@@ -1475,7 +1469,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     config["queues"] = consumerConfiguration;
     config["kv_namespaces"] = [{ binding: "KV", id: "fixture" }];
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     const recovered = await agent();
     expect(recovered.stdout + recovered.stderr).not.toContain(publicationMessage);
     expect(await read("/fixture/pending-resource")).toBe(false);
@@ -1489,7 +1483,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       consumers: [{ queue: "fixture" }],
     };
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await agent();
     await cli("delete", app.id, "--yes");
     await agent();
@@ -1552,7 +1546,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     );
     const app = await createApp("browser-network");
     console.info("browser-network: created");
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     console.info("browser-network: deploying");
     await agent();
     console.info("browser-network: deployed");
@@ -2521,7 +2515,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     await writeFile(join(appDirectory, "worker.js"), source);
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await agent();
     expect(
       z.array(contract.deployment).parse(JSON.parse((await cli("history", app.id)).stdout))[0]
@@ -2638,7 +2632,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       join(appDirectory, "wrangler.jsonc"),
       JSON.stringify({ ...config, workflows: [], d1_databases: [] }),
     );
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await agent();
     expect((await appRequest(app.id)).stdout).toBe("new code");
     await writeFile(join(appDirectory, "event.json"), "{}");
@@ -2665,7 +2659,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         workflows: [{ binding: "WORKFLOW", name: "example", class_name: "Missing" }],
       }),
     );
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await expect(agent()).rejects.toThrow("does not provide an export named 'Missing'");
     expect(
       z.array(contract.deployment).parse(JSON.parse((await cli("history", app.id)).stdout))[0]
@@ -2696,7 +2690,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "export default { fetch() { return new Response('plain app'); } };",
     );
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await agent();
     await writeFile(
       join(appDirectory, "wrangler.jsonc"),
@@ -2705,7 +2699,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         workflows: [{ binding: "WORKFLOW", name: "example", class_name: "Missing" }],
       }),
     );
-    await cli("deploy", app.id, "--skip-build", "--no-wait");
+    await cli("deploy", app.id, "--no-wait");
     await expect(agent()).rejects.toThrow("does not provide an export named 'Missing'");
     expect(
       (

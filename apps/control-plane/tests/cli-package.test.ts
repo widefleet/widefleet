@@ -239,17 +239,10 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
           );
           await runPackageCommand(["install", "--frozen-lockfile"], project);
           await runPackageCommand(["check"], project);
-          await runPackageCommand(["build"], project);
-          await runPackageCommand(["typecheck"], project);
-          expect(
-            await readFile(
-              join(project, template === "sveltekit" ? "build/worker.js" : "build/server/index.js"),
-              "utf8",
-            ),
-          ).toBeTruthy();
 
+          // Deployment runs the starter's build script before bundling.
           const deployment = await runPackageCommand(
-            ["exec", "widefleet", "deploy", appId, "--skip-build", "--no-wait", "--json"],
+            ["exec", "widefleet", "deploy", appId, "--no-wait", "--json"],
             project,
             {
               ...environment,
@@ -264,6 +257,13 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
             url: "https://fixture.example.test",
           });
           expect(uploads).toBe(previousUploads + 1);
+          expect(
+            await readFile(
+              join(project, template === "sveltekit" ? "build/worker.js" : "build/server/index.js"),
+              "utf8",
+            ),
+          ).toBeTruthy();
+          await runPackageCommand(["typecheck"], project);
         } finally {
           // Remove each dependency tree here; deleting both can exceed the Windows hook timeout.
           await rm(project, { recursive: true, force: true });
@@ -309,13 +309,7 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
 
         const deployment = execute(
           process.execPath,
-          [
-            join(project, "node_modules/widefleet/bin/widefleet.mjs"),
-            "deploy",
-            appId,
-            "--skip-build",
-            "--json",
-          ],
+          [join(project, "node_modules/widefleet/bin/widefleet.mjs"), "deploy", appId, "--json"],
           {
             cwd: project,
             timeout: 15_000,

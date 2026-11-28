@@ -29,7 +29,7 @@ Declare resources in `wrangler.jsonc`; deploys preserve resource IDs and names i
 
 Starters enable `"compatibility_flags": ["nodejs_compat"]`. This exposes celld's partial Node API surface; see the [Node.js compatibility](/reference/runtime-compatibility#nodejs-compatibility) for supported imports and runtime limits.
 
-Create a work branch and run `widefleet preview` from the app project to build and deploy an isolated preview. With source storage, the branch determines the preview's name and saved code. When source storage is disabled or unavailable, use `widefleet preview --name review` to choose a name. The CLI accepts the same `--config`, `--skip-build`, `--no-wait` and `--json` flags as `deploy`; `--app NAME_OR_UUID` selects another parent. See [previews](/reference/previews) for naming, TLS setup and isolated resources.
+Create a work branch and run `widefleet preview` from the app project to build and deploy an isolated preview. With source storage, the branch determines the preview's name and saved code. When source storage is disabled or unavailable, use `widefleet preview --name review` to choose a name. The CLI accepts the same `--config`, `--no-wait` and `--json` flags as `deploy`; `--app NAME_OR_UUID` selects another parent. See [previews](/reference/previews) for naming, TLS setup and isolated resources.
 
 Use `widefleet rollback APP_UUID ARTIFACT_UUID` to restore retained code and `widefleet delete APP_UUID --yes` to remove an app and its published versions. See [app removal](/reference/runtime#app-removal) for the cleanup process and remaining native storage cells.
 

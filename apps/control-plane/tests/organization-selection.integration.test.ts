@@ -520,11 +520,10 @@ describe("Organization discovery and selection", () => {
           }),
         );
 
-        const deployment = await execute(
-          installed,
-          ["deploy", "--skip-build", "--no-wait", "--json"],
-          { ...options, cwd: directory },
-        );
+        const deployment = await execute(installed, ["deploy", "--no-wait", "--json"], {
+          ...options,
+          cwd: directory,
+        });
 
         expect(JSON.parse(deployment.stdout)).toMatchObject({
           appId: fixture.id,
@@ -536,7 +535,7 @@ describe("Organization discovery and selection", () => {
         for (const selection of [[], ["--organization", alpha]]) {
           const result = await execute(
             installed,
-            [...selection, "preview", "--name", "review", "--skip-build", "--no-wait", "--json"],
+            [...selection, "preview", "--name", "review", "--no-wait", "--json"],
             { ...options, cwd: directory },
           );
 

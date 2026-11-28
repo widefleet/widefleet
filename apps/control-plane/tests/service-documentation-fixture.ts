@@ -145,7 +145,7 @@ export async function extractServiceDocumentation(
 
   const result = await executeCli(
     executable,
-    ["deploy", "--config", config, "--skip-build", "--no-wait", "--json"],
+    ["deploy", "--config", config, "--no-wait", "--json"],
     {
       cwd: project,
       timeout: 10000,
