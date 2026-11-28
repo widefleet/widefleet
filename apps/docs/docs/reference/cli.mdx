@@ -123,14 +123,12 @@ bindings and the next deployment.
 
 ## Deployment flags and output
 
-`deploy` and `preview` run the project's `build` script when package.json defines
-one, then bundle the Worker entry configured in `wrangler.jsonc`.
-
 These flags apply to both `deploy` and `preview`:
 
 | Flag                      | Behavior                                                                                                       |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `--config PATH`           | Read another Wrangler configuration; project paths are relative to that file.                                  |
+| `--skip-build`            | Upload the existing build instead of running the app build.                                                    |
 | `--no-source`             | Deploy without saving source to Widefleet Git. Conflicts with `--source-branch` and `--allow-branch-mismatch`. |
 | `--source-branch BRANCH`  | Identify a Git preview's branch in a detached CI checkout.                                                     |
 | `--allow-branch-mismatch` | Allow this command to publish the main app from a different local branch or a checkout without a branch.       |

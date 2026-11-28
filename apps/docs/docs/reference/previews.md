@@ -57,7 +57,7 @@ Use the URL returned by the server or CLI.
 
 ## Flags and cleanup
 
-`--config PATH`, `--no-wait` and `--json` have the same meaning as with `widefleet deploy`. JSON output includes the preview's `appId`, deployment status and URL. Build and progress logs go to stderr. With `--no-wait`, the result reports the queued deployment; activation follows asynchronously.
+`--config PATH`, `--skip-build`, `--no-wait` and `--json` have the same meaning as with `widefleet deploy`. JSON output includes the preview's `appId`, deployment status and URL. Build and progress logs go to stderr. With `--no-wait`, the result reports the queued deployment; activation follows asynchronously.
 
 ```sh
 widefleet preview --json

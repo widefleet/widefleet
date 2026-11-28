@@ -50,10 +50,10 @@ For this standalone example, save the files as `wrangler.jsonc` and `worker.ts`,
 
 ```sh
 mkdir -p public
-widefleet deploy
+widefleet deploy --skip-build
 ```
 
-The CLI runs the project's `build` script when package.json defines one, then bundles `worker.ts`. For generated framework Workers, use a main-module wrapper that re-exports the generated default handler and your Workflow classes, and generate the framework Worker in the `build` script. The platform validates every declared Workflow export before activating a deployment. Cross-script Workflow declarations are not supported; each app owns its bindings.
+`--skip-build` skips a project build script; the CLI still bundles `worker.ts`. For generated framework Workers, use a main-module wrapper that re-exports the generated default handler and your Workflow classes. Ensure the framework build runs before `widefleet deploy`. The platform validates every declared Workflow export before activating a deployment. Cross-script Workflow declarations are not supported; each app owns its bindings.
 
 ## Manage instances
 

@@ -53,12 +53,12 @@ Configure `wrangler.jsonc`:
 }
 ```
 
-Publish through the usual CLI. Without a `build` script in package.json, the CLI
-bundles the source entry directly and discovers service entrypoints from the module exports.
+Publish through the usual CLI. `--skip-build` uses the source entry directly;
+the CLI still bundles it and discovers service entrypoints from the module exports.
 Classes declared in the standard `workflows` configuration remain Workflow entrypoints.
 
 ```sh
-widefleet deploy
+widefleet deploy --skip-build
 widefleet secret put API_TOKEN --file /secure/path/api-token
 widefleet services
 ```

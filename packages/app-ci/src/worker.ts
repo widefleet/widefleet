@@ -8,7 +8,6 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { sourceCredential } from "@platform/contracts";
 import { ciBuildRequest, ciBuildResult } from "@platform/contracts/builds";
 import { z } from "zod";
-import { installWithoutLockfile } from "./install.ts";
 
 const registry = "registry.npmjs.org";
 
@@ -288,10 +287,6 @@ export class BuildSandbox extends DurableObject<Env> {
       return { text, exitCode: await process.exitCode };
     };
 
-    const note = (line: string) => {
-      log = `${log}${line}\n`.slice(-logLimit);
-    };
-
     // A command ended by the deadline fails like any other.
     const failed = (message: string) => ({
       status: "failed" as const,
@@ -330,26 +325,11 @@ export class BuildSandbox extends DurableObject<Env> {
             return failed(`${argv.slice(0, 2).join(" ")} failed`);
 
         // As `widefleet deploy`, a project without package.json has nothing to install.
-        const exists = async (file: string) =>
-          (await run(["test", "-f", file], project, false)).exitCode === 0;
-
-        if (!(await exists("package.json"))) {
-          note("Install skipped: the project has no package.json");
-        } else if (await exists("pnpm-lock.yaml")) {
+        if ((await run(["test", "-f", "package.json"], project, false)).exitCode === 0) {
           const install = await run(["pnpm", "install", "--frozen-lockfile"], project);
 
           if (install.exitCode !== 0)
             return failed(`pnpm install failed with exit code ${install.exitCode}`);
-        } else {
-          const manifest = await run(["cat", "package.json"], project, false);
-
-          if (manifest.exitCode !== 0) return failed("package.json could not be read");
-
-          const decision = installWithoutLockfile(manifest.text);
-
-          if (decision.status === "failed") return failed(decision.message);
-
-          note(`Install skipped: ${decision.reason}`);
         }
 
         // `widefleet deploy` would commit changed files, but builds cannot push.
