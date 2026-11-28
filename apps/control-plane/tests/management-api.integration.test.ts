@@ -123,6 +123,7 @@ it("lets members discover templates without creating apps or granting management
   expect(runtime.identity.authenticate).toHaveBeenLastCalledWith(
     expect.any(Request),
     "platform:read",
+    false,
   );
 });
 

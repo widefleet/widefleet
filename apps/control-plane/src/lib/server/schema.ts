@@ -273,6 +273,37 @@ export const cloudflareOperations = pgTable(
   ],
 );
 
+// A build of an app commit on the server; the actor that started it publishes its deployment.
+export const appBuilds = pgTable(
+  "app_build",
+  {
+    id: uuid().primaryKey(),
+    appId: uuid("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    actor: jsonb().notNull(),
+    commit: text().notNull(),
+    branch: text().notNull(),
+    directory: text().notNull(),
+    status: text({ enum: ["queued", "running", "succeeded", "failed"] })
+      .notNull()
+      .default("queued"),
+    deploymentId: uuid("deployment_id").references(() => deployments.id, { onDelete: "set null" }),
+    message: text(),
+    log: text().notNull().default(""),
+    /** How the starter signed in: the organization whose company SSO or recovery authenticated it. */
+    identityOrganizationId: text("identity_organization_id"),
+    recovery: boolean().notNull().default(false),
+    /** Whether the starter's credential has platform:read, which the build then has too. */
+    reads: boolean().notNull().default(false),
+    /** When the build stops, however often it runs; its token ends then too. */
+    deadline: timestamp({ withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [index("app_build_app_idx").on(table.appId, table.createdAt)],
+);
+
 export const deploymentEvents = pgTable("deployment_event", {
   id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
   deploymentId: uuid("deployment_id")

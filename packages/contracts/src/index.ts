@@ -148,6 +148,30 @@ export const deployment = z.strictObject({
   message: z.string().nullable(),
 });
 
+/**
+ * A build of a commit from the app's Widefleet Git repository on the server,
+ * as `widefleet deploy` builds on a computer. A succeeded build has published
+ * its deployment, whose own status reports the rollout.
+ */
+export const appBuild = z.strictObject({
+  id: identifier,
+  appId: identifier,
+  source: sourceRevision,
+  status: z.enum(["queued", "running", "succeeded", "failed"]),
+  deploymentId: identifier.nullable(),
+  message: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  finishedAt: z.iso.datetime().nullable(),
+});
+
+/** A build with the output of its install and build commands. */
+export const appBuildDetails = appBuild.extend({ log: z.string() });
+
+export const appBuildInput = z.strictObject({
+  /** The project directory inside the repository; that of the active deployment by default. */
+  directory: sourceRevision.shape.directory.optional(),
+});
+
 export const deploymentEvent = z.strictObject({
   id: z.number().int(),
   deploymentId: identifier,

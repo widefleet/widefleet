@@ -18,6 +18,8 @@ import { createRuntimeExtension } from ${JSON.stringify(extension)};
 import { runScheduledExtension } from "../../src/lib/server/scheduled-extension.ts";
 export { DeploymentWorkflow } from "../../src/deployment-workflow.ts";
 export { AppOperationWorkflow } from "../../src/app-operation-workflow.ts";
+import { createBuildWorkflow } from "../../src/build-workflow.ts";
+export const BuildWorkflow = createBuildWorkflow(createRuntimeExtension);
 export default {
   ...application,
   scheduled: (event, bindings) => runScheduledExtension(bindings, event, createRuntimeExtension),

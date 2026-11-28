@@ -35,6 +35,7 @@ import { createStorage } from "../src/lib/server/storage.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
 import { createTemplateInstalls } from "../src/lib/server/template-installs.ts";
+import { createBuildService } from "../src/lib/server/builds.ts";
 import { createTestEnvironment } from "./environment.ts";
 
 const execute = promisify(execFile);
@@ -171,6 +172,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         appSecrets: createAppSecrets(environment.database.db, environment.encryption),
         releases: createRuntimeReleaseService(database, storage),
         uploads: createUploadService(database, storage, configuration),
+        builds: createBuildService(database),
         templates: createTemplateInstalls(
           configuration,
           createAppService(database, configuration),

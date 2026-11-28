@@ -47,6 +47,8 @@ export const hostedResourceNames = (installation: z.infer<typeof hostedInstallat
   // The app builder runs once per build phase, so each phase has its own isolate.
   builder: `${installation.name}-app-builder`,
   documenter: `${installation.name}-app-documenter`,
+  // Builds commits from Widefleet Git in containers.
+  ci: `${installation.name}-app-ci`,
 });
 
 export const hostedResourceIds = z.object({
@@ -110,6 +112,13 @@ const readWorkerConfiguration = async (directory: string) => {
       assets: z.looseObject({ directory: z.string() }).optional(),
       workflows: z.array(z.looseObject({ name: z.string() })).default([]),
       base_dir: z.string().optional(),
+      containers: z
+        .array(
+          z.looseObject({
+            images: z.record(z.string(), z.looseObject({ dockerfile: z.string() })),
+          }),
+        )
+        .optional(),
       ratelimits: z
         .array(
           z.object({
@@ -129,6 +138,16 @@ const readWorkerConfiguration = async (directory: string) => {
     ...config,
     main: resolve(directory, config.main),
     base_dir: config.base_dir && resolve(directory, config.base_dir),
+    // Deployment writes the configuration elsewhere, so image paths are absolute.
+    containers: config.containers?.map((container) => ({
+      ...container,
+      images: Object.fromEntries(
+        Object.entries(container.images).map(([name, image]) => [
+          name,
+          { ...image, dockerfile: resolve(directory, image.dockerfile) },
+        ]),
+      ),
+    })),
     $schema: undefined,
   };
 };
@@ -154,6 +173,10 @@ export const hostedConfigurations = async (
   const runtime = await readWorkerConfiguration(runtimeDirectory);
   const control = await readWorkerConfiguration(controlDirectory);
   const builder = await readWorkerConfiguration(builderDirectory);
+
+  const ci = await readWorkerConfiguration(
+    fileURLToPath(new URL("../../../packages/app-ci/", import.meta.url)),
+  );
 
   const workflows = (base: typeof runtime) =>
     base.workflows.map((workflow) => ({
@@ -243,6 +266,7 @@ export const hostedConfigurations = async (
         service,
         { binding: "APP_BUILDER", service: names.builder },
         { binding: "APP_DOCUMENTER", service: names.documenter },
+        { binding: "APP_CI", service: names.ci, entrypoint: "AppCi" },
       ],
       ...emailBindings,
       hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
@@ -264,6 +288,7 @@ export const hostedConfigurations = async (
     },
     builder: { ...builder, account_id: ids.account, name: names.builder },
     documenter: { ...builder, account_id: ids.account, name: names.documenter },
+    ci: { ...ci, account_id: ids.account, name: names.ci },
     initialize: await hostedInitializationConfiguration(installation, ids.account),
   };
 };

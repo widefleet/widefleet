@@ -24,7 +24,9 @@ export type SecretContext =
    * field transforms receive only the value, so this context cannot name the
    * provider or its organization.
    */
-  | { kind: "sso-provider-config"; field: "oidcConfig" | "samlConfig" };
+  | { kind: "sso-provider-config"; field: "oidcConfig" | "samlConfig" }
+  /** A running build's token, which only the build holds; it is not stored. */
+  | { kind: "build-token"; buildId: string };
 
 /** Formats a new keyring with one random key version. */
 export const generateKeyring = () =>
@@ -63,7 +65,9 @@ const contextLabel = (context: SecretContext) =>
       ? [context.kind, context.organizationId, context.appId, context.name]
       : context.kind === "sso-provider-config"
         ? [context.kind, context.field]
-        : [context.kind, context.organizationId],
+        : context.kind === "build-token"
+          ? [context.kind, context.buildId]
+          : [context.kind, context.organizationId],
   );
 
 /** The key version a ciphertext names, or `null` when it names none or is malformed. */

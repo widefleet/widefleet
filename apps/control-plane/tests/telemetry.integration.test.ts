@@ -29,6 +29,7 @@ import { createJobService } from "../src/lib/server/jobs.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
 import { createTemplateInstalls } from "../src/lib/server/template-installs.ts";
+import { createBuildService } from "../src/lib/server/builds.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 import { agents, artifacts, deployments } from "../src/lib/server/schema.ts";
 
@@ -213,6 +214,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         jobs: createJobService(environment.database.db, storage, environment.encryption),
         releases: createRuntimeReleaseService(environment.database.db, storage),
         uploads: createUploadService(environment.database.db, storage, configuration),
+        builds: createBuildService(environment.database.db),
         templates: createTemplateInstalls(
           configuration,
           createAppService(environment.database.db, configuration),

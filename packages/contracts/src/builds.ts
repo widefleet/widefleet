@@ -1,9 +1,13 @@
-// The app builder's API: the control plane sends an app project's source files
-// and receives the Worker module, its source map and its metadata, as
-// `widefleet deploy` would upload them.
+// The builders' APIs. The app builder receives an app project's source files
+// and returns the Worker module, its source map and its metadata, as
+// `widefleet deploy` would upload them. The app CI runs `widefleet deploy` on a
+// commit from Widefleet Git.
 import { z } from "zod";
 import {
   appIconSource,
+  identifier,
+  sourceCredential,
+  sourceRevision,
   bindingName,
   generatedAppIcons,
   queueConsumer,
@@ -98,3 +102,28 @@ export const decodeBase64 = (text: string) =>
   Uint8Array.from(atob(text), (character) => character.charCodeAt(0));
 
 export const buildFailure = z.strictObject({ message: z.string() });
+
+/** The longest a server build runs, in seconds, counted from when it starts. */
+export const ciBuildTimeLimit = 30 * 60;
+
+/** A commit for the app CI to deploy, under the build's ID. */
+export const ciBuildRequest = z.strictObject({
+  id: z.uuid(),
+  appId: identifier,
+  /** The control plane, where the build deploys through the CI with the build's token. */
+  platform: z.strictObject({
+    url: z.url({ protocol: /^https?$/ }),
+    organizationId: z.string().min(1),
+    token: z.string().min(1),
+  }),
+  /** The app's repository, which the CI reads with credentials of the build. */
+  repository: z.strictObject({ url: sourceCredential.shape.url }),
+  source: sourceRevision,
+  /** When the build stops in milliseconds since the epoch, however often it runs. */
+  deadline: z.int().positive(),
+});
+
+export const ciBuildResult = z.discriminatedUnion("status", [
+  z.strictObject({ status: z.literal("succeeded"), log: z.string() }),
+  z.strictObject({ status: z.literal("failed"), message: z.string(), log: z.string() }),
+]);

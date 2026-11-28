@@ -64,6 +64,27 @@ describe("Hosted resource provisioning", () => {
     }
   });
 
+  it("deploys the app CI with its build image, reachable only through a service binding", async () => {
+    const configs = await hostedConfigurations(installation, ids);
+
+    expect(configs.ci).toMatchObject({
+      name: "fixture-app-ci",
+      account_id: ids.account,
+      workers_dev: false,
+      preview_urls: false,
+    });
+    expect(configs.ci.main).toMatch(/packages\/app-ci\/src\/worker\.ts$/);
+    expect(configs.ci.containers?.[0]?.images["build"]?.dockerfile).toMatch(
+      /^\/.*packages\/app-ci\/Dockerfile$/,
+    );
+    expect(configs.ci).not.toHaveProperty("routes");
+    expect(configs.controlPlane.workflows).toContainEqual({
+      binding: "BUILDS",
+      name: "fixture-builds",
+      class_name: "BuildWorkflow",
+    });
+  });
+
   it("configures the workload issuer on the runtime without adding a control-plane schedule", async () => {
     const configs = await hostedConfigurations(installation, ids, "email", {
       vars: { WIDEFLEET_WORKLOAD_ISSUER: "https://stale.example.test/workload" },
@@ -440,6 +461,7 @@ describe("Hosted resource provisioning", () => {
         },
         { binding: "APP_BUILDER", service: "fixture-app-builder" },
         { binding: "APP_DOCUMENTER", service: "fixture-app-documenter" },
+        { binding: "APP_CI", service: "fixture-app-ci", entrypoint: "AppCi" },
       ]);
       expect(configs.controlPlane.vars["APP_RUNTIME_NAME"]).toBe(configuration.runtimeName);
       expect(configs.controlPlane.hyperdrive).toEqual([

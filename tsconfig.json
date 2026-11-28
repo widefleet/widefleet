@@ -3,6 +3,7 @@
   "include": [
     "vitest.config.ts",
     "tools/*.ts",
+    "packages/app-ci/build.ts",
     "packages/app-runtime/build.ts",
     "packages/app-runtime/mcp-discovery-eval.ts"
   ],

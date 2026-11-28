@@ -138,6 +138,20 @@ const createSharedRuntime = (
 
   if (sendEmail) options.sendEmail = sendEmail;
 
+  const { APP_CI: ci, BUILDS: builds } = bindings;
+
+  if (ci && builds)
+    options.builds = {
+      start: async (id) => {
+        await builds.create({ id, params: { id } });
+      },
+      // As in deployment history, a workflow that ended leaves no build running.
+      ended: async (id) =>
+        ["errored", "terminated", "complete"].includes(
+          (await (await builds.get(id)).status()).status,
+        ),
+    };
+
   if (bindings.APP_BUILDER && bindings.APP_DOCUMENTER)
     options.builder = bindingAppBuilder(bindings.APP_BUILDER, bindings.APP_DOCUMENTER);
 

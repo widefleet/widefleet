@@ -14,6 +14,7 @@ import { parseKeyring } from "@platform/contracts/keyring";
 import type { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
 import type { deploymentWorkflowCommand } from "./deployment-workflow-command.ts";
 import type { CloudflareAuthRateLimitBindings } from "./auth-rate-limit-cloudflare.ts";
+import type { AppCi } from "./builds.ts";
 
 export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   [binding: string]:
@@ -27,6 +28,8 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
     | RateLimit
     | Workflow<z.infer<typeof cloudflareAppOperation>>
     | Workflow<z.infer<typeof deploymentWorkflowCommand>>
+    | Workflow<{ id: string }>
+    | AppCi
     | undefined;
   HYPERDRIVE: Hyperdrive;
   EMAIL?: SendEmail;
@@ -46,6 +49,9 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   /** App builder Workers for one-click template installs, one per build phase. */
   APP_BUILDER?: Fetcher;
   APP_DOCUMENTER?: Fetcher;
+  /** The app CI, which builds commits from Widefleet Git, and the Workflow that publishes them. */
+  APP_CI?: AppCi;
+  BUILDS?: Workflow<{ id: string }>;
   APP_COOKIE_SECRET?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;

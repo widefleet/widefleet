@@ -113,28 +113,47 @@ export const createApi = (runtime: Runtime) => {
     }
   });
 
-  const authenticateWrite = async (request: Request) => {
-    const principal = unwrap(await runtime.identity.authenticate(request, "platform:write"));
+  // A build acts only on its app. Input fields can name an app as the path does,
+  // so the check reads the app of the decoded input.
+  const confine = (principal: { buildAppId?: string }, appId: string | undefined) => {
+    if (principal.buildAppId !== undefined && appId !== principal.buildAppId)
+      throw new ORPCError("FORBIDDEN", { message: "Builds act only on their app" });
+  };
+
+  const inputApp = z.object({ appId: z.string() });
+
+  const authenticateWrite = async (request: Request, appId?: string, builds = false) => {
+    const principal = unwrap(
+      await runtime.identity.authenticate(request, "platform:write", builds),
+    );
+
+    confine(principal, appId);
     principals.set(request, principal);
     runtime.reporting.active(principal.id);
 
     return principal;
   };
 
-  const read = base.use(async ({ context, next }) => {
-    const principal = unwrap(await runtime.identity.authenticate(context.request, "platform:read"));
-    principals.set(context.request, principal);
+  const authenticated = (scope: "platform:read" | "platform:write", builds: boolean) =>
+    base.use(async ({ context, next }, input) => {
+      const appId = inputApp.safeParse(input).data?.appId;
+      const principal = unwrap(await runtime.identity.authenticate(context.request, scope, builds));
 
-    runtime.reporting.active(principal.id);
+      confine(principal, appId);
+      principals.set(context.request, principal);
+      runtime.reporting.active(principal.id);
 
-    return next({ context: { principal } });
-  });
+      return next({ context: { principal } });
+    });
 
-  const write = base.use(async ({ context, next }) => {
-    const principal = await authenticateWrite(context.request);
+  const read = authenticated("platform:read", false);
 
-    return next({ context: { principal } });
-  });
+  const write = authenticated("platform:write", false);
+
+  // The requests of `widefleet deploy`, which server builds also make for their app.
+  const deployRead = authenticated("platform:read", true);
+
+  const deployWrite = authenticated("platform:write", true);
 
   // Installation-wide endpoints only need a signed-in person, so browsers can call them
   // without naming an organization.
@@ -529,7 +548,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.migrations.read(context.principal, input.appId, input.jobId)),
       ),
-    network: read
+    network: deployRead
       .route({ method: "GET", path: "/apps/{appId}/network" })
       .input(contract.appPath)
       .output(contract.networkState)
@@ -812,7 +831,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.apps.setAbout(context.principal, input.appId, input.about)),
       ),
-    sourceDeployTarget: write
+    sourceDeployTarget: deployWrite
       // Deployment tokens need this read-only check without platform:read scope.
       .route({ method: "POST", path: "/apps/source-target" })
       .input(contract.sourceDeployTargetInput)
@@ -827,7 +846,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.source.read(context.principal, input.appId)),
       ),
-    prepareSource: write
+    prepareSource: deployWrite
       .route({ method: "POST", path: "/apps/{appId}/source/prepare" })
       .input(contract.appPath.strict())
       .output(contract.sourcePreparation)
@@ -841,7 +860,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.source.credential(context.principal, input.appId, "read")),
       ),
-    sourceWriteCredential: write
+    sourceWriteCredential: deployWrite
       .route({ method: "POST", path: "/apps/{appId}/source/write-credential" })
       .input(contract.appPath)
       .output(contract.sourceCredential)
@@ -947,6 +966,40 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.apps.events(context.principal, input.appId, input.deploymentId)),
       ),
+    startBuild: write
+      .route({ method: "POST", path: "/apps/{appId}/builds" })
+      .input(contract.appPath.extend(contract.appBuildInput.shape))
+      .output(contract.appBuild)
+      .handler(async ({ context, input }) => {
+        const { appId, ...build } = input;
+
+        // The build acts with the starter's sign-in and scopes, which builds cannot pass on.
+        const signIn = unwrap(
+          await runtime.identity.authenticateUser(context.request, "platform:write"),
+        );
+
+        const reads = (
+          await runtime.identity.authenticateUser(context.request, "platform:read")
+        ).isOk();
+
+        return unwrap(
+          await runtime.builds.start(context.principal, { ...signIn, reads }, appId, build),
+        );
+      }),
+    builds: read
+      .route({ method: "GET", path: "/apps/{appId}/builds" })
+      .input(contract.appPath)
+      .output(z.array(contract.appBuild))
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.builds.list(context.principal, input.appId)),
+      ),
+    build: read
+      .route({ method: "GET", path: "/apps/{appId}/builds/{buildId}" })
+      .input(contract.appPath.extend({ buildId: contract.identifier }))
+      .output(contract.appBuildDetails)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.builds.read(context.principal, input.appId, input.buildId)),
+      ),
     rollback: write
       .route({ method: "POST", path: "/apps/{appId}/rollback" })
       .input(contract.appPath.extend(contract.rollbackInput.shape))
@@ -979,7 +1032,7 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.agents.disable(context.principal, input.agentId)),
       ),
-    startUpload: write
+    startUpload: deployWrite
       .route({ method: "POST", path: "/apps/{appId}/assets-upload-session" })
       .input(contract.appPath.extend(contract.createUploadInput.shape))
       .output(contract.uploadSession)
@@ -1186,8 +1239,8 @@ export const createApi = (runtime: Runtime) => {
     );
 
     if (upload && request.method === "PUT") {
-      const principal = await authenticateWrite(request);
       const appId = contract.identifier.parse(upload[1]);
+      const principal = await authenticateWrite(request, appId, true);
 
       if (upload[2] === "worker") {
         const key = idempotencyKey(request);
