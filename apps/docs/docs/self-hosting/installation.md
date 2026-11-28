@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure and recover a company installation.
-lastModified: 2026-11-18
+lastModified: 2026-11-25
 ---
 
 This guide installs Widefleet **0.7.6** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -124,7 +124,7 @@ PostgreSQL database. Protect and back up the runtime state containing those cred
 
 ### Secrets and administrator recovery
 
-Entered provider secrets are encrypted in PostgreSQL. `PLATFORM_ENCRYPTION_KEY` or `PLATFORM_ENCRYPTION_KEY_FILE` can supply an operator-managed key; otherwise Widefleet creates `encryption.key` in `platform-state`. Use one source. The database and the same key are both required for restoration.
+Entered provider secrets are encrypted in PostgreSQL. Widefleet creates its encryption keyring in `platform-state`; you can also manage the keys yourself. Restoring the database requires the same keys. See [encryption keys](/self-hosting/encryption-keys) to configure, add and back them up.
 
 Enter and replace provider secrets through Settings or the settings API/CLI. The one-time bootstrap accepts initial values too. Saving applies the change directly.
 
@@ -252,7 +252,7 @@ Use an operator-managed, encrypted backup outside this host. Back up a **stopped
 
 1. Stop incoming traffic at the proxy, stop new deploy submissions and wait for active deployment jobs to finish. Record the organization ID, active runtime version and deployed app versions.
 2. Stop the agent and control plane. Stop the `runtime` service gracefully, allowing its configured 45-second shutdown period. If enabled, stop the OpenTelemetry Collector and ClickHouse; then stop PostgreSQL and RustFS.
-3. Archive the complete `PLATFORM_DATA_DIRECTORY` and the `platform-state`, `edge-config`, `runtime-config`, `runtime-state` and optional `acme` volumes, preserving ownership and permissions. Include the Compose project name and overrides, private environment, image manifest and any externally supplied encryption key or infrastructure secrets. The database and its encryption key must be restored together. Do not run `docker compose down --volumes`.
+3. Archive the complete `PLATFORM_DATA_DIRECTORY` and the `platform-state`, `edge-config`, `runtime-config`, `runtime-state` and optional `acme` volumes, preserving ownership and permissions. Include the Compose project name and overrides, private environment, image manifest and any externally supplied encryption keys or infrastructure secrets. The database and its [encryption keys](/self-hosting/encryption-keys#back-up-the-keys) must be restored together. Do not run `docker compose down --volumes`.
 4. Copy the encrypted archive off-host. Start the control plane through Compose, which starts its storage, initialization and runtime dependencies. Start any telemetry services and the agent, then the proxy. Verify an existing database record and its associated file.
 
 To restore on the existing host, stop the same services, restore the complete matching snapshot and environment, and restart with the recorded source and image versions. Do not mix database, object-store or runtime-state snapshots. Do not copy live PostgreSQL data files.
