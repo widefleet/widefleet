@@ -69,6 +69,8 @@
 
   const refreshFailed = $derived(Boolean(details.error));
 
+  let readingSource = false;
+
   const refresh = async () => {
     if (refreshing) return;
     refreshing = true;
@@ -83,11 +85,17 @@
           appId: route.appId,
         }).refresh();
 
-      if (activeTab === "source")
-        await getAppSource({
-          organizationId: workspace.organizationId,
-          appId: route.appId,
-        }).refresh();
+      // The saved code comes from the Git host. Its answer is not awaited, so a slow host does
+      // not hold up the next look at the deployments, and one request runs at a time.
+      if (activeTab === "deployments" && data.source.supported && !readingSource) {
+        readingSource = true;
+        void getAppSource({ organizationId: workspace.organizationId, appId: route.appId })
+          .refresh()
+          .catch(() => {})
+          .finally(() => {
+            readingSource = false;
+          });
+      }
 
       // A deployment can add the app to the organization's APIs or change what it exposes.
       if (activeTab === "api")
@@ -149,15 +157,13 @@
 
   const tabs = $derived([
     { id: "overview", label: "Overview" },
-    { id: "status", label: "Status" },
     { id: "deployments", label: "Deployments" },
-    ...(data.source.supported ? [{ id: "source", label: "Source" }] : []),
-    { id: "api", label: "API" },
+    // An app without an API or workflows has no section for them.
+    ...(data.features.api ? [{ id: "api", label: "API" }] : []),
     { id: "connections", label: "Connections" },
-    { id: "workflows", label: "Workflows" },
-    { id: "secrets", label: "Secrets" },
+    ...(data.features.workflows ? [{ id: "workflows", label: "Workflows" }] : []),
     { id: "access", label: "Access" },
-    { id: "settings", label: "App settings" },
+    { id: "settings", label: "Settings" },
   ]);
 </script>
 
@@ -170,7 +176,7 @@
 <div class="flex flex-wrap items-center justify-between gap-4">
   <div class="flex items-center gap-2">
     <span class="text-muted-foreground text-[11px] font-medium tracking-wider uppercase"
-      >{data.app.parentId ? "Preview" : "App"}</span
+      >{data.features.connector ? "Connector" : "App"}{data.app.parentId ? " preview" : ""}</span
     ><AppStatus state={data.app.state} />
   </div>
   <div class="flex items-center gap-2">
@@ -210,7 +216,6 @@
     maxlength={appDescriptionLength}
     empty="Add a description"
   />{/if}
-<p class="text-muted-foreground mt-2 text-sm wrap-anywhere">{data.app.hostname}</p>
 <nav class="mt-7 mb-8 flex gap-5 overflow-x-auto border-b sm:gap-7" aria-label="App sections">
   {#each tabs as tab (tab.id)}<a
       href={workspace.path(`/apps/${data.app.id}${tab.id === "overview" ? "" : `/${tab.id}`}`)}

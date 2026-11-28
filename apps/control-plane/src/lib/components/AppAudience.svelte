@@ -112,7 +112,7 @@
     <ShieldCheck class="text-muted-foreground mt-1 size-4 shrink-0" />
     <p>
       Group membership changes take effect after a new SSO sign-in. Permissions to manage this app
-      are configured separately under Management access. On hosted installations, rule changes can
+      are configured separately under Manage access below. On hosted installations, rule changes can
       take 60 seconds or longer to reach all locations, including after activation is confirmed.
     </p>
   </div>

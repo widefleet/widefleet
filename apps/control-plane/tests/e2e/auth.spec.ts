@@ -1683,8 +1683,10 @@ test("registers an agent, creates an app and an isolated preview, then requests 
     "href",
     `/widefleet/apps/${appId}`,
   );
+  // The address of an app is on its Connections page.
+  await page.getByRole("link", { name: "Connections", exact: true }).click();
   await expect(page.getByText("notes-preview.apps.localhost", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "App settings", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByText("Permanently delete app", { exact: true }).click();
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Delete app", exact: true }).click();
@@ -1805,17 +1807,9 @@ test("manages organization roles and app access by name while members create the
     const appPath = new URL(page.url()).pathname;
     expect((await memberContext.request.get(appPath)).status()).toBe(404);
 
-    for (const section of [
-      "deployments",
-      "connections",
-      "workflows",
-      "access",
-      "access/management",
-      "settings",
-    ])
+    for (const section of ["deployments", "connections", "workflows", "access", "settings"])
       expect((await memberContext.request.get(`${appPath}/${section}`)).status()).toBe(404);
     await page.getByRole("link", { name: "Access", exact: true }).click();
-    await page.getByRole("link", { name: "Management access", exact: true }).click();
     await page.getByLabel("Find a member by name or email").fill("member-ui@");
     await page.getByRole("button", { name: "Find member" }).click();
     await page.getByRole("button", { name: "Grant access" }).click();
@@ -1944,6 +1938,40 @@ test("saves a role on selection and restores it when saving fails", async ({ pag
   expect((await row.boundingBox())?.height).toBe(height);
 });
 
+// The Workflows section of an app's page appears with a deployment that defines a workflow.
+const deployWorkflow = async (appId: string) => {
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+  await environment.database.db.insert(artifacts).values(
+    artifact.parse({
+      id: artifactId,
+      appId: appId,
+      metadata: {
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        assets: { upload_session: crypto.randomUUID() },
+        bindings: [
+          { type: "workflow", name: "WORKFLOW", workflow_name: "example", class_name: "Example" },
+        ],
+      },
+      manifest: {},
+      modules: [{ name: "worker.js", type: "esm", sha256: "0".repeat(64), size: 0 }],
+    }),
+  );
+  await environment.database.db.insert(deployments).values({
+    id: deploymentId,
+    appId: appId,
+    artifactId,
+    requestId: crypto.randomUUID(),
+    status: "succeeded",
+    finishedAt: new Date(),
+  });
+  await environment.database.db
+    .update(apps)
+    .set({ state: "active", activeDeploymentId: deploymentId })
+    .where(eq(apps.id, appId));
+};
+
 test("submits a selective Workflow restart and waits for the agent's confirmation", async ({
   page,
   context,
@@ -1965,36 +1993,7 @@ test("submits a selective Workflow restart and waits for the agent's confirmatio
 
   expect(created.ok()).toBe(true);
   const record = app.parse(await created.json());
-  const artifactId = crypto.randomUUID();
-  const deploymentId = crypto.randomUUID();
-  await environment.database.db.insert(artifacts).values(
-    artifact.parse({
-      id: artifactId,
-      appId: record.id,
-      metadata: {
-        main_module: "worker.js",
-        compatibility_date: "2026-10-01",
-        assets: { upload_session: crypto.randomUUID() },
-        bindings: [
-          { type: "workflow", name: "WORKFLOW", workflow_name: "example", class_name: "Example" },
-        ],
-      },
-      manifest: {},
-      modules: [{ name: "worker.js", type: "esm", sha256: "0".repeat(64), size: 0 }],
-    }),
-  );
-  await environment.database.db.insert(deployments).values({
-    id: deploymentId,
-    appId: record.id,
-    artifactId,
-    requestId: crypto.randomUUID(),
-    status: "succeeded",
-    finishedAt: new Date(),
-  });
-  await environment.database.db
-    .update(apps)
-    .set({ state: "active", activeDeploymentId: deploymentId })
-    .where(eq(apps.id, record.id));
+  await deployWorkflow(record.id);
   await page.goto(`/widefleet/apps/${record.id}/workflows`, { waitUntil: "networkidle" });
   await page.getByLabel("Action", { exact: true }).selectOption("restartFrom");
   await page.getByLabel("Instance ID", { exact: true }).fill("run-1");
@@ -2094,6 +2093,12 @@ test("confirms discarded workflow drafts on section, history and document naviga
   expect(created.ok()).toBe(true);
   const record = app.parse(await created.json());
   await page.goto(`/widefleet/apps/${record.id}`, { waitUntil: "networkidle" });
+  // An app without workflows or an API has no section for them.
+  const sections = page.getByRole("navigation", { name: "App sections" });
+  await expect(sections.getByRole("link", { name: "Workflows", exact: true })).toHaveCount(0);
+  await expect(sections.getByRole("link", { name: "API", exact: true })).toHaveCount(0);
+  await deployWorkflow(record.id);
+  await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("link", { name: "Workflows", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/workflows$`));
   await page.getByLabel("Action", { exact: true }).selectOption("create");
@@ -2141,9 +2146,10 @@ test("confirms discarded workflow drafts on section, history and document naviga
   await (await discardDialog).accept();
   await leave;
   await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}$`));
-  await expect(
-    page.getByRole("heading", { name: "Ready for your first deployment." }),
-  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Overview", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   await page.goForward();
   await expect(page.getByLabel("Action", { exact: true })).toHaveValue("list");
   await page.getByLabel("Action", { exact: true }).selectOption("create");
@@ -2449,7 +2455,7 @@ test.describe(`app catalog`, () => {
       await expect(readerPage.getByRole("button", { name: "Edit about" })).toHaveCount(0);
 
       // The pages for managing the app lead them here too, so a link someone shares still works.
-      await readerPage.goto(`/widefleet/apps/${record.id}/secrets`);
+      await readerPage.goto(`/widefleet/apps/${record.id}/connections`);
       await expect(readerPage).toHaveURL(new RegExp(`/widefleet/catalog/apps/${record.id}$`, "u"));
       await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText(record.displayName);
       // The owner's tile leads to the pages for managing the app.
@@ -2745,7 +2751,7 @@ test(`edits app and inherited preview access`, async ({ browser }) => {
 
     expect(competing.status()).toBe(200);
 
-    for (const name of ["Management access", "Overview"]) {
+    for (const name of ["Deployments", "Overview"]) {
       const dialog = page.waitForEvent("dialog");
       const navigation = page.getByRole("link", { name, exact: true }).click();
       const confirmation = await dialog;
@@ -2781,14 +2787,15 @@ test(`edits app and inherited preview access`, async ({ browser }) => {
 
     const dialog = page.waitForEvent("dialog");
 
-    const navigation = page.getByRole("link", { name: "Management access", exact: true }).click();
+    const sections = page.getByRole("navigation", { name: "App sections" });
+    const navigation = sections.getByRole("link", { name: "Settings", exact: true }).click();
 
     const confirmation = await dialog;
     expect(confirmation.type()).toBe("confirm");
     await confirmation.accept();
     await navigation;
-    await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
-    await page.getByRole("link", { name: "App usage", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "App identity" })).toBeVisible();
+    await sections.getByRole("link", { name: "Access", exact: true }).click();
 
     await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue("qa");
 
@@ -2918,8 +2925,7 @@ test.describe("workspace experience", () => {
       page.getByRole("heading", { name: "Ready for your first deployment." }),
     ).toBeVisible();
     await page.getByRole("link", { name: "Access", exact: true }).click();
-    await page.getByRole("link", { name: "Management access", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/access/management$`));
+    await expect(page).toHaveURL(new RegExp(`/widefleet/apps/${record.id}/access$`));
     await page.reload();
     await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Access", exact: true })).toHaveAttribute(
@@ -3303,7 +3309,7 @@ test.describe(`app templates`, () => {
     expect(JSON.stringify(installed?.secrets)).not.toContain("synthetic-client-secret");
 
     // Both secrets are set and required by the installed version.
-    await page.goto(`/widefleet/apps/${appId}/secrets`);
+    await page.goto(`/widefleet/apps/${appId}/connections`);
     const rows = page.locator("section form, section > div.rounded-lg");
     await expect(page.getByText("Required", { exact: true })).toHaveCount(2);
     await expect(page.getByText("Missing", { exact: true })).toHaveCount(0);
@@ -3925,6 +3931,22 @@ test(`personal connections account controls and workspace entry`, async ({ brows
     const onedrive = "Microsoft OneDrive — Finance and Operations";
     const managed = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
     await expect(managed.filter({ hasText: onedrive }).getByText("Connector")).toBeVisible();
+    // Its own page names it a connector and offers the sections it has: an API, no workflows.
+    await managed.filter({ hasText: onedrive }).getByRole("link").first().click();
+    await expect(
+      page.getByRole("main").getByText("Connector", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "App sections" }).getByRole("link"),
+    ).toHaveText([
+      /^Overview$/,
+      /^Deployments/,
+      /^API$/,
+      /^Connections$/,
+      /^Access$/,
+      /^Settings$/,
+    ]);
+    await page.goto("/widefleet/apps");
     await expect(managed.filter({ hasText: "Shelf Notes" }).getByText("Connector")).toHaveCount(0);
     const kinds = page.getByRole("navigation", { name: "Filter apps" });
     await kinds.getByRole("link", { name: /^Connectors/ }).click();
