@@ -77,6 +77,18 @@ find them in **App catalog** and follow their launch URLs, subject to the app's
 SSO and group rules. Management permissions remain separate. Use
 `widefleet catalog unpublish APP_UUID` to withdraw the listing without deleting the app.
 
+Tell colleagues what the app is for in one sentence of up to 200 characters:
+
+```sh
+widefleet catalog describe APP_UUID "Create and approve purchase orders."
+```
+
+The description appears with the app on **Home** and in `widefleet catalog list`.
+Everyone who manages the app can change it, also on the app's page: choose the
+text under the app's name, edit it and save. An empty text removes it. An app
+installed from a template starts with the template's description. Descriptions
+require platform and CLI **0.7.21 or newer**.
+
 ## Verify access
 
 Open the launch URL in a separate browser profile with an intended user's
