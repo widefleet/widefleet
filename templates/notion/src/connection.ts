@@ -60,7 +60,9 @@ export const accountConnection = (environment: Environment, properties: Properti
           .first(),
       );
 
-    const stored = saved?.refreshToken ?? saved?.accessToken;
+    // Notion revokes an access token and the tokens issued before it; it
+    // accepts a refresh token but leaves the grant in place.
+    const stored = saved?.accessToken;
 
     if (!binding || !stored) return;
 
