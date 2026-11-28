@@ -41,6 +41,9 @@ export const registeredOAuthClient = z
     ...clientPolicy,
     // A service whose registration decides the client's access, such as
     // Notion's integration capabilities, takes no scopes: it lists none.
+    // Without scopes, authorization requests name none, and the service
+    // grants what it grants a request without a `scope`, which for some
+    // services is every scope a person granted the client before.
     scopes: z.array(scope),
     // How the client authenticates at the revocation endpoint, with RFC 8414's
     // method names: credentials in the form, the default, or HTTP Basic, which

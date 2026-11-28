@@ -454,6 +454,19 @@ describe("managed OAuth broker", () => {
   it("authorizes a client without scopes, refreshes and revokes with HTTP Basic authentication", async () => {
     const broker = managedOAuth(environment);
 
+    // Every code exchange and refresh issues a new access token, as Notion's do.
+    let issued = 0;
+
+    tokenResponse = () => {
+      issued++;
+
+      return Response.json({
+        access_token: `notion-access-${issued}`,
+        refresh_token: `notion-refresh-${issued}`,
+        token_type: "bearer",
+      });
+    };
+
     const authorizeNotion = (scopes: string[]) =>
       broker.request(identity, {
         action: "authorize",
@@ -482,13 +495,15 @@ describe("managed OAuth broker", () => {
     expect(requests.at(-1)).toMatchObject({ url: "https://api.notion.com/v1/oauth/token" });
     expect(requests.at(-1)?.authorization).toBe(basic);
     expect(requests.at(-1)?.body.has("client_secret")).toBe(false);
-    tokens.parse(
+
+    const refreshed = tokens.parse(
       await broker.request(identity, {
         action: "refresh",
         client: "notion",
         refreshToken: granted.refreshToken,
       }),
     );
+
     expect(requests.at(-1)?.body.get("grant_type")).toBe("refresh_token");
     expect(requests.at(-1)?.authorization).toBe(basic);
     expect(requests.at(-1)?.body.has("client_secret")).toBe(false);
@@ -497,17 +512,16 @@ describe("managed OAuth broker", () => {
       await broker.request(identity, {
         action: "revoke",
         client: "notion",
-        token: granted.accessToken,
+        token: refreshed.accessToken,
       }),
     ).toEqual({ revoked: true });
 
-    // Notion revokes access tokens. The credentials go in the Authorization
-    // header, never in the form.
-    expect(requests.at(-1)).toEqual({
-      url: "https://api.notion.com/v1/oauth/revoke",
-      body: new URLSearchParams({ token: "provider-access" }),
-      authorization: basic,
-    });
+    // Notion revokes the grant by its current access token, with the tokens
+    // issued before it. The credentials go in the Authorization header, never
+    // in the form.
+    expect(requests.at(-1)?.url).toBe("https://api.notion.com/v1/oauth/revoke");
+    expect(requests.at(-1)?.body.toString()).toBe("token=notion-access-2");
+    expect(requests.at(-1)?.authorization).toBe(basic);
   });
 
   it("keeps scopes required except for registered clients and revocation methods to registered clients with a revocation URL", () => {
