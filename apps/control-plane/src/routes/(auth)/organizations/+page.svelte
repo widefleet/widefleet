@@ -98,7 +98,10 @@
   };
 </script>
 
-<svelte:head><title>Choose organization · Widefleet</title></svelte:head>
+<svelte:head
+  ><title>{showCreation ? "Create your organization" : "Choose organization"} · Widefleet</title
+  ></svelte:head
+>
 <AuthLayout class="rounded-xl p-0 sm:p-0">
   <div class="p-6 sm:p-8">
     {#if showCreation}
@@ -118,6 +121,9 @@
       <h1 class="break-words text-2xl font-semibold leading-tight tracking-tight">
         Create your organization
       </h1>
+      <p class="text-muted-foreground mt-2 text-sm leading-6">
+        Your own space for apps. Invite your team whenever you're ready.
+      </p>
       <form {...createOrganization} class="mt-6 space-y-5">
         <FormIssues issues={creationIssues} />
         <input {...createOrganization.fields.next.as("hidden", data.next)} />
@@ -132,12 +138,13 @@
             required
             maxlength={200}
             autocomplete="organization"
+            placeholder="My workspace"
             class="h-11"
             disabled={busy}
           />
         </div>
         <div class="space-y-2">
-          <Label for="organization-slug">URL</Label>
+          <Label for="organization-slug">Web address</Label>
           <InputGroup.Root class="h-11">
             <InputGroup.Addon class="bg-muted/40 h-full border-r pr-3"
               ><InputGroup.Text class="text-base md:text-sm">{data.host}/</InputGroup.Text
@@ -151,6 +158,7 @@
               maxlength={50}
               pattern="[a-z0-9]+(-[a-z0-9]+)*"
               title="Lowercase letters, numbers and single hyphens"
+              placeholder="my-workspace"
               class="pl-3"
               disabled={busy}
             />
@@ -269,14 +277,16 @@
     {/if}
     {#if message}<div class="mt-5"><Feedback kind="error">{message}</Feedback></div>{/if}
   </div>
-  <p
-    class="bg-muted/20 text-muted-foreground rounded-b-xl border-t px-6 py-4 text-center text-sm sm:px-8"
-  >
-    <button
-      type="button"
-      class="text-foreground font-medium underline-offset-4 hover:underline disabled:opacity-50"
-      onclick={signOut}
-      disabled={busy}>Sign out</button
+  {#if showCreation && !hasChoices}<p
+      class="bg-muted/20 text-muted-foreground rounded-b-xl border-t px-6 py-4 text-center text-sm sm:px-8"
     >
-  </p>
+      Joining a team? Ask for an invite.
+    </p>{/if}
+  {#snippet action()}<Button
+      variant="ghost"
+      size="sm"
+      class="text-muted-foreground"
+      onclick={signOut}
+      disabled={busy}>Sign out</Button
+    >{/snippet}
 </AuthLayout>

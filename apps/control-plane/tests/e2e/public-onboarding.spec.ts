@@ -129,7 +129,7 @@ for (const entry of ["registration", "sign-in"] as const)
         entry === "registration" ? "/[organization]/apps" : "/[organization]",
       );
       await page.getByLabel("Name", { exact: true }).fill("Example Builders");
-      await expect(page.getByLabel("URL", { exact: true })).toHaveValue("example-builders");
+      await expect(page.getByLabel("Web address", { exact: true })).toHaveValue("example-builders");
       environment.authControl.available(false);
       await page.getByRole("button", { name: "Create organization", exact: true }).click();
       await expect(
@@ -141,7 +141,7 @@ for (const entry of ["registration", "sign-in"] as const)
         ),
       ).toBeVisible();
       await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Example Builders");
-      await expect(page.getByLabel("URL", { exact: true })).toHaveValue("example-builders");
+      await expect(page.getByLabel("Web address", { exact: true })).toHaveValue("example-builders");
       environment.authControl.available(true);
       await page.getByRole("button", { name: "Create organization", exact: true }).click();
       await expect(page).toHaveURL(/\/example-builders\/apps$/);

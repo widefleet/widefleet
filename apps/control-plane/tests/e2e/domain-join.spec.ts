@@ -194,7 +194,7 @@ test("joins an organization by email domain and manages its join domains", async
     await expect(toggle).toBeChecked();
     await builder.getByLabel("Name", { exact: true }).fill("Builders");
     // The address follows the name.
-    await expect(builder.getByLabel("URL", { exact: true })).toHaveValue("builders");
+    await expect(builder.getByLabel("Web address", { exact: true })).toHaveValue("builders");
     await builder.getByRole("button", { name: "Create organization", exact: true }).click();
     await expect(builder).toHaveURL(/\/builders\/apps$/);
 
