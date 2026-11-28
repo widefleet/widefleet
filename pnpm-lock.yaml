@@ -573,6 +573,12 @@ importers:
 
   starters/sveltekit:
     dependencies:
+      '@ui-sdk/core':
+        specifier: 0.1.0-beta.18
+        version: 0.1.0-beta.18
+      '@ui-sdk/svelte':
+        specifier: 0.1.0-beta.18
+        version: 0.1.0-beta.18(@ui-sdk/core@0.1.0-beta.18)(svelte@5.57.1)
       better-result:
         specifier: 3.0.1
         version: 3.0.1
@@ -631,6 +637,12 @@ importers:
       '@tanstack/react-start':
         specifier: 1.168.61
         version: 1.168.61(crossws@0.4.15(srvx@0.11.22))(esbuild@0.28.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(rolldown@1.2.12)(supports-color@10.2.2)(vite@8.3.2(@types/node@22.18.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      '@ui-sdk/core':
+        specifier: 0.1.0-beta.18
+        version: 0.1.0-beta.18
+      '@ui-sdk/react':
+        specifier: 0.1.0-beta.18
+        version: 0.1.0-beta.18(@types/react@19.3.0)(@ui-sdk/core@0.1.0-beta.18)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       better-result:
         specifier: 3.0.1
         version: 3.0.1
@@ -3879,6 +3891,26 @@ packages:
   '@typespec/ts-http-runtime@0.3.9':
     resolution: {integrity: sha512-edSdeAqkdxBVzA1yL1LrLCml1YjyCVvPMtMqJpbF+6K609tHe8V6sQUzFQSGcYNhcuhOceZtjvN32+mpIth30A==}
     engines: {node: '>=22.0.0'}
+
+  '@ui-sdk/core@0.1.0-beta.18':
+    resolution: {integrity: sha512-y5S6komEjZ2dtD/rrW0ulkP67zNZpfbTBmtynuw4oLvhazXoEQI7Yk1/jMuOVOJvj0RUk8tLY/iyckbzaI+CrA==}
+
+  '@ui-sdk/react@0.1.0-beta.18':
+    resolution: {integrity: sha512-iTL1slJ0PFJXPGLrNMQCuQq4cQjUlzsOAlLRsuz/aMCFtDJhvhH7E6euBwdak8mHYxGwSwVHprTfnFhkyQi44Q==}
+    peerDependencies:
+      '@types/react': '>=19.2.10'
+      '@ui-sdk/core': ^0.1.0-beta.18
+      react: '>=19'
+      react-dom: '>=19'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+
+  '@ui-sdk/svelte@0.1.0-beta.18':
+    resolution: {integrity: sha512-sD0wRq/krocdbWr+lM1Eu25IfhNNGrHoEVuVL+IeW49SgsIx0GAkiTOCgKhcz+LKTBp2tpxkpRTyJzbgXDOR+Q==}
+    peerDependencies:
+      '@ui-sdk/core': ^0.1.0-beta.18
+      svelte: '>=5.33'
 
   '@ungap/structured-clone@1.4.0':
     resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
@@ -10468,6 +10500,21 @@ snapshots:
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
+
+  '@ui-sdk/core@0.1.0-beta.18': {}
+
+  '@ui-sdk/react@0.1.0-beta.18(@types/react@19.3.0)(@ui-sdk/core@0.1.0-beta.18)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+    dependencies:
+      '@ui-sdk/core': 0.1.0-beta.18
+      react: 19.3.0
+      react-dom: 19.3.0(react@19.3.0)
+    optionalDependencies:
+      '@types/react': 19.3.0
+
+  '@ui-sdk/svelte@0.1.0-beta.18(@ui-sdk/core@0.1.0-beta.18)(svelte@5.57.1)':
+    dependencies:
+      '@ui-sdk/core': 0.1.0-beta.18
+      svelte: 5.57.1
 
   '@ungap/structured-clone@1.4.0': {}
 

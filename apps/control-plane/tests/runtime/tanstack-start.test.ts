@@ -225,7 +225,21 @@ describe.runIf(process.env["RUN_CAPTURE_TESTS"] === "1")("TanStack Start on cell
       await page.goto(origin);
       await expect.poll(() => page.textContent("body")).toContain("Angemeldet als Fixture User");
       await page.getByLabel("Deine Notiz").fill("Persisted TanStack note");
-      await page.getByLabel("Ein Foto dazu").setInputFiles({
+      // The label opens the photo picker once the page has hydrated.
+      const chooser = page.waitForEvent("filechooser");
+      await expect
+        .poll(async () => {
+          await page.getByLabel("Ein Foto dazu", { exact: true }).click();
+
+          return Promise.race([
+            chooser.then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(resolve, 500, false)),
+          ]);
+        })
+        .toBe(true);
+      await (
+        await chooser
+      ).setFiles({
         name: "fixture.png",
         mimeType: "image/png",
         buffer: Buffer.from(
@@ -242,8 +256,8 @@ describe.runIf(process.env["RUN_CAPTURE_TESTS"] === "1")("TanStack Start on cell
       const submitted = await mutation;
 
       await expect
-        .poll(() => page.locator('[role="status"]').textContent())
-        .toContain("Deine Notiz wurde gespeichert.");
+        .poll(() => page.getByText("Deine Notiz wurde gespeichert.", { exact: true }).count())
+        .toBe(1);
       await page.reload();
       expect(await page.textContent("article")).toContain("Persisted TanStack note");
       const photo = await page.locator("article img").getAttribute("src");

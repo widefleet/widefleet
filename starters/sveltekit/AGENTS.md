@@ -4,6 +4,10 @@ Read README.md for the app contract and CLI commands. Keep this project independ
 Use the installed `widefleet` CLI for app creation, deployment, history and rollback. Run `pnpm check` before deploying.
 Use `locals.user` for the authenticated company identity. Never trust identity headers outside the platform's private ingress.
 
+## Interface
+
+Build the interface from UI SDK components in `@ui-sdk/svelte`. The docs for the installed version are in `node_modules/@ui-sdk/svelte/docs`. `src/app.css` imports their default styles from `@ui-sdk/core/web.css`; restyle components there by overriding its `--ui-*` variables or by targeting their `data-slot` and state attributes.
+
 ## Connect to Widefleet
 
 Check `widefleet config show` before requesting connection details. Use company-provided or saved configuration when available. Otherwise, use a company domain or work email already available in the authorized context, or ask for the employee's work email/domain. Run `widefleet login --domain example.com` or `widefleet login --email employee@example.com`; the CLI discovers and remembers the platform URL after login. Do not ask for the platform URL as the first onboarding step. If discovery fails, report the error so IT can configure discovery or supply managed configuration. An explicit `--url` or `PLATFORM_URL` override must be removed before using email/domain discovery.

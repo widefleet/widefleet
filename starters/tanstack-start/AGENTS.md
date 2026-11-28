@@ -2,6 +2,10 @@
 
 Use the installed `widefleet` CLI for deployment, previews, history and rollback. Run `pnpm check` before deploying.
 
+## Interface
+
+Build the interface from UI SDK components in `@ui-sdk/react`. The docs for the installed version are in `node_modules/@ui-sdk/react/docs`. `src/styles.css` imports their default styles from `@ui-sdk/core/web.css`; restyle components there by overriding its `--ui-*` variables or by targeting their `data-slot` and state attributes.
+
 ## Platform integration
 
 Use `context.user` in server functions and server routes for the verified company identity. Preserve authentication in `src/server.ts`; identity headers are trustworthy only on the platform's private ingress.
