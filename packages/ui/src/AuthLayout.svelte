@@ -5,18 +5,23 @@
 
   let {
     children,
+    action,
     wide = false,
     homeHref = "/",
     class: className,
-  }: { children: Snippet; wide?: boolean; homeHref?: string | null; class?: string } = $props();
+  }: {
+    children: Snippet;
+    action?: Snippet;
+    wide?: boolean;
+    homeHref?: string | null;
+    class?: string;
+  } = $props();
 </script>
 
 <div class="bg-sidebar flex min-h-svh flex-col">
   <header class="flex items-center justify-between gap-4 px-6 py-6 sm:px-10">
-    {#if homeHref}<a href={homeHref} aria-label="Widefleet home"><Brand /></a>{:else}<Brand
-      />{/if}<span class="text-muted-foreground hidden text-xs sm:inline"
-      >A home for your internal apps.</span
-    >
+    {#if homeHref}<a href={homeHref} aria-label="Widefleet home"><Brand /></a>{:else}<Brand />{/if}
+    {@render action?.()}
   </header>
   <main
     id="main-content"
@@ -26,7 +31,5 @@
       {@render children()}
     </div>
   </main>
-  <footer class="text-muted-foreground px-6 py-6 text-center text-xs">
-    Widefleet<span class="mx-2 text-border">/</span>Your ideas. Your infrastructure.
-  </footer>
+  <footer class="text-muted-foreground px-6 py-6 text-center text-xs">Widefleet</footer>
 </div>

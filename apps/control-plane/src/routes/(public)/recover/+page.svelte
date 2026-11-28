@@ -26,7 +26,7 @@
         if (result.error)
           message =
             "This link has expired or has already been used. Generate a new link on the server.";
-        else await goto(data.destination);
+        else await goto(data.destination, { invalidateAll: true });
       })
       .catch(() => {
         message = "Recovery access is temporarily unavailable.";
