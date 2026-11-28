@@ -99,8 +99,6 @@ struct AssetFiles {
 pub struct Options {
     #[arg(long, default_value = "wrangler.jsonc")]
     pub config: PathBuf,
-    #[arg(long)]
-    skip_build: bool,
     /// Deploy without saving source to Widefleet Git.
     #[arg(long, conflicts_with_all = ["source_branch", "allow_branch_mismatch"])]
     pub(crate) no_source: bool,
@@ -271,6 +269,21 @@ fn add_app_icons(assets: &mut AssetFiles) -> Result<()> {
     Ok(())
 }
 
+/// Whether package.json declares a `build` script, or `None` without package.json.
+fn declares_build_script(project: &Path) -> Result<Option<bool>> {
+    let bytes = match std::fs::read(project.join("package.json")) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    // pnpm accepts a byte order mark, so the CLI does as well.
+    let text = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+    let manifest: serde_json::Value = serde_json::from_slice(text)
+        .map_err(|error| Error::invalid(format!("Invalid package.json: {error}")))?;
+    // Only the presence of `build` matters; pnpm validates the scripts themselves.
+    Ok(Some(manifest.pointer("/scripts/build").is_some()))
+}
+
 async fn local_command(project: &Path, arguments: &[&str]) -> Result<()> {
     let status = Command::new(if cfg!(windows) { "pnpm.cmd" } else { "pnpm" })
         .args(arguments)
@@ -401,8 +414,12 @@ async fn publish(
     } else {
         None
     };
-    if !options.skip_build && project.join("package.json").exists() {
-        local_command(project, &["run", "build"]).await?;
+    match declares_build_script(project)? {
+        Some(true) => local_command(project, &["run", "build"]).await?,
+        Some(false) => {
+            eprintln!("No build script in package.json; bundling the Worker entry as is.")
+        }
+        None => {}
     }
     let temporary = tempfile::tempdir_in(project)?;
     let entry = project.join(&configuration.worker.main).canonicalize()?;
@@ -1073,6 +1090,36 @@ mod tests {
                 .ok_or_else(|| Error::invalid("Expected an invalid configuration".into()))?;
             assert!(error.to_string().contains(message), "{error}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn only_a_declared_build_script_runs_before_bundling() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        assert_eq!(declares_build_script(root)?, None);
+        for (manifest, declared) in [
+            ("{}", false),
+            (r#"{"scripts":null}"#, false),
+            (r#"{"scripts":{"check":"tsc"}}"#, false),
+            (r#"{"name":"app","scripts":{"build":"vite build"}}"#, true),
+            ("\u{feff}{\"scripts\":{\"build\":\"vite build\"}}", true),
+            (r#"{"scripts":{"build":"echo hello","other":false}}"#, true),
+            (r#"{"scripts":[]}"#, false),
+            (r#"{"scripts":false}"#, false),
+            (r#"{"scripts":{},"scripts":{"build":"vite build"}}"#, true),
+        ] {
+            std::fs::write(root.join("package.json"), manifest)?;
+            assert_eq!(declares_build_script(root)?, Some(declared), "{manifest}");
+        }
+        std::fs::write(root.join("package.json"), "{")?;
+        let error = declares_build_script(root)
+            .err()
+            .ok_or_else(|| Error::invalid("Expected an invalid package.json".into()))?;
+        assert!(
+            error.to_string().contains("Invalid package.json"),
+            "{error}"
+        );
         Ok(())
     }
 

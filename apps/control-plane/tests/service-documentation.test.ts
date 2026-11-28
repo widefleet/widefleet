@@ -169,7 +169,7 @@ native(
       'export {Reader as default, Renamed} from "./build/framework.js";',
     );
     // The final bundle must describe the code that was built, even if the source
-    // file was edited afterwards and deployment uses --skip-build.
+    // file was edited afterwards; the project has no build script that rebuilds it.
     await writeFile(join(root, "app.ts"), code.replace("Read one item.", "STALE COMMENT"));
 
     const result = await extractServiceDocumentation(root, await bundle(root, "wrapper.ts"), [

@@ -708,7 +708,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
         const result = await executeCli(
           join(state, "installation", executableName),
-          ["deploy", "--skip-build", "--no-wait", "--json"],
+          ["deploy", "--no-wait", "--json"],
           {
             cwd: join(state, "project with spaces"),
             timeout: 30_000,
@@ -929,12 +929,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       vi.stubEnv("GIT_TRACE", trace);
 
       try {
-        expect((await cli("--no-wait", "--skip-build")).stdout).toContain("Deployment queued");
+        expect((await cli("--no-wait")).stdout).toContain("Deployment queued");
         sourceTarget.supported = true;
         requests.length = 0;
-        expect((await cli("--no-source", "--no-wait", "--skip-build")).stdout).toContain(
-          "Deployment queued",
-        );
+        expect((await cli("--no-source", "--no-wait")).stdout).toContain("Deployment queued");
         expect(requests).not.toContain("POST /api/v1/apps/source-target");
         expect(requests.some((path) => path.endsWith("/source/prepare"))).toBe(false);
         await expect(readFile(trace, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
@@ -1318,7 +1316,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         },
       ]);
 
-      const second = await previewCli("--name", "review", "--json", "--skip-build");
+      const second = await previewCli("--name", "review", "--json");
       expect(JSON.parse(second.stdout)).toMatchObject({
         appId: preview.id,
         status: "succeeded",
@@ -1355,7 +1353,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
         const result = await executeCli(
           join(state, "installation", executableName),
-          ["preview", "--name", "review", "--skip-build", "--session-file", sessionFile],
+          ["preview", "--name", "review", "--session-file", sessionFile],
           {
             cwd: join(state, "project with spaces"),
             timeout: 15_000,
@@ -1386,7 +1384,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         "review",
         "--config",
         configuration,
-        "--skip-build",
         "--no-wait",
         "--json",
       );
@@ -1396,7 +1393,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         status: "queued",
         url: preview.url,
       });
-      expect(result.stderr).not.toContain("Synthetic build output");
+      expect(result.stderr).toContain("Synthetic build output");
       expect(requests).not.toContain("GET /api/v1/apps/by-name/fixture");
       expect(historyReads).toBe(0);
     });
@@ -1406,9 +1403,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       await execute("git", ["init", "--initial-branch=feature/login", project]);
 
       try {
-        await previewCli("--skip-build", "--no-wait");
+        await previewCli("--no-wait");
         expect(createdPreviews[0]?.slug).toMatch(/^server-app-feature-login-[a-f0-9]{8}$/);
-        await previewCli("--skip-build", "--no-wait");
+        await previewCli("--no-wait");
         expect(createdPreviews).toHaveLength(1);
       } finally {
         await rm(join(project, ".git"), { recursive: true, force: true });
@@ -1472,9 +1469,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         await execute("git", ["init", `--initial-branch=${primary}`, project]);
 
         try {
-          const result = await failure(
-            cli(preview.id, "--skip-build", "--no-wait", "--allow-branch-mismatch"),
-          );
+          const result = await failure(cli(preview.id, "--no-wait", "--allow-branch-mismatch"));
 
           expect(result.stderr).toContain("Create or switch to a work branch");
           const branches = await execute("git", ["-C", project, "for-each-ref"]);
@@ -1496,18 +1491,16 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       await execute("git", ["init", "--initial-branch=feature/login", project]);
 
       try {
-        expect((await failure(previewCli("--name", "unrelated", "--skip-build"))).stderr).toContain(
+        expect((await failure(previewCli("--name", "unrelated"))).stderr).toContain(
           "Git previews use the branch-derived name",
         );
-        expect(
-          (await failure(previewCli("--source-branch", "different", "--skip-build"))).stderr,
-        ).toContain("must use the checked-out branch");
+        expect((await failure(previewCli("--source-branch", "different"))).stderr).toContain(
+          "must use the checked-out branch",
+        );
         expect(createdPreviews).toHaveLength(0);
 
         for (let attempt = 0; attempt < 2; attempt++) {
-          expect((await failure(previewCli("--skip-build"))).stderr).toContain(
-            "Synthetic source outage",
-          );
+          expect((await failure(previewCli())).stderr).toContain("Synthetic source outage");
         }
 
         const name = await contract.previewNameFromBranch("feature/login");
@@ -1538,7 +1531,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       await execute("git", ["init", "--initial-branch=different", project]);
 
       try {
-        expect((await failure(cli(preview.id, "--skip-build"))).stderr).toContain(
+        expect((await failure(cli(preview.id))).stderr).toContain(
           "This preview is linked to branch review",
         );
         expect((await execute("git", ["-C", project, "for-each-ref"])).stdout).toBe("");
@@ -1604,7 +1597,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       "refuses a name owned by an app with parent %s",
       async (parentId) => {
         storedPreview = { ...preview, parentId };
-        const result = await failure(previewCli("--name", "review", "--skip-build"));
+        const result = await failure(previewCli("--name", "review"));
         expect(result.stderr).toContain("belongs to a different app");
         expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
       },
@@ -1612,7 +1605,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("handles a concurrent creation by verifying and reusing the preview", async () => {
       concurrentCreation = true;
-      const result = await previewCli("--name", "review", "--no-wait", "--skip-build", "--json");
+      const result = await previewCli("--name", "review", "--no-wait", "--json");
       expect(JSON.parse(result.stdout)).toMatchObject({ appId: preview.id });
       expect(
         requests.filter((request) => request === `GET /api/v1/apps/by-name/${preview.slug}`),
@@ -1621,7 +1614,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("does not treat access failures as a missing preview", async () => {
       previewLookupStatus = 403;
-      const result = await failure(previewCli("--name", "review", "--skip-build"));
+      const result = await failure(previewCli("--name", "review"));
       expect(result.stderr).toContain("Preview access denied");
       expect(createdPreviews).toEqual([]);
       expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
@@ -1633,7 +1626,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         hostname: `review-${parent.hostname}`,
         url: `https://review-${parent.hostname}/`,
       };
-      const result = await previewCli("--name", "review", "--skip-build", "--no-wait", "--json");
+      const result = await previewCli("--name", "review", "--no-wait", "--json");
       expect(JSON.parse(result.stdout)).toMatchObject({
         appId: preview.id,
         url: storedPreview.url,
@@ -1643,7 +1636,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("refuses a legacy flat preview instead of publishing at the wrong hostname", async () => {
       storedPreview = { ...preview, hostname: "server-app-review.apps.localhost" };
-      const result = await failure(previewCli("--name", "review", "--skip-build"));
+      const result = await failure(previewCli("--name", "review"));
       expect(result.stderr).toContain("does not use review.server-app.apps.localhost");
       expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
     });
@@ -1659,7 +1652,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       );
       parent = app;
       storedPreview = { ...preview, state: "deleting" };
-      expect((await failure(previewCli("--name", "review", "--skip-build"))).stderr).toContain(
+      expect((await failure(previewCli("--name", "review"))).stderr).toContain(
         "preview is being deleted",
       );
       expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
@@ -1713,7 +1706,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("reports preview activation failure without a success result", async () => {
       outcome = "failed";
-      const result = await failure(previewCli("--name", "review", "--json", "--skip-build"));
+      const result = await failure(previewCli("--name", "review", "--json"));
       expect(result).toMatchObject({ code: 1, stdout: "" });
       expect(result.stderr).toContain("Synthetic preview failure");
     });
@@ -1845,7 +1838,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           [
             ...(selection === "flag" ? ["--organization", requiredOrganization] : []),
             "deploy",
-            "--skip-build",
             "--json",
           ],
           {
@@ -1878,6 +1870,24 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(historyReads).toBe(2);
     });
 
+    it("bundles the Worker entry without a build when package.json has no build script", async () => {
+      const manifest = join(state, "project with spaces/package.json");
+      const original = await readFile(manifest, "utf8");
+      await writeFile(manifest, JSON.stringify({ scripts: { check: "node build.mjs" } }));
+
+      try {
+        const result = await cli("--no-wait");
+        expect(result.stdout).toBe("Deployment queued\n");
+        expect(result.stderr).toContain(
+          "No build script in package.json; bundling the Worker entry as is.",
+        );
+        expect(result.stderr).not.toContain("Synthetic build output");
+        expect(requests).toContain(`PUT /api/v1/apps/${app.id}/worker`);
+      } finally {
+        await writeFile(manifest, original);
+      }
+    });
+
     it("prints one JSON result with the final status and timestamps", async () => {
       const result = await cli("--json");
       expect(
@@ -1898,7 +1908,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("deploys to an explicit app with a write-only token and returns its URL without waiting", async () => {
       accessToken = "synthetic-write-only-token";
-      const result = await cli(app.id, "--json", "--no-wait", "--skip-build");
+      const result = await cli(app.id, "--json", "--no-wait");
       expect(
         contract.deployment
           .extend({ url: z.url(), source: contract.sourceRevision.nullable() })
@@ -1918,7 +1928,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     it("does not claim activation when waiting is disabled", async () => {
-      const result = await cli("--no-wait", "--skip-build");
+      const result = await cli("--no-wait");
       expect(result.stdout).toBe("Deployment queued\n");
       expect(historyReads).toBe(0);
     });
@@ -1941,7 +1951,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     it.skipIf(process.platform === "win32")(
       "does not emit a result when waiting is interrupted",
       async () => {
-        const deployment = cli("--json", "--skip-build");
+        const deployment = cli("--json");
         // Observe an early process failure even while waiting for readiness.
         const interrupted = Promise.allSettled([failure(deployment)]);
 
@@ -1970,7 +1980,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       "exits unsuccessfully without a result on activation failure %j",
       async ({ args }) => {
         outcome = "failed";
-        const result = await failure(cli(...args, "--skip-build"));
+        const result = await failure(cli(...args));
         expect(result).toMatchObject({ code: 1, stdout: "" });
         expect(result.stderr).toContain("Synthetic activation failure");
         expect(result.stderr).toContain('"error_code":"deployment_failed"');
@@ -1981,7 +1991,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("reports an unknown deployment status as a protocol failure", async () => {
       outcome = "unknown-server-status";
-      const result = await failure(cli("--json", "--skip-build"));
+      const result = await failure(cli("--json"));
       expect(result).toMatchObject({ code: 1, stdout: "" });
       expect(result.stderr).toContain('"error_code":"deployment_status_invalid"');
       expect(result.stderr).toContain('"error_category":"technical"');
@@ -1990,7 +2000,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("requires a server-provided URL before uploading to an older server", async () => {
       includeUrl = false;
-      const result = await failure(cli("--json", "--skip-build"));
+      const result = await failure(cli("--json"));
       expect(result).toMatchObject({ code: 1, stdout: "" });
       expect(result.stderr).toContain("Upgrade the server");
       expect(requests).toEqual([
