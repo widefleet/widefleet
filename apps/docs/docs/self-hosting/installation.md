@@ -28,7 +28,7 @@ This setting controls sign-in codes only. Invitations still require an email ada
 Open `PLATFORM_URL`:
 
 Enter the organization name and create the first administrator with a name and email, then request a sign-in code. Read it from the selected transport and sign in. Codes expire after five minutes and allow three incorrect attempts.
-After sign-in, **Publish your first app** shows CLI connection and deployment commands. Before deploying, [connect an agent](#start-services).
+After sign-in, **Company sign-in** opens, where you turn on app sign-in for your apps. Before deploying, [connect an agent](#start-services).
 
 Follow [Set up company sign-in](/guides/company-sign-in) for Microsoft Entra,
 Google Workspace or another OpenID Connect provider. It covers registering

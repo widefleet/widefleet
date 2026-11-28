@@ -16,8 +16,8 @@ confirm the six-digit code sent to your inbox.
 
 Choose an organization or select **Create organization** when offered. Enter a
 name and a URL name using lowercase letters, numbers and hyphens; the URL name
-appears in app addresses. **Publish your first app** then shows the connection
-and deployment commands for your workspace. If setup asks you to retry, repeat
+appears in app addresses. **Manage** then opens, where you copy a prompt for
+your coding agent or start from a template. If setup asks you to retry, repeat
 the action to finish preparing that organization.
 
 Installing Widefleet yourself? Start with
