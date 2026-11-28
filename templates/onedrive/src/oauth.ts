@@ -24,6 +24,7 @@ const clients = {
     scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.ReadWrite.All"],
   },
   linear: { client: "linear", scopes: ["read", "write"] },
+  notion: { client: "notion", scopes: [] },
 } as const;
 
 type Provider = keyof typeof clients;

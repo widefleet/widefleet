@@ -13,6 +13,8 @@ export type RestOperation = {
   pathParameters: Record<string, string>;
   /** Path parameters a call may leave out, by the name the path uses, such as an OData function's optional parameter. */
   optionalPathParameters?: string[] | undefined;
+  /** Path parameters sent as given, by the name the path uses: values the API hands out URL-encoded. */
+  encodedPathParameters?: string[] | undefined;
   /** Query inputs that are maps, each of whose fields is sent as its own parameter. */
   explodedParameters?: string[] | undefined;
   /**
@@ -22,6 +24,8 @@ export type RestOperation = {
   queryParameters: Record<string, [string, string | null, boolean]>;
   /** Header names by input name. */
   headerParameters: Record<string, string>;
+  /** Headers every request sends with their one allowed value, such as an API version. */
+  fixedHeaders?: Record<string, string> | undefined;
   body: "json" | "form" | "multipart" | "text" | "file" | null;
   /** Form fields whose lists are joined into one value, with the separator; others repeat. */
   formLists?: Record<string, string> | undefined;
@@ -171,6 +175,8 @@ export const restRequest = (
 
   const init: RequestInit = { method: operation.httpMethod };
   const headers: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(operation.fixedHeaders ?? {})) headers[name] = value;
   const body = own(values, "body");
 
   if (operation.bodyRequired && body === undefined)
@@ -289,6 +295,15 @@ export const restRequest = (
     // would leave out its segment.
     if (text === "" || text === "." || text === "..")
       throw new InvalidRequest(`${method}'s ${key} is not an ID`);
+
+    // A value the API handed out URL-encoded goes back as it is, as one
+    // segment: unreserved characters and percent escapes, never a separator.
+    if (operation.encodedPathParameters?.includes(name)) {
+      if (!/^(?:[\w.~!$&'()*+,;=:@-]|%[0-9A-Fa-f]{2})+$/.test(text))
+        throw new InvalidRequest(`${method}'s ${key} is not a URL-encoded ID`);
+
+      return `${quote}${text}`;
+    }
 
     return `${quote}${encodeURIComponent(quote ? text.replaceAll("'", "''") : text)}`;
   });

@@ -1,0 +1,11 @@
+# Better Auth signs cookies and encrypts saved account tokens with the app's
+# Widefleet keys through the `keys` option these patches add. pnpm and the
+# Widefleet app builder apply them on install.
+patchedDependencies:
+  better-auth@1.7.27: patches/better-auth@1.7.27.patch
+  "@better-auth/core@1.7.27": patches/@better-auth__core@1.7.27.patch
+
+# The tests run Workers locally with workerd, bundled by esbuild.
+allowBuilds:
+  esbuild: true
+  workerd: true

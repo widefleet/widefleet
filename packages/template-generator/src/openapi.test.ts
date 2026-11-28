@@ -308,6 +308,85 @@ describe("OpenAPI template generator", () => {
     ).toThrow("items.GetContent has two inputs named itemId");
   });
 
+  it("sends a required header with one allowed value instead of taking it as an input", () => {
+    const { files } = generateOpenapi(
+      edited(
+        '{"name":"ConsistencyLevel","in":"header","schema":{"type":"string"}}',
+        '{"name":"Api-Version","in":"header","required":true,"schema":{"enum":["2026-03-11"]}},{"name":"Optional-Version","in":"header","schema":{"enum":["1"]}},{"name":"Choice","in":"header","required":true,"schema":{"enum":["a","b"]}}',
+      ),
+      rules,
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).not.toContain("Version");
+    expect(files["src/schema.ts"]).toContain(
+      '"pageable":true,"change":null,"fixedHeaders":{"Api-Version":"2026-03-11"}}',
+    );
+    expect(files["src/schema.ts"]?.match(/fixedHeaders/g)).toHaveLength(2);
+  });
+
+  it("resolves a fixed header's value through a referenced schema", () => {
+    const { files } = generateOpenapi(
+      edited(
+        '{"name":"ConsistencyLevel","in":"header","schema":{"type":"string"}}',
+        '{"name":"Api-Version","in":"header","required":true,"schema":{"$ref":"#/components/schemas/example.version"}}',
+        JSON.stringify(api).replace(
+          '"example.unused":{',
+          '"example.version":{"type":"string","enum":["2026-03-11"]},"example.unused":{',
+        ),
+      ),
+      rules,
+      service,
+      "",
+    );
+
+    expect(files["src/schema.ts"]).toContain('"fixedHeaders":{"Api-Version":"2026-03-11"}');
+  });
+
+  it("sends the path parameters the rules name as the API encoded them", () => {
+    const { files } = generateOpenapi(
+      api,
+      {
+        operations: {
+          "items.GetContent": { name: "getContent", encodedPathParameters: ["item-id"] },
+        },
+      },
+      service,
+      "",
+    );
+
+    expect(files["src/schema.ts"]).toContain('"encodedPathParameters":["item-id"]');
+    expect(() =>
+      generateOpenapi(
+        api,
+        {
+          operations: { "items.GetContent": { name: "getContent", encodedPathParameters: ["id"] } },
+        },
+        service,
+        "",
+      ),
+    ).toThrow("items.GetContent has no path parameter id to send encoded");
+  });
+
+  it("leaves out the string values a union lists next to a named type of any string", () => {
+    const { files } = generateOpenapi(
+      edited(
+        '"example.unused":{"type":"object","properties":{"id":{"type":"string"}}}',
+        '"example.unused":{"type":"object","properties":{"id":{"type":"string"}}},"example.id":{"type":"string","format":"uuid"},"example.ref":{"type":"object","properties":{"id":{"anyOf":[{"$ref":"#/components/schemas/example.id"},{"type":"string","enum":["me"]}]}}}',
+        JSON.stringify(api).replace(
+          '"parent":{',
+          '"owner":{"$ref":"#/components/schemas/example.ref"},"parent":{',
+        ),
+      ),
+      rules,
+      service,
+      "",
+    );
+
+    expect(files["src/api.ts"]).toMatch(/export type Ref = \{\n\s+id\?: Id;\n\};/);
+  });
+
   it("adds operations the description leaves out at a described operation's path", () => {
     const updateItem = {
       operation: "items.GetContent",

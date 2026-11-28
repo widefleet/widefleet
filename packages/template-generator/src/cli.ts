@@ -90,6 +90,7 @@ const configuration = z.discriminatedUnion("kind", [
         fields: z.record(z.string(), z.json()).optional(),
         form: z.json().optional(),
         requiredBody: z.boolean().optional(),
+        encodedPathParameters: z.array(z.string()).optional(),
       }),
     ),
     navigation: z.record(z.string(), z.record(z.string(), z.array(z.string()))).optional(),
