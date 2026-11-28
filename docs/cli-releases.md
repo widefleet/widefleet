@@ -54,7 +54,7 @@ Pushes to `main`, including merged pull requests, start a CLI-only publication i
 
 Control-plane, runtime, website and test-only changes outside those inputs do not publish a canary. PRs run **Check**; main pushes run the same CLI compatibility tests and service suites in **Check and publish Widefleet**. Stable version tags continue to run the full release pipeline. All four native targets are built and tested before canary publication. The existing npm trusted publisher configuration above also authorizes this path; no additional token or workflow registration is needed.
 
-On `main`, the native CLI matrix runs once. Publication downloads its tested artifacts from the same workflow run and waits for every selected check to succeed. Service changes run compatibility tests without publishing a canary. Packaged Markdown changes run the native matrix without the service suites; unrelated documentation needs only the lightweight selection and status jobs. Missing comparison history conservatively selects all checks and publication. Main checks now share publication's non-cancelling queue; PR checks still cancel superseded runs.
+On `main`, the native CLI matrix runs once. Publication downloads its tested artifacts from the same workflow run and waits for every selected check to succeed. Service changes run compatibility tests without publishing a canary. Packaged Markdown changes run the native matrix without the service suites; unrelated documentation needs only the lightweight selection and status jobs. Missing comparison history conservatively selects all checks and publication. Main checks of later pushes run in parallel; only canary publication waits in a non-cancelling queue. PR checks still cancel superseded runs.
 
 Each build uses `BASE-canary.RUN.gSHA`, where `BASE` is the product version, `RUN` is the workflow run number and `SHA` is the first twelve commit characters. The version is stamped only in the build checkout. The binary, launcher and native packages use the same version, without committing a version bump to `main`.
 
@@ -73,7 +73,7 @@ pnpm add --global widefleet@latest
 
 Canary publication updates only the `canary` npm dist-tag on the five CLI packages. Normal installs and `@latest` continue selecting stable releases. Canary builds do not publish platform images, app runtimes or GitHub Releases.
 
-Main publication runs queue instead of canceling earlier pending builds. For a partial failure, use **Re-run failed jobs** on the original run to reuse its version and tested artifacts. A retry refuses to move `canary` behind an already published newer run; use the newer canary in that case. Check the workflow summary and `npx widefleet@canary --version` after publication succeeds.
+Main publication runs queue instead of canceling earlier pending builds. For a partial failure, use **Re-run failed jobs** on the original run to reuse its version and tested artifacts. A run that reaches publication after a newer canary, including a retry, skips publication without moving `canary` back; use the newer canary in that case. Check the workflow summary and `npx widefleet@canary --version` after publication succeeds.
 
 ## Retry a partial publication
 

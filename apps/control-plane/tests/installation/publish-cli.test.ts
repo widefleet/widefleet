@@ -480,13 +480,14 @@ it.each([
   }
 });
 
-it("rejects a stale canary retry and a failed channel lookup before any upload", async () => {
+it("skips a superseded canary and rejects a failed channel lookup before any upload", async () => {
   const { directory, run } = await fixture(undefined, "0.3.0-canary.42.gabcdef012345");
 
   try {
-    await expect(
-      run({ NPM_DIST_TAG: "canary", CURRENT_CANARY: "0.4.0-canary.43.g0123456789ab" }),
-    ).rejects.toThrow("Refusing to move");
+    await run({ NPM_DIST_TAG: "canary", CURRENT_CANARY: "0.4.0-canary.43.g0123456789ab" });
+    expect(await readFile(join(directory, "summary"), "utf8")).toContain(
+      "Skipped 0.3.0-canary.42.gabcdef012345 because widefleet-linux-x64-gnu@canary is already the newer 0.4.0-canary.43.g0123456789ab.",
+    );
     await expect(run({ NPM_DIST_TAG: "canary", CANARY_STATUS: "503" })).rejects.toThrow(
       "npm canary lookup failed",
     );

@@ -10,8 +10,10 @@ permissions:
 
 cache-mode: none
 
+# A tag releases in one run at a time. Main pushes check in parallel; only their
+# canary publication waits in its own queue.
 concurrency:
-  group: publish-widefleet-${{ github.ref }}
+  group: publish-widefleet-${{ github.ref_type == 'tag' && github.ref || github.run_id }}
   cancel-in-progress: false
   queue: max
 
@@ -322,6 +324,12 @@ jobs:
     needs: [main-changes, main-checks, source-and-integration]
     if: github.repository == 'widefleet/widefleet' && github.ref == 'refs/heads/main' && needs.main-changes.outputs.canary == 'true'
     runs-on: ubuntu-24.04
+    # Runs can reach this queue out of push order; one that arrives after a newer
+    # canary skips publication.
+    concurrency:
+      group: publish-widefleet-canary
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       id-token: write
