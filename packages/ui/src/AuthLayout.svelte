@@ -26,7 +26,5 @@
       {@render children()}
     </div>
   </main>
-  <footer class="text-muted-foreground px-6 py-6 text-center text-xs">
-    Widefleet<span class="mx-2 text-border">/</span>Your ideas. Your infrastructure.
-  </footer>
+  <footer class="text-muted-foreground px-6 py-6 text-center text-xs">Widefleet</footer>
 </div>

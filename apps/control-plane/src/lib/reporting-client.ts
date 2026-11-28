@@ -28,10 +28,16 @@ export const reportBrowserError = (error: Error) => {
   }).catch(() => {});
 };
 
-export const startBrowserReporting = () => {
+export const startBrowserReporting = (signedIn: () => boolean) => {
   let stopped = false;
 
   const refresh = async () => {
+    if (!signedIn()) {
+      enabled = false;
+
+      return;
+    }
+
     try {
       const response = await fetch("/api/v1/reporting/status", {
         signal: AbortSignal.timeout(1500),

@@ -281,6 +281,7 @@
         disabled={!ready || busy}
         readonly={sentTo !== null}
         autocomplete="email"
+        placeholder="name@example.com"
         required
         class={focused ? "h-11" : undefined}
       />
