@@ -211,7 +211,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       .parse(
         messages
           .findLast(
-            (message) => message.to === email && message.subject.endsWith("is your Widefleet code"),
+            (message) => message.to === email && message.subject === "Your Widefleet code",
           )
           ?.text.match(/code is (\d{6})/)?.[1],
       );

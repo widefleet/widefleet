@@ -340,7 +340,7 @@ export const authenticationOptions = (
             throw new APIError("FORBIDDEN", { message: "Email sign-in is not configured" });
           await sendSignInEmail({
             to: email,
-            subject: `${otp} is your Widefleet code`,
+            subject: "Your Widefleet code",
             text: `Your Widefleet code is ${otp}.\n\nEnter it in the open Widefleet window. It expires in 5 minutes.\n\nIf you didn't request this code, you can ignore this email.`,
           });
         },

@@ -221,7 +221,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
     ).toBe(true);
 
     const sent = delivered.findLast(
-      (message) => message.to === email && message.subject.endsWith("is your Widefleet code"),
+      (message) => message.to === email && message.subject === "Your Widefleet code",
     );
 
     const otp = z.string().parse(sent?.text.match(/code is (\d{6})/)?.[1]);
