@@ -13,10 +13,7 @@
 
 <div class="bg-sidebar flex min-h-svh flex-col">
   <header class="flex items-center justify-between gap-4 px-6 py-6 sm:px-10">
-    {#if homeHref}<a href={homeHref} aria-label="Widefleet home"><Brand /></a>{:else}<Brand
-      />{/if}<span class="text-muted-foreground hidden text-xs sm:inline"
-      >A home for your internal apps.</span
-    >
+    {#if homeHref}<a href={homeHref} aria-label="Widefleet home"><Brand /></a>{:else}<Brand />{/if}
   </header>
   <main
     id="main-content"
