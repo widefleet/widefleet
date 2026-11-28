@@ -32,13 +32,27 @@ const clientPolicy = {
  * details, with optional provider options such as `accessType` for Google or
  * `tenantId` for Microsoft.
  */
-export const registeredOAuthClient = z.strictObject({
-  provider: z.enum(socialProviderList),
-  clientId: z.string().min(1).max(512),
-  clientSecret: z.string().min(1).max(2048),
-  options: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
-  ...clientPolicy,
-});
+export const registeredOAuthClient = z
+  .strictObject({
+    provider: z.enum(socialProviderList),
+    clientId: z.string().min(1).max(512),
+    clientSecret: z.string().min(1).max(2048),
+    options: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
+    ...clientPolicy,
+    // A service whose registration decides the client's access, such as
+    // Notion's integration capabilities, takes no scopes: it lists none.
+    // Without scopes, authorization requests name none, and the service
+    // grants what it grants a request without a `scope`, which for some
+    // services is every scope a person granted the client before.
+    scopes: z.array(scope),
+    // How the client authenticates at the revocation endpoint, with RFC 8414's
+    // method names: credentials in the form, the default, or HTTP Basic, which
+    // Notion requires.
+    revocationEndpointAuthMethod: z.enum(["client_secret_post", "client_secret_basic"]).optional(),
+  })
+  .refine((client) => !client.revocationEndpointAuthMethod || client.revocationUrl, {
+    error: "A revocation authentication method needs a revocation URL",
+  });
 
 /**
  * A service whose authorization server accepts OAuth Client ID Metadata
@@ -76,7 +90,7 @@ export const oauthRequest = z.discriminatedUnion("action", [
   z.strictObject({
     action: z.literal("authorize"),
     client: managedOAuthClientName,
-    scopes: z.array(scope).min(1).max(64),
+    scopes: z.array(scope).max(64),
     state: z.string().min(1).max(256),
     codeVerifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
   }),
